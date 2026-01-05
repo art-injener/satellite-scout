@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{.Title}}</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+    <script src="/static/vendor/htmx.min.js"></script>
+    <script src="/static/vendor/htmx-sse.js"></script>
+</head>
+<body>
+    <header class="header">
+        <h1 class="logo">🛰️ SatWatch</h1>
+        <nav class="tabs" role="tablist">
+            <a href="/tracking" 
+               class="tab{{if eq .ActiveTab "tracking"}} active{{end}}" 
+               role="tab"
+               hx-get="/tracking" 
+               hx-target="main" 
+               hx-push-url="true"
+               hx-select="main">
+                Отслеживание
+            </a>
+            <a href="/receiver" 
+               class="tab{{if eq .ActiveTab "receiver"}} active{{end}}" 
+               role="tab"
+               hx-get="/receiver" 
+               hx-target="main" 
+               hx-push-url="true"
+               hx-select="main">
+                Приёмник
+            </a>
+            <a href="/simulation" 
+               class="tab{{if eq .ActiveTab "simulation"}} active{{end}}" 
+               role="tab"
+               hx-get="/simulation" 
+               hx-target="main" 
+               hx-push-url="true"
+               hx-select="main">
+                Имитация
+            </a>
+        </nav>
+    </header>
+
+    <main class="main" role="tabpanel">
+        {{if eq .ActiveTab "tracking"}}
+            {{template "tracking-content" .}}
+        {{else if eq .ActiveTab "receiver"}}
+            {{template "receiver-content" .}}
+        {{else if eq .ActiveTab "simulation"}}
+            {{template "simulation-content" .}}
+        {{end}}
+    </main>
+
+    <footer class="footer">
+        <span class="status" id="connection-status">● Отключено</span>
+        <span class="coords">Наблюдатель: 55.76°N, 37.62°E</span>
+    </footer>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

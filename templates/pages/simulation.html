@@ -1,0 +1,103 @@
+{{define "simulation-content"}}
+<div class="simulation-layout">
+    <section class="orbit-params">
+        <h2>Параметры орбиты (Ground Track)</h2>
+        <form class="params-form" hx-post="/api/simulation/config" hx-swap="none">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="pass-lat">Широта пролёта (°)</label>
+                    <input type="number" id="pass-lat" name="pass_lat" value="55.75" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="pass-lon">Долгота пролёта (°)</label>
+                    <input type="number" id="pass-lon" name="pass_lon" value="37.62" step="0.01">
+                </div>
+                <div class="form-group">
+                    <label for="pass-time">Время пролёта</label>
+                    <input type="datetime-local" id="pass-time" name="pass_time">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="altitude">Высота (км)</label>
+                    <input type="number" id="altitude" name="altitude" value="400" step="1">
+                </div>
+                <div class="form-group">
+                    <label for="inclination">Наклонение (°)</label>
+                    <input type="number" id="inclination" name="inclination" value="51.6" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label for="direction">Направление</label>
+                    <select id="direction" name="direction">
+                        <option value="ascending">Восходящий</option>
+                        <option value="descending">Нисходящий</option>
+                    </select>
+                </div>
+            </div>
+        </form>
+    </section>
+
+    <section class="radio-params">
+        <h2>Параметры РТО</h2>
+        <form class="params-form">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="downlink-freq">Частота downlink (MHz)</label>
+                    <input type="number" id="downlink-freq" name="downlink_freq" value="145.800" step="0.001">
+                </div>
+                <div class="form-group">
+                    <label for="modulation">Модуляция</label>
+                    <select id="modulation" name="modulation">
+                        <option value="fsk">FSK</option>
+                        <option value="afsk">AFSK</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="baud-rate">Baud rate</label>
+                    <input type="number" id="baud-rate" name="baud_rate" value="1200" step="100">
+                </div>
+                <div class="form-group">
+                    <label for="deviation">Deviation (Hz)</label>
+                    <input type="number" id="deviation" name="deviation" value="3000" step="100">
+                </div>
+                <div class="form-group">
+                    <label for="telemetry-interval">Интервал телеметрии (с)</label>
+                    <input type="number" id="telemetry-interval" name="telemetry_interval" value="10" step="1">
+                </div>
+            </div>
+        </form>
+    </section>
+
+    <section class="simulation-control">
+        <h2>Управление симуляцией</h2>
+        <div class="control-buttons">
+            <button type="button" class="btn" hx-post="/api/simulation/generate-tle" hx-swap="none">
+                Сгенерировать TLE
+            </button>
+            <button type="button" class="btn btn-primary" hx-post="/api/simulation/start" hx-swap="none">
+                Запустить
+            </button>
+            <button type="button" class="btn btn-danger" hx-post="/api/simulation/stop" hx-swap="none">
+                Остановить
+            </button>
+            <button type="button" class="btn" hx-post="/api/simulation/reset" hx-swap="none">
+                Сброс
+            </button>
+        </div>
+        <div class="simulation-status" id="sim-status">
+            <span class="status-label">Статус:</span>
+            <span class="status-value">Остановлен</span>
+            <span class="status-label">Next AOS:</span>
+            <span class="status-value">--:--:--</span>
+            <span class="status-label">Doppler:</span>
+            <span class="status-value">-- Hz</span>
+        </div>
+        <div class="generated-tle" id="generated-tle">
+            <h3>Сгенерированный TLE</h3>
+            <pre class="tle-display">TLE не сгенерирован</pre>
+        </div>
+    </section>
+</div>
+{{end}}

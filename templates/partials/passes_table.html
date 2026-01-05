@@ -1,0 +1,34 @@
+{{define "passes-table"}}
+<table class="data-table passes">
+    <thead>
+        <tr>
+            <th>Спутник</th>
+            <th>AOS</th>
+            <th>TCA</th>
+            <th>LOS</th>
+            <th>Max El</th>
+            <th>Частота</th>
+            <th>Модуляция</th>
+        </tr>
+    </thead>
+    <tbody>
+        {{if .Passes}}
+            {{range .Passes}}
+            <tr>
+                <td>{{.SatelliteName}}</td>
+                <td>{{.AOS}}</td>
+                <td>{{.TCA}}</td>
+                <td>{{.LOS}}</td>
+                <td>{{.MaxElevation}}°</td>
+                <td>{{.Frequency}} MHz</td>
+                <td>{{.Modulation}}</td>
+            </tr>
+            {{end}}
+        {{else}}
+            <tr>
+                <td colspan="7" class="empty-state">Нет запланированных пролётов</td>
+            </tr>
+        {{end}}
+    </tbody>
+</table>
+{{end}}

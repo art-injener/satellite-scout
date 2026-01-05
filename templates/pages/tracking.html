@@ -1,0 +1,30 @@
+{{define "tracking-content"}}
+<div class="tracking-layout">
+    <section class="earth-view-container">
+        <h2>Earth View</h2>
+        <canvas id="earth-view" width="800" height="400"></canvas>
+    </section>
+
+    <section class="views-row">
+        <div class="azimuth-container">
+            <h3>Азимут</h3>
+            <canvas id="azimuth-view" width="150" height="150"></canvas>
+        </div>
+        <div class="sky-view-container">
+            <h3>Sky View</h3>
+            <canvas id="sky-view" width="200" height="200"></canvas>
+        </div>
+        <div class="elevation-container">
+            <h3>Угол места</h3>
+            <canvas id="elevation-view" width="150" height="150"></canvas>
+        </div>
+    </section>
+
+    <section class="passes-table-container">
+        <h2>Пролёты</h2>
+        <div id="passes-table" hx-get="/partials/passes" hx-trigger="load">
+            <p class="loading">Загрузка...</p>
+        </div>
+    </section>
+</div>
+{{end}}
