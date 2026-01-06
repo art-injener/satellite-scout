@@ -52,10 +52,13 @@
             drawPlaceholder(skyCanvas, 'Sky View', 'Небесная сфера');
         }
 
-        // Azimuth placeholder
+        // Azimuth indicator с антенной
         const azCanvas = document.getElementById('azimuth-view');
-        if (azCanvas) {
-            drawCompassPlaceholder(azCanvas);
+        if (azCanvas && window.AzimuthIndicator) {
+            window.azimuthIndicator = new AzimuthIndicator(azCanvas);
+            window.azimuthIndicator.draw();
+            window.azimuthIndicator.enableMouseControl();
+            window.azimuthIndicator.startDemo(0.3); // Демо вращение
         }
 
         // Elevation placeholder
@@ -233,9 +236,20 @@
         initCanvasPlaceholders();
     });
 
-    // Expose for debugging
+    // Expose for debugging and external control
     window.SatWatch = {
-        setConnected: setConnected
+        setConnected: setConnected,
+        // Установить азимут антенны (0-360 градусов)
+        setAzimuth: function(deg) {
+            if (window.azimuthIndicator) {
+                window.azimuthIndicator.stopDemo();
+                window.azimuthIndicator.setAzimuth(deg);
+            }
+        },
+        // Получить текущий азимут
+        getAzimuth: function() {
+            return window.azimuthIndicator ? window.azimuthIndicator.getAzimuth() : 0;
+        }
     };
 
 })();
