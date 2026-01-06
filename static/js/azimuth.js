@@ -131,13 +131,13 @@
         // Круг крепления находится на дуге тарелки (в нижней точке)
         
         // Масштаб для вписывания в canvas
-        var s = scale * 0.75;
+        var s = scale * 0.95;
         
         // === Геометрия тарелки (эллипс) ===
-        var dishHalfWidth = 50 * s;       // Половина ширины тарелки (горизонтальный радиус)
-        var dishDepth = 35 * s;           // Глубина тарелки (вертикальный радиус)
+        var dishHalfWidth = 70 * s;       // Половина ширины тарелки (увеличена)
+        var dishDepth = 32 * s;           // Глубина тарелки (вертикальный радиус)
         var dishTopY = -dishDepth;        // Y верхней линии (центр эллипса)
-        var strutJoinX = 30 * s;          // X где стойки соединяются
+        var strutJoinX = 40 * s;          // X где стойки соединяются
 
         // === 1. Тарелка ===
         // Горизонтальная линия сверху (точно по ширине эллипса, без усов)
@@ -151,8 +151,8 @@
         ctx.ellipse(0, dishTopY, dishHalfWidth, dishDepth, 0, 0, Math.PI, false);
         ctx.stroke();
 
-        // === 2. Круг крепления (в нижней точке полукруга = в центре 0,0) ===
-        var mountRadius = 16 * s;
+        // === 2. Круг крепления (уменьшен) ===
+        var mountRadius = 7 * s;
         ctx.beginPath();
         ctx.arc(0, 0, mountRadius, 0, Math.PI * 2);
         ctx.stroke();
@@ -160,8 +160,8 @@
         ctx.fill();
 
         // === 3. Линии крепления (от шестигранника к горизонтальной линии) ===
-        var hexRadius = 14 * s;
-        var hexY = dishTopY - 35 * s;  // Центр шестигранника
+        var hexRadius = 12 * s;
+        var hexY = dishTopY - 42 * s;  // Центр шестигранника (поднят выше)
         var hexBottomY = hexY + hexRadius;
         
         // Левая линия
@@ -191,68 +191,50 @@
         ctx.closePath();
         ctx.stroke();
 
-        ctx.restore();
-    };
+        // === 5. Красная стрелка (от верхней точки шестигранника до середины лимба) ===
+        var hexTopY = hexY - hexRadius;           // Верхняя точка шестигранника
+        // Конец стрелки: середина между внутренним (r-18) и внешним (r) радиусом = r-9
+        var arrowEndY = -(this.radius - 9);
+        var arrowWidth = 6;
 
-    /**
-     * Стрелка азимута (указывает направление)
-     */
-    AzimuthIndicator.prototype.drawAzimuthArrow = function(azimuth) {
-        var ctx = this.ctx;
-        var rad = this.degToRad(azimuth);
-        var arrowLength = this.radius - 25;
-        var arrowWidth = 5;
-
-        ctx.save();
-        ctx.translate(this.centerX, this.centerY);
-        ctx.rotate(rad + Math.PI / 2);
-
-        // Наконечник стрелки
+        // Линия стрелки (от шестигранника до наконечника)
         ctx.beginPath();
-        ctx.moveTo(0, -arrowLength);
-        ctx.lineTo(-arrowWidth, -arrowLength + 12);
-        ctx.lineTo(0, -arrowLength + 8);
-        ctx.lineTo(arrowWidth, -arrowLength + 12);
-        ctx.closePath();
-        ctx.fillStyle = this.colors.accentRed;
-        ctx.fill();
-
-        // Линия стрелки (от центра)
-        ctx.beginPath();
-        ctx.moveTo(0, -20); // Начинаем чуть дальше центра
-        ctx.lineTo(0, -arrowLength + 10);
+        ctx.moveTo(0, hexTopY - 2);               // Чуть выше шестигранника
+        ctx.lineTo(0, arrowEndY + 12);
         ctx.strokeStyle = this.colors.accentRed;
         ctx.lineWidth = 2;
         ctx.stroke();
 
+        // Наконечник стрелки (треугольник)
+        ctx.beginPath();
+        ctx.moveTo(0, arrowEndY);                 // Острие
+        ctx.lineTo(-arrowWidth, arrowEndY + 12);
+        ctx.lineTo(0, arrowEndY + 8);
+        ctx.lineTo(arrowWidth, arrowEndY + 12);
+        ctx.closePath();
+        ctx.fillStyle = this.colors.accentRed;
+        ctx.fill();
+
         ctx.restore();
     };
 
     /**
-     * Числовое значение азимута (левый верхний угол)
+     * Числовое значение азимута (левый нижний угол, за пределами лимба)
      */
     AzimuthIndicator.prototype.drawAzimuthValue = function(azimuth) {
         var ctx = this.ctx;
+        var text = 'AZ: ' + azimuth.toFixed(1) + '°';
         
         ctx.font = 'bold 14px monospace';
         ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
+        ctx.textBaseline = 'bottom';
 
-        var text = 'AZ: ' + azimuth.toFixed(1) + '°';
-
-        // Фон для читаемости
-        var padding = 4;
-        var textWidth = ctx.measureText(text).width;
-        
-        ctx.fillStyle = 'rgba(10, 14, 20, 0.85)';
-        ctx.fillRect(6, 6, textWidth + padding * 2, 20);
-        
-        ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 1;
-        ctx.strokeRect(6, 6, textWidth + padding * 2, 20);
+        // Позиция в левом нижнем углу
+        var x = 8;
+        var y = this.canvas.height - 8;
 
         ctx.fillStyle = this.colors.accent;
-        ctx.fillText(text, 6 + padding, 9);
+        ctx.fillText(text, x, y);
     };
 
     /**
@@ -269,9 +251,8 @@
         this.drawLimb();
 
         // Динамические элементы
-        this.drawAzimuthArrow(this.currentAzimuth);
         this.drawAntenna(this.currentAzimuth);
-        this.drawAzimuthValue(this.currentAzimuth);
+        // this.drawAzimuthValue(this.currentAzimuth); // Временно отключено
     };
 
     /**
