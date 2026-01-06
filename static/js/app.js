@@ -58,13 +58,16 @@
             window.azimuthIndicator = new AzimuthIndicator(azCanvas);
             window.azimuthIndicator.draw();
             window.azimuthIndicator.enableMouseControl();
-            window.azimuthIndicator.startDemo(0.3); // Демо вращение
+            window.azimuthIndicator.startDemo(0.3);
         }
 
-        // Elevation placeholder
+        // Elevation indicator с антенной
         const elCanvas = document.getElementById('elevation-view');
-        if (elCanvas) {
-            drawElevationPlaceholder(elCanvas);
+        if (elCanvas && window.ElevationIndicator) {
+            window.elevationIndicator = new ElevationIndicator(elCanvas);
+            window.elevationIndicator.draw();
+            window.elevationIndicator.enableMouseControl();
+            window.elevationIndicator.startDemo(0.5);
         }
 
         // Waterfall placeholder
@@ -236,20 +239,9 @@
         initCanvasPlaceholders();
     });
 
-    // Expose for debugging and external control
+    // Expose for debugging
     window.SatWatch = {
-        setConnected: setConnected,
-        // Установить азимут антенны (0-360 градусов)
-        setAzimuth: function(deg) {
-            if (window.azimuthIndicator) {
-                window.azimuthIndicator.stopDemo();
-                window.azimuthIndicator.setAzimuth(deg);
-            }
-        },
-        // Получить текущий азимут
-        getAzimuth: function() {
-            return window.azimuthIndicator ? window.azimuthIndicator.getAzimuth() : 0;
-        }
+        setConnected: setConnected
     };
 
 })();

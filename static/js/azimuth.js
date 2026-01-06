@@ -1,11 +1,11 @@
-// Azimuth Indicator - Индикатор азимута с изображением антенны
-// Антенна вращается вокруг центра (точка крепления к поворотному устройству)
+// Azimuth Indicator - Индикатор азимута с антенной
+// Использует AntennaDrawing для отрисовки антенны
 
 (function() {
     'use strict';
 
     /**
-     * Класс азимутального индикатора
+     * Класс индикатора азимута
      * @param {HTMLCanvasElement} canvas - Canvas элемент для отрисовки
      */
     function AzimuthIndicator(canvas) {
@@ -13,32 +13,35 @@
         this.ctx = canvas.getContext('2d');
         this.centerX = canvas.width / 2;
         this.centerY = canvas.height / 2;
-        this.radius = Math.min(canvas.width, canvas.height) / 2 - 25;
+        this.radius = Math.min(canvas.width, canvas.height) / 2 - 25;  // Отступ для подписей
         this.currentAzimuth = 0;
         
-        // Цвета из CSS переменных проекта
+        // Цвета
         this.colors = {
             bgPrimary: '#0a0e14',
             bgSecondary: '#12171f',
             border: '#2a3444',
-            accent: '#00d4aa',      // Основной акцент (антенна)
-            accentBlue: '#00a8ff',  // Лимб
-            accentRed: '#ff6b6b',   // Стрелка
+            accent: '#00d4aa',
+            accentBlue: '#00a8ff',
+            accentRed: '#ff6b6b',
             textPrimary: '#e6e8eb',
             textSecondary: '#8b919a',
             textMuted: '#5c6370'
         };
+
+        // Масштаб антенны (увеличен для заполнения пространства)
+        this.antennaScale = this.radius / 100 * 0.95;
     }
 
     /**
-     * Конвертация градусов в радианы (0° = север = верх)
+     * Конвертация градусов в радианы
      */
     AzimuthIndicator.prototype.degToRad = function(deg) {
-        return (deg - 90) * Math.PI / 180;
+        return deg * Math.PI / 180;
     };
 
     /**
-     * Отрисовка статического лимба (шкала азимута)
+     * Отрисовка лимба (полный круг 360°)
      */
     AzimuthIndicator.prototype.drawLimb = function() {
         var ctx = this.ctx;
@@ -46,7 +49,7 @@
         var cy = this.centerY;
         var r = this.radius;
 
-        // Внешний круг лимба
+        // Внешний круг
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.accentBlue;
@@ -61,13 +64,12 @@
         ctx.stroke();
 
         // Деления и подписи
-        ctx.font = '10px monospace';
-        ctx.fillStyle = this.colors.accentBlue;
+        ctx.font = '11px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        for (var deg = 0; deg < 360; deg += 10) {
-            var rad = this.degToRad(deg);
+        for (var deg = 0; deg < 360; deg += 15) {
+            var rad = this.degToRad(deg - 90); // 0° = север (вверх)
             var isMain = deg % 30 === 0;
             var innerR = isMain ? r - 15 : r - 10;
             var outerR = r - 2;
@@ -86,17 +88,17 @@
             ctx.lineWidth = isMain ? 2 : 1;
             ctx.stroke();
 
-            // Подписи для основных делений
+            // Подписи
             if (isMain) {
-                var labelR = r + 12;
+                var labelR = r + 14;
                 var label = deg.toString();
                 
-                // Кардинальные направления
+                // Стороны света
                 if (deg === 0) label = 'N';
                 else if (deg === 90) label = 'E';
                 else if (deg === 180) label = 'S';
                 else if (deg === 270) label = 'W';
-
+                
                 ctx.fillStyle = (deg % 90 === 0) ? this.colors.textPrimary : this.colors.textSecondary;
                 ctx.fillText(
                     label,
@@ -108,133 +110,32 @@
     };
 
     /**
-     * Отрисовка антенны (вращается с азимутом)
-     * Структура (сверху вниз): шестигранник -> линии крепления -> тарелка -> круг крепления
-     * Точно по оригиналу: тарелка = трапеция с дугой снизу
+     * Отрисовка антенны с использованием общей функции
      */
     AzimuthIndicator.prototype.drawAntenna = function(azimuth) {
-        var ctx = this.ctx;
-        var scale = this.radius / 100; // Масштаб относительно радиуса
-
-        ctx.save();
-        ctx.translate(this.centerX, this.centerY);
-        // Поворот: +90° чтобы антенна "смотрела" на север при азимуте 0°
-        ctx.rotate(this.degToRad(azimuth) + Math.PI / 2);
-
-        ctx.strokeStyle = this.colors.accent;
-        ctx.fillStyle = 'transparent';
-        ctx.lineWidth = 2;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-
-        // Центр вращения = центр круга крепления (0, 0)
-        // Круг крепления находится на дуге тарелки (в нижней точке)
-        
-        // Масштаб для вписывания в canvas
-        var s = scale * 0.95;
-        
-        // === Геометрия тарелки (эллипс) ===
-        var dishHalfWidth = 70 * s;       // Половина ширины тарелки (увеличена)
-        var dishDepth = 32 * s;           // Глубина тарелки (вертикальный радиус)
-        var dishTopY = -dishDepth;        // Y верхней линии (центр эллипса)
-        var strutJoinX = 40 * s;          // X где стойки соединяются
-
-        // === 1. Тарелка ===
-        // Горизонтальная линия сверху (точно по ширине эллипса, без усов)
-        ctx.beginPath();
-        ctx.moveTo(-dishHalfWidth, dishTopY);
-        ctx.lineTo(dishHalfWidth, dishTopY);
-        ctx.stroke();
-
-        // Эллиптическая дуга тарелки (овал, выгнутый вниз)
-        ctx.beginPath();
-        ctx.ellipse(0, dishTopY, dishHalfWidth, dishDepth, 0, 0, Math.PI, false);
-        ctx.stroke();
-
-        // === 2. Круг крепления (уменьшен) ===
-        var mountRadius = 7 * s;
-        ctx.beginPath();
-        ctx.arc(0, 0, mountRadius, 0, Math.PI * 2);
-        ctx.stroke();
-        ctx.fillStyle = this.colors.bgPrimary;
-        ctx.fill();
-
-        // === 3. Линии крепления (от шестигранника к горизонтальной линии) ===
-        var hexRadius = 12 * s;
-        var hexY = dishTopY - 42 * s;  // Центр шестигранника (поднят выше)
-        var hexBottomY = hexY + hexRadius;
-        
-        // Левая линия
-        ctx.beginPath();
-        ctx.moveTo(-9 * s, hexBottomY);
-        ctx.lineTo(-strutJoinX, dishTopY);
-        ctx.stroke();
-
-        // Правая линия
-        ctx.beginPath();
-        ctx.moveTo(9 * s, hexBottomY);
-        ctx.lineTo(strutJoinX, dishTopY);
-        ctx.stroke();
-
-        // === 4. Шестигранник (приёмник) ===
-        ctx.beginPath();
-        for (var i = 0; i < 6; i++) {
-            var angle = (i * 60 + 30) * Math.PI / 180;
-            var x = Math.cos(angle) * hexRadius;
-            var y = hexY + Math.sin(angle) * hexRadius;
-            if (i === 0) {
-                ctx.moveTo(x, y);
-            } else {
-                ctx.lineTo(x, y);
-            }
-        }
-        ctx.closePath();
-        ctx.stroke();
-
-        // === 5. Красная стрелка (от верхней точки шестигранника до середины лимба) ===
-        var hexTopY = hexY - hexRadius;           // Верхняя точка шестигранника
-        // Конец стрелки: середина между внутренним (r-18) и внешним (r) радиусом = r-9
-        var arrowEndY = -(this.radius - 9);
-        var arrowWidth = 6;
-
-        // Линия стрелки (от шестигранника до наконечника)
-        ctx.beginPath();
-        ctx.moveTo(0, hexTopY - 2);               // Чуть выше шестигранника
-        ctx.lineTo(0, arrowEndY + 12);
-        ctx.strokeStyle = this.colors.accentRed;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Наконечник стрелки (треугольник)
-        ctx.beginPath();
-        ctx.moveTo(0, arrowEndY);                 // Острие
-        ctx.lineTo(-arrowWidth, arrowEndY + 12);
-        ctx.lineTo(0, arrowEndY + 8);
-        ctx.lineTo(arrowWidth, arrowEndY + 12);
-        ctx.closePath();
-        ctx.fillStyle = this.colors.accentRed;
-        ctx.fill();
-
-        ctx.restore();
+        // Вызов общей функции отрисовки антенны
+        // Угол: azimuth + 90 (чтобы 0° был вверх, а не вправо)
+        window.AntennaDrawing.draw(
+            this.ctx,
+            this.centerX,
+            this.centerY,
+            azimuth + 90,
+            this.antennaScale,
+            this.radius - 9  // arrowEndRadius
+        );
     };
 
     /**
-     * Числовое значение азимута (левый нижний угол, за пределами лимба)
+     * Числовое значение азимута
      */
     AzimuthIndicator.prototype.drawAzimuthValue = function(azimuth) {
         var ctx = this.ctx;
-        var text = 'AZ: ' + azimuth.toFixed(1) + '°';
         
-        ctx.font = 'bold 14px monospace';
+        ctx.font = 'bold 16px monospace';
         ctx.textAlign = 'left';
-        ctx.textBaseline = 'bottom';
-
-        // Позиция в левом нижнем углу
-        var x = 8;
-        var y = this.canvas.height - 8;
-
+        ctx.textBaseline = 'top';
         ctx.fillStyle = this.colors.accent;
-        ctx.fillText(text, x, y);
+        ctx.fillText(azimuth.toFixed(1) + '°', 8, 8);
     };
 
     /**
@@ -247,38 +148,35 @@
         ctx.fillStyle = this.colors.bgPrimary;
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
 
-        // Статические элементы
+        // Статический лимб
         this.drawLimb();
 
-        // Динамические элементы
+        // Динамическая антенна
         this.drawAntenna(this.currentAzimuth);
-        // this.drawAzimuthValue(this.currentAzimuth); // Временно отключено
+        this.drawAzimuthValue(this.currentAzimuth);
     };
 
     /**
      * Установка азимута и перерисовка
-     * @param {number} deg - Азимут в градусах (0-360)
      */
     AzimuthIndicator.prototype.setAzimuth = function(deg) {
-        this.currentAzimuth = ((deg % 360) + 360) % 360; // Нормализация 0-360
+        this.currentAzimuth = ((deg % 360) + 360) % 360;
         this.draw();
     };
 
     /**
      * Получение текущего азимута
-     * @returns {number} Азимут в градусах
      */
     AzimuthIndicator.prototype.getAzimuth = function() {
         return this.currentAzimuth;
     };
 
     /**
-     * Запуск демо-анимации вращения
-     * @param {number} speed - Скорость вращения (градусов за кадр)
+     * Демо-анимация
      */
     AzimuthIndicator.prototype.startDemo = function(speed) {
         var self = this;
-        speed = speed || 0.5;
+        speed = speed || 1;
         
         if (this._animationId) {
             cancelAnimationFrame(this._animationId);
@@ -293,7 +191,7 @@
     };
 
     /**
-     * Остановка демо-анимации
+     * Остановка демо
      */
     AzimuthIndicator.prototype.stopDemo = function() {
         if (this._animationId) {
@@ -303,30 +201,28 @@
     };
 
     /**
-     * Включение управления кликом мыши
+     * Управление кликом
      */
     AzimuthIndicator.prototype.enableMouseControl = function() {
         var self = this;
-        var cx = this.centerX;
-        var cy = this.centerY;
-
+        
         this.canvas.addEventListener('click', function(e) {
             var rect = self.canvas.getBoundingClientRect();
             var scaleX = self.canvas.width / rect.width;
             var scaleY = self.canvas.height / rect.height;
             
-            var x = (e.clientX - rect.left) * scaleX - cx;
-            var y = (e.clientY - rect.top) * scaleY - cy;
+            var x = (e.clientX - rect.left) * scaleX - self.centerX;
+            var y = (e.clientY - rect.top) * scaleY - self.centerY;
             
             var angle = Math.atan2(y, x) * 180 / Math.PI + 90;
             if (angle < 0) angle += 360;
             
-            self.stopDemo(); // Остановить демо при ручном управлении
+            self.stopDemo();
             self.setAzimuth(angle);
         });
     };
 
-    // Экспорт в глобальную область
+    // Экспорт
     window.AzimuthIndicator = AzimuthIndicator;
 
 })();
