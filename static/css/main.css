@@ -138,43 +138,187 @@ body {
     color: var(--accent-success);
 }
 
-/* Tracking Layout */
+/* Tracking Layout - Default */
 .tracking-layout {
     display: grid;
-    gap: var(--spacing-lg);
-    grid-template-rows: auto auto 1fr;
-    height: 100%;
+    gap: var(--spacing-md);
+    grid-template-rows: 1fr auto;
+    height: calc(100vh - 100px);
+    overflow: hidden;
 }
 
-.earth-view-container,
-.passes-table-container {
+/* Side Panel (Info + Layout buttons) */
+.side-panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-sm);
+    min-width: 140px;
+}
+
+/* Layout Switcher - компактный */
+.layout-switcher {
+    display: flex;
+    gap: 2px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    padding: 2px;
+}
+
+.layout-btn {
+    width: 28px;
+    height: 24px;
+    background: transparent;
+    border: none;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    font-size: 0.7rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.layout-btn:hover {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+}
+
+.layout-btn.active {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+}
+
+/* Compact Layout */
+.tracking-layout[data-current-layout="compact"] {
+    grid-template-rows: 1fr;
+}
+
+.tracking-layout[data-current-layout="compact"] .earth-section {
+    grid-template-columns: 1fr 140px auto auto;
+}
+
+.tracking-layout[data-current-layout="compact"] .views-row {
+    display: contents;
+}
+
+.tracking-layout[data-current-layout="compact"] .azimuth-container,
+.tracking-layout[data-current-layout="compact"] .elevation-container {
+    padding: var(--spacing-sm);
+}
+
+.tracking-layout[data-current-layout="compact"] .azimuth-container canvas,
+.tracking-layout[data-current-layout="compact"] .elevation-container canvas {
+    width: 140px !important;
+    height: 140px !important;
+}
+
+.tracking-layout[data-current-layout="compact"] .sky-view-container {
+    display: none;
+}
+
+/* Wide Layout - большая карта, компактные индикаторы */
+.tracking-layout[data-current-layout="wide"] .earth-view-container canvas {
+    height: calc(100vh - 280px);
+    min-height: 300px;
+}
+
+.tracking-layout[data-current-layout="wide"] .views-row canvas {
+    width: 140px !important;
+    height: 140px !important;
+}
+
+.tracking-layout[data-current-layout="wide"] .sky-view-container {
+    display: none;
+}
+
+
+/* Earth Section with Info Panel */
+.earth-section {
+    display: grid;
+    grid-template-columns: 1fr 140px;
+    gap: var(--spacing-sm);
+}
+
+.earth-view-container {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: var(--spacing-md);
-}
-
-.earth-view-container h2,
-.passes-table-container h2 {
-    font-size: 0.875rem;
-    font-weight: 600;
-    color: var(--text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-    margin-bottom: var(--spacing-md);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-xs);
+    overflow: hidden;
 }
 
 .earth-view-container canvas {
     width: 100%;
-    height: auto;
-    background: var(--bg-primary);
+    height: 100%;
+    display: block;
+}
+
+.satellite-info-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
+    padding: var(--spacing-sm);
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    flex: 1;
+}
+
+.info-group {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+}
+
+.info-label {
+    color: var(--text-muted);
+    font-size: 0.65rem;
+}
+
+.info-value {
+    color: var(--text-primary);
+    font-weight: 500;
+    text-align: right;
+    font-size: 0.7rem;
+}
+
+.info-value.info-coord {
+    color: #00ff00;
+}
+
+.info-value.info-orbit {
+    color: #00d4aa;
+}
+
+.info-value.info-observer {
+    color: #ffff00;
+}
+
+.info-value.info-time {
+    color: #00a8ff;
+}
+
+.info-divider {
+    height: 1px;
+    background: var(--border-color);
+    margin: 4px 0;
+}
+
+/* Адаптивные размеры для Default layout */
+.tracking-layout[data-current-layout="default"] .earth-view-container canvas {
+    height: calc(100vh - 320px);
+    min-height: 200px;
+}
+
+.tracking-layout[data-current-layout="default"] .views-row canvas {
+    width: 160px !important;
+    height: 160px !important;
 }
 
 .views-row {
     display: flex;
-    gap: var(--spacing-lg);
+    gap: var(--spacing-sm);
     justify-content: center;
+    align-items: center;
 }
 
 .azimuth-container,
@@ -182,16 +326,16 @@ body {
 .elevation-container {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
-    border-radius: var(--radius-lg);
-    padding: var(--spacing-md);
+    border-radius: var(--radius-md);
+    padding: var(--spacing-sm);
     text-align: center;
 }
 
 .views-row h3 {
-    font-size: 0.75rem;
+    font-size: 0.7rem;
     font-weight: 500;
     color: var(--text-muted);
-    margin-bottom: var(--spacing-sm);
+    margin-bottom: var(--spacing-xs);
 }
 
 .views-row canvas {
