@@ -7,7 +7,7 @@
     /**
      * Цвета для отрисовки
      */
-    var colors = {
+    const colors = {
         bgPrimary: '#0a0e14',
         accent: '#00d4aa',
         accentRed: '#ff6b6b'
@@ -21,8 +21,9 @@
      * @param {number} angle - Угол поворота в градусах (0 = вверх)
      * @param {number} scale - Масштаб отрисовки
      * @param {number} arrowEndRadius - Радиус для конца стрелки (опционально)
+     * @param {string} viewType - Тип графика: 'azimuth' или 'elevation'
      */
-    function drawAntenna(ctx, centerX, centerY, angle, scale, arrowEndRadius) {
+    function drawAntenna(ctx, centerX, centerY, angle, scale, arrowEndRadius, viewType) {
         ctx.save();
         ctx.translate(centerX, centerY);
         ctx.rotate(angle * Math.PI / 180);
@@ -33,14 +34,14 @@
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
-        var s = scale;
+        const s = scale;
 
         // === Геометрия тарелки ===
-        var dishHalfWidth = 80 * s;
-        var dishDepth = 24 * s;
-        var dishTopY = -dishDepth;
-        var strutJoinX = 30 * s;
-        var rimHeight = 7 * s;
+        const dishHalfWidth = 80 * s;
+        const dishDepth = 24 * s;
+        const dishTopY = -dishDepth;
+        const strutJoinX = 30 * s;
+        const rimHeight = 7 * s;
 
         // === 1. Тарелка ===
         // Заливка тарелки цветом фона (чтобы перекрыть элементы под ней)
@@ -63,36 +64,71 @@
         ctx.ellipse(0, dishTopY, dishHalfWidth, dishDepth, 0, 0, Math.PI, false);
         ctx.stroke();
 
-        // === 2. Шестигранник крепления (центр вращения) ===
-        var mountRadius = 7.5 * s;
-        
-        // Дуга вокруг шестигранника (вращается вместе с антенной)
-        var arcRadius = mountRadius + 6 * s;
-        ctx.beginPath();
-        ctx.arc(0, 0, arcRadius, 0, Math.PI, false);
-        ctx.stroke();
+        // === 2. Блок крепления (центр вращения) ===
+        const mountWidth = 20 * s;
+        const mountHeight = 16 * s;
+        const arcRadius = mountHeight / 2 + 6 * s;
 
-        // Шестигранник
-        ctx.beginPath();
-        for (var j = 0; j < 6; j++) {
-            var mountAngle = (j * 60 + 30) * Math.PI / 180;
-            var mx = Math.cos(mountAngle) * mountRadius;
-            var my = Math.sin(mountAngle) * mountRadius;
-            if (j === 0) {
-                ctx.moveTo(mx, my);
-            } else {
-                ctx.lineTo(mx, my);
+        if (viewType === 'azimuth') {
+            // Вид сверху: П-образный прямоугольник + 2 вертикальные линии (ось шарнира)
+            const azMountWidth = mountWidth + 10;  // Шире на 10 пикселей
+
+            // Заливка фоном
+            ctx.beginPath();
+            ctx.rect(-azMountWidth / 2, -mountHeight / 2, azMountWidth, mountHeight);
+            ctx.fillStyle = colors.bgPrimary;
+            ctx.fill();
+
+            // Рисуем П-образный контур (без верхней стенки)
+            ctx.beginPath();
+            ctx.moveTo(-azMountWidth / 2, -mountHeight / 2);
+            ctx.lineTo(-azMountWidth / 2, mountHeight / 2);
+            ctx.lineTo(azMountWidth / 2, mountHeight / 2);
+            ctx.lineTo(azMountWidth / 2, -mountHeight / 2);
+            ctx.strokeStyle = colors.accent;
+            ctx.stroke();
+
+            // 2 вертикальные линии внутри (ось шарнира, вид сверху)
+            const axisGap = azMountWidth / 2 - 5 * s;  // Ближе к краям
+            ctx.beginPath();
+            ctx.moveTo(-axisGap, -mountHeight / 2 + 3 * s);
+            ctx.lineTo(-axisGap, mountHeight / 2 - 3 * s);
+            ctx.stroke();
+
+            ctx.beginPath();
+            ctx.moveTo(axisGap, -mountHeight / 2 + 3 * s);
+            ctx.lineTo(axisGap, mountHeight / 2 - 3 * s);
+            ctx.stroke();
+        } else {
+            // Вид сбоку (elevation): полукруг + шестигранник (вращается с антенной)
+            ctx.beginPath();
+            ctx.arc(0, 0, arcRadius, 0, Math.PI, false);
+            ctx.strokeStyle = colors.accent;
+            ctx.stroke();
+
+            // Шестигранник крепления (в центре вращения)
+            const mountHexRadius = 7 * s;
+            ctx.beginPath();
+            for (let j = 0; j < 6; j++) {
+                const mountAngle = (j * 60 + 30) * Math.PI / 180;
+                const mx = Math.cos(mountAngle) * mountHexRadius;
+                const my = Math.sin(mountAngle) * mountHexRadius;
+                if (j === 0) {
+                    ctx.moveTo(mx, my);
+                } else {
+                    ctx.lineTo(mx, my);
+                }
             }
+            ctx.closePath();
+            ctx.stroke();
+            ctx.fillStyle = colors.bgPrimary;
+            ctx.fill();
         }
-        ctx.closePath();
-        ctx.stroke();
-        ctx.fillStyle = colors.bgPrimary;
-        ctx.fill();
 
         // === 3. Линии крепления ===
-        var hexRadius = 12 * s;
-        var hexY = dishTopY - 42 * s;
-        var hexBottomY = hexY + hexRadius;
+        const hexRadius = 12 * s;
+        const hexY = dishTopY - 42 * s;
+        const hexBottomY = hexY + hexRadius;
 
         ctx.strokeStyle = colors.accent;
         ctx.beginPath();
@@ -107,10 +143,10 @@
 
         // === 4. Шестигранник приёмника ===
         ctx.beginPath();
-        for (var i = 0; i < 6; i++) {
-            var hexAngle = (i * 60 + 30) * Math.PI / 180;
-            var hx = Math.cos(hexAngle) * hexRadius;
-            var hy = hexY + Math.sin(hexAngle) * hexRadius;
+        for (let i = 0; i < 6; i++) {
+            const hexAngle = (i * 60 + 30) * Math.PI / 180;
+            const hx = Math.cos(hexAngle) * hexRadius;
+            const hy = hexY + Math.sin(hexAngle) * hexRadius;
             if (i === 0) {
                 ctx.moveTo(hx, hy);
             } else {
@@ -122,9 +158,9 @@
 
         // === 5. Красная стрелка ===
         if (arrowEndRadius) {
-            var hexTopY = hexY - hexRadius;
-            var arrowEndY = -arrowEndRadius;
-            var arrowWidth = 5;
+            const hexTopY = hexY - hexRadius;
+            const arrowEndY = -arrowEndRadius;
+            const arrowWidth = 5;
 
             ctx.beginPath();
             ctx.moveTo(0, hexTopY - 2);
@@ -147,7 +183,9 @@
 
         // Возвращаем позицию шестигранника крепления для постамента
         return {
-            mountRadius: mountRadius,
+            mountWidth: mountWidth,
+            mountHeight: mountHeight,
+            arcRadius: arcRadius,
             hexY: hexY,
             hexRadius: hexRadius,
             scale: s
@@ -158,9 +196,9 @@
      * Установка цветов (для синхронизации с основными файлами)
      */
     function setColors(newColors) {
-        if (newColors.bgPrimary) colors.bgPrimary = newColors.bgPrimary;
-        if (newColors.accent) colors.accent = newColors.accent;
-        if (newColors.accentRed) colors.accentRed = newColors.accentRed;
+        if (newColors.bgPrimary) {colors.bgPrimary = newColors.bgPrimary;}
+        if (newColors.accent) {colors.accent = newColors.accent;}
+        if (newColors.accentRed) {colors.accentRed = newColors.accentRed;}
     }
 
     // Экспорт

@@ -5,7 +5,7 @@
 
     // Connection status management
     const connectionStatus = document.getElementById('connection-status');
-    
+
     function setConnected(connected) {
         if (connectionStatus) {
             connectionStatus.textContent = connected ? '● Подключено' : '● Отключено';
@@ -15,8 +15,9 @@
 
     // Initialize when DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
+        // eslint-disable-next-line no-console
         console.log('SatWatch initialized');
-        
+
         // Set default datetime for simulation
         const passTimeInput = document.getElementById('pass-time');
         if (passTimeInput && !passTimeInput.value) {
@@ -55,7 +56,7 @@
         // Azimuth indicator с антенной
         const azCanvas = document.getElementById('azimuth-view');
         if (azCanvas && window.AzimuthIndicator) {
-            window.azimuthIndicator = new AzimuthIndicator(azCanvas);
+            window.azimuthIndicator = new window.AzimuthIndicator(azCanvas);
             window.azimuthIndicator.draw();
             window.azimuthIndicator.enableMouseControl();
             window.azimuthIndicator.startDemo(0.3);
@@ -64,7 +65,7 @@
         // Elevation indicator с антенной
         const elCanvas = document.getElementById('elevation-view');
         if (elCanvas && window.ElevationIndicator) {
-            window.elevationIndicator = new ElevationIndicator(elCanvas);
+            window.elevationIndicator = new window.ElevationIndicator(elCanvas);
             window.elevationIndicator.draw();
             window.elevationIndicator.enableMouseControl();
             window.elevationIndicator.startDemo(0.5);
@@ -114,95 +115,6 @@
         ctx.fillText(subtitle, w / 2, h / 2 + 10);
     }
 
-    // Draw compass placeholder for azimuth
-    function drawCompassPlaceholder(canvas) {
-        const ctx = canvas.getContext('2d');
-        const w = canvas.width;
-        const h = canvas.height;
-        const cx = w / 2;
-        const cy = h / 2;
-        const r = Math.min(w, h) / 2 - 10;
-
-        // Background
-        ctx.fillStyle = '#0a0e14';
-        ctx.fillRect(0, 0, w, h);
-
-        // Circle
-        ctx.strokeStyle = '#2a3444';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Cardinal directions
-        ctx.fillStyle = '#5c6370';
-        ctx.font = '12px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText('N', cx, cy - r + 15);
-        ctx.fillText('S', cx, cy + r - 15);
-        ctx.fillText('E', cx + r - 15, cy);
-        ctx.fillText('W', cx - r + 15, cy);
-
-        // Cross
-        ctx.strokeStyle = '#1a2030';
-        ctx.beginPath();
-        ctx.moveTo(cx, cy - r + 25);
-        ctx.lineTo(cx, cy + r - 25);
-        ctx.moveTo(cx - r + 25, cy);
-        ctx.lineTo(cx + r - 25, cy);
-        ctx.stroke();
-    }
-
-    // Draw elevation gauge placeholder
-    function drawElevationPlaceholder(canvas) {
-        const ctx = canvas.getContext('2d');
-        const w = canvas.width;
-        const h = canvas.height;
-        const cx = w / 2;
-        const cy = h - 20;
-        const r = Math.min(w, h) - 30;
-
-        // Background
-        ctx.fillStyle = '#0a0e14';
-        ctx.fillRect(0, 0, w, h);
-
-        // Arc (half circle)
-        ctx.strokeStyle = '#2a3444';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(cx, cy, r / 2, Math.PI, 0);
-        ctx.stroke();
-
-        // Tick marks
-        ctx.strokeStyle = '#1a2030';
-        ctx.fillStyle = '#5c6370';
-        ctx.font = '10px Inter, sans-serif';
-        ctx.textAlign = 'center';
-        
-        for (let deg = 0; deg <= 90; deg += 30) {
-            const angle = Math.PI - (deg * Math.PI / 180);
-            const x1 = cx + (r / 2 - 5) * Math.cos(angle);
-            const y1 = cy + (r / 2 - 5) * Math.sin(angle);
-            const x2 = cx + (r / 2 + 5) * Math.cos(angle);
-            const y2 = cy + (r / 2 + 5) * Math.sin(angle);
-            
-            ctx.beginPath();
-            ctx.moveTo(x1, y1);
-            ctx.lineTo(x2, y2);
-            ctx.stroke();
-
-            const tx = cx + (r / 2 + 15) * Math.cos(angle);
-            const ty = cy + (r / 2 + 15) * Math.sin(angle);
-            ctx.fillText(deg + '°', tx, ty);
-        }
-
-        // Label
-        ctx.fillStyle = '#3c4350';
-        ctx.font = '10px Inter, sans-serif';
-        ctx.fillText('EL: --°', cx, cy + 10);
-    }
-
     // Draw waterfall placeholder
     function drawWaterfallPlaceholder(canvas) {
         const ctx = canvas.getContext('2d');
@@ -234,9 +146,22 @@
     }
 
     // HTMX event handlers
-    document.body.addEventListener('htmx:afterSwap', function(evt) {
+    document.body.addEventListener('htmx:afterSwap', function() {
         // Reinitialize canvas after HTMX swap
         initCanvasPlaceholders();
+    });
+
+    // Переключение активного класса на табах при клике
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+        const clickedTab = evt.target.closest('.tab');
+        if (clickedTab) {
+            // Убираем active со всех табов
+            document.querySelectorAll('.tabs .tab').forEach(function(tab) {
+                tab.classList.remove('active');
+            });
+            // Добавляем active на кликнутый таб
+            clickedTab.classList.add('active');
+        }
     });
 
     // Expose for debugging

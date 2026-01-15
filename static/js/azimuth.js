@@ -13,9 +13,9 @@
         this.ctx = canvas.getContext('2d');
         this.centerX = canvas.width / 2;
         this.centerY = canvas.height / 2;
-        this.radius = Math.min(canvas.width, canvas.height) / 2 - 25;  // Отступ для подписей
+        this.radius = Math.min(canvas.width, canvas.height) / 2 - 25; // Отступ для подписей
         this.currentAzimuth = 0;
-        
+
         // Цвета
         this.colors = {
             bgPrimary: '#0a0e14',
@@ -44,10 +44,10 @@
      * Отрисовка лимба (полный круг 360°)
      */
     AzimuthIndicator.prototype.drawLimb = function() {
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var r = this.radius;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const r = this.radius;
 
         // Внешний круг
         ctx.beginPath();
@@ -60,7 +60,7 @@
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 2;  // Толще
         ctx.stroke();
 
         // Деления и подписи
@@ -68,11 +68,11 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        for (var deg = 0; deg < 360; deg += 15) {
-            var rad = this.degToRad(deg - 90); // 0° = север (вверх)
-            var isMain = deg % 30 === 0;
-            var innerR = isMain ? r - 15 : r - 10;
-            var outerR = r - 2;
+        for (let deg = 0; deg < 360; deg += 15) {
+            const rad = this.degToRad(deg - 90); // 0° = север (вверх)
+            const isMain = deg % 30 === 0;
+            const innerR = isMain ? r - 15 : r - 10;
+            const outerR = r - 2;
 
             // Линии делений
             ctx.beginPath();
@@ -90,15 +90,15 @@
 
             // Подписи
             if (isMain) {
-                var labelR = r + 14;
-                var label = deg.toString();
-                
+                const labelR = r + 14;
+                let label = deg.toString();
+
                 // Стороны света
-                if (deg === 0) label = 'N';
-                else if (deg === 90) label = 'E';
-                else if (deg === 180) label = 'S';
-                else if (deg === 270) label = 'W';
-                
+                if (deg === 0) {label = 'N';}
+                else if (deg === 90) {label = 'E';}
+                else if (deg === 180) {label = 'S';}
+                else if (deg === 270) {label = 'W';}
+
                 ctx.fillStyle = (deg % 90 === 0) ? this.colors.textPrimary : this.colors.textSecondary;
                 ctx.fillText(
                     label,
@@ -121,7 +121,8 @@
             this.centerY,
             azimuth + 90,
             this.antennaScale,
-            this.radius - 9  // arrowEndRadius
+            this.radius - 9, // arrowEndRadius
+            'azimuth' // viewType
         );
     };
 
@@ -129,8 +130,8 @@
      * Числовое значение азимута
      */
     AzimuthIndicator.prototype.drawAzimuthValue = function(azimuth) {
-        var ctx = this.ctx;
-        
+        const ctx = this.ctx;
+
         ctx.font = 'bold 16px monospace';
         ctx.textAlign = 'left';
         ctx.textBaseline = 'top';
@@ -142,8 +143,8 @@
      * Главная функция отрисовки
      */
     AzimuthIndicator.prototype.draw = function() {
-        var ctx = this.ctx;
-        
+        const ctx = this.ctx;
+
         // Очистка
         ctx.fillStyle = this.colors.bgPrimary;
         ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
@@ -151,9 +152,55 @@
         // Статический лимб
         this.drawLimb();
 
+        // Основание платформы на заднем плане
+        this.drawPlatformBase();
+
         // Динамическая антенна
         this.drawAntenna(this.currentAzimuth);
         this.drawAzimuthValue(this.currentAzimuth);
+    };
+
+    /**
+     * Отрисовка основания платформы (шестигранник)
+     * === ПАРАМЕТРЫ ДЛЯ НАСТРОЙКИ ===
+     */
+    AzimuthIndicator.prototype.platformBaseConfig = {
+        radius: 40,           // Радиус шестигранника
+        lineWidth: 1,         // Толщина линии (1 = тонкая, 2 = обычная)
+        useDash: false,        // Использовать пунктир (true/false)
+        dashPattern: [5, 5]   // Паттерн пунктира [линия, пробел]
+    };
+
+    AzimuthIndicator.prototype.drawPlatformBase = function() {
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const cfg = this.platformBaseConfig;
+
+        ctx.strokeStyle = this.colors.accent;
+        ctx.lineWidth = cfg.lineWidth;
+
+        // Пунктир
+        if (cfg.useDash) {
+            ctx.setLineDash(cfg.dashPattern);
+        }
+
+        ctx.beginPath();
+        for (let i = 0; i < 6; i++) {
+            const angle = (i * 60 + 30) * Math.PI / 180;
+            const x = cx + Math.cos(angle) * cfg.radius;
+            const y = cy + Math.sin(angle) * cfg.radius;
+            if (i === 0) {
+                ctx.moveTo(x, y);
+            } else {
+                ctx.lineTo(x, y);
+            }
+        }
+        ctx.closePath();
+        ctx.stroke();
+
+        // Сброс пунктира
+        ctx.setLineDash([]);
     };
 
     /**
@@ -175,9 +222,9 @@
      * Демо-анимация
      */
     AzimuthIndicator.prototype.startDemo = function(speed) {
-        var self = this;
+        const self = this;
         speed = speed || 1;
-        
+
         if (this._animationId) {
             cancelAnimationFrame(this._animationId);
         }
@@ -204,19 +251,19 @@
      * Управление кликом
      */
     AzimuthIndicator.prototype.enableMouseControl = function() {
-        var self = this;
-        
+        const self = this;
+
         this.canvas.addEventListener('click', function(e) {
-            var rect = self.canvas.getBoundingClientRect();
-            var scaleX = self.canvas.width / rect.width;
-            var scaleY = self.canvas.height / rect.height;
-            
-            var x = (e.clientX - rect.left) * scaleX - self.centerX;
-            var y = (e.clientY - rect.top) * scaleY - self.centerY;
-            
-            var angle = Math.atan2(y, x) * 180 / Math.PI + 90;
-            if (angle < 0) angle += 360;
-            
+            const rect = self.canvas.getBoundingClientRect();
+            const scaleX = self.canvas.width / rect.width;
+            const scaleY = self.canvas.height / rect.height;
+
+            const x = (e.clientX - rect.left) * scaleX - self.centerX;
+            const y = (e.clientY - rect.top) * scaleY - self.centerY;
+
+            let angle = Math.atan2(y, x) * 180 / Math.PI + 90;
+            if (angle < 0) {angle += 360;}
+
             self.stopDemo();
             self.setAzimuth(angle);
         });

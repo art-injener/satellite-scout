@@ -1,0 +1,10 @@
+{
+    "name": "satwatch-go",
+    "private": true,
+    "devDependencies": {
+        "eslint": "^8.57.0"
+    },
+    "scripts": {
+        "lint:js": "eslint \"static/js/**/*.js\""
+    }
+}

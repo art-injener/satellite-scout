@@ -1,4 +1,4 @@
-.PHONY: build test lint run stop clean
+.PHONY: build test lint lint-js run stop clean
 
 APP_NAME=satwatch
 BUILD_DIR=./build
@@ -18,6 +18,10 @@ test:
 ## lint: Проверить код линтером
 lint:
 	@golangci-lint run --timeout=2m
+
+## lint-js: Проверить JS линтером (ESLint)
+lint-js:
+	@npm run lint:js
 
 ## run: Запустить приложение в фоне
 run: build
