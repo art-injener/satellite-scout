@@ -37,13 +37,68 @@
 
         // Initialize canvas placeholders
         initCanvasPlaceholders();
+
+        // Layout switcher
+        initLayoutSwitcher();
     });
+
+    // Layout switching functionality
+    function initLayoutSwitcher() {
+        const buttons = document.querySelectorAll('.layout-btn');
+        const layout = document.querySelector('.tracking-layout');
+
+        if (!buttons.length || !layout) { return; }
+
+        buttons.forEach(function(btn) {
+            btn.addEventListener('click', function() {
+                const newLayout = this.dataset.layout;
+
+                // Update active button
+                buttons.forEach(function(b) { b.classList.remove('active'); });
+                this.classList.add('active');
+
+                // Update layout
+                layout.dataset.currentLayout = newLayout;
+
+                // Save preference
+                localStorage.setItem('satwatch-layout', newLayout);
+
+                // Reinitialize canvases for new sizes
+                setTimeout(function() {
+                    initCanvasPlaceholders();
+                }, 100);
+            });
+        });
+
+        // Restore saved layout
+        const savedLayout = localStorage.getItem('satwatch-layout');
+        if (savedLayout) {
+            const btn = document.querySelector('.layout-btn[data-layout="' + savedLayout + '"]');
+            if (btn) {
+                btn.click();
+            }
+        }
+    }
 
     // Initialize canvas elements with placeholder content
     function initCanvasPlaceholders() {
-        // Earth View placeholder
+        // Earth View - интерактивная карта мира
         const earthCanvas = document.getElementById('earth-view');
-        if (earthCanvas) {
+        if (earthCanvas && window.EarthView) {
+            // Уничтожаем предыдущий экземпляр при переинициализации
+            if (window.earthView) {
+                window.earthView.stopDemo();
+            }
+            window.earthView = new window.EarthView(earthCanvas);
+            window.earthView.init().then(function() {
+                // Запуск демо-анимации после загрузки данных
+                window.earthView.startDemo(2);
+            }).catch(function(err) {
+                // eslint-disable-next-line no-console
+                console.error('EarthView init failed:', err);
+                drawPlaceholder(earthCanvas, 'Earth View', 'Ошибка загрузки карты');
+            });
+        } else if (earthCanvas) {
             drawPlaceholder(earthCanvas, 'Earth View', 'Карта мира появится здесь');
         }
 

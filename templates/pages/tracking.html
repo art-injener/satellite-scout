@@ -1,8 +1,57 @@
 {{define "tracking-content"}}
-<div class="tracking-layout">
-    <section class="earth-view-container">
-        <h2>Earth View</h2>
-        <canvas id="earth-view" width="800" height="400"></canvas>
+<div class="tracking-layout" data-current-layout="default">
+    <section class="earth-section">
+        <div class="earth-view-container">
+            <canvas id="earth-view" width="800" height="400"></canvas>
+        </div>
+        <div class="side-panel">
+            <div class="layout-switcher">
+                <button class="layout-btn active" data-layout="default" title="Default">D</button>
+                <button class="layout-btn" data-layout="compact" title="Compact">C</button>
+                <button class="layout-btn" data-layout="wide" title="Wide">W</button>
+            </div>
+            <div class="satellite-info-panel" id="satellite-info">
+                <div class="info-group">
+                    <div class="info-label">Satellite</div>
+                    <div class="info-value" id="info-name">ISS</div>
+                </div>
+                <div class="info-group">
+                    <div class="info-label">NORAD</div>
+                    <div class="info-value" id="info-norad">25544</div>
+                </div>
+                <div class="info-divider"></div>
+                <div class="info-group">
+                    <div class="info-label">Lat</div>
+                    <div class="info-value info-coord" id="info-lat">---.--°</div>
+                </div>
+                <div class="info-group">
+                    <div class="info-label">Lon</div>
+                    <div class="info-value info-coord" id="info-lon">---.--°</div>
+                </div>
+                <div class="info-group">
+                    <div class="info-label">Alt</div>
+                    <div class="info-value info-coord" id="info-alt">--- km</div>
+                </div>
+                <div class="info-divider"></div>
+                <div class="info-group">
+                    <div class="info-label">Incl</div>
+                    <div class="info-value info-orbit" id="info-orbit">51.64°</div>
+                </div>
+                <div class="info-group">
+                    <div class="info-label">Period</div>
+                    <div class="info-value" id="info-period">92 min</div>
+                </div>
+                <div class="info-divider"></div>
+                <div class="info-group">
+                    <div class="info-label">Observer</div>
+                    <div class="info-value info-observer" id="info-observer">Rostov</div>
+                </div>
+                <div class="info-group">
+                    <div class="info-label">UTC</div>
+                    <div class="info-value info-time" id="info-time">--:--:--</div>
+                </div>
+            </div>
+        </div>
     </section>
 
     <section class="views-row">
@@ -17,13 +66,6 @@
         <div class="elevation-container">
             <h3>Угол места</h3>
             <canvas id="elevation-view" width="300" height="300"></canvas>
-        </div>
-    </section>
-
-    <section class="passes-table-container">
-        <h2>Пролёты</h2>
-        <div id="passes-table" hx-get="/partials/passes" hx-trigger="load">
-            <p class="loading">Загрузка...</p>
         </div>
     </section>
 </div>
