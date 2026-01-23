@@ -143,11 +143,10 @@ body {
     display: grid;
     gap: var(--spacing-md);
     grid-template-rows: 1fr auto;
-    height: calc(100vh - 100px);
-    overflow: hidden;
+    min-height: 0;
 }
 
-/* Side Panel (Info + Layout buttons) */
+/* Side Panel */
 .side-panel {
     display: flex;
     flex-direction: column;
@@ -155,80 +154,6 @@ body {
     min-width: 140px;
 }
 
-/* Layout Switcher - компактный */
-.layout-switcher {
-    display: flex;
-    gap: 2px;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
-    padding: 2px;
-}
-
-.layout-btn {
-    width: 28px;
-    height: 24px;
-    background: transparent;
-    border: none;
-    border-radius: var(--radius-sm);
-    color: var(--text-muted);
-    font-size: 0.7rem;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-}
-
-.layout-btn:hover {
-    background: var(--bg-elevated);
-    color: var(--text-primary);
-}
-
-.layout-btn.active {
-    background: var(--accent-primary);
-    color: var(--bg-primary);
-}
-
-/* Compact Layout */
-.tracking-layout[data-current-layout="compact"] {
-    grid-template-rows: 1fr;
-}
-
-.tracking-layout[data-current-layout="compact"] .earth-section {
-    grid-template-columns: 1fr 140px auto auto;
-}
-
-.tracking-layout[data-current-layout="compact"] .views-row {
-    display: contents;
-}
-
-.tracking-layout[data-current-layout="compact"] .azimuth-container,
-.tracking-layout[data-current-layout="compact"] .elevation-container {
-    padding: var(--spacing-sm);
-}
-
-.tracking-layout[data-current-layout="compact"] .azimuth-container canvas,
-.tracking-layout[data-current-layout="compact"] .elevation-container canvas {
-    width: 140px !important;
-    height: 140px !important;
-}
-
-.tracking-layout[data-current-layout="compact"] .sky-view-container {
-    display: none;
-}
-
-/* Wide Layout - большая карта, компактные индикаторы */
-.tracking-layout[data-current-layout="wide"] .earth-view-container canvas {
-    height: calc(100vh - 280px);
-    min-height: 300px;
-}
-
-.tracking-layout[data-current-layout="wide"] .views-row canvas {
-    width: 140px !important;
-    height: 140px !important;
-}
-
-.tracking-layout[data-current-layout="wide"] .sky-view-container {
-    display: none;
-}
 
 
 /* Earth Section with Info Panel */
@@ -303,22 +228,11 @@ body {
     margin: 4px 0;
 }
 
-/* Адаптивные размеры для Default layout */
-.tracking-layout[data-current-layout="default"] .earth-view-container canvas {
-    height: calc(100vh - 320px);
-    min-height: 200px;
-}
-
-.tracking-layout[data-current-layout="default"] .views-row canvas {
-    width: 160px !important;
-    height: 160px !important;
-}
-
 .views-row {
     display: flex;
-    gap: var(--spacing-sm);
+    gap: var(--spacing-md);
     justify-content: center;
-    align-items: center;
+    align-items: flex-start;
 }
 
 .azimuth-container,
@@ -339,8 +253,16 @@ body {
 }
 
 .views-row canvas {
+    display: block;
+    width: 300px;
+    height: 300px;
     background: var(--bg-primary);
     border-radius: var(--radius-md);
+}
+
+/* Sky View имеет увеличенную высоту для информационной панели */
+.sky-view-container canvas {
+    height: 350px;
 }
 
 /* Receiver Layout */

@@ -1,15 +1,10 @@
 {{define "tracking-content"}}
-<div class="tracking-layout" data-current-layout="default">
+<div class="tracking-layout">
     <section class="earth-section">
         <div class="earth-view-container">
             <canvas id="earth-view" width="800" height="400"></canvas>
         </div>
         <div class="side-panel">
-            <div class="layout-switcher">
-                <button class="layout-btn active" data-layout="default" title="Default">D</button>
-                <button class="layout-btn" data-layout="compact" title="Compact">C</button>
-                <button class="layout-btn" data-layout="wide" title="Wide">W</button>
-            </div>
             <div class="satellite-info-panel" id="satellite-info">
                 <div class="info-group">
                     <div class="info-label">Satellite</div>
@@ -61,7 +56,7 @@
         </div>
         <div class="sky-view-container">
             <h3>Sky View</h3>
-            <canvas id="sky-view" width="200" height="200"></canvas>
+            <canvas id="sky-view" width="300" height="350"></canvas>
         </div>
         <div class="elevation-container">
             <h3>Угол места</h3>
