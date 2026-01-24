@@ -11,10 +11,28 @@
      */
     function ElevationIndicator(canvas) {
         this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
-        this.centerX = canvas.width / 2;
-        this.centerY = canvas.height / 2; // Центр как у азимута
-        this.radius = Math.min(canvas.width, canvas.height) / 2 - 25; // Как у азимута
+
+        // Настройка HiDPI canvas
+        const logicalWidth = parseInt(canvas.getAttribute('width'), 10);
+        const logicalHeight = parseInt(canvas.getAttribute('height'), 10);
+
+        if (window.CanvasUtils) {
+            this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, logicalWidth, logicalHeight);
+        } else {
+            this.ctx = canvas.getContext('2d');
+        }
+
+        // Используем логические размеры для расчётов
+        this.centerX = logicalWidth / 2;
+
+        // Радиус зависит только от ширины, чтобы масштаб не менялся при изменении высоты
+        this.radius = logicalWidth / 2 - 25; // 125px для canvas 300px
+
+        // Центр Y рассчитывается так, чтобы полукруг полностью помещался в canvas
+        // Нужно место для: радиус + метки (≈15px сверху) + смещение вниз (5px)
+        const topPadding = 15;
+        this.centerY = this.radius + topPadding + 5;
+
         this.currentElevation = 45;
 
         // Цвета
@@ -61,7 +79,7 @@
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, Math.PI, 0, false);
         ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 2;  // Толще
+        ctx.lineWidth = 2; // Толще
         ctx.stroke();
 
         // Деления и подписи
@@ -187,9 +205,14 @@
     ElevationIndicator.prototype.draw = function() {
         const ctx = this.ctx;
 
+        // Получаем логические размеры для очистки
+        const size = window.CanvasUtils ?
+            window.CanvasUtils.getLogicalSize(this.canvas) :
+            { width: this.canvas.width, height: this.canvas.height };
+
         // Очистка
         ctx.fillStyle = this.colors.bgPrimary;
-        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        ctx.fillRect(0, 0, size.width, size.height);
 
         // Статический лимб
         this.drawLimb();

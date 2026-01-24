@@ -71,7 +71,7 @@
 
         if (viewType === 'azimuth') {
             // Вид сверху: П-образный прямоугольник + 2 вертикальные линии (ось шарнира)
-            const azMountWidth = mountWidth + 10;  // Шире на 10 пикселей
+            const azMountWidth = mountWidth + 10; // Шире на 10 пикселей
 
             // Заливка фоном
             ctx.beginPath();
@@ -89,7 +89,7 @@
             ctx.stroke();
 
             // 2 вертикальные линии внутри (ось шарнира, вид сверху)
-            const axisGap = azMountWidth / 2 - 5 * s;  // Ближе к краям
+            const axisGap = azMountWidth / 2 - 5 * s; // Ближе к краям
             ctx.beginPath();
             ctx.moveTo(-axisGap, -mountHeight / 2 + 3 * s);
             ctx.lineTo(-axisGap, mountHeight / 2 - 3 * s);
