@@ -70,7 +70,7 @@
             window.skyView = new window.SkyView(skyCanvas);
             window.skyView.startDemo(2);
         } else if (skyCanvas) {
-            drawPlaceholder(skyCanvas, 'Sky View', 'Небесная сфера');
+            drawPlaceholder(skyCanvas, '', 'Небесная сфера');
         }
 
         // Azimuth indicator с антенной

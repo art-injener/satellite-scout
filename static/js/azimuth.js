@@ -10,10 +10,21 @@
      */
     function AzimuthIndicator(canvas) {
         this.canvas = canvas;
-        this.ctx = canvas.getContext('2d');
-        this.centerX = canvas.width / 2;
-        this.centerY = canvas.height / 2;
-        this.radius = Math.min(canvas.width, canvas.height) / 2 - 25; // Отступ для подписей
+
+        // Настройка HiDPI canvas
+        const logicalWidth = parseInt(canvas.getAttribute('width'), 10);
+        const logicalHeight = parseInt(canvas.getAttribute('height'), 10);
+
+        if (window.CanvasUtils) {
+            this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, logicalWidth, logicalHeight);
+        } else {
+            this.ctx = canvas.getContext('2d');
+        }
+
+        // Используем логические размеры для расчётов
+        this.centerX = logicalWidth / 2;
+        this.centerY = logicalHeight / 2;
+        this.radius = Math.min(logicalWidth, logicalHeight) / 2 - 25; // Отступ для подписей
         this.currentAzimuth = 0;
 
         // Цвета
@@ -60,7 +71,7 @@
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 2;  // Толще
+        ctx.lineWidth = 2; // Толще
         ctx.stroke();
 
         // Деления и подписи
@@ -145,9 +156,14 @@
     AzimuthIndicator.prototype.draw = function() {
         const ctx = this.ctx;
 
+        // Получаем логические размеры для очистки
+        const size = window.CanvasUtils ?
+            window.CanvasUtils.getLogicalSize(this.canvas) :
+            { width: this.canvas.width, height: this.canvas.height };
+
         // Очистка
         ctx.fillStyle = this.colors.bgPrimary;
-        ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+        ctx.fillRect(0, 0, size.width, size.height);
 
         // Статический лимб
         this.drawLimb();
@@ -165,10 +181,10 @@
      * === ПАРАМЕТРЫ ДЛЯ НАСТРОЙКИ ===
      */
     AzimuthIndicator.prototype.platformBaseConfig = {
-        radius: 40,           // Радиус шестигранника
-        lineWidth: 1,         // Толщина линии (1 = тонкая, 2 = обычная)
-        useDash: false,        // Использовать пунктир (true/false)
-        dashPattern: [5, 5]   // Паттерн пунктира [линия, пробел]
+        radius: 40, // Радиус шестигранника
+        lineWidth: 1, // Толщина линии (1 = тонкая, 2 = обычная)
+        useDash: false, // Использовать пунктир (true/false)
+        dashPattern: [5, 5] // Паттерн пунктира [линия, пробел]
     };
 
     AzimuthIndicator.prototype.drawPlatformBase = function() {
