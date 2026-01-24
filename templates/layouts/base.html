@@ -4,63 +4,87 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css">
+    <link rel="stylesheet" href="/static/css/main.css?v=49">
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/htmx-sse.js"></script>
 </head>
 <body>
-    <header class="header">
-        <h1 class="logo">🛰️ SatWatch</h1>
-        <nav class="tabs" role="tablist">
+    <!-- Боковое вертикальное меню -->
+    <aside class="sidebar">
+        <div class="sidebar-logo" title="SatWatch">🛰️</div>
+        <nav class="sidebar-nav" role="tablist">
             <a href="/tracking" 
-               class="tab{{if eq .ActiveTab "tracking"}} active{{end}}" 
+               class="sidebar-tab{{if eq .ActiveTab "tracking"}} active{{end}}" 
                role="tab"
+               title="Отслеживание"
                hx-get="/tracking" 
-               hx-target="main" 
+               hx-target=".main" 
                hx-push-url="true"
-               hx-select="main">
-                Отслеживание
+               hx-select=".main">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
+                    <path d="M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+                </svg>
             </a>
             <a href="/receiver" 
-               class="tab{{if eq .ActiveTab "receiver"}} active{{end}}" 
+               class="sidebar-tab{{if eq .ActiveTab "receiver"}} active{{end}}" 
                role="tab"
+               title="Приёмник"
                hx-get="/receiver" 
-               hx-target="main" 
+               hx-target=".main" 
                hx-push-url="true"
-               hx-select="main">
-                Приёмник
+               hx-select=".main">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/>
+                    <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4"/>
+                    <circle cx="12" cy="12" r="2"/>
+                    <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.4"/>
+                    <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/>
+                </svg>
             </a>
             <a href="/simulation" 
-               class="tab{{if eq .ActiveTab "simulation"}} active{{end}}" 
+               class="sidebar-tab{{if eq .ActiveTab "simulation"}} active{{end}}" 
                role="tab"
+               title="Имитация"
                hx-get="/simulation" 
-               hx-target="main" 
+               hx-target=".main" 
                hx-push-url="true"
-               hx-select="main">
-                Имитация
+               hx-select=".main">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="3"/>
+                    <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
+                </svg>
             </a>
         </nav>
-    </header>
+        <div class="sidebar-footer">
+            <span class="status-dot" id="connection-status" title="Статус подключения">●</span>
+        </div>
+    </aside>
 
-    <main class="main" role="tabpanel">
-        {{if eq .ActiveTab "tracking"}}
-            {{template "tracking-content" .}}
-        {{else if eq .ActiveTab "receiver"}}
-            {{template "receiver-content" .}}
-        {{else if eq .ActiveTab "simulation"}}
-            {{template "simulation-content" .}}
-        {{end}}
-    </main>
+    <!-- Основная область -->
+    <div class="main-wrapper">
+        <main class="main" role="tabpanel">
+            {{if eq .ActiveTab "tracking"}}
+                {{template "tracking-content" .}}
+            {{else if eq .ActiveTab "receiver"}}
+                {{template "receiver-content" .}}
+            {{else if eq .ActiveTab "simulation"}}
+                {{template "simulation-content" .}}
+            {{end}}
+        </main>
 
-    <footer class="footer">
-        <span class="status" id="connection-status">● Отключено</span>
-        <span class="coords">Наблюдатель: 55.76°N, 37.62°E</span>
-    </footer>
+        <footer class="footer">
+            <span class="coords">Наблюдатель: 55.76°N, 37.62°E</span>
+        </footer>
+    </div>
 
-    <script src="/static/js/antenna.js?v=40"></script>
-    <script src="/static/js/azimuth.js?v=40"></script>
-    <script src="/static/js/elevation.js?v=40"></script>
-    <script src="/static/js/earthview.js?v=40"></script>
-    <script src="/static/js/app.js?v=40"></script>
+    <script src="/static/js/canvas-utils.js?v=1"></script>
+    <script src="/static/js/antenna.js?v=45"></script>
+    <script src="/static/js/azimuth.js?v=48"></script>
+    <script src="/static/js/elevation.js?v=49"></script>
+    <script src="/static/js/earthview.js?v=48"></script>
+    <script src="/static/js/skyview.js?v=50"></script>
+    <script src="/static/js/app.js?v=46"></script>
 </body>
 </html>

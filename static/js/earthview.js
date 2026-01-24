@@ -481,11 +481,18 @@
         const ctx = this.ctx;
         const p = this.project(this.observer.lon, this.observer.lat);
 
-        // Жёлтый кружок с заливкой
+        // Оранжевый треугольник
+        const size = 5;
+        ctx.fillStyle = '#ffaa00'; // Оранжевый
+        ctx.strokeStyle = '#ff6600'; // Более тёмный оранжевый для обводки
+        ctx.lineWidth = 1;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 4, 0, Math.PI * 2);
-        ctx.fillStyle = '#ffff00'; // Жёлтый
+        ctx.moveTo(p.x, p.y - size); // Вершина
+        ctx.lineTo(p.x - size, p.y + size); // Левый нижний угол
+        ctx.lineTo(p.x + size, p.y + size); // Правый нижний угол
+        ctx.closePath();
         ctx.fill();
+        ctx.stroke();
 
         // Название белым цветом
         if (this.observer.name) {
@@ -493,7 +500,7 @@
             ctx.fillStyle = '#ffffff'; // Белый текст
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(this.observer.name, p.x + 8, p.y);
+            ctx.fillText(this.observer.name, p.x + size + 4, p.y);
         }
     };
 

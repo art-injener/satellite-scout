@@ -1,71 +1,67 @@
 {{define "tracking-content"}}
-<div class="tracking-layout" data-current-layout="default">
-    <section class="earth-section">
+<div class="tracking-layout">
+    <!-- Левая колонка: карта + информация о спутнике -->
+    <section class="map-column">
         <div class="earth-view-container">
             <canvas id="earth-view" width="800" height="400"></canvas>
         </div>
-        <div class="side-panel">
-            <div class="layout-switcher">
-                <button class="layout-btn active" data-layout="default" title="Default">D</button>
-                <button class="layout-btn" data-layout="compact" title="Compact">C</button>
-                <button class="layout-btn" data-layout="wide" title="Wide">W</button>
+        <!-- Панель информации о спутнике -->
+        <div class="satellite-info-panel" id="satellite-info">
+            <div class="info-row">
+                <span class="info-cell">
+                    <span class="info-label">NORAD</span>
+                    <span class="info-value" id="info-norad">25544</span>
+                </span>
+                <span class="info-cell info-cell-name">
+                    <span class="info-value info-value-accent" id="info-name">ISS Space Station</span>
+                </span>
+                <span class="info-cell">
+                    <span class="info-label">UTC</span>
+                    <span class="info-value" id="info-time">--:--:--</span>
+                </span>
+                <span class="info-cell">
+                    <span class="info-label">Observer</span>
+                    <span class="info-value" id="info-observer">Rostov-on-Don</span>
+                </span>
             </div>
-            <div class="satellite-info-panel" id="satellite-info">
-                <div class="info-group">
-                    <div class="info-label">Satellite</div>
-                    <div class="info-value" id="info-name">ISS</div>
-                </div>
-                <div class="info-group">
-                    <div class="info-label">NORAD</div>
-                    <div class="info-value" id="info-norad">25544</div>
-                </div>
-                <div class="info-divider"></div>
-                <div class="info-group">
-                    <div class="info-label">Lat</div>
-                    <div class="info-value info-coord" id="info-lat">---.--°</div>
-                </div>
-                <div class="info-group">
-                    <div class="info-label">Lon</div>
-                    <div class="info-value info-coord" id="info-lon">---.--°</div>
-                </div>
-                <div class="info-group">
-                    <div class="info-label">Alt</div>
-                    <div class="info-value info-coord" id="info-alt">--- km</div>
-                </div>
-                <div class="info-divider"></div>
-                <div class="info-group">
-                    <div class="info-label">Incl</div>
-                    <div class="info-value info-orbit" id="info-orbit">51.64°</div>
-                </div>
-                <div class="info-group">
-                    <div class="info-label">Period</div>
-                    <div class="info-value" id="info-period">92 min</div>
-                </div>
-                <div class="info-divider"></div>
-                <div class="info-group">
-                    <div class="info-label">Observer</div>
-                    <div class="info-value info-observer" id="info-observer">Rostov</div>
-                </div>
-                <div class="info-group">
-                    <div class="info-label">UTC</div>
-                    <div class="info-value info-time" id="info-time">--:--:--</div>
-                </div>
+            <div class="info-row">
+                <span class="info-cell">
+                    <span class="info-label">Incl</span>
+                    <span class="info-value" id="info-orbit">51.64°</span>
+                </span>
+                <span class="info-cell">
+                    <span class="info-label">Period</span>
+                    <span class="info-value" id="info-period">92.5 min</span>
+                </span>
+                <span class="info-cell">
+                    <span class="info-label">Lat</span>
+                    <span class="info-value info-value-accent" id="info-lat">---.--°</span>
+                </span>
+                <span class="info-cell">
+                    <span class="info-label">Lon</span>
+                    <span class="info-value info-value-accent" id="info-lon">---.--°</span>
+                </span>
+                <span class="info-cell">
+                    <span class="info-label">Alt</span>
+                    <span class="info-value info-value-accent" id="info-alt">--- km</span>
+                </span>
             </div>
+            <div class="simulation-badge">ИМИТАЦИЯ</div>
         </div>
     </section>
 
-    <section class="views-row">
+    <!-- Правая колонка: графики в вертикальный столбик -->
+    <section class="charts-column">
         <div class="azimuth-container">
             <h3>Азимут</h3>
             <canvas id="azimuth-view" width="300" height="300"></canvas>
         </div>
         <div class="sky-view-container">
-            <h3>Sky View</h3>
-            <canvas id="sky-view" width="200" height="200"></canvas>
+            <canvas id="sky-view" width="300" height="350"></canvas>
         </div>
         <div class="elevation-container">
             <h3>Угол места</h3>
-            <canvas id="elevation-view" width="300" height="300"></canvas>
+            <canvas id="elevation-view" width="300" height="250"></canvas>
         </div>
     </section>
 </div>

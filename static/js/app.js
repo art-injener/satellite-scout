@@ -37,48 +37,7 @@
 
         // Initialize canvas placeholders
         initCanvasPlaceholders();
-
-        // Layout switcher
-        initLayoutSwitcher();
     });
-
-    // Layout switching functionality
-    function initLayoutSwitcher() {
-        const buttons = document.querySelectorAll('.layout-btn');
-        const layout = document.querySelector('.tracking-layout');
-
-        if (!buttons.length || !layout) { return; }
-
-        buttons.forEach(function(btn) {
-            btn.addEventListener('click', function() {
-                const newLayout = this.dataset.layout;
-
-                // Update active button
-                buttons.forEach(function(b) { b.classList.remove('active'); });
-                this.classList.add('active');
-
-                // Update layout
-                layout.dataset.currentLayout = newLayout;
-
-                // Save preference
-                localStorage.setItem('satwatch-layout', newLayout);
-
-                // Reinitialize canvases for new sizes
-                setTimeout(function() {
-                    initCanvasPlaceholders();
-                }, 100);
-            });
-        });
-
-        // Restore saved layout
-        const savedLayout = localStorage.getItem('satwatch-layout');
-        if (savedLayout) {
-            const btn = document.querySelector('.layout-btn[data-layout="' + savedLayout + '"]');
-            if (btn) {
-                btn.click();
-            }
-        }
-    }
 
     // Initialize canvas elements with placeholder content
     function initCanvasPlaceholders() {
@@ -102,10 +61,16 @@
             drawPlaceholder(earthCanvas, 'Earth View', 'Карта мира появится здесь');
         }
 
-        // Sky View placeholder
+        // Sky View - азимутальная проекция неба
         const skyCanvas = document.getElementById('sky-view');
-        if (skyCanvas) {
-            drawPlaceholder(skyCanvas, 'Sky View', 'Небесная сфера');
+        if (skyCanvas && window.SkyView) {
+            if (window.skyView) {
+                window.skyView.stopDemo();
+            }
+            window.skyView = new window.SkyView(skyCanvas);
+            window.skyView.startDemo(2);
+        } else if (skyCanvas) {
+            drawPlaceholder(skyCanvas, '', 'Небесная сфера');
         }
 
         // Azimuth indicator с антенной
