@@ -43,7 +43,7 @@ formatters:
 linters:
   # В версии 2: default может быть "all", "standard", "none" или "fast"
   # Используем "none" и явно включаем нужные линтеры
-  default: none
+  default: fast
   enable:
     # Вычисляет и проверяет цикломатическую сложность функций
     - gocyclo
