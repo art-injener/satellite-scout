@@ -8,42 +8,29 @@ run:
 
 # Форматеры - инструменты для автоматического форматирования кода
 # Больше информации: https://golangci-lint.run/docs/formatters/
-formatters:
-  enable:
-    # Форматирует код и импорты с дополнительными правилами (строже чем gofmt)
-    - gofumpt
-    # Управляет порядком и группировкой импортов
-    - gci
-    # Исправляет длинные строки (опционально, может конфликтовать с lll линтером)
-    # - golines
-
-  settings:
-    gofumpt:
-      # Дополнительные правила форматирования
-      extra-rules: true
-      # Форматирование строк в стиле Go 1.19+
-      lang-version: "1.25"
-    gci:
-      # Секции импортов: standard, default, prefix, blank, dot
-      sections:
-        - standard  # Стандартная библиотека Go
-        - default   # Все остальные импорты
-        - prefix(github.com/art-injener/satwatch-go)  # Локальные импорты проекта
-      # Пользовательский порядок секций
-      custom-order: true
-      # Не добавлять пустые строки между секциями одного типа
-      skip-generated: true
-    # golines:
-    #   # Максимальная длина строки (должна соответствовать lll.line-length)
-    #   max-len: 160
-    #   # Минимальная длина строки для разбиения
-    #   tab-len: 1
+# ОТКЛЮЧЕНО: Форматеры следует запускать отдельно через make fmt
+# formatters:
+#   enable:
+#     - gofumpt
+#     - gci
 
 # Больше информации https://golangci-lint.run/usage/linters/
 linters:
   # В версии 2: default может быть "all", "standard", "none" или "fast"
   # Используем "none" и явно включаем нужные линтеры
-  default: none
+  default: fast
+  
+  # Отключаем избыточные или устаревшие линтеры
+  disable:
+    # wsl устарел (заменён на wsl_v5), слишком строгие правила пустых строк
+    - wsl
+    # nlreturn требует пустые строки перед return - избыточно и снижает читаемость
+    - nlreturn
+    # mnd (magic number detector) слишком агрессивный, ругается даже на очевидные числа
+    - mnd
+    # godox блокирует TODO комментарии, которые полезны для разработки
+    - godox
+    
   enable:
     # Вычисляет и проверяет цикломатическую сложность функций
     - gocyclo
@@ -159,9 +146,23 @@ linters:
 
   # В версии 2 настройки линтеров находятся в linters.settings
   settings:
+    depguard:
+      rules:
+        main:
+          # Разрешить все импорты по умолчанию
+          allow:
+            - $gostd
+            - github.com/art-injener/satwatch-go
+            - github.com/joshuaferrara/go-satellite
+            - github.com/pkg/errors
     gocyclo:
       # Минимальная сложность кода для сработки. По-умолчанию 30, но рекомендуется 10-20
       min-complexity: 20
+    cyclop:
+      # Максимальная цикломатическая сложность (для TLE парсинга функции могут быть сложными)
+      max-complexity: 15
+      # Не учитывать assert вызовы в тестах
+      skip-tests: true
     gosec:
       # Исключить правила (более подробно https://golangci-lint.run/usage/linters/#gosec)
       excludes:
@@ -258,6 +259,7 @@ linters:
           - errcheck  # В тестах допустимо игнорировать некоторые ошибки
           - goconst   # В тестах допустимы повторяющиеся строки
           - gci       # Форматирование импортов в тестах менее критично
+          - testpackage # Разрешить тесты в том же пакете для доступа к внутренним функциям
 
 issues:
   # Максимальное количество задач на один линтер. Установите 0, чтобы отключить. По умолчанию 50

@@ -40,3 +40,5 @@ tmp_docs/
 CLAUDE.md
 node_modules/
 package-lock.json
+/memory-bank/
+./memory-bank/

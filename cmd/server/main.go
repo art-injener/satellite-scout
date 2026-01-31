@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/art-injener/satwatch-go/internal/config"
-	"github.com/art-injener/satwatch-go/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/config"
+	"github.com/art-injener/satellite-scout/internal/handlers"
 )
 
 const (
@@ -141,6 +141,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 // responseWriter оборачивает http.ResponseWriter для захвата кода статуса.
 type responseWriter struct {
 	http.ResponseWriter
+
 	status int
 }
 
