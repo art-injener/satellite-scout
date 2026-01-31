@@ -6,7 +6,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/art-injener/satwatch-go/internal/config"
+	"github.com/art-injener/satellite-scout/internal/config"
 )
 
 func TestNewAPIHandler(t *testing.T) {
