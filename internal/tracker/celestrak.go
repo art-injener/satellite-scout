@@ -280,7 +280,7 @@ func (c *CelestrakClient) doRequest(ctx context.Context, url string) (string, er
 		return "", fmt.Errorf("creating request: %w", err)
 	}
 
-	req.Header.Set("User-Agent", "SatWatch/1.0 (https://github.com/art-injener/satwatch-go)")
+	req.Header.Set("User-Agent", "Satellite Scout/1.0 (https://github.com/art-injener/satellite-scout)")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {

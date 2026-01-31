@@ -61,7 +61,7 @@ func (h *PageHandler) Index(w http.ResponseWriter, r *http.Request) {
 // Tracking рендерит страницу отслеживания (вкладка 1).
 func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:     "Отслеживание - SatWatch",
+		Title:     "Отслеживание - Satellite Scout",
 		ActiveTab: "tracking",
 	}
 	h.render(w, templateBaseName, data)
@@ -70,7 +70,7 @@ func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
 // Receiver рендерит страницу приёмника (вкладка 2).
 func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:     "Приёмник - SatWatch",
+		Title:     "Приёмник - Satellite Scout",
 		ActiveTab: "receiver",
 	}
 	h.render(w, templateBaseName, data)
@@ -79,7 +79,7 @@ func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
 // Simulation рендерит страницу имитации (вкладка 3).
 func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:     "Имитация - SatWatch",
+		Title:     "Имитация - Satellite Scout",
 		ActiveTab: "simulation",
 	}
 	h.render(w, templateBaseName, data)

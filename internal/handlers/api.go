@@ -5,7 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/art-injener/satwatch-go/internal/config"
+	"github.com/art-injener/satellite-scout/internal/config"
 )
 
 const (

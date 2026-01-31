@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/art-injener/satwatch-go/internal/config"
-	"github.com/art-injener/satwatch-go/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/config"
+	"github.com/art-injener/satellite-scout/internal/handlers"
 )
 
 const (
