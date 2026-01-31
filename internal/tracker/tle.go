@@ -10,7 +10,7 @@ import (
 	"time"
 )
 
-// Ошибки парсинга TLE
+// Ошибки парсинга TLE.
 var (
 	ErrInvalidTLEFormat  = errors.New("invalid TLE format")
 	ErrInvalidChecksum   = errors.New("invalid TLE checksum")
@@ -18,12 +18,13 @@ var (
 	ErrLineTooShort      = errors.New("TLE line too short")
 	ErrNoradIDMismatch   = errors.New("NORAD ID mismatch between lines")
 	ErrInvalidAlpha5     = errors.New("invalid Alpha-5 NORAD ID format")
+	ErrEpochTooShort     = errors.New("epoch string too short")
 )
 
 // alpha5Map маппинг букв Alpha-5 формата на числовые префиксы.
 // Alpha-5 используется для NORAD ID > 99999 (например, Starlink).
 // Буквы I и O не используются (путаются с 1 и 0).
-// A=10, B=11, ..., H=17, J=18, ..., N=22, P=23, ..., Z=33
+// A=10, B=11, ..., H=17, J=18, ..., N=22, P=23, ..., Z=33.
 var alpha5Map = map[byte]int{
 	'A': 10, 'B': 11, 'C': 12, 'D': 13, 'E': 14, 'F': 15, 'G': 16, 'H': 17,
 	'J': 18, 'K': 19, 'L': 20, 'M': 21, 'N': 22,
@@ -55,7 +56,7 @@ type TLE struct {
 	Line2          string    // Оригинальная Line 2
 }
 
-// Константы формата TLE
+// Константы формата TLE.
 const (
 	idxLine0 = 0 // Имя спутника (опционально)
 	idxLine1 = 1 // Line 1
@@ -107,9 +108,9 @@ func ParseTLE(lines []string) (*TLE, error) {
 func ParseTLEBatch(data string) ([]*TLE, error) {
 	lines := strings.Split(data, "\n")
 	var tles []*TLE
-	var currentLines []string
+	currentLines := make([]string, 0, 3) // Обычно 3 строки (имя + line1 + line2)
 
-	for i := 0; i < len(lines); i++ {
+	for i := range lines {
 		trimmed := strings.TrimSpace(lines[i])
 
 		// Пустая строка — возможный разделитель
@@ -117,11 +118,12 @@ func ParseTLEBatch(data string) ([]*TLE, error) {
 			if len(currentLines) >= 2 {
 				tle, err := ParseTLE(currentLines)
 				if err != nil {
-					return nil, fmt.Errorf("parsing TLE: %w", err)
+					return nil, fmt.Errorf(errMsgParsingTLE, err)
 				}
 				tles = append(tles, tle)
 				currentLines = nil
 			}
+
 			continue
 		}
 
@@ -142,7 +144,7 @@ func ParseTLEBatch(data string) ([]*TLE, error) {
 	if len(currentLines) >= 2 {
 		tle, err := ParseTLE(currentLines)
 		if err != nil {
-			return nil, fmt.Errorf("parsing TLE: %w", err)
+			return nil, fmt.Errorf(errMsgParsingTLE, err)
 		}
 		tles = append(tles, tle)
 	}
@@ -283,13 +285,17 @@ func parseLine1(tle *TLE, line string) error {
 	// Ephemeris Type (col 63)
 	ephTypeStr := strings.TrimSpace(line[62:63])
 	if ephTypeStr != "" && ephTypeStr != " " {
-		tle.EphemerisType, _ = strconv.Atoi(ephTypeStr)
+		if ephType, err := strconv.Atoi(ephTypeStr); err == nil {
+			tle.EphemerisType = ephType
+		}
 	}
 
 	// Element Set Number (cols 65-68)
 	elemSetStr := strings.TrimSpace(line[64:68])
 	if elemSetStr != "" {
-		tle.ElementSetNo, _ = strconv.Atoi(elemSetStr)
+		if elemSet, err := strconv.Atoi(elemSetStr); err == nil {
+			tle.ElementSetNo = elemSet
+		}
 	}
 
 	return nil
@@ -357,7 +363,9 @@ func parseLine2(tle *TLE, line string) error {
 	// Revolution Number (cols 64-68)
 	revNumStr := strings.TrimSpace(line[63:68])
 	if revNumStr != "" {
-		tle.RevNumber, _ = strconv.Atoi(revNumStr)
+		if revNum, err := strconv.Atoi(revNumStr); err == nil {
+			tle.RevNumber = revNum
+		}
 	}
 
 	return nil
@@ -380,7 +388,7 @@ func validateChecksum(line string) bool {
 // calculateChecksum вычисляет контрольную сумму TLE по алгоритму Modulo-10.
 func calculateChecksum(line string) int {
 	sum := 0
-	for i := 0; i < len(line); i++ {
+	for i := range len(line) {
 		c := line[i]
 		switch {
 		case c >= '0' && c <= '9':
@@ -390,6 +398,7 @@ func calculateChecksum(line string) int {
 			// Буквы, пробелы, точки и другие символы не учитываются
 		}
 	}
+
 	return sum % 10
 }
 
@@ -418,7 +427,7 @@ func parseNoradID(s string) (int, error) {
 
 		rest, err := strconv.Atoi(s[1:5])
 		if err != nil {
-			return 0, fmt.Errorf("%w: %v", ErrInvalidAlpha5, err)
+			return 0, fmt.Errorf("%w: %w", ErrInvalidAlpha5, err)
 		}
 
 		// Alpha-5: prefix * 10000 + rest
@@ -437,7 +446,7 @@ func parseNoradID(s string) (int, error) {
 }
 
 // parseExponent парсит научную нотацию TLE вида "12345-6" или "-12345-6".
-// Формат: [знак]NNNNN[+-]E, означает ±0.NNNNN × 10^(±E)
+// Формат: [знак]NNNNN[+-]E, означает ±0.NNNNN × 10^(±E).
 func parseExponent(s string) float64 {
 	s = strings.TrimSpace(s)
 	if s == "" || s == "00000-0" || s == "00000+0" {
@@ -465,26 +474,33 @@ func parseExponent(s string) float64 {
 
 	if expPos == -1 {
 		// Нет экспоненты, просто число
-		val, _ := strconv.ParseFloat("0."+s, 64)
-		return sign * val
+		if val, err := strconv.ParseFloat("0."+s, 64); err == nil {
+			return sign * val
+		}
+
+		return 0
 	}
 
 	// Мантисса и экспонента
 	mantissaStr := s[:expPos]
 	expStr := s[expPos:]
 
-	mantissa, _ := strconv.ParseFloat("0."+mantissaStr, 64)
-	exp, _ := strconv.Atoi(expStr)
+	mantissa, errMantissa := strconv.ParseFloat("0."+mantissaStr, 64)
+	exp, errExp := strconv.Atoi(expStr)
+
+	if errMantissa != nil || errExp != nil {
+		return 0
+	}
 
 	return sign * mantissa * math.Pow(10, float64(exp))
 }
 
 // parseEpoch парсит эпоху TLE из формата YYDDD.DDDDDDDD.
-// YY: год (00-56 = 2000-2056, 57-99 = 1957-1999)
-// DDD.DDDDDDDD: день года с дробной частью
+// YY: год (00-56 = 2000-2056, 57-99 = 1957-1999).
+// DDD.DDDDDDDD: день года с дробной частью.
 func parseEpoch(epochStr string) (time.Time, error) {
 	if len(epochStr) < 7 {
-		return time.Time{}, fmt.Errorf("epoch string too short: %s", epochStr)
+		return time.Time{}, fmt.Errorf("%w: %s", ErrEpochTooShort, epochStr)
 	}
 
 	// Парсим год

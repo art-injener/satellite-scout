@@ -1,8 +1,8 @@
-// Package tracker реализует парсинг TLE и расчёт позиций спутников.
 package tracker
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,32 +10,37 @@ import (
 	"time"
 )
 
-// Константы Celestrak API
+// Константы Celestrak API.
 const (
-	// CelestrakBaseURL базовый URL Celestrak API
+	// CelestrakBaseURL базовый URL Celestrak API.
 	CelestrakBaseURL = "https://celestrak.org/NORAD/elements/gp.php"
 
-	// DefaultRateLimit минимальный интервал между запросами (рекомендация Celestrak)
+	// DefaultRateLimit минимальный интервал между запросами (рекомендация Celestrak).
 	DefaultRateLimit = 2 * time.Second
 
-	// DefaultTimeout таймаут HTTP запроса
+	// DefaultTimeout таймаут HTTP запроса.
 	DefaultTimeout = 30 * time.Second
 
-	// DefaultMaxRetries количество повторных попыток
+	// DefaultMaxRetries количество повторных попыток.
 	DefaultMaxRetries = 3
+
+	// errMsgParsingTLE сообщение об ошибке парсинга TLE.
+	errMsgParsingTLE = "parsing TLE: %w"
 )
 
-// Ошибки Celestrak клиента
+// Ошибки Celestrak клиента.
 var (
-	ErrCelestrakNotFound    = fmt.Errorf("satellite not found")
-	ErrCelestrakRateLimit   = fmt.Errorf("rate limited (429)")
-	ErrCelestrakServerError = fmt.Errorf("server error")
+	ErrCelestrakNotFound         = errors.New("satellite not found")
+	ErrCelestrakRateLimit        = errors.New("rate limited (429)")
+	ErrCelestrakServerError      = errors.New("server error")
+	ErrCelestrakUnexpectedStatus = errors.New("unexpected HTTP status")
+	ErrCelestrakFetchGroups      = errors.New("errors fetching groups")
 )
 
 // SatelliteGroup предустановленные группы спутников Celestrak.
 type SatelliteGroup string
 
-// Предустановленные группы спутников
+// Предустановленные группы спутников.
 const (
 	GroupStations          SatelliteGroup = "stations"     // МКС и связанные
 	GroupWeather           SatelliteGroup = "weather"      // Метеорологические
@@ -143,7 +148,7 @@ func (c *CelestrakClient) FetchByNoradID(ctx context.Context, noradID int) (*TLE
 
 	tles, err := ParseTLEBatch(data)
 	if err != nil {
-		return nil, fmt.Errorf("parsing TLE: %w", err)
+		return nil, fmt.Errorf(errMsgParsingTLE, err)
 	}
 
 	if len(tles) == 0 {
@@ -164,7 +169,7 @@ func (c *CelestrakClient) FetchGroup(ctx context.Context, group SatelliteGroup) 
 
 	tles, err := ParseTLEBatch(data)
 	if err != nil {
-		return nil, fmt.Errorf("parsing TLEs: %w", err)
+		return nil, fmt.Errorf(errMsgParsingTLE, err)
 	}
 
 	return tles, nil
@@ -179,7 +184,7 @@ func (c *CelestrakClient) FetchURL(ctx context.Context, url string) ([]*TLE, err
 
 	tles, err := ParseTLEBatch(data)
 	if err != nil {
-		return nil, fmt.Errorf("parsing TLEs: %w", err)
+		return nil, fmt.Errorf(errMsgParsingTLE, err)
 	}
 
 	return tles, nil
@@ -214,7 +219,7 @@ func (c *CelestrakClient) FetchMultipleGroups(ctx context.Context, groups []Sate
 	wg.Wait()
 
 	if len(errors) > 0 {
-		return allTLEs, fmt.Errorf("errors fetching groups: %v", errors)
+		return allTLEs, fmt.Errorf("%w: %v", ErrCelestrakFetchGroups, errors)
 	}
 
 	return allTLEs, nil
@@ -227,8 +232,12 @@ func (c *CelestrakClient) fetch(ctx context.Context, url string) (string, error)
 	var lastErr error
 	for attempt := 0; attempt <= c.maxRetries; attempt++ {
 		if attempt > 0 {
-			// Exponential backoff
-			backoff := time.Duration(1<<uint(attempt-1)) * time.Second
+			// Exponential backoff с безопасным преобразованием
+			// attempt-1 всегда >= 0, т.к. проверено if attempt > 0
+			// Ограничиваем 31 для защиты от переполнения при сдвиге
+			attemptVal := min(attempt-1, 31)
+
+			backoff := time.Duration(1<<uint(attemptVal)) * time.Second //nolint:gosec // attemptVal проверен выше
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()
@@ -244,7 +253,7 @@ func (c *CelestrakClient) fetch(ctx context.Context, url string) (string, error)
 		lastErr = err
 
 		// Не повторяем при 404
-		if err == ErrCelestrakNotFound {
+		if errors.Is(err, ErrCelestrakNotFound) {
 			return "", err
 		}
 	}
@@ -277,7 +286,12 @@ func (c *CelestrakClient) doRequest(ctx context.Context, url string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("executing request: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if closeErr := resp.Body.Close(); closeErr != nil {
+			// Логируем, но не возвращаем ошибку, т.к. данные уже прочитаны
+			_ = closeErr
+		}
+	}()
 
 	switch resp.StatusCode {
 	case http.StatusOK:
@@ -290,7 +304,8 @@ func (c *CelestrakClient) doRequest(ctx context.Context, url string) (string, er
 		if resp.StatusCode >= 500 {
 			return "", fmt.Errorf("%w: %d", ErrCelestrakServerError, resp.StatusCode)
 		}
-		return "", fmt.Errorf("unexpected status: %d", resp.StatusCode)
+
+		return "", fmt.Errorf("%w: %d", ErrCelestrakUnexpectedStatus, resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(resp.Body)
