@@ -3,39 +3,41 @@ package tracker
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 )
 
-// makeTLELine добавляет корректную контрольную сумму к строке TLE (68 символов без checksum)
+// makeTLELine добавляет корректную контрольную сумму к строке TLE (68 символов без checksum).
 func makeTLELine(line68 string) string {
 	if len(line68) != 68 {
 		panic(fmt.Sprintf("line must be 68 chars, got %d", len(line68)))
 	}
 	checksum := calculateChecksum(line68)
-	return line68 + fmt.Sprintf("%d", checksum)
+
+	return line68 + strconv.Itoa(checksum)
 }
 
-// Эталонные TLE для тестов (с автоматически рассчитанными контрольными суммами)
+// Эталонные TLE для тестов (с автоматически рассчитанными контрольными суммами).
 var (
-	// ISS (ZARYA) - 3-line формат
+	// ISS (ZARYA) - 3-line формат.
 	issLine1 = makeTLELine("1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  999")
 	issLine2 = makeTLELine("2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.4981557142340")
 	issTLE   = "ISS (ZARYA)\n" + issLine1 + "\n" + issLine2
 
-	// Hubble Space Telescope - 2-line формат
+	// Hubble Space Telescope - 2-line формат.
 	hstLine1 = makeTLELine("1 20580U 90037B   24001.50000000  .00001234  00000-0  56789-4 0  999")
 	hstLine2 = makeTLELine("2 20580  28.4700 120.3456 0002567  45.1234 315.0000 15.0987654312345")
 	hstTLE   = hstLine1 + "\n" + hstLine2
 
-	// Meteor-M2 - 3-line формат
+	// Meteor-M2 - 3-line формат.
 	meteorLine1 = makeTLELine("1 40069U 14037A   24001.50000000  .00000123  00000-0  12345-4 0  999")
 	meteorLine2 = makeTLELine("2 40069  98.5200  45.6789 0001234 123.4567 236.7890 14.2098765432109")
 	meteorTLE   = "METEOR-M2\n" + meteorLine1 + "\n" + meteorLine2
 )
 
-// TestValidateChecksum проверяет алгоритм Modulo-10
+// TestValidateChecksum проверяет алгоритм Modulo-10.
 func TestValidateChecksum(t *testing.T) {
 	// Строки с минусами для тестирования
 	lineWithMinus68 := "1 25544U 98067A   24001.50000000 -.00016717  00000-0 -10270-3 0  999"
@@ -78,7 +80,7 @@ func TestValidateChecksum(t *testing.T) {
 	}
 }
 
-// TestParseTLE_ThreeLine проверяет парсинг 3-line TLE (с названием)
+// TestParseTLE_ThreeLine проверяет парсинг 3-line TLE (с названием).
 func TestParseTLE_ThreeLine(t *testing.T) {
 	lines := strings.Split(issTLE, "\n")
 
@@ -133,7 +135,7 @@ func TestParseTLE_ThreeLine(t *testing.T) {
 	}
 }
 
-// TestParseTLE_TwoLine проверяет парсинг 2-line TLE (без названия)
+// TestParseTLE_TwoLine проверяет парсинг 2-line TLE (без названия).
 func TestParseTLE_TwoLine(t *testing.T) {
 	lines := strings.Split(hstTLE, "\n")
 
@@ -158,7 +160,7 @@ func TestParseTLE_TwoLine(t *testing.T) {
 	}
 }
 
-// TestParseTLE_Epoch проверяет корректность парсинга эпохи
+// TestParseTLE_Epoch проверяет корректность парсинга эпохи.
 func TestParseTLE_Epoch(t *testing.T) {
 	lines := strings.Split(issTLE, "\n")
 
@@ -187,7 +189,7 @@ func TestParseTLE_Epoch(t *testing.T) {
 	}
 }
 
-// TestParseTLE_InvalidChecksum проверяет отклонение TLE с неверной контрольной суммой
+// TestParseTLE_InvalidChecksum проверяет отклонение TLE с неверной контрольной суммой.
 func TestParseTLE_InvalidChecksum(t *testing.T) {
 	// Создаём TLE с неверной контрольной суммой (заменяем последнюю цифру)
 	invalidLine1 := issLine1[:68] + "0" // неверный checksum
@@ -201,7 +203,7 @@ func TestParseTLE_InvalidChecksum(t *testing.T) {
 	}
 }
 
-// TestParseTLE_InvalidFormat проверяет обработку некорректного формата
+// TestParseTLE_InvalidFormat проверяет обработку некорректного формата.
 func TestParseTLE_InvalidFormat(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -216,8 +218,11 @@ func TestParseTLE_InvalidFormat(t *testing.T) {
 			lines: []string{"1 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9993"},
 		},
 		{
-			name:  "Wrong line number",
-			lines: []string{"3 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9993", "2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.49815571423456"},
+			name: "Wrong line number",
+			lines: []string{
+				"3 25544U 98067A   24001.50000000  .00016717  00000-0  10270-3 0  9993",
+				"2 25544  51.6400 247.4627 0006703 130.5360 325.0288 15.49815571423456",
+			},
 		},
 		{
 			name:  "Line too short",
@@ -235,7 +240,7 @@ func TestParseTLE_InvalidFormat(t *testing.T) {
 	}
 }
 
-// TestParseTLEBatch проверяет парсинг нескольких TLE
+// TestParseTLEBatch проверяет парсинг нескольких TLE.
 func TestParseTLEBatch(t *testing.T) {
 	batch := issTLE + "\n" + meteorTLE
 
@@ -265,7 +270,7 @@ func TestParseTLEBatch(t *testing.T) {
 	}
 }
 
-// TestParseExponent проверяет парсинг научной нотации TLE
+// TestParseExponent проверяет парсинг научной нотации TLE.
 func TestParseExponent(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -289,7 +294,7 @@ func TestParseExponent(t *testing.T) {
 	}
 }
 
-// TestTLE_String проверяет восстановление TLE в строковый формат
+// TestTLE_String проверяет восстановление TLE в строковый формат.
 func TestTLE_String(t *testing.T) {
 	lines := strings.Split(issTLE, "\n")
 
@@ -307,7 +312,7 @@ func TestTLE_String(t *testing.T) {
 	}
 }
 
-// TestParseTLE_Bstar проверяет парсинг BSTAR коэффициента
+// TestParseTLE_Bstar проверяет парсинг BSTAR коэффициента.
 func TestParseTLE_Bstar(t *testing.T) {
 	lines := strings.Split(issTLE, "\n")
 
@@ -323,7 +328,7 @@ func TestParseTLE_Bstar(t *testing.T) {
 	}
 }
 
-// TestParseTLE_MeanMotionDerivatives проверяет парсинг производных mean motion
+// TestParseTLE_MeanMotionDerivatives проверяет парсинг производных mean motion.
 func TestParseTLE_MeanMotionDerivatives(t *testing.T) {
 	lines := strings.Split(issTLE, "\n")
 
@@ -339,7 +344,7 @@ func TestParseTLE_MeanMotionDerivatives(t *testing.T) {
 	}
 }
 
-// TestParseNoradID_Alpha5 проверяет парсинг NORAD ID в формате Alpha-5
+// TestParseNoradID_Alpha5 проверяет парсинг NORAD ID в формате Alpha-5.
 func TestParseNoradID_Alpha5(t *testing.T) {
 	tests := []struct {
 		input    string
@@ -383,7 +388,7 @@ func TestParseNoradID_Alpha5(t *testing.T) {
 	}
 }
 
-// TestParseTLE_Alpha5_Starlink проверяет парсинг TLE со Starlink (Alpha-5 NORAD ID)
+// TestParseTLE_Alpha5_Starlink проверяет парсинг TLE со Starlink (Alpha-5 NORAD ID).
 func TestParseTLE_Alpha5_Starlink(t *testing.T) {
 	// Симулируем Starlink TLE с Alpha-5 NORAD ID (A0001 = 100001)
 	starlinkLine1 := makeTLELine("1 A0001U 24001A   24001.50000000  .00000123  00000-0  12345-4 0  999")

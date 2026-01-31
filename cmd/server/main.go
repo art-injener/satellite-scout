@@ -141,6 +141,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 // responseWriter оборачивает http.ResponseWriter для захвата кода статуса.
 type responseWriter struct {
 	http.ResponseWriter
+
 	status int
 }
 

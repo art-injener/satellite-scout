@@ -13,6 +13,14 @@ const (
 	templateGlob     = "*.html"
 	templateBaseName = "base.html"
 
+	// Директории шаблонов.
+	layoutsDir  = "layouts"
+	pagesDir    = "pages"
+	partialsDir = "partials"
+
+	// Маршруты.
+	trackingPath = "/tracking"
+
 	slogKeyError = "error"
 )
 
@@ -39,6 +47,44 @@ func NewPageHandler(tmplDir string, devMode bool) (*PageHandler, error) {
 	return h, nil
 }
 
+// PageData содержит общие данные для рендеринга страниц.
+type PageData struct {
+	Title     string
+	ActiveTab string
+}
+
+// Index перенаправляет на страницу отслеживания.
+func (h *PageHandler) Index(w http.ResponseWriter, r *http.Request) {
+	http.Redirect(w, r, trackingPath, http.StatusFound)
+}
+
+// Tracking рендерит страницу отслеживания (вкладка 1).
+func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
+	data := PageData{
+		Title:     "Отслеживание - SatWatch",
+		ActiveTab: "tracking",
+	}
+	h.render(w, templateBaseName, data)
+}
+
+// Receiver рендерит страницу приёмника (вкладка 2).
+func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
+	data := PageData{
+		Title:     "Приёмник - SatWatch",
+		ActiveTab: "receiver",
+	}
+	h.render(w, templateBaseName, data)
+}
+
+// Simulation рендерит страницу имитации (вкладка 3).
+func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
+	data := PageData{
+		Title:     "Имитация - SatWatch",
+		ActiveTab: "simulation",
+	}
+	h.render(w, templateBaseName, data)
+}
+
 func (h *PageHandler) loadTemplates() error {
 	pattern := filepath.Join(h.tmplDir, "**", templateGlob)
 	tmpl, err := template.ParseGlob(pattern)
@@ -47,21 +93,21 @@ func (h *PageHandler) loadTemplates() error {
 		tmpl = template.New("")
 
 		// Сначала загружаем layouts
-		layoutPattern := filepath.Join(h.tmplDir, "layouts", templateGlob)
+		layoutPattern := filepath.Join(h.tmplDir, layoutsDir, templateGlob)
 		tmpl, err = tmpl.ParseGlob(layoutPattern)
 		if err != nil {
 			return err
 		}
 
 		// Загружаем страницы
-		pagesPattern := filepath.Join(h.tmplDir, "pages", templateGlob)
+		pagesPattern := filepath.Join(h.tmplDir, pagesDir, templateGlob)
 		tmpl, err = tmpl.ParseGlob(pagesPattern)
 		if err != nil {
 			return err
 		}
 
 		// Загружаем частичные шаблоны
-		partialsPattern := filepath.Join(h.tmplDir, "partials", templateGlob)
+		partialsPattern := filepath.Join(h.tmplDir, partialsDir, templateGlob)
 		tmpl, err = tmpl.ParseGlob(partialsPattern)
 		if err != nil {
 			return err
@@ -93,42 +139,4 @@ func (h *PageHandler) render(w http.ResponseWriter, name string, data any) {
 		slog.Error("failed to render template", "name", name, slogKeyError, err)
 		http.Error(w, "Render error", http.StatusInternalServerError)
 	}
-}
-
-// PageData содержит общие данные для рендеринга страниц.
-type PageData struct {
-	Title     string
-	ActiveTab string
-}
-
-// Index перенаправляет на страницу отслеживания.
-func (h *PageHandler) Index(w http.ResponseWriter, r *http.Request) {
-	http.Redirect(w, r, "/tracking", http.StatusFound)
-}
-
-// Tracking рендерит страницу отслеживания (вкладка 1).
-func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
-		Title:     "Отслеживание - SatWatch",
-		ActiveTab: "tracking",
-	}
-	h.render(w, templateBaseName, data)
-}
-
-// Receiver рендерит страницу приёмника (вкладка 2).
-func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
-		Title:     "Приёмник - SatWatch",
-		ActiveTab: "receiver",
-	}
-	h.render(w, templateBaseName, data)
-}
-
-// Simulation рендерит страницу имитации (вкладка 3).
-func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
-		Title:     "Имитация - SatWatch",
-		ActiveTab: "simulation",
-	}
-	h.render(w, templateBaseName, data)
 }

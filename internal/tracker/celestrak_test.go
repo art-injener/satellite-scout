@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-// TestCelestrakClient_FetchByNoradID тестирует загрузку TLE по NORAD ID
+// TestCelestrakClient_FetchByNoradID тестирует загрузку TLE по NORAD ID.
 func TestCelestrakClient_FetchByNoradID(t *testing.T) {
 	// Mock сервер с TLE данными ISS
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -48,7 +48,7 @@ func TestCelestrakClient_FetchByNoradID(t *testing.T) {
 	}
 }
 
-// TestCelestrakClient_FetchByNoradID_NotFound тестирует обработку 404
+// TestCelestrakClient_FetchByNoradID_NotFound тестирует обработку 404.
 func TestCelestrakClient_FetchByNoradID_NotFound(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -69,7 +69,7 @@ func TestCelestrakClient_FetchByNoradID_NotFound(t *testing.T) {
 	}
 }
 
-// TestCelestrakClient_FetchGroup тестирует загрузку группы спутников
+// TestCelestrakClient_FetchGroup тестирует загрузку группы спутников.
 func TestCelestrakClient_FetchGroup(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if !strings.Contains(r.URL.RawQuery, "GROUP=stations") {
@@ -99,7 +99,7 @@ func TestCelestrakClient_FetchGroup(t *testing.T) {
 	}
 }
 
-// TestCelestrakClient_RateLimit тестирует соблюдение rate limit
+// TestCelestrakClient_RateLimit тестирует соблюдение rate limit.
 func TestCelestrakClient_RateLimit(t *testing.T) {
 	requestCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -119,7 +119,7 @@ func TestCelestrakClient_RateLimit(t *testing.T) {
 	start := time.Now()
 
 	// Делаем 3 запроса
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, _ = client.FetchByNoradID(ctx, 25544)
 	}
 
@@ -136,7 +136,7 @@ func TestCelestrakClient_RateLimit(t *testing.T) {
 	}
 }
 
-// TestCelestrakClient_Retry тестирует повторные попытки при ошибках
+// TestCelestrakClient_Retry тестирует повторные попытки при ошибках.
 func TestCelestrakClient_Retry(t *testing.T) {
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -171,7 +171,7 @@ func TestCelestrakClient_Retry(t *testing.T) {
 	}
 }
 
-// TestCelestrakClient_ContextCancellation тестирует отмену контекста
+// TestCelestrakClient_ContextCancellation тестирует отмену контекста.
 func TestCelestrakClient_ContextCancellation(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(5 * time.Second) // Долгий ответ
@@ -193,7 +193,7 @@ func TestCelestrakClient_ContextCancellation(t *testing.T) {
 	}
 }
 
-// TestGetGroupURL тестирует формирование URL для группы
+// TestGetGroupURL тестирует формирование URL для группы.
 func TestGetGroupURL(t *testing.T) {
 	url := GetGroupURL(GroupStations)
 	expected := "https://celestrak.org/NORAD/elements/gp.php?GROUP=stations&FORMAT=TLE"
@@ -202,7 +202,7 @@ func TestGetGroupURL(t *testing.T) {
 	}
 }
 
-// TestGetNoradURL тестирует формирование URL для NORAD ID
+// TestGetNoradURL тестирует формирование URL для NORAD ID.
 func TestGetNoradURL(t *testing.T) {
 	url := GetNoradURL(25544)
 	expected := "https://celestrak.org/NORAD/elements/gp.php?CATNR=25544&FORMAT=TLE"
@@ -211,7 +211,7 @@ func TestGetNoradURL(t *testing.T) {
 	}
 }
 
-// TestAvailableGroups проверяет список доступных групп
+// TestAvailableGroups проверяет список доступных групп.
 func TestAvailableGroups(t *testing.T) {
 	groups := AvailableGroups()
 	if len(groups) == 0 {
@@ -235,7 +235,7 @@ func TestAvailableGroups(t *testing.T) {
 	}
 }
 
-// TestCelestrakClient_RateLimitHeader тестирует обработку 429
+// TestCelestrakClient_RateLimitHeader тестирует обработку 429.
 func TestCelestrakClient_RateLimitHeader(t *testing.T) {
 	attemptCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
