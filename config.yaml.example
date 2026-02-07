@@ -1,0 +1,50 @@
+# Пример конфигурации Satellite Scout
+
+# Настройки сервера
+server:
+  port: 8080
+
+# Местоположение наблюдателя
+observer:
+  lat: 47.315813      # широта (Ростов-на-Дону по умолчанию)
+  lon: 39.788243      # долгота
+  alt: 70.0           # высота над уровнем моря (метры)
+
+# Настройки TLE (Two-Line Elements)
+tle:
+  # Группы спутников для загрузки с Celestrak.
+  #
+  # Доступные группы:
+  #   stations      - МКС и связанные          amateur       - Радиолюбительские
+  #   cubesat       - CubeSat                   weather       - Метеорологические
+  #   noaa          - NOAA спутники             goes          - GOES спутники
+  #   starlink      - Starlink                  oneweb        - OneWeb
+  #   gps-ops       - GPS операционные          glo-ops       - GLONASS операционные
+  #   galileo       - Galileo                   beidou        - BeiDou
+  #   sbas          - SBAS                      science       - Научные
+  #   geo           - Геостационарные           iridium       - Iridium
+  #   iridium-NEXT  - Iridium NEXT              globalstar    - Globalstar
+  #   orbcomm       - Orbcomm                   active        - Все активные спутники
+  #   analyst       - Интересные объекты        military      - Военные
+  #   radar         - Радарные                  argos         - ARGOS
+  #   planet        - Planet Labs               spire         - Spire Global
+  #   resource      - Earth Resources           sarsat        - Search & Rescue
+  #   dmc           - Disaster Monitoring       tdrss         - Tracking & Data Relay
+  #   education     - Образовательные           geodetic      - Геодезические
+  #   engineering   - Инженерные                tle-new       - Последние запуски
+  groups:
+    - stations        # МКС и связанные
+    - amateur         # Радиолюбительские спутники
+    - cubesat         # CubeSat
+
+  # Интервал автоматического обновления TLE
+  update_interval: 6h
+
+  # Директория для файлового кеша TLE
+  cache_dir: data/tle_cache
+
+  # Максимальный возраст TLE в днях (для предупреждений)
+  max_tle_age_days: 7
+
+  # Загружать метаданные спутников из SatNOGS (в разработке)
+  enable_metadata: false

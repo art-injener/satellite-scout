@@ -152,7 +152,7 @@ linters:
           # Разрешить все импорты по умолчанию
           allow:
             - $gostd
-            - github.com/art-injener/satwatch-go
+            - github.com/art-injener/satellite-scout
             - github.com/joshuaferrara/go-satellite
             - github.com/pkg/errors
     gocyclo:
@@ -210,7 +210,10 @@ linters:
     goconst:
       # Искать среди чисел
       numbers: true
-      # Минимальное значение повторений, работает только с goconst.numbers
+      # Минимальное количество вхождений строки для срабатывания
+      # Увеличено до 10 для ключей логирования (error, group и т.д.)
+      min-occurrences: 10
+      # Минимальное значение повторений для чисел
       min: 3
       # Игнорировать, когда константа не используется в качестве аргумента функции
       ignore-calls: false
