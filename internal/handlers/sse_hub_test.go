@@ -10,8 +10,6 @@ import (
 	"time"
 )
 
-// --- Вспомогательные функции для тестов ---
-
 // startTestHub запускает Hub и возвращает его с функцией отмены.
 func startTestHub(t *testing.T) (*SSEHub, context.CancelFunc) {
 	t.Helper()
@@ -53,7 +51,7 @@ func registerTestClient(hub *SSEHub) *sseClient {
 
 // readSSEEvent читает одно SSE-событие из Scanner.
 // Формат: "event: <type>\ndata: <json>\n\n".
-func readSSEEvent(t *testing.T, scanner *bufio.Scanner) (eventType, data string) {
+func readSSEEvent(t *testing.T, scanner *bufio.Scanner) (string, string) {
 	t.Helper()
 
 	// Строка "event: <type>".
@@ -66,7 +64,7 @@ func readSSEEvent(t *testing.T, scanner *bufio.Scanner) (eventType, data string)
 		t.Fatalf("expected 'event: ...' line, got: %q", eventLine)
 	}
 
-	eventType = strings.TrimPrefix(eventLine, "event: ")
+	eventType := strings.TrimPrefix(eventLine, "event: ")
 
 	// Строка "data: <json>".
 	if !scanner.Scan() {
@@ -78,7 +76,7 @@ func readSSEEvent(t *testing.T, scanner *bufio.Scanner) (eventType, data string)
 		t.Fatalf("expected 'data: ...' line, got: %q", dataLine)
 	}
 
-	data = strings.TrimPrefix(dataLine, "data: ")
+	data := strings.TrimPrefix(dataLine, "data: ")
 
 	// Пустая строка (разделитель SSE).
 	if !scanner.Scan() {
@@ -91,8 +89,6 @@ func readSSEEvent(t *testing.T, scanner *bufio.Scanner) (eventType, data string)
 
 	return eventType, data
 }
-
-// --- Тесты ---
 
 func TestNewSSEHub(t *testing.T) {
 	hub := NewSSEHub()
@@ -463,8 +459,7 @@ func TestSSEHub_ServeHTTP_MultipleClients(t *testing.T) {
 
 func BenchmarkSSEHub_Broadcast(b *testing.B) {
 	hub := NewSSEHub()
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
 	go hub.Run(ctx)
 

@@ -69,24 +69,24 @@ func (h *SSEHub) Run(ctx context.Context) {
 		}
 
 		h.clientCount.Store(0)
-		slog.Info("SSE hub stopped", "cleaned_clients", len(clients))
+		slog.InfoContext(ctx, "SSE hub stopped", "cleaned_clients", len(clients))
 	}()
 
-	slog.Info("SSE hub started")
+	slog.InfoContext(ctx, "SSE hub started")
 
 	for {
 		select {
 		case client := <-h.register:
 			clients[client] = true
 			h.clientCount.Add(1)
-			slog.Debug("SSE client registered", "total_clients", h.clientCount.Load())
+			slog.DebugContext(ctx, "SSE client registered", "total_clients", h.clientCount.Load())
 
 		case client := <-h.unregister:
-			if _, ok := clients[client]; ok {
+			if _, exists := clients[client]; exists {
 				close(client.events)
 				delete(clients, client)
 				h.clientCount.Add(-1)
-				slog.Debug("SSE client unregistered", "total_clients", h.clientCount.Load())
+				slog.DebugContext(ctx, "SSE client unregistered", "total_clients", h.clientCount.Load())
 			}
 
 		case event := <-h.broadcast:
@@ -96,7 +96,7 @@ func (h *SSEHub) Run(ctx context.Context) {
 					// Событие отправлено.
 				default:
 					// Буфер клиента полон — пропускаем (защита от медленных клиентов).
-					slog.Warn("SSE client buffer full, dropping event", "event_type", event.Type)
+					slog.WarnContext(ctx, "SSE client buffer full, dropping event", "event_type", event.Type)
 				}
 			}
 
@@ -183,8 +183,8 @@ func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Основной цикл отправки событий.
 	for {
 		select {
-		case event, ok := <-client.events:
-			if !ok {
+		case event, open := <-client.events:
+			if !open {
 				// Канал закрыт — Hub остановлен или клиент удалён.
 				return
 			}
