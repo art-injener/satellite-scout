@@ -384,7 +384,7 @@ func BenchmarkPropagate(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := prop.Propagate(testTime.Add(time.Duration(i) * time.Second))
+		_, err = prop.Propagate(testTime.Add(time.Duration(i) * time.Second))
 		if err != nil {
 			b.Fatalf("Propagate() error = %v", err)
 		}

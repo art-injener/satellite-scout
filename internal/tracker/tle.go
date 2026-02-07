@@ -285,7 +285,8 @@ func parseLine1(tle *TLE, line string) error {
 	// Ephemeris Type (col 63)
 	ephTypeStr := strings.TrimSpace(line[62:63])
 	if ephTypeStr != "" && ephTypeStr != " " {
-		if ephType, err := strconv.Atoi(ephTypeStr); err == nil {
+		ephType, parseErr := strconv.Atoi(ephTypeStr)
+		if parseErr == nil {
 			tle.EphemerisType = ephType
 		}
 	}
@@ -293,7 +294,8 @@ func parseLine1(tle *TLE, line string) error {
 	// Element Set Number (cols 65-68)
 	elemSetStr := strings.TrimSpace(line[64:68])
 	if elemSetStr != "" {
-		if elemSet, err := strconv.Atoi(elemSetStr); err == nil {
+		elemSet, parseErr := strconv.Atoi(elemSetStr)
+		if parseErr == nil {
 			tle.ElementSetNo = elemSet
 		}
 	}
@@ -363,7 +365,8 @@ func parseLine2(tle *TLE, line string) error {
 	// Revolution Number (cols 64-68)
 	revNumStr := strings.TrimSpace(line[63:68])
 	if revNumStr != "" {
-		if revNum, err := strconv.Atoi(revNumStr); err == nil {
+		revNum, parseErr := strconv.Atoi(revNumStr)
+		if parseErr == nil {
 			tle.RevNumber = revNum
 		}
 	}

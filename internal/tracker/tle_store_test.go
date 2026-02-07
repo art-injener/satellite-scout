@@ -243,12 +243,7 @@ func TestTLEStore_IndexNoDuplicates(t *testing.T) {
 // ============================================================================
 
 func TestTLEStore_SaveAndLoadCache(t *testing.T) {
-	// Создаём временную директорию для кеша
-	tempDir, err := os.MkdirTemp("", "tle_cache_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = tempDir
@@ -261,19 +256,22 @@ func TestTLEStore_SaveAndLoadCache(t *testing.T) {
 	}
 
 	// Сохраняем в кеш
-	if err := store.saveGroupToCache("test_group", tles); err != nil {
+	err = store.saveGroupToCache("test_group", tles)
+	if err != nil {
 		t.Fatalf("saveGroupToCache failed: %v", err)
 	}
 
 	// Проверяем, что файл создан
 	cachePath := filepath.Join(tempDir, "test_group.tle")
-	if _, err := os.Stat(cachePath); os.IsNotExist(err) {
+	_, err = os.Stat(cachePath)
+	if os.IsNotExist(err) {
 		t.Error("Cache file not created")
 	}
 
 	// Проверяем метаданные
 	metaPath := filepath.Join(tempDir, "cache_meta.json")
-	if _, err := os.Stat(metaPath); os.IsNotExist(err) {
+	_, err = os.Stat(metaPath)
+	if os.IsNotExist(err) {
 		t.Error("Cache meta file not created")
 	}
 
@@ -289,11 +287,7 @@ func TestTLEStore_SaveAndLoadCache(t *testing.T) {
 }
 
 func TestTLEStore_CacheMeta(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "tle_cache_meta_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = tempDir
@@ -313,7 +307,8 @@ func TestTLEStore_CacheMeta(t *testing.T) {
 		UpdatedAt: time.Now(),
 		Count:     10,
 	}
-	if err := store.saveCacheMeta(meta); err != nil {
+	err = store.saveCacheMeta(meta)
+	if err != nil {
 		t.Fatalf("saveCacheMeta failed: %v", err)
 	}
 
@@ -364,26 +359,23 @@ func TestTLEStore_IsCacheFresh(t *testing.T) {
 
 func TestTLEStore_LoadGroup_FromCelestrak(t *testing.T) {
 	// Mock Celestrak сервер
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte(testTLEData))
 	}))
-	defer server.Close()
+	defer srv.Close()
 
-	tempDir, err := os.MkdirTemp("", "tle_load_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = tempDir
 
-	client := NewCelestrakClient(WithBaseURL(server.URL), WithRateLimit(0))
+	client := NewCelestrakClient(WithBaseURL(srv.URL), WithRateLimit(0))
 	store := NewTLEStore(cfg, WithCelestrakClient(client))
 
 	ctx := context.Background()
-	if err := store.LoadGroup(ctx, "test"); err != nil {
+	err := store.LoadGroup(ctx, "test")
+	if err != nil {
 		t.Fatalf("LoadGroup failed: %v", err)
 	}
 
@@ -393,38 +385,37 @@ func TestTLEStore_LoadGroup_FromCelestrak(t *testing.T) {
 
 	// Проверяем, что данные сохранены в кеш
 	cachePath := filepath.Join(tempDir, "test.tle")
-	if _, err := os.Stat(cachePath); os.IsNotExist(err) {
+	_, err = os.Stat(cachePath)
+	if os.IsNotExist(err) {
 		t.Error("Cache file should be created after successful load")
 	}
 }
 
 func TestTLEStore_LoadGroup_FallbackToCache(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "tle_fallback_test")
-	if err != nil {
-		t.Fatalf("Failed to create temp dir: %v", err)
-	}
-	defer os.RemoveAll(tempDir)
+	tempDir := t.TempDir()
 
 	// Создаём кеш-файл вручную
 	cachePath := filepath.Join(tempDir, "test.tle")
-	if err := os.WriteFile(cachePath, []byte(testTLEData), 0644); err != nil {
+	err := os.WriteFile(cachePath, []byte(testTLEData), 0644)
+	if err != nil {
 		t.Fatalf("Failed to create cache file: %v", err)
 	}
 
 	// Mock сервер, который возвращает ошибку
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))
-	defer server.Close()
+	defer srv.Close()
 
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = tempDir
 
-	client := NewCelestrakClient(WithBaseURL(server.URL), WithRateLimit(0), WithMaxRetries(0))
+	client := NewCelestrakClient(WithBaseURL(srv.URL), WithRateLimit(0), WithMaxRetries(0))
 	store := NewTLEStore(cfg, WithCelestrakClient(client))
 
 	ctx := context.Background()
-	if err := store.LoadGroup(ctx, "test"); err != nil {
+	err = store.LoadGroup(ctx, "test")
+	if err != nil {
 		t.Fatalf("LoadGroup should succeed with cache fallback: %v", err)
 	}
 

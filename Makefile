@@ -1,4 +1,4 @@
-.PHONY: build test lint lint-js run stop clean
+.PHONY: build test lint lint-js lint-fix fmt run stop clean
 
 APP_NAME=satwatch
 BUILD_DIR=./build
@@ -18,6 +18,15 @@ test:
 ## lint: Проверить код линтером
 lint:
 	@golangci-lint run --timeout=2m
+
+## lint-fix: Проверить и автоматически исправить что можно
+lint-fix:
+	@golangci-lint run --fix --timeout=2m
+
+## fmt: Отформатировать код (goimports + golines)
+fmt:
+	@golangci-lint fmt
+	@echo "✓ Код отформатирован"
 
 ## lint-js: Проверить JS линтером (ESLint)
 lint-js:
