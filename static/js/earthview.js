@@ -175,7 +175,7 @@
         // Столицы мира
         this._drawCities();
 
-        // Орбита (ground track)
+        // Наземная трасса спутника
         if (this.satellite.groundTrack.length > 0) {
             this._drawGroundTrack();
         }
@@ -359,7 +359,7 @@
     };
 
     /**
-     * Отрисовка ground track орбиты
+     * Отрисовка наземной трассы спутника
      */
     EarthView.prototype._drawGroundTrack = function() {
         const track = this.satellite.groundTrack;
@@ -602,7 +602,7 @@
     };
 
     /**
-     * Установка ground track орбиты
+     * Установка наземной трассы спутника
      * @param {Array} points - Массив точек [{lon, lat, time}]
      */
     EarthView.prototype.setGroundTrack = function(points) {
@@ -610,7 +610,7 @@
     };
 
     /**
-     * Добавление точки к ground track
+     * Добавление точки к наземной трассе спутника
      * @param {number} lon - Долгота
      * @param {number} lat - Широта
      * @param {number} time - Время (timestamp)
@@ -624,7 +624,7 @@
     };
 
     /**
-     * Очистка ground track
+     * Очистка наземной трассы спутника
      */
     EarthView.prototype.clearGroundTrack = function() {
         this.satellite.groundTrack = [];
