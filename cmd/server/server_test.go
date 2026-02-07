@@ -114,9 +114,3 @@ func TestResponseWriter_MultipleWriteHeader(t *testing.T) {
 		t.Errorf("Expected wrapper status %d, got %d", http.StatusBadRequest, rw.status)
 	}
 }
-
-func TestSlogKeyError(t *testing.T) {
-	if slogKeyError != "error" {
-		t.Errorf("Expected slogKeyError to be 'error', got '%s'", slogKeyError)
-	}
-}

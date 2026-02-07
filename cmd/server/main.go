@@ -14,12 +14,8 @@ import (
 	"github.com/art-injener/satellite-scout/internal/handlers"
 )
 
-const (
-	slogKeyError = "error"
-)
-
 func main() {
-	// Настройка структурированного логгера
+	// Настройка структурированного логгера.
 	logger := slog.New(slog.NewTextHandler(
 		os.Stdout,
 		&slog.HandlerOptions{
@@ -27,7 +23,7 @@ func main() {
 		}))
 	slog.SetDefault(logger)
 
-	// Загрузка конфигурации
+	// Загрузка конфигурации.
 	cfg := config.Load()
 	slog.Info("configuration loaded",
 		"port", cfg.Port,
@@ -35,41 +31,19 @@ func main() {
 		"observer_lon", cfg.ObserverLon,
 	)
 
-	// Инициализация обработчиков
-	pageHandler, err := handlers.NewPageHandler("templates", true)
-	if err != nil {
-		slog.Error("failed to initialize page handler", slogKeyError, err)
-		os.Exit(1)
-	}
+	// Контекст для фоновых сервисов (SSE Hub, будущие Position/Track сервисы).
+	svcCtx, svcCancel := context.WithCancel(context.Background())
+	defer svcCancel()
 
-	apiHandler := handlers.NewAPIHandler(cfg)
+	// SSE Hub — единая точка рассылки real-time данных.
+	sseHub := handlers.NewSSEHub()
+	go sseHub.Run(svcCtx)
 
+	// Маршруты.
 	mux := http.NewServeMux()
+	setupRoutes(mux, cfg, sseHub)
 
-	// Статические файлы
-	staticFS := http.FileServer(http.Dir("static"))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", staticFS))
-
-	// Маршруты страниц
-	mux.HandleFunc("GET /", pageHandler.Index)
-	mux.HandleFunc("GET /tracking", pageHandler.Tracking)
-	mux.HandleFunc("GET /receiver", pageHandler.Receiver)
-	mux.HandleFunc("GET /simulation", pageHandler.Simulation)
-
-	// API маршруты
-	mux.HandleFunc("GET /api/health", apiHandler.HealthCheck)
-	mux.HandleFunc("GET /api/config", apiHandler.GetConfig)
-
-	// Частичные шаблоны (HTMX)
-	mux.HandleFunc("GET /partials/passes", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: реализовать частичный шаблон таблицы пролётов
-		w.Header().Set("Content-Type", "text/html")
-		if _, writeErr := w.Write([]byte(`<p class="empty-state">Нет запланированных пролётов</p>`)); writeErr != nil {
-			slog.Error("failed to write response", slogKeyError, writeErr)
-		}
-	})
-
-	// Создание сервера с таймаутами
+	// HTTP-сервер.
 	server := &http.Server{
 		Addr:         cfg.Addr(),
 		Handler:      loggingMiddleware(mux),
@@ -78,74 +52,58 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Канал для сигнализации об ошибках сервера
+	// Запуск и graceful shutdown.
+	run(server, sseHub, svcCancel)
+}
+
+// run запускает HTTP-сервер и обрабатывает graceful shutdown.
+func run(server *http.Server, sseHub *handlers.SSEHub, svcCancel context.CancelFunc) {
 	serverErr := make(chan error, 1)
 
 	go func() {
 		slog.Info("starting server", "addr", server.Addr)
-		if listenErr := server.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
-			serverErr <- listenErr
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
 		}
 	}()
 
-	// Ожидание сигнала прерывания или ошибки сервера
+	// Ожидание сигнала прерывания или ошибки сервера.
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
-	case srvErr := <-serverErr:
-		slog.Error("server error", slogKeyError, srvErr)
+	case err := <-serverErr:
+		slog.Error("server error", "error", err)
 		os.Exit(1)
 	case sig := <-quit:
 		slog.Info("received shutdown signal", "signal", sig)
 	}
 
+	shutdown(server, sseHub, svcCancel)
+}
+
+// shutdown выполняет graceful shutdown: фоновые сервисы → HTTP-сервер.
+func shutdown(server *http.Server, sseHub *handlers.SSEHub, svcCancel context.CancelFunc) {
 	slog.Info("shutting down server...")
 
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Останавливаем фоновые сервисы (SSE Hub отключает всех клиентов).
+	svcCancel()
 
-	if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil {
-		slog.Error("server shutdown error", slogKeyError, shutdownErr)
-		shutdownCancel()
+	select {
+	case <-sseHub.Done():
+		slog.Info("SSE hub shutdown complete")
+	case <-time.After(5 * time.Second):
+		slog.Warn("SSE hub shutdown timeout")
+	}
+
+	// Останавливаем HTTP-сервер (ожидаем завершения активных соединений).
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer shutdownCancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		slog.Error("server shutdown error", "error", err)
 		os.Exit(1)
 	}
-	shutdownCancel()
 
 	slog.Info("server stopped gracefully")
-}
-
-// loggingMiddleware логирует HTTP запросы.
-func loggingMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		start := time.Now()
-
-		// Обёртка response writer для захвата кода статуса
-		wrapped := &responseWriter{ResponseWriter: w, status: http.StatusOK}
-
-		next.ServeHTTP(wrapped, r)
-
-		// Пропуск логирования статических файлов
-		if len(r.URL.Path) > 7 && r.URL.Path[:8] == "/static/" {
-			return
-		}
-
-		slog.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", wrapped.status,
-			"duration", time.Since(start),
-		)
-	})
-}
-
-// responseWriter оборачивает http.ResponseWriter для захвата кода статуса.
-type responseWriter struct {
-	http.ResponseWriter
-
-	status int
-}
-
-func (rw *responseWriter) WriteHeader(code int) {
-	rw.status = code
-	rw.ResponseWriter.WriteHeader(code)
 }
