@@ -1001,7 +1001,7 @@
         let simTime = startTime;
 
         // Генерация траектории пролёта спутника
-        // Строим ДУГУ на азимутальной проекции (как в SkyRoof)
+        // Строим ДУГУ на азимутальной проекции (полярная проекция: ro = 1 - El/90°)
         function generatePassTrack(baseTime) {
             self.clearTrack();
 
