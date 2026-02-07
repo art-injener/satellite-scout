@@ -50,7 +50,9 @@ func setupTrackingService(t *testing.T) (*SatelliteTrackingService, context.Canc
 	store := setupTLEStore(t)
 	observer := tracker.NewObserver(47.315813, 39.788243, 0.070) // Ростов-на-Дону.
 
-	svc := NewSatelliteTrackingService(hub, store, observer).WithInterval(100 * time.Millisecond)
+	svc := NewSatelliteTrackingService(hub, store, observer).
+		WithPositionInterval(100 * time.Millisecond).
+		WithTrackInterval(100 * time.Millisecond)
 
 	return svc, cancel
 }
@@ -64,28 +66,48 @@ func TestNewSatelliteTrackingService(t *testing.T) {
 	if svc == nil {
 		t.Fatal("expected non-nil SatelliteTrackingService")
 	}
-	if svc.interval != DefaultTrackingInterval {
-		t.Errorf("expected default interval %v, got %v", DefaultTrackingInterval, svc.interval)
+	if svc.positionInterval != DefaultTrackingInterval {
+		t.Errorf("expected default position interval %v, got %v", DefaultTrackingInterval, svc.positionInterval)
+	}
+	if svc.trackInterval != DefaultTrackInterval {
+		t.Errorf("expected default track interval %v, got %v", DefaultTrackInterval, svc.trackInterval)
 	}
 	if svc.TrackedCount() != 0 {
 		t.Errorf("expected 0 tracked satellites, got %d", svc.TrackedCount())
 	}
 }
 
-func TestWithInterval(t *testing.T) {
+func TestWithPositionInterval(t *testing.T) {
 	hub := handlers.NewSSEHub()
 	store := tracker.NewTLEStore(nil)
 	observer := tracker.NewObserver(55.0, 37.0, 0.0)
 
-	svc := NewSatelliteTrackingService(hub, store, observer).WithInterval(500 * time.Millisecond)
-	if svc.interval != 500*time.Millisecond {
-		t.Errorf("expected 500ms interval, got %v", svc.interval)
+	svc := NewSatelliteTrackingService(hub, store, observer).WithPositionInterval(500 * time.Millisecond)
+	if svc.positionInterval != 500*time.Millisecond {
+		t.Errorf("expected 500ms position interval, got %v", svc.positionInterval)
 	}
 
 	// Невалидный интервал не должен менять значение.
-	svc.WithInterval(0)
-	if svc.interval != 500*time.Millisecond {
-		t.Errorf("expected 500ms interval after invalid, got %v", svc.interval)
+	svc.WithPositionInterval(0)
+	if svc.positionInterval != 500*time.Millisecond {
+		t.Errorf("expected 500ms position interval after invalid, got %v", svc.positionInterval)
+	}
+}
+
+func TestWithTrackInterval(t *testing.T) {
+	hub := handlers.NewSSEHub()
+	store := tracker.NewTLEStore(nil)
+	observer := tracker.NewObserver(55.0, 37.0, 0.0)
+
+	svc := NewSatelliteTrackingService(hub, store, observer).WithTrackInterval(10 * time.Second)
+	if svc.trackInterval != 10*time.Second {
+		t.Errorf("expected 10s track interval, got %v", svc.trackInterval)
+	}
+
+	// Невалидный интервал не должен менять значение.
+	svc.WithTrackInterval(0)
+	if svc.trackInterval != 10*time.Second {
+		t.Errorf("expected 10s track interval after invalid, got %v", svc.trackInterval)
 	}
 }
 
@@ -256,7 +278,9 @@ func TestRunBroadcastsPositions(t *testing.T) {
 	store := setupTLEStore(t)
 	observer := tracker.NewObserver(47.315813, 39.788243, 0.070)
 
-	svc := NewSatelliteTrackingService(hub, store, observer).WithInterval(50 * time.Millisecond)
+	svc := NewSatelliteTrackingService(hub, store, observer).
+		WithPositionInterval(50 * time.Millisecond).
+		WithTrackInterval(100 * time.Millisecond)
 
 	if err := svc.TrackSatellite(issNoradID); err != nil {
 		t.Fatalf("failed to track ISS: %v", err)
@@ -292,7 +316,9 @@ func TestRunEmptyTrackedNoBroadcast(t *testing.T) {
 	store := tracker.NewTLEStore(nil)
 	observer := tracker.NewObserver(55.0, 37.0, 0.0)
 
-	svc := NewSatelliteTrackingService(hub, store, observer).WithInterval(50 * time.Millisecond)
+	svc := NewSatelliteTrackingService(hub, store, observer).
+		WithPositionInterval(50 * time.Millisecond).
+		WithTrackInterval(50 * time.Millisecond)
 
 	// Запускаем без спутников.
 	var wg sync.WaitGroup
@@ -304,6 +330,125 @@ func TestRunEmptyTrackedNoBroadcast(t *testing.T) {
 	cancel()
 	wg.Wait()
 	// Если дошли без паники — тест пройден.
+}
+
+func TestComputeAndBroadcastTracks(t *testing.T) {
+	svc, cancel := setupTrackingService(t)
+	defer cancel()
+
+	if err := svc.TrackSatellite(issNoradID); err != nil {
+		t.Fatalf("failed to track ISS: %v", err)
+	}
+
+	// Вызываем computeAndBroadcastTracks напрямую — не должно паниковать.
+	svc.computeAndBroadcastTracks()
+}
+
+func TestComputeAndBroadcastTracksJSON(t *testing.T) {
+	svc, cancel := setupTrackingService(t)
+	defer cancel()
+
+	if err := svc.TrackSatellite(issNoradID); err != nil {
+		t.Fatalf("failed to track ISS: %v", err)
+	}
+
+	// Получаем TLE и генерируем трассу напрямую для проверки формата.
+	tle, ok := svc.store.Get(issNoradID)
+	if !ok {
+		t.Fatal("ISS TLE not found in store")
+	}
+
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	track, err := tracker.GenerateDefaultGroundTrack(tle, now)
+	if err != nil {
+		t.Fatalf("GenerateDefaultGroundTrack failed: %v", err)
+	}
+
+	data, err := json.Marshal(track)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	// Проверяем JSON-ключи.
+	var m map[string]any
+	if unmarshalErr := json.Unmarshal(data, &m); unmarshalErr != nil {
+		t.Fatalf("json.Unmarshal failed: %v", unmarshalErr)
+	}
+
+	requiredKeys := []string{"past", "future", "norad_id"}
+	for _, key := range requiredKeys {
+		if _, exists := m[key]; !exists {
+			t.Errorf("missing key in track JSON: %s", key)
+		}
+	}
+
+	// norad_id должен совпадать.
+	if id, isFloat := m["norad_id"].(float64); !isFloat || int(id) != issNoradID {
+		t.Errorf("expected norad_id %d, got %v", issNoradID, m["norad_id"])
+	}
+
+	// Трасса ISS должна содержать точки.
+	if track.TotalPoints() == 0 {
+		t.Error("expected non-empty ground track for ISS")
+	}
+
+	// Должны быть и past, и future сегменты.
+	if len(track.Past) == 0 {
+		t.Error("expected non-empty past segments")
+	}
+	if len(track.Future) == 0 {
+		t.Error("expected non-empty future segments")
+	}
+}
+
+func TestComputeAndBroadcastTracksEmpty(t *testing.T) {
+	ctx := t.Context()
+
+	hub := handlers.NewSSEHub()
+	go hub.Run(ctx)
+
+	store := tracker.NewTLEStore(nil)
+	observer := tracker.NewObserver(55.0, 37.0, 0.0)
+
+	svc := NewSatelliteTrackingService(hub, store, observer)
+
+	// Без отслеживаемых спутников — не должно паниковать.
+	svc.computeAndBroadcastTracks()
+}
+
+func TestRunBroadcastsBothPositionsAndTracks(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	hub := handlers.NewSSEHub()
+	go hub.Run(ctx)
+
+	store := setupTLEStore(t)
+	observer := tracker.NewObserver(47.315813, 39.788243, 0.070)
+
+	svc := NewSatelliteTrackingService(hub, store, observer).
+		WithPositionInterval(50 * time.Millisecond).
+		WithTrackInterval(80 * time.Millisecond)
+
+	if err := svc.TrackSatellite(issNoradID); err != nil {
+		t.Fatalf("failed to track ISS: %v", err)
+	}
+
+	// Запускаем сервис — оба тикера должны сработать без паники.
+	var wg sync.WaitGroup
+	wg.Go(func() {
+		svc.Run(ctx)
+	})
+
+	// Ждём достаточно для срабатывания обоих тикеров.
+	time.Sleep(200 * time.Millisecond)
+
+	cancel()
+	wg.Wait()
+
+	if svc.TrackedCount() != 1 {
+		t.Errorf("expected 1 tracked satellite, got %d", svc.TrackedCount())
+	}
 }
 
 func TestSatelliteNotFoundError(t *testing.T) {

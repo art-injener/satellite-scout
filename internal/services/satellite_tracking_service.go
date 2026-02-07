@@ -15,8 +15,11 @@ import (
 
 // Константы SatelliteTrackingService.
 const (
-	// Интервал обновления позиций по умолчанию.
+	// Интервал обновления позиций по умолчанию (1 раз/сек).
 	DefaultTrackingInterval = 1 * time.Second
+
+	// Интервал обновления наземных трасс по умолчанию (1 раз/30 сек).
+	DefaultTrackInterval = 30 * time.Second
 
 	// Количество точек контура зоны видимости.
 	visibilityZonePoints = 72
@@ -68,12 +71,16 @@ type trackedSatellite struct {
 }
 
 // SatelliteTrackingService отслеживает спутники в реальном времени:
-// рассчитывает позиции, AER, зону видимости и рассылает данные через SSE Hub.
+// рассчитывает позиции, AER, зону видимости и наземные трассы,
+// рассылает данные через SSE Hub.
+// Два тикера: positions (1/сек) и tracks (1/30 сек).
 type SatelliteTrackingService struct {
 	hub      *handlers.SSEHub
 	store    *tracker.TLEStore
 	observer *tracker.Observer
-	interval time.Duration
+
+	positionInterval time.Duration // Интервал обновления позиций.
+	trackInterval    time.Duration // Интервал обновления наземных трасс.
 
 	mu      sync.RWMutex
 	tracked map[int]*trackedSatellite // noradID → trackedSatellite.
@@ -86,39 +93,66 @@ func NewSatelliteTrackingService(
 	observer *tracker.Observer,
 ) *SatelliteTrackingService {
 	return &SatelliteTrackingService{
-		hub:      hub,
-		store:    store,
-		observer: observer,
-		interval: DefaultTrackingInterval,
-		tracked:  make(map[int]*trackedSatellite),
+		hub:              hub,
+		store:            store,
+		observer:         observer,
+		positionInterval: DefaultTrackingInterval,
+		trackInterval:    DefaultTrackInterval,
+		tracked:          make(map[int]*trackedSatellite),
 	}
 }
 
-// WithInterval устанавливает пользовательский интервал обновления.
-func (s *SatelliteTrackingService) WithInterval(d time.Duration) *SatelliteTrackingService {
+// WithPositionInterval устанавливает интервал обновления позиций.
+func (s *SatelliteTrackingService) WithPositionInterval(
+	d time.Duration,
+) *SatelliteTrackingService {
 	if d > 0 {
-		s.interval = d
+		s.positionInterval = d
+	}
+	return s
+}
+
+// WithTrackInterval устанавливает интервал обновления наземных трасс.
+func (s *SatelliteTrackingService) WithTrackInterval(
+	d time.Duration,
+) *SatelliteTrackingService {
+	if d > 0 {
+		s.trackInterval = d
 	}
 	return s
 }
 
 // Run запускает основной цикл отслеживания спутников.
-// Каждый tick рассчитываются позиции всех отслеживаемых спутников
-// и результаты отправляются через SSE Hub.
+// Два тикера:
+//   - positionTicker (1/сек) — текущие позиции спутников, AER, зона видимости
+//   - trackTicker (1/30 сек) — наземные трассы орбит
+//
+// Трассы отправляются немедленно при старте, затем по тикеру.
 // Завершается при отмене ctx.
 func (s *SatelliteTrackingService) Run(ctx context.Context) {
-	slog.InfoContext(ctx, "satellite tracking service started", "interval", s.interval)
+	slog.InfoContext(ctx, "satellite tracking service started",
+		"position_interval", s.positionInterval,
+		"track_interval", s.trackInterval,
+	)
 
-	ticker := time.NewTicker(s.interval)
-	defer ticker.Stop()
+	posTicker := time.NewTicker(s.positionInterval)
+	defer posTicker.Stop()
+
+	trackTicker := time.NewTicker(s.trackInterval)
+	defer trackTicker.Stop()
+
+	// Немедленная отправка трасс при старте (не ждём 30 сек).
+	s.computeAndBroadcastTracks()
 
 	for {
 		select {
 		case <-ctx.Done():
 			slog.InfoContext(ctx, "satellite tracking service stopped")
 			return
-		case <-ticker.C:
-			s.computeAndBroadcast()
+		case <-posTicker.C:
+			s.computeAndBroadcastPositions()
+		case <-trackTicker.C:
+			s.computeAndBroadcastTracks()
 		}
 	}
 }
@@ -177,9 +211,9 @@ func (s *SatelliteTrackingService) TrackedCount() int {
 	return len(s.tracked)
 }
 
-// computeAndBroadcast рассчитывает позиции всех отслеживаемых спутников
-// и отправляет результаты через SSE Hub.
-func (s *SatelliteTrackingService) computeAndBroadcast() {
+// computeAndBroadcastPositions рассчитывает позиции всех отслеживаемых спутников
+// и отправляет результаты через SSE Hub (event: position).
+func (s *SatelliteTrackingService) computeAndBroadcastPositions() {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -210,6 +244,51 @@ func (s *SatelliteTrackingService) computeAndBroadcast() {
 		}
 
 		s.hub.Broadcast("position", data)
+	}
+}
+
+// computeAndBroadcastTracks генерирует наземные трассы всех отслеживаемых спутников
+// и отправляет результаты через SSE Hub (event: track).
+func (s *SatelliteTrackingService) computeAndBroadcastTracks() {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	if len(s.tracked) == 0 {
+		return
+	}
+
+	now := time.Now().UTC()
+
+	for _, sat := range s.tracked {
+		tle, ok := s.store.Get(sat.noradID)
+		if !ok {
+			slog.Debug("TLE not found for track generation",
+				"norad_id", sat.noradID,
+				"name", sat.name,
+			)
+			continue
+		}
+
+		track, err := tracker.GenerateDefaultGroundTrack(tle, now)
+		if err != nil {
+			slog.Debug("failed to generate ground track",
+				"norad_id", sat.noradID,
+				"name", sat.name,
+				"error", err,
+			)
+			continue
+		}
+
+		data, err := json.Marshal(track)
+		if err != nil {
+			slog.Error("failed to marshal track event",
+				"norad_id", sat.noradID,
+				"error", err,
+			)
+			continue
+		}
+
+		s.hub.Broadcast("track", data)
 	}
 }
 

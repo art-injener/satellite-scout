@@ -50,7 +50,7 @@ func main() {
 	// Наблюдатель (ObserverAlt в метрах → км).
 	observer := tracker.NewObserver(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt/1000.0)
 
-	// Сервис отслеживания спутников — расчёт позиций и broadcast через SSE (1 раз/сек).
+	// Сервис отслеживания спутников — позиции (1/сек) и наземные трассы (1/30 сек) через SSE.
 	trackingService := services.NewSatelliteTrackingService(sseHub, tleStore, observer)
 	go trackingService.Run(svcCtx)
 
