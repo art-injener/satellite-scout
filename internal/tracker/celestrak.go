@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
+	"slices"
 	"sync"
 	"time"
 )
@@ -344,4 +346,27 @@ func AvailableGroups() []SatelliteGroup {
 		GroupSARSat, GroupDMC, GroupTDRSS, GroupEducation,
 		GroupGeodetic, GroupEngineering, GroupLastLaunch,
 	}
+}
+
+// validGroupNames набор допустимых имён групп для быстрой проверки (O(1) lookup).
+var validGroupNames = buildValidGroupSet()
+
+func buildValidGroupSet() map[string]struct{} {
+	groups := AvailableGroups()
+	set := make(map[string]struct{}, len(groups))
+	for _, g := range groups {
+		set[string(g)] = struct{}{}
+	}
+	return set
+}
+
+// IsValidGroup проверяет, является ли имя группы допустимым.
+func IsValidGroup(name string) bool {
+	_, ok := validGroupNames[name]
+	return ok
+}
+
+// AvailableGroupNames возвращает отсортированный список имён всех предустановленных групп.
+func AvailableGroupNames() []string {
+	return slices.Sorted(maps.Keys(validGroupNames))
 }

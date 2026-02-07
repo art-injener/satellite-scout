@@ -3,6 +3,8 @@ package config
 import (
 	"os"
 	"strconv"
+
+	"github.com/art-injener/satellite-scout/internal/tracker"
 )
 
 const (
@@ -27,6 +29,9 @@ type Config struct {
 	ObserverLat float64
 	ObserverLon float64
 	ObserverAlt float64 // метры над уровнем моря
+
+	// Настройки TLE (загрузка, кеширование, обновление)
+	TLE *tracker.TLEStoreConfig
 }
 
 // Load возвращает конфигурацию из переменных окружения с значениями по умолчанию.
@@ -36,6 +41,7 @@ func Load() *Config {
 		ObserverLat: getEnvFloat(envObserverLat, defaultObserverLat),
 		ObserverLon: getEnvFloat(envObserverLon, defaultObserverLon),
 		ObserverAlt: getEnvFloat(envObserverAlt, defaultObserverAlt),
+		TLE:         tracker.DefaultTLEStoreConfig(),
 	}
 	return cfg
 }
