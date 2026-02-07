@@ -124,13 +124,14 @@
      * Отрисовка антенны с использованием общей функции
      */
     AzimuthIndicator.prototype.drawAntenna = function(azimuth) {
-        // Вызов общей функции отрисовки антенны
-        // Угол: azimuth + 90 (чтобы 0° был вверх, а не вправо)
+        // При angle=0 антенна смотрит вверх (отрицательный Y в canvas).
+        // ctx.rotate() вращает по часовой стрелке — совпадает с азимутом (0°=N, 90°=E).
+        // Поэтому передаём azimuth напрямую без преобразований.
         window.AntennaDrawing.draw(
             this.ctx,
             this.centerX,
             this.centerY,
-            azimuth + 90,
+            azimuth,
             this.antennaScale,
             this.radius - 9, // arrowEndRadius
             'azimuth' // viewType
@@ -261,28 +262,6 @@
             cancelAnimationFrame(this._animationId);
             this._animationId = null;
         }
-    };
-
-    /**
-     * Управление кликом
-     */
-    AzimuthIndicator.prototype.enableMouseControl = function() {
-        const self = this;
-
-        this.canvas.addEventListener('click', function(e) {
-            const rect = self.canvas.getBoundingClientRect();
-            const scaleX = self.canvas.width / rect.width;
-            const scaleY = self.canvas.height / rect.height;
-
-            const x = (e.clientX - rect.left) * scaleX - self.centerX;
-            const y = (e.clientY - rect.top) * scaleY - self.centerY;
-
-            let angle = Math.atan2(y, x) * 180 / Math.PI + 90;
-            if (angle < 0) {angle += 360;}
-
-            self.stopDemo();
-            self.setAzimuth(angle);
-        });
     };
 
     // Экспорт

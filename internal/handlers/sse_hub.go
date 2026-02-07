@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
-	"time"
 )
 
 // Размер буфера канала событий клиента.
@@ -31,6 +30,7 @@ type sseClient struct {
 // SSEHub управляет подключениями SSE-клиентов и рассылкой событий.
 // Все данные (позиции, треки, зона видимости) доставляются через Hub.
 // Владеет картой клиентов — все мутации происходят в горутине Run.
+// Кеширует последние события track и position для мгновенной отправки новым клиентам.
 type SSEHub struct {
 	register   chan *sseClient // Канал регистрации новых клиентов.
 	unregister chan *sseClient // Канал отписки клиентов.
@@ -55,8 +55,12 @@ func NewSSEHub() *SSEHub {
 // Run запускает основной цикл обработки SSE Hub.
 // Блокирует выполнение до отмены контекста.
 // Владеет картой клиентов — все операции с ней происходят в одной горутине.
+// Кеширует последние position и track события для мгновенной отправки новым клиентам.
 func (h *SSEHub) Run(ctx context.Context) {
 	clients := make(map[*sseClient]bool)
+
+	// Кеш последних событий по типу для отправки новым клиентам.
+	lastEvents := make(map[string]SSEEvent)
 
 	defer func() {
 		// Сигнализируем о завершении Hub (до закрытия каналов клиентов,
@@ -81,6 +85,16 @@ func (h *SSEHub) Run(ctx context.Context) {
 			h.clientCount.Add(1)
 			slog.DebugContext(ctx, "SSE client registered", "total_clients", h.clientCount.Load())
 
+			// Отправка кешированных событий новому клиенту (track, position).
+			for _, eventType := range []string{"track", "position"} {
+				if cached, ok := lastEvents[eventType]; ok {
+					select {
+					case client.events <- cached:
+					default:
+					}
+				}
+			}
+
 		case client := <-h.unregister:
 			if _, exists := clients[client]; exists {
 				close(client.events)
@@ -90,6 +104,9 @@ func (h *SSEHub) Run(ctx context.Context) {
 			}
 
 		case event := <-h.broadcast:
+			// Кешируем последние события по типу.
+			lastEvents[event.Type] = event
+
 			for client := range clients {
 				select {
 				case client.events <- event:
@@ -137,12 +154,6 @@ func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		http.Error(w, "streaming not supported", http.StatusInternalServerError)
 		return
-	}
-
-	// Отключаем таймаут записи для долгоживущего SSE-соединения.
-	rc := http.NewResponseController(w)
-	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
-		slog.Warn("failed to disable write deadline for SSE", "error", err)
 	}
 
 	// SSE заголовки.

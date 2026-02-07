@@ -58,7 +58,15 @@
             </a>
         </nav>
         <div class="sidebar-footer">
-            <span class="status-dot" id="connection-status" title="Статус подключения">●</span>
+            <span class="sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Статус подключения к потоку данных">
+                <svg class="sse-status__icon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <circle cx="12" cy="20" r="1.5" fill="currentColor" stroke="none"/>
+                    <path d="M8.5 16.5a5 5 0 0 1 7 0"/>
+                    <path d="M5 13a9 9 0 0 1 14 0"/>
+                    <path d="M1.5 9.5a13 13 0 0 1 21 0"/>
+                </svg>
+                <span class="sse-status__label" id="connection-status-label">Отключено</span>
+            </span>
         </div>
     </aside>
 
@@ -81,12 +89,12 @@
 
     <script src="/static/js/canvas-utils.js?v=1"></script>
     <script src="/static/js/antenna.js?v=45"></script>
-    <script src="/static/js/azimuth.js?v=48"></script>
+    <script src="/static/js/azimuth.js?v=52"></script>
     <script src="/static/js/elevation.js?v=49"></script>
     <script src="/static/js/earthview.js?v=48"></script>
     <script src="/static/js/skyview.js?v=50"></script>
-    <script src="/static/js/satellite-state.js?v=1"></script>
-    <script src="/static/js/sse-client.js?v=1"></script>
-    <script src="/static/js/app.js?v=46"></script>
+    <script src="/static/js/satellite-state.js?v=2"></script>
+    <script src="/static/js/sse-client.js?v=2"></script>
+    <script src="/static/js/app.js?v=49"></script></script>
 </body>
 </html>

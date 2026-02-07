@@ -32,6 +32,7 @@ func loggingMiddleware(next http.Handler) http.Handler {
 }
 
 // responseWriter оборачивает http.ResponseWriter для захвата кода статуса.
+// Реализует http.Flusher для поддержки SSE (Server-Sent Events).
 type responseWriter struct {
 	http.ResponseWriter
 
@@ -41,4 +42,12 @@ type responseWriter struct {
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.status = code
 	rw.ResponseWriter.WriteHeader(code)
+}
+
+// Flush реализует интерфейс http.Flusher для SSE.
+// Проксирует вызов Flush() к оригинальному ResponseWriter, если он поддерживает Flusher.
+func (rw *responseWriter) Flush() {
+	if flusher, ok := rw.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
 }

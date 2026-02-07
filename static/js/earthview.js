@@ -56,7 +56,8 @@
         // Данные спутника
         this.satellite = {
             position: null, // {lon, lat, alt}
-            groundTrack: [], // Массив точек орбиты
+            groundTrack: [], // Массив точек или {past: [[...]], future: [[...]]} с сервера
+            visibilityZone: null, // Точки контура зоны видимости с сервера [{lon, lat}, ...]
             name: '',
             noradId: null
         };
@@ -176,13 +177,13 @@
         this._drawCities();
 
         // Наземная трасса спутника
-        if (this.satellite.groundTrack.length > 0) {
+        if (this._hasGroundTrack()) {
             this._drawGroundTrack();
         }
 
-        // Круг видимости спутника (footprint)
-        if (this.options.showFootprint && this.satellite.position) {
-            this._drawFootprint();
+        // Зона видимости спутника (с сервера; если нет — не рисуем)
+        if (this.options.showFootprint && this.satellite.visibilityZone && this.satellite.visibilityZone.length > 0) {
+            this._drawVisibilityZone();
         }
 
         // Наблюдатель
@@ -359,20 +360,58 @@
     };
 
     /**
-     * Отрисовка наземной трассы спутника
+     * Проверка наличия данных трассы (массив точек или формат с сервера {past, future}).
+     */
+    EarthView.prototype._hasGroundTrack = function() {
+        const track = this.satellite.groundTrack;
+        if (Array.isArray(track)) {
+            return track.length > 0;
+        }
+        if (track && typeof track === 'object' && (track.past || track.future)) {
+            var pastLen = (track.past && track.past.length) ? track.past.reduce(function(s, seg) { return s + seg.length; }, 0) : 0;
+            var futureLen = (track.future && track.future.length) ? track.future.reduce(function(s, seg) { return s + seg.length; }, 0) : 0;
+            return pastLen > 0 || futureLen > 0;
+        }
+        return false;
+    };
+
+    /**
+     * Отрисовка наземной трассы спутника.
+     * Поддерживает формат с сервера {past: [[...]], future: [[...]]} и плоский массив (демо).
      */
     EarthView.prototype._drawGroundTrack = function() {
         const track = this.satellite.groundTrack;
 
-        if (track.length < 2) { return; }
+        if (Array.isArray(track)) {
+            if (track.length >= 2) {
+                this._drawTrackSegment(track, this.colors.orbitFuture);
+            }
+            return;
+        }
 
-        // Отрисовка всей орбиты зелёным
-        this._drawTrackSegment(track, this.colors.orbitFuture);
+        if (track && track.past) {
+            for (var i = 0; i < track.past.length; i++) {
+                var seg = track.past[i];
+                if (seg && seg.length >= 2) {
+                    this.ctx.setLineDash([4, 4]);
+                    this._drawTrackSegment(seg, this.colors.orbitPast);
+                    this.ctx.setLineDash([]);
+                }
+            }
+        }
+        if (track && track.future) {
+            for (var j = 0; j < track.future.length; j++) {
+                var segF = track.future[j];
+                if (segF && segF.length >= 2) {
+                    this._drawTrackSegment(segF, this.colors.orbitFuture);
+                }
+            }
+        }
     };
 
     /**
      * Отрисовка сегмента орбиты
-     * @param {Array} points - Массив точек [{lon, lat, time}]
+     * @param {Array} points - Массив точек [{lon, lat, time} или {lon, lat, ts}]
      * @param {string} color - Цвет линии
      */
     EarthView.prototype._drawTrackSegment = function(points, color) {
@@ -386,11 +425,12 @@
             ctx.lineWidth = 0.5; // Очень тонкая линия
             ctx.beginPath();
 
-            let prevP = null;
-            let moved = false;
+            var prevP = null;
+            var moved = false;
 
-            for (let i = 0; i < points.length; i++) {
-                const p = this.project(points[i].lon, points[i].lat);
+            for (var i = 0; i < points.length; i++) {
+                var pt = points[i];
+                var p = this.project(pt.lon, pt.lat);
 
                 // Проверка на пересечение антимеридиана
                 if (prevP && Math.abs(p.x - prevP.x) > this.width / 2) {
@@ -415,17 +455,17 @@
         // Отрисовка точек (минутные метки) - жёлтым цветом
         if (mode === 'dots' || mode === 'both') {
             ctx.fillStyle = this.colors.orbitDots; // Жёлтый
-            let lastDotTime = -Infinity;
+            var lastDotTime = -Infinity;
 
-            for (let i = 0; i < points.length; i++) {
-                const point = points[i];
-                // Рисуем точку каждую минуту
-                if (point.time - lastDotTime >= dotInterval) {
-                    const p = this.project(point.lon, point.lat);
+            for (var k = 0; k < points.length; k++) {
+                var point = points[k];
+                var t = point.ts != null ? point.ts : point.time;
+                if (t - lastDotTime >= dotInterval) {
+                    var pp = this.project(point.lon, point.lat);
                     ctx.beginPath();
-                    ctx.arc(p.x, p.y, 1, 0, Math.PI * 2); // Очень маленькие точки
+                    ctx.arc(pp.x, pp.y, 1, 0, Math.PI * 2); // Очень маленькие точки
                     ctx.fill();
-                    lastDotTime = point.time;
+                    lastDotTime = t;
                 }
             }
         }
@@ -505,57 +545,37 @@
     };
 
     /**
-     * Отрисовка круга видимости спутника (footprint)
-     * Радиус видимости зависит от высоты орбиты
+     * Отрисовка зоны видимости спутника по точкам с сервера.
+     * Контур задаётся массивом {lon, lat}; при пересечении антимеридиана — разрыв линии.
      */
-    EarthView.prototype._drawFootprint = function() {
+    EarthView.prototype._drawVisibilityZone = function() {
         const ctx = this.ctx;
-        const pos = this.satellite.position;
+        const points = this.satellite.visibilityZone;
 
-        // Расчёт углового радиуса видимости
-        // Формула: cos(rho) = R_earth / (R_earth + altitude)
-        const R_EARTH = 6371; // км
-        const altitude = pos.alt || 420; // Высота орбиты (по умолчанию МКС ~420 км)
-        const rho = Math.acos(R_EARTH / (R_EARTH + altitude)) * 180 / Math.PI;
+        if (!points || points.length < 2) { return; }
 
-        // Рисуем круг видимости пунктирной линией
         ctx.strokeStyle = this.colors.footprint;
         ctx.lineWidth = 1;
         ctx.setLineDash([5, 5]);
 
         ctx.beginPath();
 
-        // Генерируем точки окружности
-        const numPoints = 72; // Точек для плавного круга
-        let prevP = null;
+        var prevP = null;
+        var moved = false;
 
-        for (let i = 0; i <= numPoints; i++) {
-            const angle = (i / numPoints) * 360;
-            const angleRad = angle * Math.PI / 180;
+        for (var i = 0; i < points.length; i++) {
+            var pt = points[i];
+            var p = this.project(pt.lon, pt.lat);
 
-            // Вычисляем точку на окружности (сферическая геометрия)
-            const latRad = pos.lat * Math.PI / 180;
-            const rhoRad = rho * Math.PI / 180;
-
-            const pointLat = Math.asin(
-                Math.sin(latRad) * Math.cos(rhoRad) +
-                Math.cos(latRad) * Math.sin(rhoRad) * Math.cos(angleRad)
-            ) * 180 / Math.PI;
-
-            const pointLon = pos.lon + Math.atan2(
-                Math.sin(angleRad) * Math.sin(rhoRad) * Math.cos(latRad),
-                Math.cos(rhoRad) - Math.sin(latRad) * Math.sin(pointLat * Math.PI / 180)
-            ) * 180 / Math.PI;
-
-            const p = this.project(pointLon, pointLat);
-
-            // Проверка на пересечение антимеридиана
             if (prevP && Math.abs(p.x - prevP.x) > this.width / 2) {
                 ctx.stroke();
                 ctx.beginPath();
+                moved = false;
+            }
+
+            if (!moved) {
                 ctx.moveTo(p.x, p.y);
-            } else if (i === 0) {
-                ctx.moveTo(p.x, p.y);
+                moved = true;
             } else {
                 ctx.lineTo(p.x, p.y);
             }
@@ -564,7 +584,7 @@
         }
 
         ctx.stroke();
-        ctx.setLineDash([]); // Сброс пунктира
+        ctx.setLineDash([]);
     };
 
     // ========== API методы ==========
@@ -602,11 +622,32 @@
     };
 
     /**
-     * Установка наземной трассы спутника
-     * @param {Array} points - Массив точек [{lon, lat, time}]
+     * Установка наземной трассы спутника.
+     * Принимает формат с сервера {past: [[{lon, lat, ts}...]], future: [[...]]}
+     * или плоский массив точек [{lon, lat, time}] (для демо).
+     * @param {Array|Object} data - Массив точек или объект {past, future}
      */
-    EarthView.prototype.setGroundTrack = function(points) {
-        this.satellite.groundTrack = points || [];
+    EarthView.prototype.setGroundTrack = function(data) {
+        if (!data) {
+            this.satellite.groundTrack = [];
+            return;
+        }
+        if (Array.isArray(data)) {
+            this.satellite.groundTrack = data;
+            return;
+        }
+        this.satellite.groundTrack = {
+            past: data.past || [],
+            future: data.future || []
+        };
+    };
+
+    /**
+     * Установка зоны видимости спутника (контур с сервера).
+     * @param {Array} points - Массив точек [{lon, lat}, ...]
+     */
+    EarthView.prototype.setVisibilityZone = function(points) {
+        this.satellite.visibilityZone = Array.isArray(points) ? points : null;
     };
 
     /**

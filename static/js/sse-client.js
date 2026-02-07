@@ -317,3 +317,9 @@ class SSEClient {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { SSEClient, SSEConnectionStatus };
 }
+
+// Экспорт для использования в браузере.
+if (typeof window !== 'undefined') {
+    window.SSEClient = SSEClient;
+    window.SSEConnectionStatus = SSEConnectionStatus;
+}

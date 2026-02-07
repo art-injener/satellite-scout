@@ -65,12 +65,13 @@ func main() {
 	setupRoutes(mux, cfg, sseHub)
 
 	// HTTP-сервер.
+	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.
+	// Таймауты для обычных запросов управляются через middleware/context.
 	server := &http.Server{
-		Addr:         cfg.Addr(),
-		Handler:      loggingMiddleware(mux),
-		ReadTimeout:  15 * time.Second,
-		WriteTimeout: 15 * time.Second,
-		IdleTimeout:  60 * time.Second,
+		Addr:        cfg.Addr(),
+		Handler:     loggingMiddleware(mux),
+		ReadTimeout: 15 * time.Second,
+		IdleTimeout: 120 * time.Second, // Увеличен для SSE
 	}
 
 	// Запуск и graceful shutdown.

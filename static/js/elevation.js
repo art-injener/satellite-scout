@@ -275,30 +275,6 @@
         }
     };
 
-    /**
-     * Управление кликом
-     */
-    ElevationIndicator.prototype.enableMouseControl = function() {
-        const self = this;
-
-        this.canvas.addEventListener('click', function(e) {
-            const rect = self.canvas.getBoundingClientRect();
-            const scaleX = self.canvas.width / rect.width;
-            const scaleY = self.canvas.height / rect.height;
-
-            const x = (e.clientX - rect.left) * scaleX - self.centerX;
-            const y = (e.clientY - rect.top) * scaleY - self.centerY;
-
-            // Конвертация в угол места
-            let angle = -Math.atan2(y, x) * 180 / Math.PI + 90;
-            if (angle > 180) {angle -= 360;}
-            angle = Math.max(-90, Math.min(90, angle));
-
-            self.stopDemo();
-            self.setElevation(angle);
-        });
-    };
-
     // Экспорт
     window.ElevationIndicator = ElevationIndicator;
 

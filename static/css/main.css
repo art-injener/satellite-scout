@@ -127,13 +127,69 @@ body {
     border-top: 1px solid var(--border-color);
 }
 
-.status-dot {
-    font-size: 0.75rem;
+/* Индикатор статуса SSE: три состояния, иконка broadcast */
+.sse-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-xs);
+    min-width: 24px;
+    min-height: 24px;
+    border-radius: var(--radius-sm);
+    transition: color 0.2s ease, opacity 0.2s ease;
+}
+
+.sse-status__icon {
+    flex-shrink: 0;
+    display: block;
+}
+
+.sse-status__label {
+    font-size: 0.7rem;
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    white-space: nowrap;
+    transition: max-width 0.2s ease, opacity 0.15s ease;
+}
+
+.sidebar-footer:hover .sse-status__label,
+.sse-status:focus-within .sse-status__label {
+    max-width: 5.5em;
+    opacity: 1;
+}
+
+/* Отключено — приглушённый серый */
+.sse-status--disconnected {
     color: var(--text-muted);
 }
 
-.status-dot.connected {
+.sse-status--disconnected .sse-status__icon {
+    opacity: 0.7;
+}
+
+/* Подключение — янтарный, пульсация */
+.sse-status--connecting {
+    color: var(--accent-warning);
+}
+
+.sse-status--connecting .sse-status__icon {
+    animation: sse-status-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes sse-status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.45; }
+}
+
+/* Подключено — зелёный, статично */
+.sse-status--connected {
     color: var(--accent-success);
+}
+
+.sse-status--connected .sse-status__icon {
+    opacity: 1;
 }
 
 /* ===== Main Wrapper ===== */

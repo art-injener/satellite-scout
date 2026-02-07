@@ -3,13 +3,34 @@
 (function() {
     'use strict';
 
-    // Connection status management
-    const connectionStatus = document.getElementById('connection-status');
+    // Индикатор статуса SSE: три состояния (подключено / подключение / отключено)
+    const connectionStatusEl = document.getElementById('connection-status');
+    const connectionStatusLabel = document.getElementById('connection-status-label');
 
-    function setConnected(connected) {
-        if (connectionStatus) {
-            connectionStatus.textContent = connected ? '● Подключено' : '● Отключено';
-            connectionStatus.classList.toggle('connected', connected);
+    function setConnectionStatus(status) {
+        if (!connectionStatusEl) { return; }
+
+        connectionStatusEl.classList.remove('sse-status--connected', 'sse-status--connecting', 'sse-status--disconnected');
+
+        var label = 'Отключено';
+        var title = 'Поток данных: отключено';
+
+        if (status === 'connected') {
+            connectionStatusEl.classList.add('sse-status--connected');
+            label = 'Подключено';
+            title = 'Поток данных: подключено';
+        } else if (status === 'connecting') {
+            connectionStatusEl.classList.add('sse-status--connecting');
+            label = 'Подключение…';
+            title = 'Поток данных: подключение…';
+        } else {
+            connectionStatusEl.classList.add('sse-status--disconnected');
+            title = 'Поток данных: отключено';
+        }
+
+        connectionStatusEl.setAttribute('title', title);
+        if (connectionStatusLabel) {
+            connectionStatusLabel.textContent = label;
         }
     }
 
@@ -39,19 +60,120 @@
         initCanvasPlaceholders();
     });
 
+    // Инициализация StateManager и SSE Client один раз (подписки и подключение).
+    function ensureSSEAndSubscriptions() {
+        if (window._stateManager) {
+            console.log('[app.js] SSE уже инициализирован');
+            return;
+        }
+        
+        console.log('[app.js] Инициализация SSE и StateManager');
+        console.log('[app.js] SatelliteStateManager доступен:', typeof window.SatelliteStateManager);
+        console.log('[app.js] SSEClient доступен:', typeof window.SSEClient);
+        
+        window._stateManager = new window.SatelliteStateManager();
+        window._sseClient = new window.SSEClient(window._stateManager);
+        
+        window._sseClient.onStatusChange(function(evt) {
+            console.log('[app.js] Статус SSE изменился:', evt.status);
+            var s = evt.status;
+            if (s === window.SSEConnectionStatus.CONNECTED) {
+                setConnectionStatus('connected');
+            } else if (s === window.SSEConnectionStatus.CONNECTING) {
+                setConnectionStatus('connecting');
+            } else {
+                setConnectionStatus('disconnected');
+            }
+        });
+        
+        console.log('[app.js] Подключение к SSE...');
+        window._sseClient.connect();
+
+        var sm = window._stateManager;
+        var StateEventType = window.StateEventType;
+
+        sm.subscribe(StateEventType.POSITION, function(state) {
+            console.log('[app.js] Получено событие POSITION:', state);
+            var pos = state.position;
+            if (!pos) { 
+                console.warn('[app.js] POSITION: нет данных позиции');
+                return; 
+            }
+
+            console.log('[app.js] POSITION данные:', {
+                lat: pos.lat,
+                lon: pos.lon,
+                alt: pos.alt,
+                az: pos.az,
+                el: pos.el
+            });
+
+            if (window.earthView) {
+                window.earthView.setSatellitePosition(pos.lon, pos.lat, pos.alt);
+                window.earthView.setSatelliteInfo(state.name || '', state.noradId);
+                if (state.visibilityZone && state.visibilityZone.points) {
+                    window.earthView.setVisibilityZone(state.visibilityZone.points);
+                }
+                window.earthView.draw();
+                window.earthView.updateInfoPanel(pos.ts || Date.now());
+            }
+            if (window.skyView) {
+                window.skyView.setSatellitePosition(pos.az, pos.el);
+                window.skyView.draw();
+            }
+            if (window.azimuthIndicator) {
+                window.azimuthIndicator.setAzimuth(pos.az);
+                window.azimuthIndicator.draw();
+            }
+            if (window.elevationIndicator) {
+                window.elevationIndicator.setElevation(pos.el);
+                window.elevationIndicator.draw();
+            }
+        });
+
+        sm.subscribe(StateEventType.TRACK, function(state) {
+            if (window.earthView && state.track) {
+                window.earthView.setGroundTrack(state.track);
+                window.earthView.draw();
+            }
+        });
+    }
+
     // Initialize canvas elements with placeholder content
     function initCanvasPlaceholders() {
-        // Earth View - интерактивная карта мира
-        const earthCanvas = document.getElementById('earth-view');
+        ensureSSEAndSubscriptions();
+
+        // Earth View — карта мира, данные с SSE
+        var earthCanvas = document.getElementById('earth-view');
         if (earthCanvas && window.EarthView) {
-            // Уничтожаем предыдущий экземпляр при переинициализации
             if (window.earthView) {
                 window.earthView.stopDemo();
             }
             window.earthView = new window.EarthView(earthCanvas);
             window.earthView.init().then(function() {
-                // Запуск демо-анимации после загрузки данных
-                window.earthView.startDemo(2);
+                // Загрузка координат наблюдателя из конфигурации сервера
+                return fetch('/api/config').then(function(resp) { return resp.json(); });
+            }).then(function(cfg) {
+                if (cfg && cfg.observer) {
+                    window.earthView.setObserver(cfg.observer.lon, cfg.observer.lat, 'Rostov-on-Don');
+                }
+                // Подтягиваем накопленные данные из StateManager (track/position могли прийти до init)
+                if (window._stateManager) {
+                    var state = window._stateManager.getActiveState();
+                    if (state) {
+                        if (state.track) {
+                            window.earthView.setGroundTrack(state.track);
+                        }
+                        if (state.position) {
+                            window.earthView.setSatellitePosition(state.position.lon, state.position.lat, state.position.alt);
+                            window.earthView.setSatelliteInfo(state.name || '', state.noradId);
+                        }
+                        if (state.visibilityZone && state.visibilityZone.points) {
+                            window.earthView.setVisibilityZone(state.visibilityZone.points);
+                        }
+                    }
+                }
+                window.earthView.draw();
             }).catch(function(err) {
                 // eslint-disable-next-line no-console
                 console.error('EarthView init failed:', err);
@@ -61,38 +183,34 @@
             drawPlaceholder(earthCanvas, 'Earth View', 'Карта мира появится здесь');
         }
 
-        // Sky View - азимутальная проекция неба
-        const skyCanvas = document.getElementById('sky-view');
+        // Sky View — азимутальная проекция неба, данные с SSE
+        var skyCanvas = document.getElementById('sky-view');
         if (skyCanvas && window.SkyView) {
             if (window.skyView) {
                 window.skyView.stopDemo();
             }
             window.skyView = new window.SkyView(skyCanvas);
-            window.skyView.startDemo(2);
+            window.skyView.draw();
         } else if (skyCanvas) {
             drawPlaceholder(skyCanvas, '', 'Небесная сфера');
         }
 
-        // Azimuth indicator с антенной
-        const azCanvas = document.getElementById('azimuth-view');
+        // Azimuth indicator — данные с SSE
+        var azCanvas = document.getElementById('azimuth-view');
         if (azCanvas && window.AzimuthIndicator) {
             window.azimuthIndicator = new window.AzimuthIndicator(azCanvas);
             window.azimuthIndicator.draw();
-            window.azimuthIndicator.enableMouseControl();
-            window.azimuthIndicator.startDemo(0.3);
         }
 
-        // Elevation indicator с антенной
-        const elCanvas = document.getElementById('elevation-view');
+        // Elevation indicator — данные с SSE
+        var elCanvas = document.getElementById('elevation-view');
         if (elCanvas && window.ElevationIndicator) {
             window.elevationIndicator = new window.ElevationIndicator(elCanvas);
             window.elevationIndicator.draw();
-            window.elevationIndicator.enableMouseControl();
-            window.elevationIndicator.startDemo(0.5);
         }
 
         // Waterfall placeholder
-        const wfCanvas = document.getElementById('waterfall');
+        var wfCanvas = document.getElementById('waterfall');
         if (wfCanvas) {
             drawWaterfallPlaceholder(wfCanvas);
         }
@@ -186,7 +304,7 @@
 
     // Expose for debugging
     window.SatWatch = {
-        setConnected: setConnected
+        setConnectionStatus: setConnectionStatus
     };
 
 })();

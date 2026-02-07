@@ -366,3 +366,10 @@ class SatelliteStateManager {
 if (typeof module !== 'undefined' && module.exports) {
     module.exports = { SatelliteStateManager, SatelliteState, StateEventType };
 }
+
+// Экспорт для использования в браузере.
+if (typeof window !== 'undefined') {
+    window.SatelliteStateManager = SatelliteStateManager;
+    window.SatelliteState = SatelliteState;
+    window.StateEventType = StateEventType;
+}
