@@ -1,6 +1,7 @@
 package tracker
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +18,9 @@ const (
 	// DefaultMaxTLEAgeDays максимальный возраст TLE в днях до предупреждения.
 	DefaultMaxTLEAgeDays = 7.0
 )
+
+// ErrUnknownTLEGroups указаны неизвестные группы TLE.
+var ErrUnknownTLEGroups = errors.New("unknown TLE groups")
 
 // DefaultTLEGroups группы спутников по умолчанию для загрузки.
 var DefaultTLEGroups = []string{"stations", "amateur", "cubesat"}
@@ -80,7 +84,8 @@ func (c *TLEStoreConfig) Validate() error {
 		}
 	}
 	if len(invalid) > 0 {
-		return fmt.Errorf("unknown TLE groups: %s (available: %s)",
+		return fmt.Errorf("%w: %s (available: %s)",
+			ErrUnknownTLEGroups,
 			strings.Join(invalid, ", "),
 			strings.Join(AvailableGroupNames(), ", "),
 		)

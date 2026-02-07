@@ -113,7 +113,10 @@ func (p *Propagator) Propagate(t time.Time) (*ECIPosition, error) {
 
 	// Проверяем результат на NaN (признак ошибки пропагации).
 	if isNaN(position.X) || isNaN(position.Y) || isNaN(position.Z) {
-		return nil, fmt.Errorf("%w: position contains NaN (possible orbital decay or invalid TLE)", ErrPropagationFailed)
+		return nil, fmt.Errorf(
+			"%w: position contains NaN (possible orbital decay or invalid TLE)",
+			ErrPropagationFailed,
+		)
 	}
 
 	return &ECIPosition{

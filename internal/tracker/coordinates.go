@@ -118,13 +118,13 @@ func LLAToECEF(lla *LLA) *ECEFPosition {
 	sinLon := math.Sin(lla.Lon)
 	cosLon := math.Cos(lla.Lon)
 
-	// N — радиус кривизны в первом вертикале.
-	N := WGS84A / math.Sqrt(1.0-WGS84E2*sinLat*sinLat)
+	// radiusN — радиус кривизны в первом вертикале.
+	radiusN := WGS84A / math.Sqrt(1.0-WGS84E2*sinLat*sinLat)
 
 	return &ECEFPosition{
-		X: (N + lla.Alt) * cosLat * cosLon,
-		Y: (N + lla.Alt) * cosLat * sinLon,
-		Z: (N*(1.0-WGS84E2) + lla.Alt) * sinLat,
+		X: (radiusN + lla.Alt) * cosLat * cosLon,
+		Y: (radiusN + lla.Alt) * cosLat * sinLon,
+		Z: (radiusN*(1.0-WGS84E2) + lla.Alt) * sinLat,
 	}
 }
 
@@ -153,9 +153,9 @@ func ECEFToLLA(ecef *ECEFPosition) *LLA {
 
 	for range maxIterations {
 		sinLat := math.Sin(lat)
-		N := WGS84A / math.Sqrt(1.0-WGS84E2*sinLat*sinLat)
+		radiusN := WGS84A / math.Sqrt(1.0-WGS84E2*sinLat*sinLat)
 
-		latNew := math.Atan2(z+WGS84E2*N*sinLat, p)
+		latNew := math.Atan2(z+WGS84E2*radiusN*sinLat, p)
 
 		if math.Abs(latNew-lat) < tolerance {
 			lat = latNew
@@ -168,14 +168,14 @@ func ECEFToLLA(ecef *ECEFPosition) *LLA {
 	// Высота.
 	sinLat := math.Sin(lat)
 	cosLat := math.Cos(lat)
-	N := WGS84A / math.Sqrt(1.0-WGS84E2*sinLat*sinLat)
+	radiusN := WGS84A / math.Sqrt(1.0-WGS84E2*sinLat*sinLat)
 
 	var alt float64
 	if math.Abs(cosLat) > 1e-10 {
-		alt = p/cosLat - N
+		alt = p/cosLat - radiusN
 	} else {
 		// Вблизи полюсов.
-		alt = math.Abs(z)/math.Abs(sinLat) - N*(1.0-WGS84E2)
+		alt = math.Abs(z)/math.Abs(sinLat) - radiusN*(1.0-WGS84E2)
 	}
 
 	return &LLA{

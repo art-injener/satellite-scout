@@ -64,8 +64,8 @@ func main() {
 	mux.HandleFunc("GET /partials/passes", func(w http.ResponseWriter, r *http.Request) {
 		// TODO: реализовать частичный шаблон таблицы пролётов
 		w.Header().Set("Content-Type", "text/html")
-		if _, err := w.Write([]byte(`<p class="empty-state">Нет запланированных пролётов</p>`)); err != nil {
-			slog.Error("failed to write response", slogKeyError, err)
+		if _, writeErr := w.Write([]byte(`<p class="empty-state">Нет запланированных пролётов</p>`)); writeErr != nil {
+			slog.Error("failed to write response", slogKeyError, writeErr)
 		}
 	})
 
@@ -83,8 +83,8 @@ func main() {
 
 	go func() {
 		slog.Info("starting server", "addr", server.Addr)
-		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			serverErr <- err
+		if listenErr := server.ListenAndServe(); listenErr != nil && !errors.Is(listenErr, http.ErrServerClosed) {
+			serverErr <- listenErr
 		}
 	}()
 
@@ -93,8 +93,8 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	select {
-	case err := <-serverErr:
-		slog.Error("server error", slogKeyError, err)
+	case srvErr := <-serverErr:
+		slog.Error("server error", slogKeyError, srvErr)
 		os.Exit(1)
 	case sig := <-quit:
 		slog.Info("received shutdown signal", "signal", sig)
@@ -104,8 +104,8 @@ func main() {
 
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
 
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("server shutdown error", slogKeyError, err)
+	if shutdownErr := server.Shutdown(shutdownCtx); shutdownErr != nil {
+		slog.Error("server shutdown error", slogKeyError, shutdownErr)
 		shutdownCancel()
 		os.Exit(1)
 	}

@@ -33,16 +33,10 @@ func TestLoad_DefaultValues(t *testing.T) {
 
 func TestLoad_CustomValues(t *testing.T) {
 	// Устанавливаем переменные окружения
-	_ = os.Setenv("PORT", "3000")
-	_ = os.Setenv("OBSERVER_LAT", "51.5074")
-	_ = os.Setenv("OBSERVER_LON", "-0.1278")
-	_ = os.Setenv("OBSERVER_ALT", "11.0")
-	t.Cleanup(func() {
-		_ = os.Unsetenv("PORT")
-		_ = os.Unsetenv("OBSERVER_LAT")
-		_ = os.Unsetenv("OBSERVER_LON")
-		_ = os.Unsetenv("OBSERVER_ALT")
-	})
+	t.Setenv("PORT", "3000")
+	t.Setenv("OBSERVER_LAT", "51.5074")
+	t.Setenv("OBSERVER_LON", "-0.1278")
+	t.Setenv("OBSERVER_ALT", "11.0")
 
 	cfg := Load()
 
@@ -65,12 +59,8 @@ func TestLoad_CustomValues(t *testing.T) {
 
 func TestLoad_InvalidFloatValues(t *testing.T) {
 	// Устанавливаем невалидные значения
-	_ = os.Setenv("OBSERVER_LAT", "invalid")
-	_ = os.Setenv("OBSERVER_LON", "not-a-number")
-	t.Cleanup(func() {
-		_ = os.Unsetenv("OBSERVER_LAT")
-		_ = os.Unsetenv("OBSERVER_LON")
-	})
+	t.Setenv("OBSERVER_LAT", "invalid")
+	t.Setenv("OBSERVER_LON", "not-a-number")
 
 	cfg := Load()
 
@@ -144,8 +134,7 @@ func TestGetEnv(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envValue != "" {
-				_ = os.Setenv(tt.key, tt.envValue)
-				t.Cleanup(func() { _ = os.Unsetenv(tt.key) })
+				t.Setenv(tt.key, tt.envValue)
 			} else {
 				_ = os.Unsetenv(tt.key)
 			}
@@ -198,8 +187,7 @@ func TestGetEnvFloat(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if tt.envValue != "" {
-				_ = os.Setenv(tt.key, tt.envValue)
-				t.Cleanup(func() { _ = os.Unsetenv(tt.key) })
+				t.Setenv(tt.key, tt.envValue)
 			} else {
 				_ = os.Unsetenv(tt.key)
 			}

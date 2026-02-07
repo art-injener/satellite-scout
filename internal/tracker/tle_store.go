@@ -123,14 +123,14 @@ func NewTLEStore(cfg *TLEStoreConfig, opts ...TLEStoreOption) *TLEStore {
 
 // Start запускает TLEStore: загружает TLE и запускает автообновление.
 func (s *TLEStore) Start(ctx context.Context) error {
-	s.logger.Info("starting TLEStore",
+	s.logger.InfoContext(ctx, "starting TLEStore",
 		"groups", s.config.Groups,
 		"update_interval", s.config.UpdateInterval,
 	)
 
 	// Загрузка всех настроенных групп
 	if err := s.LoadAllGroups(ctx); err != nil {
-		s.logger.Warn("initial TLE load had errors", "error", err)
+		s.logger.WarnContext(ctx, "initial TLE load had errors", "error", err)
 		// Не возвращаем ошибку — можем работать с частичными данными
 	}
 
@@ -272,7 +272,7 @@ func (s *TLEStore) LoadAllGroups(ctx context.Context) error {
 
 	for _, group := range s.config.Groups {
 		if err := s.LoadGroup(ctx, group); err != nil {
-			s.logger.Warn("failed to load group",
+			s.logger.WarnContext(ctx, "failed to load group",
 				"group", group,
 				"error", err,
 			)
@@ -280,7 +280,7 @@ func (s *TLEStore) LoadAllGroups(ctx context.Context) error {
 		}
 	}
 
-	s.logger.Info("loaded TLE groups",
+	s.logger.InfoContext(ctx, "loaded TLE groups",
 		"total_count", s.Count(),
 		"groups", s.Groups(),
 	)
@@ -292,7 +292,7 @@ func (s *TLEStore) LoadAllGroups(ctx context.Context) error {
 // Стратегия: сначала Celestrak (свежие данные), при ошибке — fallback на кеш.
 // После успешной загрузки с Celestrak — сохраняем в кеш.
 func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
-	s.logger.Debug("loading TLE group", "group", group)
+	s.logger.DebugContext(ctx, "loading TLE group", "group", group)
 
 	var tles []*TLE
 	var err error
@@ -301,7 +301,7 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 	// Пробуем загрузить с Celestrak
 	tles, err = s.client.FetchGroup(ctx, SatelliteGroup(group))
 	if err != nil {
-		s.logger.Warn("failed to fetch from Celestrak, trying cache",
+		s.logger.WarnContext(ctx, "failed to fetch from Celestrak, trying cache",
 			"group", group,
 			"error", err,
 		)
@@ -309,21 +309,21 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 		// Fallback на файловый кеш
 		tles, err = s.loadGroupFromCache(group)
 		if err != nil {
-			s.logger.Warn("failed to load from cache",
+			s.logger.WarnContext(ctx, "failed to load from cache",
 				"group", group,
 				"error", err,
 			)
 			return fmt.Errorf("%w: %s (celestrak and cache both failed)", ErrLoadGroupFailed, group)
 		}
 		fromCache = true
-		s.logger.Info("loaded TLE group from cache",
+		s.logger.InfoContext(ctx, "loaded TLE group from cache",
 			"group", group,
 			"count", len(tles),
 		)
 	} else {
 		// Успешно загрузили с Celestrak — сохраняем в кеш
 		if saveErr := s.saveGroupToCache(group, tles); saveErr != nil {
-			s.logger.Warn("failed to save to cache",
+			s.logger.WarnContext(ctx, "failed to save to cache",
 				"group", group,
 				"error", saveErr,
 			)
@@ -338,7 +338,7 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 	s.mu.Unlock()
 
 	if !fromCache {
-		s.logger.Info("loaded TLE group from Celestrak",
+		s.logger.InfoContext(ctx, "loaded TLE group from Celestrak",
 			"group", group,
 			"count", len(tles),
 		)
@@ -388,15 +388,15 @@ func (s *TLEStore) startUpdater(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Info("updater stopped by context")
+			s.logger.InfoContext(ctx, "updater stopped by context")
 			return
 		case <-s.stopCh:
-			s.logger.Info("updater stopped by stop signal")
+			s.logger.InfoContext(ctx, "updater stopped by stop signal")
 			return
 		case <-ticker.C:
-			s.logger.Info("starting scheduled TLE update")
+			s.logger.InfoContext(ctx, "starting scheduled TLE update")
 			if err := s.LoadAllGroups(ctx); err != nil {
-				s.logger.Warn("scheduled TLE update had errors", "error", err)
+				s.logger.WarnContext(ctx, "scheduled TLE update had errors", "error", err)
 			}
 		}
 	}
@@ -419,7 +419,7 @@ func NewSafeTicker(d time.Duration) *SafeTicker {
 func (s *TLEStore) loadCacheMeta() (*CacheMeta, error) {
 	metaPath := filepath.Join(s.config.CacheDir, cacheMetaFilename)
 
-	data, err := os.ReadFile(metaPath) //nolint:gosec // путь из конфига, не от пользователя
+	data, err := os.ReadFile(metaPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return &CacheMeta{Groups: make(map[string]CacheGroupMeta)}, nil
@@ -428,7 +428,8 @@ func (s *TLEStore) loadCacheMeta() (*CacheMeta, error) {
 	}
 
 	var meta CacheMeta
-	if err := json.Unmarshal(data, &meta); err != nil {
+	err = json.Unmarshal(data, &meta)
+	if err != nil {
 		return nil, fmt.Errorf("parsing cache meta: %w", err)
 	}
 
@@ -453,7 +454,8 @@ func (s *TLEStore) saveCacheMeta(meta *CacheMeta) error {
 		return fmt.Errorf("marshaling cache meta: %w", err)
 	}
 
-	if err := os.WriteFile(metaPath, data, 0600); err != nil {
+	err = os.WriteFile(metaPath, data, 0600)
+	if err != nil {
 		return fmt.Errorf("writing cache meta: %w", err)
 	}
 
@@ -477,7 +479,7 @@ func (s *TLEStore) isCacheFresh(meta *CacheMeta, group string) bool {
 func (s *TLEStore) loadGroupFromCache(group string) ([]*TLE, error) {
 	cachePath := filepath.Join(s.config.CacheDir, strings.ToLower(group)+tleCacheExtension)
 
-	data, err := os.ReadFile(cachePath) //nolint:gosec // путь из конфига, не от пользователя
+	data, err := os.ReadFile(cachePath)
 	if err != nil {
 		return nil, fmt.Errorf("reading cache file: %w", err)
 	}
@@ -522,7 +524,8 @@ func (s *TLEStore) saveGroupToCache(group string, tles []*TLE) error {
 		Count:     len(tles),
 	}
 
-	if err := s.saveCacheMeta(meta); err != nil {
+	err = s.saveCacheMeta(meta)
+	if err != nil {
 		s.logger.Warn("failed to save cache meta", "error", err)
 	}
 
