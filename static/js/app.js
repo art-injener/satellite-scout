@@ -126,8 +126,8 @@
                 window.azimuthIndicator.draw();
             }
             if (window.elevationIndicator) {
-                window.elevationIndicator.setElevation(pos.el);
-                window.elevationIndicator.draw();
+                // Передаём азимут и угол места для определения полусферы (W/E)
+                window.elevationIndicator.setPosition(pos.az, pos.el);
             }
         });
 

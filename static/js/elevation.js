@@ -1,6 +1,8 @@
 // Elevation Indicator - Индикатор угла места
 // Использует AntennaDrawing для отрисовки антенны
-// Шкала от -90° до +90° (0° = зенит)
+// Шкала от 0° (горизонт) до 90° (зенит) с двумя зонами:
+// - Левая зона (W): западная полусфера (азимут > 180° или az == 0°)
+// - Правая зона (E): восточная полусфера (0° < азимут ≤ 180°)
 
 (function() {
     'use strict';
@@ -33,7 +35,9 @@
         const topPadding = 15;
         this.centerY = this.radius + topPadding + 5;
 
-        this.currentElevation = 45;
+        // Текущие значения
+        this.currentElevation = 45; // 0-90°
+        this.currentAzimuth = 270;  // 0-360° (по умолчанию западная полусфера)
 
         // Цвета
         this.colors = {
@@ -60,7 +64,18 @@
     };
 
     /**
-     * Отрисовка полулимба (от -90° до +90°)
+     * Определение полусферы по азимуту
+     * @returns {boolean} true = западная полусфера (левая зона), false = восточная (правая)
+     */
+    ElevationIndicator.prototype.isWesternHemisphere = function() {
+        // Западная полусфера: az > 180° или az == 0° (север относим к западной)
+        return this.currentAzimuth > 180 || this.currentAzimuth === 0;
+    };
+
+    /**
+     * Отрисовка полулимба с двумя зонами
+     * Зенит = 0° (центр), Горизонт = 90° (края)
+     * Шкала: 90° (W) ← 60° ← 30° ← 0° (зенит) → 30° → 60° → 90° (E)
      */
     ElevationIndicator.prototype.drawLimb = function() {
         const ctx = this.ctx;
@@ -79,7 +94,15 @@
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, Math.PI, 0, false);
         ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 2; // Толще
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Вертикальная разделительная линия (зенит = 0°)
+        ctx.beginPath();
+        ctx.moveTo(cx, cy - r + 2);
+        ctx.lineTo(cx, cy - r + 15);
+        ctx.strokeStyle = this.colors.accentBlue;
+        ctx.lineWidth = 2;
         ctx.stroke();
 
         // Деления и подписи
@@ -87,41 +110,90 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // От -90° до +90° с шагом 15°
-        for (let elev = -90; elev <= 90; elev += 15) {
-            // Конвертация: -90° -> PI (лево), 0° -> PI/2 (верх), +90° -> 0 (право)
-            const rad = Math.PI - (elev + 90) * Math.PI / 180;
-            const isMain = elev % 30 === 0;
+        // Шкала: 0° в центре (зенит), 90° по краям (горизонт)
+        // Левая сторона: 0° (верх) → 30° → 60° → 90° (лево)
+        // Правая сторона: 0° (верх) → 30° → 60° → 90° (право)
+        for (let i = 0; i <= 6; i++) {
+            const scaleValue = i * 15; // 0, 15, 30, 45, 60, 75, 90
+            const isMain = scaleValue % 30 === 0;
             const innerR = isMain ? r - 15 : r - 10;
             const outerR = r - 2;
 
-            // Линии делений
+            // Левая сторона: угол от PI/2 (верх, 0°) до PI (лево, 90°)
+            // scaleValue=0 → rad=PI/2, scaleValue=90 → rad=PI
+            const radLeft = Math.PI / 2 + scaleValue * Math.PI / 180;
+
+            // Правая сторона: угол от PI/2 (верх, 0°) до 0 (право, 90°)
+            // scaleValue=0 → rad=PI/2, scaleValue=90 → rad=0
+            const radRight = Math.PI / 2 - scaleValue * Math.PI / 180;
+
+            // === Левая сторона ===
             ctx.beginPath();
             ctx.moveTo(
-                cx + Math.cos(rad) * innerR,
-                cy - Math.sin(rad) * innerR
+                cx + Math.cos(radLeft) * innerR,
+                cy - Math.sin(radLeft) * innerR
             );
             ctx.lineTo(
-                cx + Math.cos(rad) * outerR,
-                cy - Math.sin(rad) * outerR
+                cx + Math.cos(radLeft) * outerR,
+                cy - Math.sin(radLeft) * outerR
             );
             ctx.strokeStyle = isMain ? this.colors.accentBlue : this.colors.border;
             ctx.lineWidth = isMain ? 2 : 1;
             ctx.stroke();
 
-            // Подписи для основных делений
+            // Подписи для левой стороны (основные деления)
             if (isMain) {
                 const labelR = r + 12;
-                const label = elev.toString() + '°';
+                const label = scaleValue.toString() + '°';
 
-                ctx.fillStyle = (elev === 0) ? this.colors.textPrimary : this.colors.textSecondary;
+                ctx.fillStyle = (scaleValue === 0) ? this.colors.textPrimary : this.colors.textSecondary;
                 ctx.fillText(
                     label,
-                    cx + Math.cos(rad) * labelR,
-                    cy - Math.sin(rad) * labelR
+                    cx + Math.cos(radLeft) * labelR,
+                    cy - Math.sin(radLeft) * labelR
                 );
             }
+
+            // === Правая сторона (кроме 0°, чтобы не дублировать в центре) ===
+            if (scaleValue > 0) {
+                ctx.beginPath();
+                ctx.moveTo(
+                    cx + Math.cos(radRight) * innerR,
+                    cy - Math.sin(radRight) * innerR
+                );
+                ctx.lineTo(
+                    cx + Math.cos(radRight) * outerR,
+                    cy - Math.sin(radRight) * outerR
+                );
+                ctx.strokeStyle = isMain ? this.colors.accentBlue : this.colors.border;
+                ctx.lineWidth = isMain ? 2 : 1;
+                ctx.stroke();
+
+                // Подписи для правой стороны
+                if (isMain) {
+                    const labelR = r + 12;
+                    const label = scaleValue.toString() + '°';
+
+                    ctx.fillStyle = this.colors.textSecondary;
+                    ctx.fillText(
+                        label,
+                        cx + Math.cos(radRight) * labelR,
+                        cy - Math.sin(radRight) * labelR
+                    );
+                }
+            }
         }
+
+        // Подписи сторон света W и E под цифрами 90°
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = this.colors.textMuted;
+
+        // W слева (под 90° левой стороны)
+        ctx.textAlign = 'center';
+        ctx.fillText('W', cx - r - 12, cy + 15);
+
+        // E справа (под 90° правой стороны)
+        ctx.fillText('E', cx + r + 12, cy + 15);
     };
 
     /**
@@ -163,23 +235,47 @@
         ctx.moveTo(cx - outerArcRadius, cy + lineLength);
         ctx.lineTo(cx + outerArcRadius, cy + lineLength);
         ctx.stroke();
-        // Шестигранник теперь вращается с антенной (в antenna.js)
     };
 
     /**
-     * Отрисовка антенны (дуга теперь в antenna.js)
+     * Вычисление угла поворота антенны для AntennaDrawing
+     * @param {number} elevation - угол места 0-90°
+     * @returns {number} угол поворота для отрисовки (0 = вверх)
+     * 
+     * Шкала: 0° = зенит (антенна вверх), 90° = горизонт (антенна в сторону)
+     * Угол на шкале = 90° - elevation
+     */
+    ElevationIndicator.prototype.calculateAntennaAngle = function(elevation) {
+        // Угол наклона от вертикали = 90° - elevation
+        // elevation 90° (зенит) → наклон 0° (антенна вверх)
+        // elevation 0° (горизонт) → наклон 90° (антенна в сторону)
+        const tilt = 90 - elevation;
+
+        // Для западной полусферы: антенна наклоняется влево (отрицательный угол)
+        // Для восточной полусферы: антенна наклоняется вправо (положительный угол)
+        if (this.isWesternHemisphere()) {
+            return -tilt; // влево
+        } else {
+            return tilt;  // вправо
+        }
+    };
+
+    /**
+     * Отрисовка антенны
      */
     ElevationIndicator.prototype.drawAntenna = function(elevation) {
         const ctx = this.ctx;
         const cx = this.centerX;
         const cy = this.centerY;
 
+        const angle = this.calculateAntennaAngle(elevation);
+
         // Рисуем антенну (включает вращающуюся дугу)
         window.AntennaDrawing.draw(
             ctx,
             cx,
             cy,
-            elevation,
+            angle,
             this.antennaScale,
             this.radius - 9,
             'elevation' // viewType
@@ -226,10 +322,30 @@
     };
 
     /**
-     * Установка угла места и перерисовка
+     * Установка позиции (азимут + угол места)
+     * @param {number} az - азимут 0-360°
+     * @param {number} el - угол места 0-90°
+     */
+    ElevationIndicator.prototype.setPosition = function(az, el) {
+        this.currentAzimuth = Math.max(0, Math.min(360, az));
+        this.currentElevation = Math.max(0, Math.min(90, el));
+        this.draw();
+    };
+
+    /**
+     * Установка угла места (обратная совместимость)
+     * @param {number} deg - угол места
      */
     ElevationIndicator.prototype.setElevation = function(deg) {
-        this.currentElevation = Math.max(-90, Math.min(90, deg));
+        // Для обратной совместимости: если передан отрицательный угол,
+        // интерпретируем как западную полусферу, положительный — как восточную
+        if (deg < 0) {
+            this.currentAzimuth = 270; // Западная полусфера
+            this.currentElevation = Math.max(0, Math.min(90, Math.abs(deg)));
+        } else {
+            this.currentAzimuth = 90; // Восточная полусфера
+            this.currentElevation = Math.max(0, Math.min(90, deg));
+        }
         this.draw();
     };
 
@@ -241,24 +357,41 @@
     };
 
     /**
-     * Демо-анимация
+     * Получение текущего азимута
+     */
+    ElevationIndicator.prototype.getAzimuth = function() {
+        return this.currentAzimuth;
+    };
+
+    /**
+     * Демо-анимация (симуляция пролёта)
      */
     ElevationIndicator.prototype.startDemo = function(speed) {
         const self = this;
         speed = speed || 0.5;
         let direction = 1;
+        let phase = 0; // 0 = западный пролёт, 1 = восточный пролёт
 
         if (this._animationId) {
             cancelAnimationFrame(this._animationId);
         }
 
+        // Начинаем с западной полусферы
+        this.currentAzimuth = 270;
+        this.currentElevation = 0;
+
         function animate() {
             self.currentElevation += speed * direction;
+
             if (self.currentElevation >= 90) {
                 direction = -1;
-            } else if (self.currentElevation <= -90) {
+            } else if (self.currentElevation <= 0) {
                 direction = 1;
+                // Переключаем полусферу
+                phase = (phase + 1) % 2;
+                self.currentAzimuth = phase === 0 ? 270 : 90;
             }
+
             self.draw();
             self._animationId = requestAnimationFrame(animate);
         }
