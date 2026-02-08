@@ -54,6 +54,9 @@ func main() {
 	trackingService := services.NewSatelliteTrackingService(sseHub, tleStore, observer)
 	go trackingService.Run(svcCtx)
 
+	// Сервис пролётов — расчёт и кеширование пролётов спутников.
+	passService := services.NewPassService(tleStore, observer)
+
 	// Начальное отслеживание ISS (NORAD 25544) для демонстрации.
 	const issNoradID = 25544
 	if err := trackingService.TrackSatellite(issNoradID); err != nil {
@@ -62,7 +65,7 @@ func main() {
 
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, sseHub)
+	setupRoutes(mux, cfg, sseHub, passService, trackingService)
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.

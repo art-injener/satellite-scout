@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // makeTLELinePP добавляет контрольную сумму к 68-символьной строке TLE.
@@ -53,9 +55,7 @@ func parsePPTLE(t *testing.T, lines []string) *TLE {
 	t.Helper()
 
 	tle, err := ParseTLE(lines)
-	if err != nil {
-		t.Fatalf("ParseTLE failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	return tle
 }
@@ -65,10 +65,7 @@ func makePPPropagator(t *testing.T, lines []string) *Propagator {
 
 	tle := parsePPTLE(t, lines)
 	prop, err := NewPropagator(tle)
-
-	if err != nil {
-		t.Fatalf("NewPropagator failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	return prop
 }
@@ -88,9 +85,7 @@ func TestPredictPasses_ISSFindsMultiplePasses(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// ISS делает ~16 витков/сутки, из которых 4-6 видимы из одной точки.
 	if len(passes) < 2 {
@@ -116,9 +111,7 @@ func TestPredictPasses_PassStructure(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	if len(passes) == 0 {
 		t.Fatal("no passes found")
@@ -179,9 +172,7 @@ func TestPredictPasses_PassesSortedByAOS(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	for i := 1; i < len(passes); i++ {
 		if passes[i].AOS < passes[i-1].AOS {
@@ -198,9 +189,7 @@ func TestPredictPasses_PassesNotOverlapping(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	for i := 1; i < len(passes); i++ {
 		if passes[i].AOS < passes[i-1].LOS {
@@ -217,9 +206,7 @@ func TestPredictPasses_SkyPathPresent(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	if len(passes) == 0 {
 		t.Fatal("no passes found")
@@ -260,9 +247,7 @@ func TestPredictPasses_GEOSkipped(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	if len(passes) != 0 {
 		t.Errorf("expected 0 passes for GEO satellite, got %d", len(passes))
@@ -276,9 +261,7 @@ func TestPredictPasses_PolarOrbit(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Полярный спутник тоже должен иметь пролёты.
 	if len(passes) < 1 {
@@ -299,9 +282,7 @@ func TestPredictPasses_HighInclination(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	if len(passes) < 1 {
 		t.Errorf("expected at least 1 high inclination pass in 24h, got %d", len(passes))
@@ -317,14 +298,10 @@ func TestPredictPasses_HigherMinElevation(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes5, err := PredictPasses(prop, ppObserver, start, end, 5.0)
-	if err != nil {
-		t.Fatalf("PredictPasses(5°) failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	passes20, err := PredictPasses(prop, ppObserver, start, end, 20.0)
-	if err != nil {
-		t.Fatalf("PredictPasses(20°) failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// С более высоким минимумом элевации должно быть меньше или столько же пролётов.
 	if len(passes20) > len(passes5) {
@@ -350,9 +327,7 @@ func TestPredictPasses_ShortPeriod(t *testing.T) {
 	end := start.Add(2 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// За 2 часа может быть 0 или 1 пролёт ISS.
 	if len(passes) > 3 {
@@ -432,9 +407,7 @@ func TestPredictPassesForTLE_ISS(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPassesForTLE(tle, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPassesForTLE failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	if len(passes) < 2 {
 		t.Errorf("expected at least 2 passes, got %d", len(passes))
@@ -496,7 +469,8 @@ func TestComputeOrbitNumber_InPasses(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil || len(passes) < 2 {
+	require.NoError(t, err)
+	if len(passes) < 2 {
 		t.Skip("need at least 2 passes")
 	}
 
@@ -570,7 +544,8 @@ func TestAzElToXY_SkyPathHasXY(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil || len(passes) == 0 {
+	require.NoError(t, err)
+	if len(passes) == 0 {
 		t.Skip("need at least 1 pass")
 	}
 
@@ -626,7 +601,8 @@ func TestFindMaxElevation_BetweenAOSAndLOS(t *testing.T) {
 	end := start.Add(24 * time.Hour)
 
 	passes, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil || len(passes) == 0 {
+	require.NoError(t, err)
+	if len(passes) == 0 {
 		t.Skip("no passes found, cannot test findMaxElevation")
 	}
 
@@ -661,24 +637,16 @@ func TestPredictPasses_DifferentObservers(t *testing.T) {
 	// Наблюдатель на экваторе.
 	equatorObs := NewObserver(0, 0, 0)
 	passesEq, err := PredictPasses(prop, equatorObs, start, end, DefaultMinElevation)
-
-	if err != nil {
-		t.Fatalf("PredictPasses (equator) failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Наблюдатель на средних широтах.
 	passesMid, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-	if err != nil {
-		t.Fatalf("PredictPasses (mid-lat) failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	// Наблюдатель на высокой широте (за пределами наклонения ISS — 51.6°).
 	highLatObs := NewObserver(70, 0, 0)
 	passesHigh, err := PredictPasses(prop, highLatObs, start, end, DefaultMinElevation)
-
-	if err != nil {
-		t.Fatalf("PredictPasses (high-lat) failed: %v", err)
-	}
+	require.NoError(t, err)
 
 	t.Logf("ISS passes in 24h: equator=%d, mid-lat (47°N)=%d, high-lat (70°N)=%d",
 		len(passesEq), len(passesMid), len(passesHigh))
@@ -695,9 +663,7 @@ func BenchmarkPredictPasses_ISS24h(b *testing.B) {
 	tle := parseBenchTLE(b, ppISSLines)
 
 	prop, err := NewPropagator(tle)
-	if err != nil {
-		b.Fatalf("NewPropagator failed: %v", err)
-	}
+	require.NoError(b, err)
 
 	start := ppBaseTime
 	end := start.Add(24 * time.Hour)
@@ -705,7 +671,8 @@ func BenchmarkPredictPasses_ISS24h(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, _ = PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
+		_, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
+		require.NoError(b, err)
 	}
 }
 
@@ -713,9 +680,7 @@ func BenchmarkPredictPasses_Polar24h(b *testing.B) {
 	tle := parseBenchTLE(b, ppPolarLines)
 
 	prop, err := NewPropagator(tle)
-	if err != nil {
-		b.Fatalf("NewPropagator failed: %v", err)
-	}
+	require.NoError(b, err)
 
 	start := ppBaseTime
 	end := start.Add(24 * time.Hour)
@@ -723,7 +688,8 @@ func BenchmarkPredictPasses_Polar24h(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, _ = PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
+		_, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
+		require.NoError(b, err)
 	}
 }
 
@@ -732,9 +698,7 @@ func parseBenchTLE(b *testing.B, lines []string) *TLE {
 	b.Helper()
 
 	tle, err := ParseTLE(lines)
-	if err != nil {
-		b.Fatalf("ParseTLE failed: %v", err)
-	}
+	require.NoError(b, err)
 
 	return tle
 }

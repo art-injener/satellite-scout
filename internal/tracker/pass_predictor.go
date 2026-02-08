@@ -153,7 +153,7 @@ func findMaxElevation(prop *Propagator, obs *Observer, tAOS, tLOS time.Time) (ti
 }
 
 // azElToXY вычисляет координаты полярной проекции из азимута и угла места.
-// Формула из SkyRoof (SatellitePass.cs:160-179):
+// Формула:
 //
 //	r   = 1 - el_rad/(π/2)          — радиус: 0 на зените, 1 на горизонте
 //	phi = π/2 - az_rad              — угол: N=вверх, E=вправо
@@ -221,7 +221,7 @@ func computeSkyPath(prop *Propagator, obs *Observer, tAOS, tLOS time.Time) []AzE
 }
 
 // buildPass формирует структуру Pass из рассчитанных параметров пролёта.
-// Централизует создание Pass, включая расчёт номера орбиты (формула SkyRoof).
+// Централизует создание Pass, включая расчёт номера орбиты.
 func buildPass(prop *Propagator, obs *Observer, aosExact, tcaTime, losExact time.Time, tcaEl, tcaAz float64) *Pass {
 	tle := prop.TLE()
 
@@ -251,7 +251,7 @@ func buildPass(prop *Propagator, obs *Observer, aosExact, tcaTime, losExact time
 	if tle != nil {
 		satName = tle.Name
 		noradID = tle.NoradID
-		// Номер орбиты на момент TCA (формула SkyRoof).
+		// Номер орбиты на момент TCA
 		orbitNumber = ComputeOrbitNumber(tle, tcaTime)
 	}
 
@@ -367,7 +367,7 @@ func PredictPasses(prop *Propagator, obs *Observer, start, end time.Time, minElD
 			// Находим TCA (максимальную элевацию).
 			tcaTime, tcaEl, tcaAz := findMaxElevation(prop, obs, aosExact, losExact)
 
-			// Формируем Pass (с номером орбиты по формуле SkyRoof).
+			// Формируем Pass (с номером орбиты).
 			passes = append(passes, buildPass(prop, obs, aosExact, tcaTime, losExact, tcaEl, tcaAz))
 
 			// Перепрыгиваем за LOS + 1 шаг.
@@ -412,7 +412,7 @@ func PredictPasses(prop *Propagator, obs *Observer, start, end time.Time, minElD
 			// Находим TCA.
 			tcaTime, tcaEl, tcaAz := findMaxElevation(prop, obs, aosExact, losExact)
 
-			// Формируем Pass (с номером орбиты по формуле SkyRoof).
+			// Формируем Pass (с номером орбиты).
 			passes = append(passes, buildPass(prop, obs, aosExact, tcaTime, losExact, tcaEl, tcaAz))
 
 			// Перепрыгиваем за LOS.
@@ -448,7 +448,13 @@ func PredictPassesForTLE(tle *TLE, obs *Observer, start, end time.Time, minElDeg
 
 // PredictAllPasses предсказывает пролёты для всех спутников в TLEStore из указанной группы.
 // Возвращает все пролёты, отсортированные по AOS.
-func PredictAllPasses(store *TLEStore, obs *Observer, group string, start, end time.Time, minElDeg float64) ([]*Pass, error) {
+func PredictAllPasses(
+	store *TLEStore,
+	obs *Observer,
+	group string,
+	start, end time.Time,
+	minElDeg float64,
+) ([]*Pass, error) {
 	if store == nil {
 		return nil, errors.New("TLE store is nil")
 	}

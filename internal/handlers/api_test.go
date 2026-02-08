@@ -49,13 +49,13 @@ func TestAPIHandler_HealthCheck(t *testing.T) {
 		t.Errorf("Expected Content-Type application/json, got %s", contentType)
 	}
 
-	var body map[string]string
+	var body HealthResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if status, ok := body["status"]; !ok || status != "ok" {
-		t.Errorf("Expected status: ok, got %v", body)
+	if body.Status != "ok" {
+		t.Errorf("Expected status: ok, got %s", body.Status)
 	}
 }
 
@@ -85,26 +85,21 @@ func TestAPIHandler_GetConfig(t *testing.T) {
 		t.Errorf("Expected Content-Type application/json, got %s", contentType)
 	}
 
-	var body map[string]any
+	var body ConfigResponse
 	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	observer, ok := body["observer"].(map[string]any)
-	if !ok {
-		t.Fatal("Expected observer object in response")
+	if body.Observer.Lat != cfg.ObserverLat {
+		t.Errorf("Expected lat %f, got %f", cfg.ObserverLat, body.Observer.Lat)
 	}
 
-	if lat := observer["lat"].(float64); lat != cfg.ObserverLat {
-		t.Errorf("Expected lat %f, got %f", cfg.ObserverLat, lat)
+	if body.Observer.Lon != cfg.ObserverLon {
+		t.Errorf("Expected lon %f, got %f", cfg.ObserverLon, body.Observer.Lon)
 	}
 
-	if lon := observer["lon"].(float64); lon != cfg.ObserverLon {
-		t.Errorf("Expected lon %f, got %f", cfg.ObserverLon, lon)
-	}
-
-	if alt := observer["alt"].(float64); alt != cfg.ObserverAlt {
-		t.Errorf("Expected alt %f, got %f", cfg.ObserverAlt, alt)
+	if body.Observer.Alt != cfg.ObserverAlt {
+		t.Errorf("Expected alt %f, got %f", cfg.ObserverAlt, body.Observer.Alt)
 	}
 }
 
@@ -118,13 +113,13 @@ func TestWriteJSON(t *testing.T) {
 		{
 			name:       "success response",
 			status:     http.StatusOK,
-			data:       map[string]string{"message": "success"},
+			data:       HealthResponse{Status: "ok"},
 			wantStatus: http.StatusOK,
 		},
 		{
 			name:       "error response",
 			status:     http.StatusBadRequest,
-			data:       map[string]string{"error": "bad request"},
+			data:       ErrorResponse{Error: "bad request"},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
@@ -153,7 +148,7 @@ func TestWriteJSON(t *testing.T) {
 			}
 
 			if tt.data != nil {
-				var body map[string]string
+				var body map[string]any
 				if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
 					t.Errorf("Failed to decode response: %v", err)
 				}

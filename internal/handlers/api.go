@@ -35,18 +35,16 @@ func writeJSON(w http.ResponseWriter, status int, data any) {
 
 // HealthCheck возвращает статус работоспособности сервера.
 func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]string{
-		"status": "ok",
-	})
+	writeJSON(w, http.StatusOK, HealthResponse{Status: "ok"})
 }
 
 // GetConfig возвращает текущую конфигурацию.
 func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{
-		"observer": map[string]float64{
-			"lat": h.config.ObserverLat,
-			"lon": h.config.ObserverLon,
-			"alt": h.config.ObserverAlt,
+	writeJSON(w, http.StatusOK, ConfigResponse{
+		Observer: ObserverConfig{
+			Lat: h.config.ObserverLat,
+			Lon: h.config.ObserverLon,
+			Alt: h.config.ObserverAlt,
 		},
 	})
 }

@@ -6,10 +6,17 @@ import (
 
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/services"
 )
 
 // setupRoutes регистрирует все HTTP-маршруты приложения.
-func setupRoutes(mux *http.ServeMux, cfg *config.Config, sseHub *handlers.SSEHub) {
+func setupRoutes(
+	mux *http.ServeMux,
+	cfg *config.Config,
+	sseHub *handlers.SSEHub,
+	passService *services.PassService,
+	trackingService *services.SatelliteTrackingService,
+) {
 	// Инициализация обработчиков.
 	pageHandler, err := handlers.NewPageHandler("templates", true)
 	if err != nil {
@@ -18,6 +25,7 @@ func setupRoutes(mux *http.ServeMux, cfg *config.Config, sseHub *handlers.SSEHub
 	}
 
 	apiHandler := handlers.NewAPIHandler(cfg)
+	passHandler := handlers.NewPassHandler(passService, trackingService)
 
 	// Статические файлы.
 	staticFS := http.FileServer(http.Dir("static"))
@@ -32,6 +40,10 @@ func setupRoutes(mux *http.ServeMux, cfg *config.Config, sseHub *handlers.SSEHub
 	// API маршруты.
 	mux.HandleFunc("GET /api/health", apiHandler.HealthCheck)
 	mux.HandleFunc("GET /api/config", apiHandler.GetConfig)
+
+	// API пролётов.
+	mux.HandleFunc("GET /api/passes", passHandler.GetPasses)
+	mux.HandleFunc("POST /api/tracking/current", passHandler.SetTrackingCurrent)
 
 	// SSE endpoint — EventSource-совместимый поток данных.
 	// WriteTimeout для SSE-соединений отключается per-connection в ServeHTTP.

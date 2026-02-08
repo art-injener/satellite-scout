@@ -4,6 +4,8 @@ import (
 	"math"
 	"testing"
 	"time"
+
+	"github.com/stretchr/testify/require"
 )
 
 // --- VisibilityRadius ---
@@ -371,7 +373,8 @@ func BenchmarkGenerateVisibilityZone_ISS(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, _ = GenerateVisibilityZone(tle, now, defaultZonePoints)
+		_, err := GenerateVisibilityZone(tle, now, defaultZonePoints)
+		require.NoError(b, err)
 	}
 }
 

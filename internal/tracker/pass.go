@@ -41,6 +41,7 @@ type Pass struct {
 }
 
 // ComputeOrbitNumber вычисляет номер орбиты (витка) на заданный момент времени.
+// Формула:
 //
 //	orbitNumber = revNum + floor((meanAnomaly + argPerigee) / 2π)
 //	              + (revPerDay + bstar * timeSinceEpoch) * timeSinceEpoch
@@ -64,7 +65,7 @@ func ComputeOrbitNumber(tle *TLE, t time.Time) int {
 	meanAnomaly := tle.MeanAnomaly * Deg2Rad
 	argPerigee := tle.ArgOfPerigee * Deg2Rad
 
-	// Формула SkyRoof: номер витка от эпохи + дробная поправка + витки с учётом drag.
+	// Формула: номер витка от эпохи + дробная поправка + витки с учётом drag.
 	orbitNum := revNum +
 		math.Floor((meanAnomaly+argPerigee)/twoPi) +
 		(revPerDay+bstar*timeSinceEpoch)*timeSinceEpoch
