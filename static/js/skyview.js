@@ -31,7 +31,7 @@
             showSatelliteAura: true, // Показывать окружность вокруг спутника
             showObserver: true, // Показывать иконку наблюдателя
             azimuthStep: 30, // Шаг меток азимута (30° или 45°)
-            arrowInterval: 120000, // Интервал стрелок на траектории (2 минуты)
+            arrowInterval: 600000, // Интервал стрелок на траектории (10 минут)
             satelliteAuraRadius: 20, // Радиус ауры спутника
             animationSpeed: 1 // Скорость анимации
         }, options || {});
@@ -691,9 +691,6 @@
         ctx.lineWidth = 1;
         ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
 
-        // Анимация "передачи сигнала" (волны от спутника)
-        this._drawSignalWaves(p.x, p.y);
-
         // Подпись спутника
         if (this.satellite.name) {
             ctx.font = 'bold 10px sans-serif';
@@ -862,13 +859,37 @@
             ctx.fillText('--:--', col3X + 30, row1Y);
         }
 
-        // Название спутника
+        // Название спутника (с обрезкой если слишком длинное)
         ctx.fillStyle = this.colors.infoLabel;
         ctx.fillText('Sat:', col3X, row2Y);
         ctx.fillStyle = this.colors.satellite;
-        ctx.font = 'bold 9px monospace';
+        ctx.font = 'bold 8px monospace';
         const satName = this.satellite.name || '---';
-        ctx.fillText(satName, col3X + 30, row2Y);
+        const maxWidth = w - col3X - 35; // Максимальная ширина для имени
+        const truncatedName = this._truncateText(ctx, satName, maxWidth);
+        ctx.fillText(truncatedName, col3X + 28, row2Y);
+    };
+
+    /**
+     * Обрезка текста с добавлением "..." если не помещается
+     * @param {CanvasRenderingContext2D} ctx - Контекст canvas
+     * @param {string} text - Исходный текст
+     * @param {number} maxWidth - Максимальная ширина в пикселях
+     * @returns {string} - Обрезанный текст
+     */
+    SkyView.prototype._truncateText = function(ctx, text, maxWidth) {
+        if (ctx.measureText(text).width <= maxWidth) {
+            return text;
+        }
+        
+        const ellipsis = '…';
+        let truncated = text;
+        
+        while (truncated.length > 0 && ctx.measureText(truncated + ellipsis).width > maxWidth) {
+            truncated = truncated.slice(0, -1);
+        }
+        
+        return truncated + ellipsis;
     };
 
     /**

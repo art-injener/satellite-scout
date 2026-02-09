@@ -249,6 +249,7 @@ body {
 
 .earth-view-container {
     flex: 1;
+    position: relative;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
@@ -715,5 +716,240 @@ section h2 {
     
     .sidebar {
         display: none;
+    }
+}
+
+/* ============================================
+   Страница пролётов (Passes)
+   ============================================ */
+
+.passes-layout {
+    display: flex;
+    flex-direction: column;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-lg);
+    height: 100%;
+    overflow: hidden;
+}
+
+.passes-header {
+    flex-shrink: 0;
+}
+
+.passes-header h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 var(--spacing-xs) 0;
+    border-bottom: none;
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.passes-subtitle {
+    color: var(--text-muted);
+    font-size: 0.875rem;
+    margin: 0;
+}
+
+/* Фильтры */
+.passes-filters {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-lg);
+    padding: var(--spacing-md);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    flex-shrink: 0;
+}
+
+.filter-group {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-md);
+    border: none;
+    padding: 0;
+    margin: 0;
+}
+
+.filter-group legend {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    margin-right: var(--spacing-md);
+}
+
+.filter-option {
+    display: flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    cursor: pointer;
+    font-size: 0.875rem;
+    color: var(--text-secondary);
+}
+
+.filter-option input[type="radio"] {
+    accent-color: var(--accent-primary);
+}
+
+.filter-option:hover {
+    color: var(--text-primary);
+}
+
+.filter-actions {
+    margin-left: auto;
+}
+
+/* Кнопки */
+.btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
+    padding: var(--spacing-sm) var(--spacing-md);
+    border: none;
+    border-radius: var(--radius-md);
+    font-size: 0.875rem;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.15s, color 0.15s;
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+}
+
+.btn-secondary:hover {
+    background: var(--border-color);
+    color: var(--text-primary);
+}
+
+.btn-primary {
+    background: var(--accent-secondary);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: #0090dd;
+}
+
+/* Контейнер таблицы */
+.passes-table-container {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    min-height: 200px;
+}
+
+/* Состояние загрузки */
+.passes-loading {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md);
+    padding: var(--spacing-xl);
+    color: var(--text-muted);
+    height: 100%;
+}
+
+.spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--bg-tertiary);
+    border-top-color: var(--accent-secondary);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ===== Оверлей смены спутника ===== */
+.tracking-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(6, 10, 18, 0.80);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 50;
+    opacity: 1;
+    transition: opacity 0.6s ease-out;
+    pointer-events: none;
+    border-radius: var(--radius-md);
+}
+
+.tracking-overlay.hidden {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.tracking-overlay.fade-out {
+    opacity: 0;
+}
+
+.tracking-overlay-content {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+    text-align: center;
+}
+
+.tracking-spinner {
+    width: 40px;
+    height: 40px;
+    border: 3px solid rgba(0, 255, 200, 0.15);
+    border-top-color: var(--accent-primary, #00ffc8);
+    border-radius: 50%;
+    animation: spin 0.9s linear infinite;
+}
+
+.tracking-overlay-text {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 13px;
+    color: var(--text-muted, #6a7a8a);
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+.tracking-overlay-sat {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 18px;
+    color: var(--accent-primary, #00ffc8);
+    font-weight: 700;
+    letter-spacing: 1px;
+}
+
+.tracking-overlay-name {
+    font-family: var(--font-mono, 'JetBrains Mono', monospace);
+    font-size: 14px;
+    color: var(--accent-secondary, #40c4ff);
+    font-weight: 500;
+}
+
+/* Responsive для страницы пролётов */
+@media (max-width: 900px) {
+    .passes-filters {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .filter-actions {
+        margin-left: 0;
+        width: 100%;
+    }
+    
+    .filter-actions .btn {
+        width: 100%;
+        justify-content: center;
     }
 }

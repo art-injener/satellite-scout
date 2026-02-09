@@ -186,6 +186,46 @@ func makeAzElPoint(azDeg, elDeg float64, t time.Time) AzElPoint {
 	}
 }
 
+// findSkyAOS находит время восхода (el=0) для sky path.
+// Ищет назад от aosExact с мелким шагом до el<0, бисектирует между соседними точками.
+// Глубина поиска 60 минут — покрывает любые LEO/MEO пролёты.
+func findSkyAOS(prop *Propagator, obs *Observer, aosRough, aosExact time.Time) time.Time {
+	const step = 2 * time.Second // мелкий шаг — надёжно находим ближайший переход
+	const maxIter = 1800         // 1800 * 2 = 60 минут
+
+	prev := aosExact
+	cur := aosExact
+	for i := 0; i < maxIter; i++ {
+		cur = cur.Add(-step)
+		if computeElevationDeg(prop, obs, cur) < 0 {
+			// Нашли переход el<0 → el>=0 между cur и prev
+			return refineBisect(prop, obs, cur, prev, 0.0, true)
+		}
+		prev = cur
+	}
+	return aosExact // Не нашли — спутник всегда над горизонтом
+}
+
+// findSkyLOS находит время захода (el=0) для sky path.
+// Ищет вперёд от losExact с мелким шагом до el<0, бисектирует между соседними точками.
+// Глубина поиска 60 минут — покрывает любые LEO/MEO пролёты.
+func findSkyLOS(prop *Propagator, obs *Observer, losExact, losRough time.Time) time.Time {
+	const step = 2 * time.Second
+	const maxIter = 1800 // 1800 * 2 = 60 минут
+
+	prev := losExact
+	cur := losExact
+	for i := 0; i < maxIter; i++ {
+		cur = cur.Add(step)
+		if computeElevationDeg(prop, obs, cur) < 0 {
+			// Нашли переход el>=0 → el<0 между prev и cur
+			return refineBisect(prop, obs, prev, cur, 0.0, false)
+		}
+		prev = cur
+	}
+	return losExact // Не нашли
+}
+
 // computeSkyPath генерирует массив точек Az/El/X/Y через пролёт для SVG мини-проекции.
 // Шаг — skyPathStepSec секунд. Включает точки AOS и LOS.
 // X/Y — предвычисленные координаты полярной проекции, фронтенд рисует их напрямую.
@@ -222,7 +262,8 @@ func computeSkyPath(prop *Propagator, obs *Observer, tAOS, tLOS time.Time) []AzE
 
 // buildPass формирует структуру Pass из рассчитанных параметров пролёта.
 // Централизует создание Pass, включая расчёт номера орбиты.
-func buildPass(prop *Propagator, obs *Observer, aosExact, tcaTime, losExact time.Time, tcaEl, tcaAz float64) *Pass {
+// aosRough/losRough — грубые границы (el < minElDeg), для надёжного поиска горизонта.
+func buildPass(prop *Propagator, obs *Observer, aosExact, tcaTime, losExact time.Time, tcaEl, tcaAz float64, aosRough, losRough time.Time) *Pass {
 	tle := prop.TLE()
 
 	// AER в точках AOS и LOS.
@@ -239,8 +280,13 @@ func buildPass(prop *Propagator, obs *Observer, aosExact, tcaTime, losExact time
 		losAz = losAER.AzDeg()
 	}
 
-	// SkyPath — траектория на небесной сфере для SVG мини-проекции.
-	skyPath := computeSkyPath(prop, obs, aosExact, losExact)
+	// SkyPath — траектория на небесной сфере для визуализации.
+	// Используем el=0 (горизонт) для начала и конца.
+	// aosRough/losRough — точки с el < minElDeg (но не обязательно el < 0).
+	// Если el(aosRough) >= 0 — пролёт начался до окна предсказания, ищем горизонт назад.
+	skyAOS := findSkyAOS(prop, obs, aosRough, aosExact)
+	skyLOS := findSkyLOS(prop, obs, losExact, losRough)
+	skyPath := computeSkyPath(prop, obs, skyAOS, skyLOS)
 
 	// Параметры спутника.
 	duration := losExact.Sub(aosExact).Seconds()
@@ -318,10 +364,13 @@ func PredictPasses(prop *Propagator, obs *Observer, start, end time.Time, minElD
 			losRough := t
 
 			// Грубый поиск AOS (назад от t).
+			// Разрешаем поиск за пределы start — для пролётов, начавшихся до окна предсказания.
+			// Ограничение: не дальше 60 минут назад от t (покрывает любой LEO пролёт).
+			backLimit := t.Add(-60 * time.Minute)
 			for {
 				prev := aosRough.Add(-step)
-				if prev.Before(start) {
-					aosRough = start
+				if prev.Before(backLimit) {
+					aosRough = prev
 					break
 				}
 				prevEl := computeElevationDeg(prop, obs, prev)
@@ -368,7 +417,8 @@ func PredictPasses(prop *Propagator, obs *Observer, start, end time.Time, minElD
 			tcaTime, tcaEl, tcaAz := findMaxElevation(prop, obs, aosExact, losExact)
 
 			// Формируем Pass (с номером орбиты).
-			passes = append(passes, buildPass(prop, obs, aosExact, tcaTime, losExact, tcaEl, tcaAz))
+			// aosRough и losRough — грубые точки (el < minElDeg) для поиска горизонта.
+			passes = append(passes, buildPass(prop, obs, aosExact, tcaTime, losExact, tcaEl, tcaAz, aosRough, losRough))
 
 			// Перепрыгиваем за LOS + 1 шаг.
 			t = losExact.Add(step)
@@ -384,6 +434,7 @@ func PredictPasses(prop *Propagator, obs *Observer, start, end time.Time, minElD
 		nextEl := computeElevationDeg(prop, obs, nextT)
 		if nextEl >= minElDeg {
 			// Переход через порог — уточняем AOS.
+			// t — грубая точка AOS (el < minElDeg).
 			aosExact := refineBisect(prop, obs, t, nextT, minElDeg, true)
 
 			// Грубый поиск LOS (вперёд от nextT).
@@ -413,7 +464,8 @@ func PredictPasses(prop *Propagator, obs *Observer, start, end time.Time, minElD
 			tcaTime, tcaEl, tcaAz := findMaxElevation(prop, obs, aosExact, losExact)
 
 			// Формируем Pass (с номером орбиты).
-			passes = append(passes, buildPass(prop, obs, aosExact, tcaTime, losExact, tcaEl, tcaAz))
+			// t — грубая AOS (el < minElDeg), losRough — грубая LOS (el < minElDeg).
+			passes = append(passes, buildPass(prop, obs, aosExact, tcaTime, losExact, tcaEl, tcaAz, t, losRough))
 
 			// Перепрыгиваем за LOS.
 			t = losExact.Add(step)
@@ -469,6 +521,41 @@ func PredictAllPasses(
 		return nil, nil
 	}
 
+	return predictPassesForTLEs(tles, obs, start, end, minElDeg)
+}
+
+// PredictPassesForAll рассчитывает пролёты для ВСЕХ спутников в хранилище.
+// Возвращает пролёты отсортированные по AOS (ближайшие первыми).
+func PredictPassesForAll(
+	store *TLEStore,
+	obs *Observer,
+	start, end time.Time,
+	minElDeg float64,
+) ([]*Pass, error) {
+	if store == nil {
+		return nil, errors.New("TLE store is nil")
+	}
+
+	if obs == nil {
+		return nil, ErrNilObserver
+	}
+
+	// Получаем все TLE из хранилища.
+	tles := store.GetAll()
+	if len(tles) == 0 {
+		return nil, nil
+	}
+
+	return predictPassesForTLEs(tles, obs, start, end, minElDeg)
+}
+
+// predictPassesForTLEs — внутренняя функция расчёта пролётов для списка TLE.
+func predictPassesForTLEs(
+	tles []*TLE,
+	obs *Observer,
+	start, end time.Time,
+	minElDeg float64,
+) ([]*Pass, error) {
 	var allPasses []*Pass
 
 	for _, tle := range tles {

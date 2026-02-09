@@ -4,6 +4,19 @@
     <section class="map-column">
         <div class="earth-view-container">
             <canvas id="earth-view" width="800" height="400"></canvas>
+            <!-- Оверлей при смене спутника -->
+            <div id="tracking-overlay" class="tracking-overlay hidden">
+                <div class="tracking-overlay-content">
+                    <div class="tracking-spinner"></div>
+                    <div class="tracking-overlay-text">
+                        Берём на сопровождение
+                    </div>
+                    <div class="tracking-overlay-sat" id="tracking-overlay-sat">
+                        NORAD <span id="tracking-overlay-norad">---</span>
+                    </div>
+                    <div class="tracking-overlay-name" id="tracking-overlay-name">---</div>
+                </div>
+            </div>
         </div>
         <!-- Панель информации о спутнике -->
         <div class="satellite-info-panel" id="satellite-info">

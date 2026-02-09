@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"encoding/json"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -12,30 +11,24 @@ import (
 // PassServiceInterface — интерфейс сервиса пролётов.
 type PassServiceInterface interface {
 	GetPasses(group string, hours int, minEl float64) ([]*tracker.Pass, error)
-}
-
-// TrackingServiceInterface — интерфейс сервиса отслеживания (для POST /api/tracking/current).
-type TrackingServiceInterface interface {
-	TrackSatellite(noradID int) error
+	GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.Pass, error)
 }
 
 // PassHandler обрабатывает запросы к API пролётов.
 type PassHandler struct {
-	passService     PassServiceInterface
-	trackingService TrackingServiceInterface
+	passService PassServiceInterface
 }
 
 // NewPassHandler создаёт новый обработчик API пролётов.
-func NewPassHandler(passService PassServiceInterface, trackingService TrackingServiceInterface) *PassHandler {
+func NewPassHandler(passService PassServiceInterface) *PassHandler {
 	return &PassHandler{
-		passService:     passService,
-		trackingService: trackingService,
+		passService: passService,
 	}
 }
 
 // GetPasses обрабатывает GET /api/passes.
 // Query параметры:
-//   - group: группа спутников (по умолчанию "amateur")
+//   - group: группа спутников (опционально). Если не указан — возвращает пролёты всех групп.
 //   - hours: горизонт прогноза в часах (по умолчанию 24)
 //   - min_el: минимальный угол места в градусах (по умолчанию 5)
 //
@@ -43,9 +36,6 @@ func NewPassHandler(passService PassServiceInterface, trackingService TrackingSe
 func (h *PassHandler) GetPasses(w http.ResponseWriter, r *http.Request) {
 	// Парсинг параметров.
 	group := r.URL.Query().Get("group")
-	if group == "" {
-		group = "amateur"
-	}
 
 	hours := 24
 	if hoursStr := r.URL.Query().Get("hours"); hoursStr != "" {
@@ -61,8 +51,16 @@ func (h *PassHandler) GetPasses(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Получение пролётов.
-	passes, err := h.passService.GetPasses(group, hours, minEl)
+	var passes []*tracker.Pass
+	var err error
+
+	// Если группа не указана — возвращаем пролёты всех загруженных спутников.
+	if group == "" {
+		passes, err = h.passService.GetAllGroupsPasses(hours, minEl)
+	} else {
+		passes, err = h.passService.GetPasses(group, hours, minEl)
+	}
+
 	if err != nil {
 		slog.Error("failed to get passes",
 			"group", group,
@@ -76,64 +74,20 @@ func (h *PassHandler) GetPasses(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Для ответа: если группа пустая, обозначаем как "all".
+	responseGroup := group
+	if responseGroup == "" {
+		responseGroup = "all"
+	}
+
 	// Ответ.
 	writeJSON(w, http.StatusOK, PassesResponse{
 		Passes: passes,
 		Count:  len(passes),
 		Params: PassesParams{
-			Group: group,
+			Group: responseGroup,
 			Hours: hours,
 			MinEl: minEl,
 		},
-	})
-}
-
-// trackingRequest — тело запроса POST /api/tracking/current.
-type trackingRequest struct {
-	NoradID int `json:"norad_id"`
-}
-
-// SetTrackingCurrent обрабатывает POST /api/tracking/current.
-// Устанавливает спутник для отслеживания (добавляет в SatelliteTrackingService).
-func (h *PassHandler) SetTrackingCurrent(w http.ResponseWriter, r *http.Request) {
-	// Парсинг body.
-	var req trackingRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{
-			Error: "invalid request body",
-		})
-		return
-	}
-
-	if req.NoradID <= 0 {
-		writeJSON(w, http.StatusBadRequest, ErrorResponse{
-			Error: "norad_id is required and must be positive",
-		})
-		return
-	}
-
-	// Добавление в отслеживание.
-	if err := h.trackingService.TrackSatellite(req.NoradID); err != nil {
-		slog.Error("failed to track satellite",
-			"norad_id", req.NoradID,
-			"error", err,
-		)
-		// Определяем тип ошибки для корректного статуса.
-		status := http.StatusInternalServerError
-		msg := "failed to track satellite"
-		// Если спутник не найден — 404.
-		if err.Error() == "satellite not found in TLE store: "+strconv.Itoa(req.NoradID) {
-			status = http.StatusNotFound
-			msg = "satellite not found"
-		}
-		writeJSON(w, status, ErrorResponse{Error: msg})
-		return
-	}
-
-	slog.Info("satellite tracking started via API", "norad_id", req.NoradID)
-
-	writeJSON(w, http.StatusOK, TrackingResponse{
-		Status:  "tracking",
-		NoradID: req.NoradID,
 	})
 }

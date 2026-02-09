@@ -1,0 +1,284 @@
+/**
+ * Стили таблицы пролётов спутников.
+ */
+
+/* Таблица */
+.passes-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.8125rem;
+}
+
+.passes-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+
+.passes-table th {
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 0.6875rem;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    padding: var(--spacing-sm) var(--spacing-md);
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+    white-space: nowrap;
+}
+
+.passes-table th:last-child {
+    text-align: center;
+}
+
+/* Строки */
+.pass-row {
+    cursor: pointer;
+    transition: background-color 0.15s;
+}
+
+.pass-row:hover {
+    background: var(--bg-tertiary);
+}
+
+.pass-row--selected {
+    background: rgba(0, 168, 255, 0.15) !important;
+}
+
+.pass-row--selected:hover {
+    background: rgba(0, 168, 255, 0.2) !important;
+}
+
+/* Статусы строк */
+.pass-row--active {
+    background: rgba(74, 222, 128, 0.1);
+}
+
+.pass-row--active .sat-name {
+    color: var(--accent-success);
+    font-weight: 600;
+}
+
+.pass-row--active .pass-cell--countdown {
+    color: var(--accent-success);
+    font-weight: 600;
+}
+
+.pass-row--completed {
+    opacity: 0.5;
+}
+
+.pass-row--completed .sat-name {
+    color: var(--text-muted);
+}
+
+/* Ячейки */
+.pass-cell {
+    padding: var(--spacing-sm) var(--spacing-md);
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.pass-cell--name {
+    min-width: 140px;
+}
+
+.sat-name {
+    display: block;
+    color: var(--text-primary);
+    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 140px;
+}
+
+.sat-norad {
+    display: block;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+}
+
+.pass-cell--orbit {
+    text-align: center;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+}
+
+.pass-cell--time {
+    white-space: nowrap;
+}
+
+.time-value {
+    display: block;
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+}
+
+.az-value,
+.el-value {
+    display: block;
+    font-size: 0.6875rem;
+    color: var(--text-muted);
+}
+
+.el-value--max {
+    color: var(--accent-secondary);
+    font-weight: 500;
+}
+
+.pass-cell--duration {
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.pass-cell--countdown {
+    font-family: var(--font-mono);
+    color: var(--accent-warning);
+    text-align: center;
+    min-width: 70px;
+}
+
+.countdown-now {
+    color: var(--accent-success);
+    font-weight: 600;
+}
+
+.pass-cell--minipath {
+    text-align: center;
+    padding: var(--spacing-xs);
+}
+
+/* SVG мини-проекция */
+.mini-path {
+    display: block;
+    margin: 0 auto;
+}
+
+.mini-path .horizon-circle {
+    fill: none;
+    stroke: var(--border-color);
+    stroke-width: 0.04;
+}
+
+.mini-path .crosshair {
+    stroke: var(--bg-tertiary);
+    stroke-width: 0.02;
+    stroke-dasharray: 0.05 0.05;
+}
+
+.mini-path .sky-track {
+    fill: none;
+    stroke: var(--accent-secondary);
+    stroke-width: 0.06;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.mini-path .marker-aos {
+    fill: var(--accent-success);
+}
+
+.mini-path .marker-los {
+    fill: var(--accent-danger);
+}
+
+/* Пустое состояние */
+.passes-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md);
+    padding: calc(var(--spacing-xl) * 2);
+    color: var(--text-muted);
+    min-height: 300px;
+}
+
+.passes-empty svg {
+    opacity: 0.5;
+}
+
+.passes-empty p {
+    margin: 0;
+    font-size: 0.9375rem;
+}
+
+/* Ошибка */
+.passes-error {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--spacing-md);
+    padding: calc(var(--spacing-xl) * 2);
+    color: var(--accent-danger);
+    min-height: 300px;
+}
+
+.passes-error svg {
+    opacity: 0.7;
+}
+
+.passes-error p {
+    margin: 0;
+    color: var(--text-secondary);
+}
+
+/* Кнопка "Взять на сопровождение" */
+.passes-actions {
+    display: flex;
+    justify-content: flex-end;
+    padding: var(--spacing-md);
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+}
+
+#btn-track-satellite {
+    min-width: 200px;
+}
+
+#btn-track-satellite:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+    .passes-table {
+        font-size: 0.75rem;
+    }
+    
+    .passes-table th,
+    .pass-cell {
+        padding: var(--spacing-xs) var(--spacing-sm);
+    }
+    
+    .sat-name {
+        max-width: 100px;
+    }
+    
+    .mini-path {
+        width: 40px;
+        height: 40px;
+    }
+    
+    /* Скрываем орбиту на узких экранах */
+    .pass-cell--orbit,
+    .passes-table th:nth-child(2) {
+        display: none;
+    }
+}
+
+@media (max-width: 600px) {
+    /* Скрываем длительность и TCA на очень узких экранах */
+    .passes-table th:nth-child(4),
+    .passes-table th:nth-child(6),
+    .pass-cell:nth-child(4),
+    .pass-cell:nth-child(6) {
+        display: none;
+    }
+}

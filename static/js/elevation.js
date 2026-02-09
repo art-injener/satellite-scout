@@ -1,6 +1,6 @@
 // Elevation Indicator - Индикатор угла места
 // Использует AntennaDrawing для отрисовки антенны
-// Шкала от 0° (горизонт) до 90° (зенит) с двумя зонами:
+// Шкала: 0° по краям (горизонт W/E), 90° в центре (зенит)
 // - Левая зона (W): западная полусфера (азимут > 180° или az == 0°)
 // - Правая зона (E): восточная полусфера (0° < азимут ≤ 180°)
 
@@ -74,8 +74,8 @@
 
     /**
      * Отрисовка полулимба с двумя зонами
-     * Зенит = 0° (центр), Горизонт = 90° (края)
-     * Шкала: 90° (W) ← 60° ← 30° ← 0° (зенит) → 30° → 60° → 90° (E)
+     * Горизонт = 0° (края), Зенит = 90° (центр)
+     * Шкала: 0° (W) → 30° → 60° → 90° (зенит) ← 60° ← 30° ← 0° (E)
      */
     ElevationIndicator.prototype.drawLimb = function() {
         const ctx = this.ctx;
@@ -97,7 +97,7 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Вертикальная разделительная линия (зенит = 0°)
+        // Вертикальная разделительная линия (зенит = 90°)
         ctx.beginPath();
         ctx.moveTo(cx, cy - r + 2);
         ctx.lineTo(cx, cy - r + 15);
@@ -110,20 +110,21 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Шкала: 0° в центре (зенит), 90° по краям (горизонт)
-        // Левая сторона: 0° (верх) → 30° → 60° → 90° (лево)
-        // Правая сторона: 0° (верх) → 30° → 60° → 90° (право)
+        // Шкала: 0° по краям (горизонт), 90° в центре (зенит)
+        // Левая сторона: 0° (лево) → 30° → 60° → 90° (верх)
+        // Правая сторона: 90° (верх) → 60° → 30° → 0° (право)
         for (let i = 0; i <= 6; i++) {
             const scaleValue = i * 15; // 0, 15, 30, 45, 60, 75, 90
+            const labelValue = 90 - scaleValue; // Инвертируем: 90, 75, 60, 45, 30, 15, 0
             const isMain = scaleValue % 30 === 0;
             const innerR = isMain ? r - 15 : r - 10;
             const outerR = r - 2;
 
-            // Левая сторона: угол от PI/2 (верх, 0°) до PI (лево, 90°)
+            // Левая сторона: угол от PI/2 (верх, 90°) до PI (лево, 0°)
             // scaleValue=0 → rad=PI/2, scaleValue=90 → rad=PI
             const radLeft = Math.PI / 2 + scaleValue * Math.PI / 180;
 
-            // Правая сторона: угол от PI/2 (верх, 0°) до 0 (право, 90°)
+            // Правая сторона: угол от PI/2 (верх, 90°) до 0 (право, 0°)
             // scaleValue=0 → rad=PI/2, scaleValue=90 → rad=0
             const radRight = Math.PI / 2 - scaleValue * Math.PI / 180;
 
@@ -144,9 +145,9 @@
             // Подписи для левой стороны (основные деления)
             if (isMain) {
                 const labelR = r + 12;
-                const label = scaleValue.toString() + '°';
+                const label = labelValue.toString() + '°';
 
-                ctx.fillStyle = (scaleValue === 0) ? this.colors.textPrimary : this.colors.textSecondary;
+                ctx.fillStyle = (labelValue === 90) ? this.colors.textPrimary : this.colors.textSecondary;
                 ctx.fillText(
                     label,
                     cx + Math.cos(radLeft) * labelR,
@@ -154,7 +155,7 @@
                 );
             }
 
-            // === Правая сторона (кроме 0°, чтобы не дублировать в центре) ===
+            // === Правая сторона (кроме 90° в центре, чтобы не дублировать) ===
             if (scaleValue > 0) {
                 ctx.beginPath();
                 ctx.moveTo(
@@ -172,7 +173,7 @@
                 // Подписи для правой стороны
                 if (isMain) {
                     const labelR = r + 12;
-                    const label = scaleValue.toString() + '°';
+                    const label = labelValue.toString() + '°';
 
                     ctx.fillStyle = this.colors.textSecondary;
                     ctx.fillText(
@@ -184,15 +185,15 @@
             }
         }
 
-        // Подписи сторон света W и E под цифрами 90°
+        // Подписи сторон света W и E под цифрами 0°
         ctx.font = 'bold 11px monospace';
         ctx.fillStyle = this.colors.textMuted;
 
-        // W слева (под 90° левой стороны)
+        // W слева (под 0° левой стороны)
         ctx.textAlign = 'center';
         ctx.fillText('W', cx - r - 12, cy + 15);
 
-        // E справа (под 90° правой стороны)
+        // E справа (под 0° правой стороны)
         ctx.fillText('E', cx + r + 12, cy + 15);
     };
 

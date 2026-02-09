@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css?v=49">
+    <link rel="stylesheet" href="/static/css/main.css?v=50">
+    <link rel="stylesheet" href="/static/css/passes-table.css?v=1">
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/htmx-sse.js"></script>
 </head>
@@ -25,6 +26,19 @@
                     <circle cx="12" cy="12" r="3"/>
                     <path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
                     <path d="M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
+                </svg>
+            </a>
+            <a href="/passes" 
+               class="sidebar-tab{{if eq .ActiveTab "passes"}} active{{end}}" 
+               role="tab"
+               title="Пролёты"
+               hx-get="/passes" 
+               hx-target=".main" 
+               hx-push-url="true"
+               hx-select=".main">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <circle cx="12" cy="12" r="10"/>
+                    <polyline points="12 6 12 12 16 14"/>
                 </svg>
             </a>
             <a href="/receiver" 
@@ -75,6 +89,8 @@
         <main class="main" role="tabpanel">
             {{if eq .ActiveTab "tracking"}}
                 {{template "tracking-content" .}}
+            {{else if eq .ActiveTab "passes"}}
+                {{template "passes-content" .}}
             {{else if eq .ActiveTab "receiver"}}
                 {{template "receiver-content" .}}
             {{else if eq .ActiveTab "simulation"}}
@@ -95,6 +111,7 @@
     <script src="/static/js/skyview.js?v=50"></script>
     <script src="/static/js/satellite-state.js?v=2"></script>
     <script src="/static/js/sse-client.js?v=2"></script>
-    <script src="/static/js/app.js?v=49"></script></script>
+    <script src="/static/js/passes-table.js?v=2"></script>
+    <script src="/static/js/app.js?v=51"></script>
 </body>
 </html>

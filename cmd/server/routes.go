@@ -15,7 +15,6 @@ func setupRoutes(
 	cfg *config.Config,
 	sseHub *handlers.SSEHub,
 	passService *services.PassService,
-	trackingService *services.SatelliteTrackingService,
 ) {
 	// Инициализация обработчиков.
 	pageHandler, err := handlers.NewPageHandler("templates", true)
@@ -25,7 +24,7 @@ func setupRoutes(
 	}
 
 	apiHandler := handlers.NewAPIHandler(cfg)
-	passHandler := handlers.NewPassHandler(passService, trackingService)
+	passHandler := handlers.NewPassHandler(passService)
 
 	// Статические файлы.
 	staticFS := http.FileServer(http.Dir("static"))
@@ -34,6 +33,7 @@ func setupRoutes(
 	// Маршруты страниц.
 	mux.HandleFunc("GET /", pageHandler.Index)
 	mux.HandleFunc("GET /tracking", pageHandler.Tracking)
+	mux.HandleFunc("GET /passes", pageHandler.Passes)
 	mux.HandleFunc("GET /receiver", pageHandler.Receiver)
 	mux.HandleFunc("GET /simulation", pageHandler.Simulation)
 
@@ -43,7 +43,6 @@ func setupRoutes(
 
 	// API пролётов.
 	mux.HandleFunc("GET /api/passes", passHandler.GetPasses)
-	mux.HandleFunc("POST /api/tracking/current", passHandler.SetTrackingCurrent)
 
 	// SSE endpoint — EventSource-совместимый поток данных.
 	// WriteTimeout для SSE-соединений отключается per-connection в ServeHTTP.

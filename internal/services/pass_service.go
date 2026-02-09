@@ -22,6 +22,9 @@ const (
 
 	// Группа спутников по умолчанию.
 	DefaultSatelliteGroup = "amateur"
+
+	// Ключ кеша для всех групп.
+	allGroupsCacheKey = "all"
 )
 
 // cacheEntry — запись в кеше пролётов.
@@ -121,6 +124,74 @@ func (s *PassService) GetPasses(group string, hours int, minEl float64) ([]*trac
 		"min_el", minEl,
 		"passes", len(passes),
 	)
+
+	return passes, nil
+}
+
+// GetAllGroupsPasses возвращает список пролётов для ВСЕХ загруженных спутников.
+// Объединяет пролёты всех групп (stations, amateur, cubesat и др.).
+// Результат кешируется на время cacheTTL.
+// Пролёты отсортированы по времени AOS (ближайшие первыми).
+func (s *PassService) GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.Pass, error) {
+	// Нормализация параметров.
+	if hours <= 0 {
+		hours = DefaultPredictionHours
+	}
+	if minEl < 0 {
+		minEl = DefaultMinElevation
+	}
+
+	cacheKey := s.makeCacheKey(allGroupsCacheKey, hours, minEl)
+
+	// Проверка кеша.
+	s.mu.RLock()
+	entry, ok := s.cache[cacheKey]
+	s.mu.RUnlock()
+
+	if ok && !entry.isExpired(s.cacheTTL) {
+		slog.Debug("all groups pass cache hit",
+			"hours", hours,
+			"min_el", minEl,
+			"passes", len(entry.passes),
+		)
+		return entry.passes, nil
+	}
+
+	// Расчёт пролётов для всех спутников.
+	passes, err := s.computeAllPasses(hours, minEl)
+	if err != nil {
+		return nil, err
+	}
+
+	// Сохранение в кеш.
+	s.mu.Lock()
+	s.cache[cacheKey] = &cacheEntry{
+		passes:    passes,
+		createdAt: time.Now(),
+		group:     allGroupsCacheKey,
+		hours:     hours,
+		minEl:     minEl,
+	}
+	s.mu.Unlock()
+
+	slog.Debug("all groups pass cache miss, computed",
+		"hours", hours,
+		"min_el", minEl,
+		"passes", len(passes),
+	)
+
+	return passes, nil
+}
+
+// computeAllPasses рассчитывает пролёты для всех спутников в хранилище.
+func (s *PassService) computeAllPasses(hours int, minEl float64) ([]*tracker.Pass, error) {
+	now := time.Now().UTC()
+	end := now.Add(time.Duration(hours) * time.Hour)
+
+	passes, err := tracker.PredictPassesForAll(s.store, s.observer, now, end, minEl)
+	if err != nil {
+		return nil, err
+	}
 
 	return passes, nil
 }

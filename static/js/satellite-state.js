@@ -252,9 +252,10 @@ class SatelliteStateManager {
      * Вызывает satellite_change event с состоянием нового спутника.
      *
      * @param {number} noradId — NORAD ID спутника.
+     * @param {string} [name] — Имя спутника (опционально, из SSE события).
      * @returns {boolean} true если спутник найден или создан.
      */
-    setActiveSatellite(noradId) {
+    setActiveSatellite(noradId, name) {
         if (typeof noradId !== 'number' || noradId <= 0) {
             console.warn('[StateManager] setActiveSatellite: invalid noradId');
             return false;
@@ -266,6 +267,10 @@ class SatelliteStateManager {
         // Notify о смене спутника (даже если состояние ещё пустое).
         if (noradId !== prevId) {
             const state = this._getOrCreateState(noradId);
+            // Устанавливаем имя из SSE если оно есть
+            if (name && typeof name === 'string') {
+                state.name = name;
+            }
             this._notify(StateEventType.SATELLITE_CHANGE, state);
         }
 

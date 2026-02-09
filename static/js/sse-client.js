@@ -232,7 +232,7 @@ class SSEClient {
             break;
         case 'satellite_change':
             if (typeof data.norad_id === 'number') {
-                this._stateManager.setActiveSatellite(data.norad_id);
+                this._stateManager.setActiveSatellite(data.norad_id, data.name || '');
             }
             break;
         default:

@@ -67,7 +67,7 @@ func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
 	h.render(w, templateBaseName, data)
 }
 
-// Receiver рендерит страницу приёмника (вкладка 2).
+// Receiver рендерит страницу приёмника (вкладка 3).
 func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
 		Title:     "Приёмник - Satellite Scout",
@@ -76,7 +76,16 @@ func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
 	h.render(w, templateBaseName, data)
 }
 
-// Simulation рендерит страницу имитации (вкладка 3).
+// Passes рендерит страницу пролётов (вкладка 2).
+func (h *PageHandler) Passes(w http.ResponseWriter, r *http.Request) {
+	data := PageData{
+		Title:     "Пролёты - Satellite Scout",
+		ActiveTab: "passes",
+	}
+	h.render(w, templateBaseName, data)
+}
+
+// Simulation рендерит страницу имитации (вкладка 4).
 func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
 		Title:     "Имитация - Satellite Scout",

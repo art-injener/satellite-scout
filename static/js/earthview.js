@@ -32,18 +32,20 @@
         this.colors = {
             background: '#000010', // Тёмно-синий фон (океаны)
             coastline: '#00d4d4', // Циан - береговые линии
-            grid: '#0044aa', // Синий - сетка (как в STSPLUS)
-            gridMajor: '#0066cc', // Яркий синий - основные линии
+            grid: '#556677', // Серый - сетка (видимый)
+            gridMajor: '#667788', // Светлее - основные линии
             orbitFuture: '#00ff00', // Зелёный - будущая орбита
             orbitPast: '#ff4444', // Красный - прошлая орбита
             orbitDots: '#ffff00', // Жёлтый - точки орбиты
             satellite: '#ffffff', // Белый - маркер спутника
             satelliteGlow: '#00ffff', // Циан - свечение спутника
-            footprint: '#aaaaaa', // Серый - круг видимости (пунктир)
+            footprint: 'rgba(0, 200, 255, 0.6)', // Голубой - контур зоны видимости
+            footprintFill: 'rgba(0, 200, 255, 0.08)', // Голубой с прозрачностью - заливка зоны
             observer: '#ff0000', // Красный - наблюдатель (как в STSPLUS)
             textPrimary: '#ffffff',
             textSecondary: '#00d4d4', // Циан для подписей
-            textGrid: '#ffffff' // Белые подписи сетки
+            textGrid: '#ffffff', // Белые подписи сетки
+            satLabel: '#ffff00' // Жёлтый - подпись спутника (контрастный)
         };
 
         // Данные береговых линий (GeoJSON)
@@ -507,7 +509,7 @@
         // Название спутника
         if (this.satellite.name) {
             ctx.font = 'bold 11px monospace';
-            ctx.fillStyle = this.colors.textPrimary;
+            ctx.fillStyle = this.colors.satLabel;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'bottom';
             ctx.fillText(this.satellite.name, p.x + 18, p.y - 4);
@@ -554,37 +556,58 @@
 
         if (!points || points.length < 2) { return; }
 
-        ctx.strokeStyle = this.colors.footprint;
-        ctx.lineWidth = 1;
-        ctx.setLineDash([5, 5]);
-
-        ctx.beginPath();
-
+        // Собираем сегменты (разрыв при пересечении антимеридиана)
+        var segments = [];
+        var currentSegment = [];
         var prevP = null;
-        var moved = false;
 
         for (var i = 0; i < points.length; i++) {
             var pt = points[i];
             var p = this.project(pt.lon, pt.lat);
 
             if (prevP && Math.abs(p.x - prevP.x) > this.width / 2) {
-                ctx.stroke();
-                ctx.beginPath();
-                moved = false;
+                // Разрыв — сохраняем текущий сегмент и начинаем новый
+                if (currentSegment.length > 0) {
+                    segments.push(currentSegment);
+                }
+                currentSegment = [];
             }
 
-            if (!moved) {
-                ctx.moveTo(p.x, p.y);
-                moved = true;
-            } else {
-                ctx.lineTo(p.x, p.y);
-            }
-
+            currentSegment.push(p);
             prevP = p;
         }
+        if (currentSegment.length > 0) {
+            segments.push(currentSegment);
+        }
 
-        ctx.stroke();
+        // Рисуем заливку (если зона не разорвана)
+        if (segments.length === 1 && segments[0].length > 2) {
+            ctx.beginPath();
+            ctx.moveTo(segments[0][0].x, segments[0][0].y);
+            for (var j = 1; j < segments[0].length; j++) {
+                ctx.lineTo(segments[0][j].x, segments[0][j].y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = this.colors.footprintFill;
+            ctx.fill();
+        }
+
+        // Рисуем контур
+        ctx.strokeStyle = this.colors.footprint;
+        ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
+
+        for (var k = 0; k < segments.length; k++) {
+            var seg = segments[k];
+            if (seg.length < 2) continue;
+
+            ctx.beginPath();
+            ctx.moveTo(seg[0].x, seg[0].y);
+            for (var m = 1; m < seg.length; m++) {
+                ctx.lineTo(seg[m].x, seg[m].y);
+            }
+            ctx.stroke();
+        }
     };
 
     // ========== API методы ==========

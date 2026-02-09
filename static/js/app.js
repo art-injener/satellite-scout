@@ -58,6 +58,14 @@
 
         // Initialize canvas placeholders
         initCanvasPlaceholders();
+        
+        // Инициализация таблицы пролётов, если мы на вкладке /passes
+        if (typeof initPassesTable === 'function') {
+            var passesContainer = document.getElementById('passes-table-container');
+            if (passesContainer) {
+                initPassesTable();
+            }
+        }
     });
 
     // Инициализация StateManager и SSE Client один раз (подписки и подключение).
@@ -92,22 +100,16 @@
         var sm = window._stateManager;
         var StateEventType = window.StateEventType;
 
+        // Запоминаем для какого спутника уже загружен sky path
+        var loadedSkyPathForNoradId = null;
+        
         sm.subscribe(StateEventType.POSITION, function(state) {
-            console.log('[app.js] Получено событие POSITION:', state);
             var pos = state.position;
             if (!pos) { 
-                console.warn('[app.js] POSITION: нет данных позиции');
                 return; 
             }
 
-            console.log('[app.js] POSITION данные:', {
-                lat: pos.lat,
-                lon: pos.lon,
-                alt: pos.alt,
-                az: pos.az,
-                el: pos.el
-            });
-
+            // Обновление EarthView
             if (window.earthView) {
                 window.earthView.setSatellitePosition(pos.lon, pos.lat, pos.alt);
                 window.earthView.setSatelliteInfo(state.name || '', state.noradId);
@@ -117,18 +119,30 @@
                 window.earthView.draw();
                 window.earthView.updateInfoPanel(pos.ts || Date.now());
             }
+            
+            // Обновление SkyView
             if (window.skyView) {
+                window.skyView.setSatelliteInfo(state.name || '');
                 window.skyView.setSatellitePosition(pos.az, pos.el);
-                window.skyView.draw();
+                
+                // Загружаем sky path если ещё не загружен для этого спутника
+                if (state.noradId && loadedSkyPathForNoradId !== state.noradId) {
+                    loadedSkyPathForNoradId = state.noradId;
+                    loadSkyPathForSatellite(state.noradId);
+                }
             }
+            
+            // Обновление индикаторов
             if (window.azimuthIndicator) {
                 window.azimuthIndicator.setAzimuth(pos.az);
                 window.azimuthIndicator.draw();
             }
             if (window.elevationIndicator) {
-                // Передаём азимут и угол места для определения полусферы (W/E)
                 window.elevationIndicator.setPosition(pos.az, pos.el);
             }
+            
+            // Обновление info panel
+            updateInfoPanel(state);
         });
 
         sm.subscribe(StateEventType.TRACK, function(state) {
@@ -137,6 +151,119 @@
                 window.earthView.draw();
             }
         });
+        
+        // При смене спутника: оверлей + загрузка sky path
+        sm.subscribe(StateEventType.SATELLITE_CHANGE, function(state) {
+            console.log('[app.js] Смена спутника:', state.noradId, state.name);
+            loadedSkyPathForNoradId = state.noradId;
+            loadSkyPathForSatellite(state.noradId);
+            showTrackingOverlay(state.noradId, state.name || '');
+        });
+    }
+    
+    // Показ/скрытие оверлея при смене спутника
+    var overlayTimer = null;
+    function showTrackingOverlay(noradId, name) {
+        var overlay = document.getElementById('tracking-overlay');
+        if (!overlay) return;
+        
+        // Отменяем предыдущий таймер
+        if (overlayTimer) {
+            clearTimeout(overlayTimer);
+            overlayTimer = null;
+        }
+        
+        // Заполняем данные
+        var noradEl = document.getElementById('tracking-overlay-norad');
+        var nameEl = document.getElementById('tracking-overlay-name');
+        if (noradEl) noradEl.textContent = noradId || '---';
+        if (nameEl) nameEl.textContent = name || '---';
+        
+        // Показываем
+        overlay.classList.remove('hidden', 'fade-out');
+        
+        // Скрываем через 3 секунды с плавным fade-out
+        overlayTimer = setTimeout(function() {
+            overlay.classList.add('fade-out');
+            // После завершения анимации скрываем полностью
+            setTimeout(function() {
+                overlay.classList.add('hidden');
+                overlay.classList.remove('fade-out');
+            }, 600); // длительность transition в CSS
+        }, 3000);
+    }
+    
+    // Обновление info panel данными спутника
+    function updateInfoPanel(state) {
+        var pos = state.position;
+        if (!pos) return;
+        
+        var el = function(id) { return document.getElementById(id); };
+        
+        // NORAD ID и имя
+        if (el('info-norad')) el('info-norad').textContent = state.noradId || '--';
+        if (el('info-name')) el('info-name').textContent = state.name || '--';
+        
+        // Координаты
+        if (el('info-lat')) el('info-lat').textContent = pos.lat ? pos.lat.toFixed(2) + '°' : '---.--°';
+        if (el('info-lon')) el('info-lon').textContent = pos.lon ? pos.lon.toFixed(2) + '°' : '---.--°';
+        if (el('info-alt')) el('info-alt').textContent = pos.alt ? pos.alt.toFixed(0) + ' km' : '--- km';
+        
+        // UTC время
+        if (el('info-time')) {
+            var ts = pos.ts || Date.now();
+            var d = new Date(ts);
+            el('info-time').textContent = d.toISOString().substr(11, 8);
+        }
+    }
+    
+    // Загрузка sky path для SkyView при смене спутника
+    function loadSkyPathForSatellite(noradId) {
+        if (!noradId || !window.skyView) return;
+        
+        // Запрашиваем пролёты и ищем ближайший для этого спутника
+        fetch('/api/passes?hours=24')
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (!data.passes || data.passes.length === 0) return;
+                
+                var now = Date.now();
+                // Ищем активный или ближайший пролёт для этого спутника
+                var pass = null;
+                for (var i = 0; i < data.passes.length; i++) {
+                    var p = data.passes[i];
+                    if (p.norad_id === noradId) {
+                        // Активный пролёт (сейчас виден) или ближайший предстоящий
+                        if ((p.aos <= now && now <= p.los) || now < p.aos) {
+                            pass = p;
+                            break;
+                        }
+                    }
+                }
+                
+                if (pass && pass.sky_path && pass.sky_path.length > 0) {
+                    // API возвращает точки с готовыми az/el/time
+                    var track = pass.sky_path.map(function(point) {
+                        return {
+                            az: point.az,
+                            el: point.el,
+                            time: point.time  // Используем время из API
+                        };
+                    });
+                    
+                    window.skyView.setTrack(track);
+                    window.skyView.setPassTimes(pass.aos, pass.los);
+                    console.log('[app.js] SkyView track для', noradId, ':', track.length, 'точек');
+                    console.log('[app.js] Первая точка:', track[0]);
+                    console.log('[app.js] Последняя точка:', track[track.length-1]);
+                    console.log('[app.js] Pass AOS:', new Date(pass.aos).toISOString(), 'LOS:', new Date(pass.los).toISOString());
+                } else {
+                    console.log('[app.js] Нет sky_path для пролёта', noradId, pass);
+                }
+            })
+            .catch(function(err) {
+                console.error('[app.js] Ошибка загрузки sky path:', err);
+            });
     }
 
     // Initialize canvas elements with placeholder content
@@ -191,6 +318,17 @@
             }
             window.skyView = new window.SkyView(skyCanvas);
             window.skyView.draw();
+            
+            // Запуск цикла анимации для SkyView (плавная отрисовка)
+            startSkyViewAnimation();
+            
+            // Загружаем sky path для текущего спутника, если он уже известен
+            if (window._stateManager) {
+                var state = window._stateManager.getActiveState();
+                if (state && state.noradId) {
+                    loadSkyPathForSatellite(state.noradId);
+                }
+            }
         } else if (skyCanvas) {
             drawPlaceholder(skyCanvas, '', 'Небесная сфера');
         }
@@ -287,6 +425,14 @@
     document.body.addEventListener('htmx:afterSwap', function() {
         // Reinitialize canvas after HTMX swap
         initCanvasPlaceholders();
+        
+        // Инициализация таблицы пролётов, если мы на вкладке /passes
+        if (typeof initPassesTable === 'function') {
+            var passesContainer = document.getElementById('passes-table-container');
+            if (passesContainer) {
+                initPassesTable();
+            }
+        }
     });
 
     // Переключение активного класса на табах при клике
@@ -302,9 +448,36 @@
         }
     });
 
+    // Цикл анимации для SkyView (использует requestAnimationFrame)
+    var skyViewAnimationId = null;
+    
+    function startSkyViewAnimation() {
+        if (skyViewAnimationId) {
+            cancelAnimationFrame(skyViewAnimationId);
+        }
+        
+        function animate() {
+            if (window.skyView) {
+                window.skyView.draw();
+            }
+            skyViewAnimationId = requestAnimationFrame(animate);
+        }
+        
+        animate();
+    }
+    
+    function stopSkyViewAnimation() {
+        if (skyViewAnimationId) {
+            cancelAnimationFrame(skyViewAnimationId);
+            skyViewAnimationId = null;
+        }
+    }
+
     // Expose for debugging
     window.SatWatch = {
-        setConnectionStatus: setConnectionStatus
+        setConnectionStatus: setConnectionStatus,
+        loadSkyPath: loadSkyPathForSatellite,
+        stopSkyViewAnimation: stopSkyViewAnimation
     };
 
 })();

@@ -50,22 +50,22 @@ func main() {
 	// Наблюдатель (ObserverAlt в метрах → км).
 	observer := tracker.NewObserver(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt/1000.0)
 
-	// Сервис отслеживания спутников — позиции (1/сек) и наземные трассы (1/30 сек) через SSE.
+	// Сервис отслеживания спутников — позиции (1/сек), трассы (1/30 сек), авто-трекинг (1/10 сек).
 	trackingService := services.NewSatelliteTrackingService(sseHub, tleStore, observer)
-	go trackingService.Run(svcCtx)
 
 	// Сервис пролётов — расчёт и кеширование пролётов спутников.
 	passService := services.NewPassService(tleStore, observer)
 
-	// Начальное отслеживание ISS (NORAD 25544) для демонстрации.
-	const issNoradID = 25544
-	if err := trackingService.TrackSatellite(issNoradID); err != nil {
-		slog.Warn("failed to track ISS — TLE may not be loaded yet", "error", err)
-	}
+	// Связываем trackingService с passService для авто-трекинга.
+	// При старте автоматически выбирается ближайший по расписанию спутник.
+	trackingService.SetPassProvider(passService)
+
+	// Запускаем сервис отслеживания (авто-трекинг включится автоматически).
+	go trackingService.Run(svcCtx)
 
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, sseHub, passService, trackingService)
+	setupRoutes(mux, cfg, sseHub, passService)
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.

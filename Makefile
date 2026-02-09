@@ -1,6 +1,6 @@
 .PHONY: build test lint lint-js lint-fix fmt run stop clean
 
-APP_NAME=sat-scout
+APP_NAME=satellite-scout
 BUILD_DIR=./build
 BINARY=$(BUILD_DIR)/$(APP_NAME)
 PID_FILE=$(BUILD_DIR)/$(APP_NAME).pid
