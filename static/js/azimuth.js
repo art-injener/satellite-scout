@@ -235,34 +235,6 @@
         return this.currentAzimuth;
     };
 
-    /**
-     * Демо-анимация
-     */
-    AzimuthIndicator.prototype.startDemo = function(speed) {
-        const self = this;
-        speed = speed || 1;
-
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-        }
-
-        function animate() {
-            self.currentAzimuth = (self.currentAzimuth + speed) % 360;
-            self.draw();
-            self._animationId = requestAnimationFrame(animate);
-        }
-        animate();
-    };
-
-    /**
-     * Остановка демо
-     */
-    AzimuthIndicator.prototype.stopDemo = function() {
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-            this._animationId = null;
-        }
-    };
 
     // Экспорт
     window.AzimuthIndicator = AzimuthIndicator;

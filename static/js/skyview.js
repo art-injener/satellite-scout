@@ -695,11 +695,11 @@
         if (this.satellite.name) {
             ctx.font = 'bold 10px sans-serif';
             ctx.fillStyle = this.colors.satLabel;
-            ctx.textAlign = 'left';
+            ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
             ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
             ctx.shadowBlur = 3;
-            ctx.fillText(this.satellite.name, p.x + size + 5, p.y - 2);
+            ctx.fillText(this.satellite.name, p.x + size + 5, p.y - 10);
             ctx.shadowBlur = 0;
         }
     };
@@ -1006,134 +1006,6 @@
         Object.assign(this.colors, colors);
     };
 
-    /**
-     * Демо-режим с симуляцией пролёта
-     */
-    SkyView.prototype.startDemo = function(speed) {
-        const self = this;
-        speed = speed || 1;
-
-        this.setSatelliteInfo('ISS');
-        this._lastAnimTime = Date.now();
-
-        // Параметры симуляции пролёта
-        const passDuration = 10 * 60 * 1000; // 10 минут
-        const startTime = Date.now();
-        let simTime = startTime;
-
-        // Генерация траектории пролёта спутника
-        // Строим ДУГУ на азимутальной проекции (полярная проекция: ro = 1 - El/90°)
-        function generatePassTrack(baseTime) {
-            self.clearTrack();
-
-            // Параметры пролёта
-            const maxEl = 30 + Math.random() * 50; // Макс. угол места 30-80°
-            const passDirection = Math.random() * 360; // Направление пролёта (градусы)
-            const passDirectionRad = passDirection * Math.PI / 180;
-
-            // Кривизна дуги (смещение перпендикулярно направлению)
-            // Чем выше maxEl, тем меньше кривизна (более прямой путь)
-            const curvature = 0.2 + Math.random() * 0.3 * (1 - maxEl / 90); // 0.2-0.5, ослаблено при высоком maxEl
-
-            const steps = 60;
-
-            for (let i = 0; i <= steps; i++) {
-                const t = i / steps; // 0 → 1
-                const s = (t - 0.5) * 2; // -1 → 0 → 1
-
-                // Компонента вдоль направления пролёта (линейная)
-                const alongTrack = s * 0.95; // от -0.95 до +0.95 (не доходя до края)
-
-                // Компонента поперёк направления (парабола - создаёт дугу!)
-                // Максимум в центре (s=0), ноль на краях (s=±1)
-                const acrossTrack = curvature * (1 - s * s);
-
-                // Координаты на проекции
-                // alongTrack - вдоль направления пролёта
-                // acrossTrack - перпендикулярно (создаёт изгиб дуги)
-                const projX = alongTrack * Math.sin(passDirectionRad) + acrossTrack * Math.cos(passDirectionRad);
-                const projY = -alongTrack * Math.cos(passDirectionRad) + acrossTrack * Math.sin(passDirectionRad);
-
-                // Радиус на проекции
-                const projRadius = Math.sqrt(projX * projX + projY * projY);
-
-                // Elevation из радиуса: ro=0 → el=90°, ro=1 → el=0°
-                const el = 90 * (1 - Math.min(1, projRadius));
-
-                // Азимут из координат
-                let az = Math.atan2(projX, -projY) * 180 / Math.PI;
-                if (az < 0) {az += 360;}
-
-                const time = baseTime + t * passDuration;
-
-                // Добавляем только видимую часть (el >= 0)
-                if (el >= 0) {
-                    self.addTrackPoint(az, el, time);
-                }
-            }
-        }
-
-        generatePassTrack(simTime);
-
-        function animate() {
-            simTime += 100 * speed;
-
-            const track = self.satellite.track;
-            let currentPos = null;
-
-            for (let i = 0; i < track.length - 1; i++) {
-                if (track[i].time <= simTime && track[i + 1].time > simTime) {
-                    const t1 = track[i];
-                    const t2 = track[i + 1];
-                    const ratio = (simTime - t1.time) / (t2.time - t1.time);
-
-                    let az = t1.az + (t2.az - t1.az) * ratio;
-                    if (Math.abs(t2.az - t1.az) > 180) {
-                        if (t2.az > t1.az) {
-                            az = t1.az + (t2.az - 360 - t1.az) * ratio;
-                        } else {
-                            az = t1.az + (t2.az + 360 - t1.az) * ratio;
-                        }
-                        if (az < 0) {az += 360;}
-                        if (az >= 360) {az -= 360;}
-                    }
-
-                    currentPos = {
-                        az: az,
-                        el: t1.el + (t2.el - t1.el) * ratio
-                    };
-                    break;
-                }
-            }
-
-            if (!currentPos || simTime > track[track.length - 1].time) {
-                simTime = Date.now();
-                generatePassTrack(simTime);
-                currentPos = { az: track[0].az, el: track[0].el };
-            }
-
-            self.setSatellitePosition(currentPos.az, currentPos.el);
-            self.draw();
-
-            self._animationId = requestAnimationFrame(animate);
-        }
-
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-        }
-
-        animate();
-    };
-
-    /**
-     * Остановка демо
-     */
-    SkyView.prototype.stopDemo = function() {
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-            this._animationId = null;
-        }
-    };
 
     // Экспорт
     window.SkyView = SkyView;

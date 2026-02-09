@@ -273,9 +273,6 @@
         // Earth View — карта мира, данные с SSE
         var earthCanvas = document.getElementById('earth-view');
         if (earthCanvas && window.EarthView) {
-            if (window.earthView) {
-                window.earthView.stopDemo();
-            }
             window.earthView = new window.EarthView(earthCanvas);
             window.earthView.init().then(function() {
                 // Загрузка координат наблюдателя из конфигурации сервера
@@ -313,9 +310,6 @@
         // Sky View — азимутальная проекция неба, данные с SSE
         var skyCanvas = document.getElementById('sky-view');
         if (skyCanvas && window.SkyView) {
-            if (window.skyView) {
-                window.skyView.stopDemo();
-            }
             window.skyView = new window.SkyView(skyCanvas);
             window.skyView.draw();
             

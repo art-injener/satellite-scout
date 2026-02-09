@@ -23,12 +23,10 @@
             showCoastlines: true,
             showFootprint: true, // Круг видимости спутника
             trackMode: 'both', // 'line', 'dots', 'both'
-            trackDotInterval: 60000, // Интервал точек в мс (1 минута)
-            orbitPeriodMinutes: 92, // Период орбиты (МКС ~92 мин)
-            orbitRevolutions: 3 // Количество витков для отображения
+            trackDotInterval: 60000 // Интервал точек в мс (1 минута)
         }, options || {});
 
-        // Цветовая схема в стиле STSPLUS
+        // Цветовая схема в стиле STSPLUS (улучшенная для читаемости)
         this.colors = {
             background: '#000010', // Тёмно-синий фон (океаны)
             coastline: '#00d4d4', // Циан - береговые линии
@@ -39,13 +37,13 @@
             orbitDots: '#ffff00', // Жёлтый - точки орбиты
             satellite: '#ffffff', // Белый - маркер спутника
             satelliteGlow: '#00ffff', // Циан - свечение спутника
-            footprint: 'rgba(0, 200, 255, 0.6)', // Голубой - контур зоны видимости
-            footprintFill: 'rgba(0, 200, 255, 0.08)', // Голубой с прозрачностью - заливка зоны
+            footprint: 'rgba(200, 100, 255, 0.60)', // Пурпурный - контур зоны видимости (контрастирует с бирюзой и зелёным)
+            footprintFill: 'rgba(200, 100, 255, 0.10)', // Пурпурный полупрозрачный - заливка зоны
             observer: '#ff0000', // Красный - наблюдатель (как в STSPLUS)
             textPrimary: '#ffffff',
             textSecondary: '#00d4d4', // Циан для подписей
             textGrid: '#ffffff', // Белые подписи сетки
-            satLabel: '#ffff00' // Жёлтый - подпись спутника (контрастный)
+            satLabel: 'rgba(200, 100, 255, 0.60)' // Ярко-жёлтый - подпись спутника (контрастирует с пурпурной зоной)
         };
 
         // Данные береговых линий (GeoJSON)
@@ -75,7 +73,7 @@
             { name: 'DELHI', lon: 77.21, lat: 28.61 },
             { name: 'NEW YORK', lon: -74.01, lat: 40.71 },
             { name: 'LONDON', lon: -0.13, lat: 51.51 },
-            { name: 'CAIRO', lon: 31.24, lat: 30.04 },
+            // { name: 'CAIRO', lon: 31.24, lat: 30.04 },
             { name: 'SYDNEY', lon: 151.21, lat: -33.87 },
             { name: 'RIO DE JANEIRO', lon: -43.17, lat: -22.91 },
             { name: 'CAPE TOWN', lon: 18.42, lat: -33.93 },
@@ -379,7 +377,7 @@
 
     /**
      * Отрисовка наземной трассы спутника.
-     * Поддерживает формат с сервера {past: [[...]], future: [[...]]} и плоский массив (демо).
+     * Поддерживает формат с сервера {past: [[...]], future: [[...]]} и плоский массив.
      */
     EarthView.prototype._drawGroundTrack = function() {
         const track = this.satellite.groundTrack;
@@ -485,6 +483,12 @@
         ctx.fillStyle = this.colors.satellite;
         ctx.lineWidth = 2;
 
+        // Неоновая обводка (glow эффект)
+        ctx.shadowColor = '#ff00ff'; // magenta неоновый
+        ctx.shadowBlur = 5;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 0;
+
         // Иконка спутника в стиле STSPLUS (упрощённая МКС)
         // Центральный модуль
         ctx.fillRect(p.x - 2, p.y - 6, 4, 12);
@@ -506,13 +510,17 @@
         ctx.lineTo(p.x + 14, p.y + 3);
         ctx.stroke();
 
-        // Название спутника
+        // Сброс свечения
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+
+        // Название спутника (такой же стиль, как у наблюдателя, под иконкой)
         if (this.satellite.name) {
-            ctx.font = 'bold 11px monospace';
-            ctx.fillStyle = this.colors.satLabel;
-            ctx.textAlign = 'left';
-            ctx.textBaseline = 'bottom';
-            ctx.fillText(this.satellite.name, p.x + 18, p.y - 4);
+            ctx.font = 'bold 10px monospace';
+            ctx.fillStyle = '#ffffff'; // Белый текст
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.fillText(this.satellite.name, p.x, p.y + 8);
         }
     };
 
@@ -523,26 +531,20 @@
         const ctx = this.ctx;
         const p = this.project(this.observer.lon, this.observer.lat);
 
-        // Оранжевый треугольник
-        const size = 5;
-        ctx.fillStyle = '#ffaa00'; // Оранжевый
-        ctx.strokeStyle = '#ff6600'; // Более тёмный оранжевый для обводки
-        ctx.lineWidth = 1;
+        // Оранжевый кружок без заливки (маленький)
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y - size); // Вершина
-        ctx.lineTo(p.x - size, p.y + size); // Левый нижний угол
-        ctx.lineTo(p.x + size, p.y + size); // Правый нижний угол
-        ctx.closePath();
-        ctx.fill();
+        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
+        ctx.strokeStyle = '#ffaa00'; // Оранжевый
+        ctx.lineWidth = 1;
         ctx.stroke();
 
         // Название белым цветом
         if (this.observer.name) {
-            ctx.font = 'bold 10px monospace';
-            ctx.fillStyle = '#ffffff'; // Белый текст
+            ctx.font = 'bold 9px monospace';
+            ctx.fillStyle = '#ffaa00'; // Белый текст
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(this.observer.name, p.x + size + 4, p.y);
+            ctx.fillText(this.observer.name.toLocaleUpperCase(), p.x + 5, p.y);
         }
     };
 
@@ -592,7 +594,7 @@
             ctx.fill();
         }
 
-        // Рисуем контур
+        // Рисуем контур (тонкая линия)
         ctx.strokeStyle = this.colors.footprint;
         ctx.lineWidth = 1.5;
         ctx.setLineDash([]);
@@ -647,7 +649,7 @@
     /**
      * Установка наземной трассы спутника.
      * Принимает формат с сервера {past: [[{lon, lat, ts}...]], future: [[...]]}
-     * или плоский массив точек [{lon, lat, time}] (для демо).
+     * или плоский массив точек [{lon, lat, time}].
      * @param {Array|Object} data - Массив точек или объект {past, future}
      */
     EarthView.prototype.setGroundTrack = function(data) {
@@ -714,115 +716,10 @@
     };
 
     /**
-     * Демо-анимация движения спутника
-     * @param {number} speed - Скорость (множитель времени, 1 = реальное время)
-     */
-    EarthView.prototype.startDemo = function(speed) {
-        const self = this;
-        speed = speed || 1;
-
-        // Тестовые данные МКС-подобной орбиты
-        this.setSatelliteInfo('ISS', 25544);
-        // Ростов-на-Дону
-        this.setObserver(39.7, 47.23, 'Rostov-on-Don');
-
-        const inclination = 51.6; // Наклонение орбиты МКС (градусы)
-        const orbitalPeriod = 92 * 60 * 1000; // Период орбиты в мс (~92 минуты)
-        const revolutions = this.options.orbitRevolutions || 3; // Количество витков
-
-        // Время симуляции
-        let simTime = Date.now();
-        let lastTrackUpdateTime = 0;
-        let currentPointIndex = 0;
-
-        // Функция расчёта позиции спутника по времени
-        function calcPosition(time) {
-            // Угловая скорость (градусов в мс)
-            const angularSpeed = 360 / orbitalPeriod;
-            // Текущий угол на орбите
-            const angle = (time * angularSpeed) % 360;
-            // Долгота (учитываем вращение Земли: -360°/24ч)
-            const earthRotation = (time / (24 * 60 * 60 * 1000)) * 360;
-            const lon = (angle - earthRotation) % 360;
-            // Нормализация долготы
-            const normalizedLon = lon > 180 ? lon - 360 : (lon < -180 ? lon + 360 : lon);
-            // Широта (синусоида с наклонением)
-            const lat = inclination * Math.sin(angle * Math.PI / 180);
-
-            return { lon: normalizedLon, lat: lat };
-        }
-
-        // Генерация статичной орбиты на несколько витков вперёд
-        function generateTrack(baseTime) {
-            self.clearGroundTrack();
-
-            // Генерируем орбиту: только вперёд на 3 витка
-            const futureDuration = orbitalPeriod * revolutions;
-            const step = 30000; // Шаг 30 секунд для плавности
-
-            for (let dt = 0; dt <= futureDuration; dt += step) {
-                const time = baseTime + dt;
-                const pos = calcPosition(time);
-                self.addTrackPoint(pos.lon, pos.lat, time);
-            }
-
-            lastTrackUpdateTime = baseTime;
-            currentPointIndex = 0; // Начинаем с первой точки
-        }
-
-        // Поиск ближайшей точки на орбите для текущего времени
-        function findCurrentPointIndex() {
-            const track = self.satellite.groundTrack;
-            for (let i = 0; i < track.length; i++) {
-                if (track[i].time >= simTime) {
-                    return Math.max(0, i - 1);
-                }
-            }
-            return track.length - 1;
-        }
-
-        function animate() {
-            // Обновление симулированного времени (медленнее)
-            simTime += 200 * speed; // +0.2 секунды * speed за кадр (~12x реального времени)
-
-            // Проверяем, нужно ли обновить орбиту (каждый виток)
-            const timeSinceUpdate = simTime - lastTrackUpdateTime;
-            if (timeSinceUpdate > orbitalPeriod * 0.9) {
-                // Спутник близко к концу отображаемой орбиты - обновляем
-                generateTrack(simTime);
-            }
-
-            // Движение спутника по точкам орбиты
-            const track = self.satellite.groundTrack;
-            if (track.length > 0) {
-                // Находим текущую точку на орбите
-                currentPointIndex = findCurrentPointIndex();
-
-                if (currentPointIndex < track.length) {
-                    const point = track[currentPointIndex];
-                    self.setSatellitePosition(point.lon, point.lat, 420);
-                }
-            }
-
-            self.draw();
-            self.updateInfoPanel(simTime);
-            self._animationId = requestAnimationFrame(animate);
-        }
-
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-        }
-
-        // Генерируем орбиту один раз при старте
-        generateTrack(simTime);
-        animate();
-    };
-
-    /**
      * Обновление информационной панели
-     * @param {number} simTime - Симулированное время
+     * @param {number} time - Время (timestamp)
      */
-    EarthView.prototype.updateInfoPanel = function(simTime) {
+    EarthView.prototype.updateInfoPanel = function(time) {
         const pos = this.satellite.position;
         if (!pos) { return; }
 
@@ -847,7 +744,7 @@
             elLon.textContent = Math.abs(pos.lon).toFixed(2) + '°' + lonDir;
         }
         if (elAlt) {
-            elAlt.textContent = (pos.alt || 420).toFixed(0) + ' km';
+            elAlt.textContent = (pos.alt || 0).toFixed(0) + ' km';
         }
 
         if (elObserver && this.observer) {
@@ -855,21 +752,11 @@
         }
 
         if (elTime) {
-            const date = new Date(simTime);
+            const date = new Date(time || Date.now());
             const hours = date.getUTCHours().toString().padStart(2, '0');
             const mins = date.getUTCMinutes().toString().padStart(2, '0');
             const secs = date.getUTCSeconds().toString().padStart(2, '0');
             elTime.textContent = hours + ':' + mins + ':' + secs;
-        }
-    };
-
-    /**
-     * Остановка демо-анимации
-     */
-    EarthView.prototype.stopDemo = function() {
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-            this._animationId = null;
         }
     };
 

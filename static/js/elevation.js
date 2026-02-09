@@ -364,50 +364,6 @@
         return this.currentAzimuth;
     };
 
-    /**
-     * Демо-анимация (симуляция пролёта)
-     */
-    ElevationIndicator.prototype.startDemo = function(speed) {
-        const self = this;
-        speed = speed || 0.5;
-        let direction = 1;
-        let phase = 0; // 0 = западный пролёт, 1 = восточный пролёт
-
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-        }
-
-        // Начинаем с западной полусферы
-        this.currentAzimuth = 270;
-        this.currentElevation = 0;
-
-        function animate() {
-            self.currentElevation += speed * direction;
-
-            if (self.currentElevation >= 90) {
-                direction = -1;
-            } else if (self.currentElevation <= 0) {
-                direction = 1;
-                // Переключаем полусферу
-                phase = (phase + 1) % 2;
-                self.currentAzimuth = phase === 0 ? 270 : 90;
-            }
-
-            self.draw();
-            self._animationId = requestAnimationFrame(animate);
-        }
-        animate();
-    };
-
-    /**
-     * Остановка демо
-     */
-    ElevationIndicator.prototype.stopDemo = function() {
-        if (this._animationId) {
-            cancelAnimationFrame(this._animationId);
-            this._animationId = null;
-        }
-    };
 
     // Экспорт
     window.ElevationIndicator = ElevationIndicator;
