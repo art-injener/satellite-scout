@@ -18,9 +18,11 @@
         // Настройки по умолчанию
         this.options = Object.assign({
             coastlineUrl: '/static/data/ne_110m_coastline.json',
+            russiaBordersUrl: '/static/data/russia_110m.geojson',
             gridStep: 30, // Шаг сетки в градусах
             showGrid: true,
             showCoastlines: true,
+            showRussiaBorders: true, // Границы РФ и подпись «Россия»
             showFootprint: true, // Круг видимости спутника
             trackMode: 'both', // 'line', 'dots', 'both'
             trackDotInterval: 60000 // Интервал точек в мс (1 минута)
@@ -39,15 +41,25 @@
             satelliteGlow: '#00ffff', // Циан - свечение спутника
             footprint: 'rgba(200, 100, 255, 0.60)', // Пурпурный - контур зоны видимости (контрастирует с бирюзой и зелёным)
             footprintFill: 'rgba(200, 100, 255, 0.10)', // Пурпурный полупрозрачный - заливка зоны
-            observer: '#ff0000', // Красный - наблюдатель (как в STSPLUS)
+            observer: '#ff0000', // маркер наблюдателя (кружок)
+            observerLabel: '#ff9500', // подпись города наблюдения — янтарный
+            observerLabelStroke: 'rgba(0,0,0,0.9)', // обводка подписи наблюдателя
+            observerLabelBg: 'rgba(220, 220, 228, 0.92)', // фон под подпись наблюдателя — светло-серый
             textPrimary: '#ffffff',
             textSecondary: '#00d4d4', // Циан для подписей
             textGrid: '#ffffff', // Белые подписи сетки
-            satLabel: 'rgba(200, 100, 255, 0.60)' // Ярко-жёлтый - подпись спутника (контрастирует с пурпурной зоной)
+            satLabel: '#ffeb3b', // подпись спутника — яркий жёлтый
+            satLabelStroke: 'rgba(0,0,0,0.85)', // обводка подписи спутника
+            satLabelBg: 'rgba(220, 220, 228, 0.92)', // фон под подпись спутника — светло-серый
+            russiaBorder: '#ffcc00', // Границы РФ (жёлто-золотой, хорошо видно на карте)
+            russiaLabel: '#ffcc00' // Подпись «Россия»
         };
 
         // Данные береговых линий (GeoJSON)
         this.coastlineData = null;
+
+        // Данные границ РФ (GeoJSON)
+        this.russiaData = null;
 
         // Состояние карты
         this.center = { lon: 0, lat: 0 }; // Центр карты
@@ -67,7 +79,7 @@
 
         // Столицы мира для отображения на карте (только основные)
         this.cities = [
-            { name: 'MOSCOW', lon: 37.62, lat: 55.75 },
+            { name: 'МОСКВА', lon: 37.62, lat: 55.75 },
             { name: 'BEIJING', lon: 116.40, lat: 39.90 },
             { name: 'TOKYO', lon: 139.69, lat: 35.69 },
             { name: 'DELHI', lon: 77.21, lat: 28.61 },
@@ -86,7 +98,32 @@
 
         // Привязка обработчиков событий
         this._boundResize = this._onResize.bind(this);
+        this._resizeObserver = null;
     }
+
+    /**
+     * Настройка размеров canvas под HiDPI/Retina.
+     * CSS задаёт отображаемый размер (width/height: 100%), JS задаёт только буфер.
+     * Читаем clientWidth/Height (размер отображения из CSS) и ставим буфер × dpr.
+     */
+    EarthView.prototype._setupCanvasSize = function() {
+        // clientWidth/Height = размер отображения, заданный CSS (100% контейнера)
+        var displayWidth = this.canvas.clientWidth;
+        var displayHeight = this.canvas.clientHeight;
+        if (displayWidth <= 0 || displayHeight <= 0) { return; }
+
+        var dpr = window.devicePixelRatio || 1;
+        var backingWidth = Math.round(displayWidth * dpr);
+        var backingHeight = Math.round(displayHeight * dpr);
+
+        // Устанавливаем только буфер, НЕ style (style задан CSS)
+        if (this.canvas.width !== backingWidth || this.canvas.height !== backingHeight) {
+            this.canvas.width = backingWidth;
+            this.canvas.height = backingHeight;
+            this.width = backingWidth;
+            this.height = backingHeight;
+        }
+    };
 
     // ========== Проекция координат ==========
 
@@ -152,6 +189,35 @@
             });
     };
 
+    /**
+     * Загрузка границ РФ 
+     * @param {string} url - URL GeoJSON файла
+     * @returns {Promise}
+     */
+    EarthView.prototype.loadRussiaBorders = function(url) {
+        const self = this;
+        url = url || this.options.russiaBordersUrl;
+
+        return fetch(url)
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('Ошибка загрузки границ РФ: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                self.russiaData = data;
+                // eslint-disable-next-line no-console
+                console.log('EarthView: загружены границы РФ');
+                return data;
+            })
+            .catch(function(error) {
+                // eslint-disable-next-line no-console
+                console.warn('EarthView: границы РФ не загружены:', error.message);
+                return null;
+            });
+    };
+
     // ========== Отрисовка ==========
 
     /**
@@ -171,6 +237,10 @@
 
         if (this.options.showCoastlines && this.coastlineData) {
             this._drawCoastlines();
+        }
+
+        if (this.options.showRussiaBorders && this.russiaData) {
+            this._drawRussiaBorders();
         }
 
         // Столицы мира
@@ -312,7 +382,7 @@
             ctx.stroke();
 
             // Название города белым (мелкий шрифт)
-            ctx.font = '8px monospace';
+            ctx.font = 'bold 12px sans-serif';
             ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
@@ -357,6 +427,50 @@
         }
 
         ctx.stroke();
+    };
+
+    /**
+     * Отрисовка границ РФ и подписи «Россия»
+     */
+    EarthView.prototype._drawRussiaBorders = function() {
+        if (!this.russiaData || !this.russiaData.features || this.russiaData.features.length === 0) {
+            return;
+        }
+
+        const ctx = this.ctx;
+        ctx.strokeStyle = this.colors.russiaBorder || '#ffcc00';
+        ctx.lineWidth = 1.5;
+
+        for (let f = 0; f < this.russiaData.features.length; f++) {
+            const feature = this.russiaData.features[f];
+            const geom = feature.geometry;
+            if (!geom || !geom.coordinates) { continue; }
+
+            if (geom.type === 'Polygon') {
+                this._drawLineString(geom.coordinates[0]);
+            } else if (geom.type === 'MultiPolygon') {
+                for (let p = 0; p < geom.coordinates.length; p++) {
+                    const ring = geom.coordinates[p][0];
+                    if (ring && ring.length >= 2) {
+                        this._drawLineString(ring);
+                    }
+                }
+            }
+        }
+
+        // Подпись «Россия» — в центре территории (приблизительно 95°E, 60°N)
+        const labelLon = 95;
+        const labelLat = 60;
+        const labelPoint = this.project(labelLon, labelLat);
+        ctx.font = 'bold 14px sans-serif';
+        ctx.fillStyle = this.colors.russiaLabel || '#ffffff';
+        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
+        ctx.lineWidth = 3;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        const text = 'Россия';
+        ctx.strokeText(text, labelPoint.x, labelPoint.y);
+        ctx.fillText(text, labelPoint.x, labelPoint.y);
     };
 
     /**
@@ -422,7 +536,7 @@
         // Отрисовка линии
         if (mode === 'line' || mode === 'both') {
             ctx.strokeStyle = color;
-            ctx.lineWidth = 0.5; // Очень тонкая линия
+            ctx.lineWidth = 1.2; 
             ctx.beginPath();
 
             var prevP = null;
@@ -463,7 +577,7 @@
                 if (t - lastDotTime >= dotInterval) {
                     var pp = this.project(point.lon, point.lat);
                     ctx.beginPath();
-                    ctx.arc(pp.x, pp.y, 1, 0, Math.PI * 2); // Очень маленькие точки
+                    ctx.arc(pp.x, pp.y, 2, 0, Math.PI * 2); // Очень маленькие точки
                     ctx.fill();
                     lastDotTime = t;
                 }
@@ -479,48 +593,57 @@
         const pos = this.satellite.position;
         const p = this.project(pos.lon, pos.lat);
 
+        // Масштаб для HiDPI (буфер увеличен на dpr, значит пиксели нужно масштабировать)
+        var dpr = window.devicePixelRatio || 1;
+        var s = dpr * 1.2; // базовый множитель для увеличения
+
         ctx.strokeStyle = this.colors.satellite;
         ctx.fillStyle = this.colors.satellite;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 2 * s;
 
         // Неоновая обводка (glow эффект)
         ctx.shadowColor = '#ff00ff'; // magenta неоновый
-        ctx.shadowBlur = 5;
+        ctx.shadowBlur = 4 * s;
         ctx.shadowOffsetX = 0;
         ctx.shadowOffsetY = 0;
 
         // Иконка спутника в стиле STSPLUS (упрощённая МКС)
         // Центральный модуль
-        ctx.fillRect(p.x - 2, p.y - 6, 4, 12);
+        ctx.fillRect(p.x - 3*s, p.y - 8*s, 6*s, 16*s);
 
         // Солнечные панели (горизонтальные)
-        ctx.fillRect(p.x - 12, p.y - 2, 8, 4);
-        ctx.fillRect(p.x + 4, p.y - 2, 8, 4);
+        ctx.fillRect(p.x - 16*s, p.y - 3*s, 10*s, 6*s);
+        ctx.fillRect(p.x + 6*s, p.y - 3*s, 10*s, 6*s);
 
         // Дополнительные элементы панелей
-        ctx.lineWidth = 1;
+        ctx.lineWidth = 1.5 * s;
         ctx.beginPath();
-        ctx.moveTo(p.x - 12, p.y);
-        ctx.lineTo(p.x - 14, p.y - 3);
-        ctx.moveTo(p.x - 12, p.y);
-        ctx.lineTo(p.x - 14, p.y + 3);
-        ctx.moveTo(p.x + 12, p.y);
-        ctx.lineTo(p.x + 14, p.y - 3);
-        ctx.moveTo(p.x + 12, p.y);
-        ctx.lineTo(p.x + 14, p.y + 3);
+        ctx.moveTo(p.x - 16*s, p.y);
+        ctx.lineTo(p.x - 19*s, p.y - 4*s);
+        ctx.moveTo(p.x - 16*s, p.y);
+        ctx.lineTo(p.x - 19*s, p.y + 4*s);
+        ctx.moveTo(p.x + 16*s, p.y);
+        ctx.lineTo(p.x + 19*s, p.y - 4*s);
+        ctx.moveTo(p.x + 16*s, p.y);
+        ctx.lineTo(p.x + 19*s, p.y + 4*s);
         ctx.stroke();
 
         // Сброс свечения
         ctx.shadowColor = 'transparent';
         ctx.shadowBlur = 0;
 
-        // Название спутника (такой же стиль, как у наблюдателя, под иконкой)
+        // Название спутника — цвет и обводка (без фона)
         if (this.satellite.name) {
-            ctx.font = 'bold 10px monospace';
-            ctx.fillStyle = '#ffffff'; // Белый текст
+            var fontSize = Math.round(12 * s);
+            ctx.font = 'bold ' + fontSize + 'px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            ctx.fillText(this.satellite.name, p.x, p.y + 8);
+            var labelY = p.y + 12 * s;
+            ctx.strokeStyle = this.colors.satLabelStroke || 'rgba(0,0,0,0.85)';
+            ctx.lineWidth = 2.5;
+            ctx.strokeText(this.satellite.name, p.x, labelY);
+            ctx.fillStyle = this.colors.satLabel || '#ffeb3b';
+            ctx.fillText(this.satellite.name, p.x, labelY);
         }
     };
 
@@ -531,83 +654,71 @@
         const ctx = this.ctx;
         const p = this.project(this.observer.lon, this.observer.lat);
 
-        // Оранжевый кружок без заливки (маленький)
+        // кружок без заливки (маленький) — в цвет подписи
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-        ctx.strokeStyle = '#ffaa00'; // Оранжевый
-        ctx.lineWidth = 1;
+        ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
+        ctx.strokeStyle = this.colors.observerLabel || '#ff9500';
+        ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Название белым цветом
+        // Название точки наблюдения — цвет и обводка (без фона)
         if (this.observer.name) {
-            ctx.font = 'bold 9px monospace';
-            ctx.fillStyle = '#ffaa00'; // Белый текст
+            var obsText = this.observer.name.toLocaleUpperCase();
+            ctx.font = 'bold 10px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            ctx.fillText(this.observer.name.toLocaleUpperCase(), p.x + 5, p.y);
+            var labelX = p.x + 5;
+            ctx.strokeStyle = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
+            ctx.lineWidth = 2;
+            ctx.strokeText(obsText, labelX, p.y);
+            ctx.fillStyle = this.colors.observerLabel || '#ff9500';
+            ctx.fillText(obsText, labelX, p.y);
         }
     };
 
     /**
-     * Отрисовка зоны видимости спутника по точкам с сервера.
-     * Контур задаётся массивом {lon, lat}; при пересечении антимеридиана — разрыв линии.
+     * Отрисовка зоны видимости спутника.
+     * Сервер присылает готовые сегменты (замкнутые полигоны, разбитые по ±180°).
+     * Каждый сегмент рисуется как замкнутый контур с заливкой.
      */
     EarthView.prototype._drawVisibilityZone = function() {
-        const ctx = this.ctx;
-        const points = this.satellite.visibilityZone;
+        var ctx = this.ctx;
+        var segments = this.satellite.visibilityZone;
 
-        if (!points || points.length < 2) { return; }
+        if (!segments || segments.length === 0) { return; }
 
-        // Собираем сегменты (разрыв при пересечении антимеридиана)
-        var segments = [];
-        var currentSegment = [];
-        var prevP = null;
+        var dpr = window.devicePixelRatio || 1;
 
-        for (var i = 0; i < points.length; i++) {
-            var pt = points[i];
-            var p = this.project(pt.lon, pt.lat);
+        for (var k = 0; k < segments.length; k++) {
+            var seg = segments[k];
+            if (!seg || seg.length < 3) { continue; }
 
-            if (prevP && Math.abs(p.x - prevP.x) > this.width / 2) {
-                // Разрыв — сохраняем текущий сегмент и начинаем новый
-                if (currentSegment.length > 0) {
-                    segments.push(currentSegment);
-                }
-                currentSegment = [];
+            // Проецируем точки сегмента
+            var projected = [];
+            for (var i = 0; i < seg.length; i++) {
+                projected.push(this.project(seg[i].lon, seg[i].lat));
             }
 
-            currentSegment.push(p);
-            prevP = p;
-        }
-        if (currentSegment.length > 0) {
-            segments.push(currentSegment);
-        }
-
-        // Рисуем заливку (если зона не разорвана)
-        if (segments.length === 1 && segments[0].length > 2) {
+            // Заливка
             ctx.beginPath();
-            ctx.moveTo(segments[0][0].x, segments[0][0].y);
-            for (var j = 1; j < segments[0].length; j++) {
-                ctx.lineTo(segments[0][j].x, segments[0][j].y);
+            ctx.moveTo(projected[0].x, projected[0].y);
+            for (var j = 1; j < projected.length; j++) {
+                ctx.lineTo(projected[j].x, projected[j].y);
             }
             ctx.closePath();
             ctx.fillStyle = this.colors.footprintFill;
             ctx.fill();
-        }
 
-        // Рисуем контур (тонкая линия)
-        ctx.strokeStyle = this.colors.footprint;
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([]);
-
-        for (var k = 0; k < segments.length; k++) {
-            var seg = segments[k];
-            if (seg.length < 2) continue;
-
+            // Контур
+            ctx.strokeStyle = this.colors.footprint;
+            ctx.lineWidth = 1.5 * dpr;
+            ctx.setLineDash([]);
             ctx.beginPath();
-            ctx.moveTo(seg[0].x, seg[0].y);
-            for (var m = 1; m < seg.length; m++) {
-                ctx.lineTo(seg[m].x, seg[m].y);
+            ctx.moveTo(projected[0].x, projected[0].y);
+            for (var m = 1; m < projected.length; m++) {
+                ctx.lineTo(projected[m].x, projected[m].y);
             }
+            ctx.closePath();
             ctx.stroke();
         }
     };
@@ -619,8 +730,20 @@
      * @returns {Promise}
      */
     EarthView.prototype.init = function() {
-        const self = this;
-        return this.loadCoastlines().then(function() {
+        var self = this;
+        this._setupCanvasSize();
+        if (typeof ResizeObserver !== 'undefined') {
+            this._resizeObserver = new ResizeObserver(function() {
+                self._onResize();
+            });
+            this._resizeObserver.observe(this.canvas.parentElement);
+        } else {
+            window.addEventListener('resize', this._boundResize);
+        }
+        return Promise.all([
+            this.loadCoastlines(),
+            this.loadRussiaBorders()
+        ]).then(function() {
             self.draw();
             return self;
         });
@@ -668,11 +791,11 @@
     };
 
     /**
-     * Установка зоны видимости спутника (контур с сервера).
-     * @param {Array} points - Массив точек [{lon, lat}, ...]
+     * Установка зоны видимости спутника (сегменты с сервера).
+     * @param {Array} segments - Массив сегментов [[{lon, lat}, ...], ...]
      */
-    EarthView.prototype.setVisibilityZone = function(points) {
-        this.satellite.visibilityZone = Array.isArray(points) ? points : null;
+    EarthView.prototype.setVisibilityZone = function(segments) {
+        this.satellite.visibilityZone = Array.isArray(segments) ? segments : null;
     };
 
     /**
@@ -707,11 +830,10 @@
     };
 
     /**
-     * Обработчик изменения размера
+     * Обработчик изменения размера (поддержка HiDPI: пересчёт буфера и отрисовка)
      */
     EarthView.prototype._onResize = function() {
-        this.width = this.canvas.width;
-        this.height = this.canvas.height;
+        this._setupCanvasSize();
         this.draw();
     };
 

@@ -113,8 +113,8 @@
             if (window.earthView) {
                 window.earthView.setSatellitePosition(pos.lon, pos.lat, pos.alt);
                 window.earthView.setSatelliteInfo(state.name || '', state.noradId);
-                if (state.visibilityZone && state.visibilityZone.points) {
-                    window.earthView.setVisibilityZone(state.visibilityZone.points);
+                if (state.visibilityZone && state.visibilityZone.segments) {
+                    window.earthView.setVisibilityZone(state.visibilityZone.segments);
                 }
                 window.earthView.draw();
                 window.earthView.updateInfoPanel(pos.ts || Date.now());
@@ -279,7 +279,7 @@
                 return fetch('/api/config').then(function(resp) { return resp.json(); });
             }).then(function(cfg) {
                 if (cfg && cfg.observer) {
-                    window.earthView.setObserver(cfg.observer.lon, cfg.observer.lat, 'Rostov-on-Don');
+                    window.earthView.setObserver(cfg.observer.lon, cfg.observer.lat, 'Ростов-на-Дону');
                 }
                 // Подтягиваем накопленные данные из StateManager (track/position могли прийти до init)
                 if (window._stateManager) {
@@ -292,8 +292,8 @@
                             window.earthView.setSatellitePosition(state.position.lon, state.position.lat, state.position.alt);
                             window.earthView.setSatelliteInfo(state.name || '', state.noradId);
                         }
-                        if (state.visibilityZone && state.visibilityZone.points) {
-                            window.earthView.setVisibilityZone(state.visibilityZone.points);
+                        if (state.visibilityZone && state.visibilityZone.segments) {
+                            window.earthView.setVisibilityZone(state.visibilityZone.segments);
                         }
                     }
                 }

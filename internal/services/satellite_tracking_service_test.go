@@ -214,12 +214,16 @@ func TestComputePosition(t *testing.T) {
 		t.Errorf("range should be positive: %.1f", event.Range)
 	}
 
-	// Зона видимости: не nil, 72 точки.
+	// Зона видимости: не nil, сегменты содержат ~72 точки (+ граничные при антимеридиане).
 	if event.VisibilityZone == nil {
 		t.Fatal("visibility zone should not be nil")
 	}
-	if len(event.VisibilityZone.Points) != visibilityZonePoints {
-		t.Errorf("expected %d zone points, got %d", visibilityZonePoints, len(event.VisibilityZone.Points))
+	totalPts := 0
+	for _, seg := range event.VisibilityZone.Segments {
+		totalPts += len(seg)
+	}
+	if totalPts < visibilityZonePoints {
+		t.Errorf("expected >= %d zone points, got %d", visibilityZonePoints, totalPts)
 	}
 
 	// Timestamp.

@@ -23,7 +23,7 @@ function makePositionData(overrides = {}) {
         el: 42.0,
         range: 623.0,
         visibility_zone: {
-            points: [{ lon: 20, lat: 30 }, { lon: 21, lat: 31 }],
+            segments: [[{ lon: 20, lat: 30 }, { lon: 21, lat: 31 }]],
             radius_deg: 20.1,
             center_lat: 47.3,
             center_lon: 39.8,
@@ -199,7 +199,8 @@ test('updates visibility zone from position data', () => {
     const state = m.getState(ISS_NORAD_ID);
     assert.ok(state.visibilityZone);
     assert.strictEqual(state.visibilityZone.radius_deg, 20.1);
-    assert.strictEqual(state.visibilityZone.points.length, 2);
+    assert.strictEqual(state.visibilityZone.segments.length, 1);
+    assert.strictEqual(state.visibilityZone.segments[0].length, 2);
 });
 
 test('position without visibility_zone does not clear existing zone', () => {

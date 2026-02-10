@@ -15,7 +15,7 @@ const (
 	DefaultPassCacheTTL = 5 * time.Minute
 
 	// Горизонт прогноза по умолчанию (часы).
-	DefaultPredictionHours = 24
+	DefaultPredictionHours = 1
 
 	// Минимальный угол места по умолчанию (градусы).
 	DefaultMinElevation = 5.0
@@ -149,11 +149,11 @@ func (s *PassService) GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.P
 	s.mu.RUnlock()
 
 	if ok && !entry.isExpired(s.cacheTTL) {
-		slog.Debug("all groups pass cache hit",
-			"hours", hours,
-			"min_el", minEl,
-			"passes", len(entry.passes),
-		)
+		// slog.Debug("all groups pass cache hit",
+		// 	"hours", hours,
+		// 	"min_el", minEl,
+		// 	"passes", len(entry.passes),
+		// )
 		return entry.passes, nil
 	}
 

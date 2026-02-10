@@ -134,8 +134,15 @@ func GenerateGroundTrack(tle *TLE, start, end, now time.Time, step time.Duration
 	}, nil
 }
 
+// Периоды орбиты для автодиапазона наземной трассы: сколько витков назад и вперёд от "сейчас".
+// Дробные значения допустимы, например 0.5 — полвитка.
+const (
+	defaultTrackPeriodsBack  = 0.3 // полпериода назад
+	defaultTrackPeriodsAhead = 0.7 // один период вперёд
+)
+
 // GenerateDefaultGroundTrack генерирует трассу орбиты с автодиапазоном:
-// 1 орбитальный период назад + 3 периода вперёд, шаг 30 секунд.
+// defaultTrackPeriodsBack периодов назад + defaultTrackPeriodsAhead периодов вперёд, шаг 30 секунд.
 func GenerateDefaultGroundTrack(tle *TLE, now time.Time) (*GroundTrack, error) {
 	if tle == nil {
 		return nil, ErrNilTLEForTrack
@@ -148,8 +155,8 @@ func GenerateDefaultGroundTrack(tle *TLE, now time.Time) (*GroundTrack, error) {
 
 	const defaultStep = 30 * time.Second
 
-	start := now.Add(-1 * period)
-	end := now.Add(3 * period)
+	start := now.Add(-time.Duration(float64(period) * defaultTrackPeriodsBack))
+	end := now.Add(time.Duration(float64(period) * defaultTrackPeriodsAhead))
 
 	return GenerateGroundTrack(tle, start, end, now, defaultStep)
 }

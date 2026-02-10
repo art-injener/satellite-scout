@@ -4,6 +4,7 @@ package tracker
 import (
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -87,7 +88,13 @@ func ParseTLE(lines []string) (*TLE, error) {
 		line2 = strings.TrimSpace(lines[idxLine1])
 
 	case '2':
-		// Некорректный порядок строк
+		// Допускаем переставленный 2-line формат (Line2, Line1) — исправляем порядок
+		secondLine := strings.TrimSpace(lines[idxLine1])
+		if len(lines) == 2 && len(secondLine) > 0 && secondLine[0] == '1' {
+			line1 = secondLine
+			line2 = firstLine
+			break
+		}
 		return nil, fmt.Errorf("%w: expected Line1, got Line2", ErrInvalidTLEFormat)
 
 	default:
@@ -113,17 +120,23 @@ func ParseTLEBatch(data string) ([]*TLE, error) {
 	for i := range lines {
 		trimmed := strings.TrimSpace(lines[i])
 
-		// Пустая строка — возможный разделитель
+		// Пропускаем пустые строки и комментарии (например, заголовки от прокси/кеша)
 		if trimmed == "" {
 			if len(currentLines) >= 2 {
 				tle, err := ParseTLE(currentLines)
 				if err != nil {
-					return nil, fmt.Errorf(errMsgParsingTLE, err)
+					slog.Default().Debug("skipped invalid TLE block", "lines", currentLines, "error", err)
+					currentLines = nil
+				} else {
+					tles = append(tles, tle)
+					currentLines = nil
 				}
-				tles = append(tles, tle)
-				currentLines = nil
 			}
 
+			continue
+		}
+		if trimmed[0] == '#' {
+			// Строка-комментарий — не включаем в блок TLE
 			continue
 		}
 
@@ -133,10 +146,12 @@ func ParseTLEBatch(data string) ([]*TLE, error) {
 		if tle := tryParseTLE(currentLines); tle != nil {
 			parsed, err := ParseTLE(currentLines)
 			if err != nil {
-				return nil, fmt.Errorf("parsing TLE: %w", err)
+				slog.Default().Debug("skipped invalid TLE block", "lines", currentLines, "error", err)
+				currentLines = nil
+			} else {
+				tles = append(tles, parsed)
+				currentLines = nil
 			}
-			tles = append(tles, parsed)
-			currentLines = nil
 		}
 	}
 
@@ -144,9 +159,10 @@ func ParseTLEBatch(data string) ([]*TLE, error) {
 	if len(currentLines) >= 2 {
 		tle, err := ParseTLE(currentLines)
 		if err != nil {
-			return nil, fmt.Errorf(errMsgParsingTLE, err)
+			slog.Default().Debug("skipped invalid TLE block", "lines", currentLines, "error", err)
+		} else {
+			tles = append(tles, tle)
 		}
-		tles = append(tles, tle)
 	}
 
 	return tles, nil
@@ -162,8 +178,11 @@ func tryParseTLE(lines []string) []string {
 
 	switch n {
 	case 2:
-		// 2-line формат: Line1 + Line2
+		// 2-line формат: Line1+Line2 или переставленный Line2+Line1
 		if lines[0][0] == '1' && lines[1][0] == '2' {
+			return lines
+		}
+		if lines[0][0] == '2' && lines[1][0] == '1' {
 			return lines
 		}
 	case 3:

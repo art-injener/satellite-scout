@@ -190,7 +190,10 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 	autoTrackTicker := time.NewTicker(s.autoTrackInterval)
 	defer autoTrackTicker.Stop()
 
-	// Немедленная отправка трасс при старте (не ждём 30 сек).
+	// Немедленный выбор начального спутника и отправка данных (не ждём 10 сек до первого тика авто-трекинга).
+	s.updateAutoTrack()
+	// Первая позиция и трасса — сразу после выбора спутника.
+	s.computeAndBroadcastPositions()
 	s.computeAndBroadcastTracks()
 
 	for {

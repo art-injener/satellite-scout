@@ -240,6 +240,32 @@ func TestParseTLE_InvalidFormat(t *testing.T) {
 	}
 }
 
+// TestParseTLE_SwappedTwoLine проверяет парсинг 2-line TLE при переставленном порядке (Line2, Line1).
+func TestParseTLE_SwappedTwoLine(t *testing.T) {
+	lines := []string{hstLine2, hstLine1}
+
+	tle, err := ParseTLE(lines)
+	if err != nil {
+		t.Fatalf("ParseTLE() error = %v", err)
+	}
+	if tle.NoradID != 20580 {
+		t.Errorf("NoradID = %d, want 20580", tle.NoradID)
+	}
+}
+
+// TestParseTLEBatch_SkipsComments проверяет, что строки-комментарии пропускаются.
+func TestParseTLEBatch_SkipsComments(t *testing.T) {
+	batch := "# Comment line\n" + issTLE + "\n# Another comment\n" + meteorTLE
+
+	tles, err := ParseTLEBatch(batch)
+	if err != nil {
+		t.Fatalf("ParseTLEBatch() error = %v", err)
+	}
+	if len(tles) != 2 {
+		t.Fatalf("ParseTLEBatch() returned %d TLEs, want 2", len(tles))
+	}
+}
+
 // TestParseTLEBatch проверяет парсинг нескольких TLE.
 func TestParseTLEBatch(t *testing.T) {
 	batch := issTLE + "\n" + meteorTLE

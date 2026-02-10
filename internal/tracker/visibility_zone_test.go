@@ -157,9 +157,16 @@ func TestGenerateVisibilityZone_ISS(t *testing.T) {
 		t.Fatalf("GenerateVisibilityZone: %v", err)
 	}
 
+	// Без антимеридиана — один сегмент.
+	if len(zone.Segments) != 1 {
+		t.Fatalf("expected 1 segment, got %d", len(zone.Segments))
+	}
+
+	allPoints := zoneAllPoints(zone)
+
 	// Проверяем количество точек.
-	if len(zone.Points) != defaultZonePoints {
-		t.Errorf("expected %d points, got %d", defaultZonePoints, len(zone.Points))
+	if len(allPoints) != defaultZonePoints {
+		t.Errorf("expected %d points, got %d", defaultZonePoints, len(allPoints))
 	}
 
 	// Проверяем радиус (ISS ~420 км → ~20°).
@@ -177,13 +184,8 @@ func TestGenerateVisibilityZone_ISS(t *testing.T) {
 		t.Errorf("NoradID: expected 25544, got %d", zone.NoradID)
 	}
 
-	// Проверяем что точки образуют замкнутый контур (первая ≈ последняя).
-	first := zone.Points[0]
-	last := zone.Points[len(zone.Points)-1]
-
-	// Контур не замыкается дублированием — но все точки должны быть на одинаковом расстоянии от центра.
-	// Проверяем, что все точки лежат примерно на угловом радиусе от центра.
-	for i, p := range zone.Points {
+	// Все точки лежат примерно на угловом радиусе от центра.
+	for i, p := range allPoints {
 		dist := angularDistance(zone.CenterLat, zone.CenterLon, p.Lat, p.Lon)
 		distDeg := dist * Rad2Deg
 
@@ -193,9 +195,6 @@ func TestGenerateVisibilityZone_ISS(t *testing.T) {
 				i, distDeg, zone.RadiusDeg)
 		}
 	}
-
-	_ = first
-	_ = last
 }
 
 func TestGenerateVisibilityZone_GEO(t *testing.T) {
@@ -253,8 +252,9 @@ func TestGenerateVisibilityZoneFromLLA_Equator(t *testing.T) {
 		t.Fatal("GenerateVisibilityZoneFromLLA returned nil")
 	}
 
-	if len(zone.Points) != defaultZonePoints {
-		t.Errorf("expected %d points, got %d", defaultZonePoints, len(zone.Points))
+	allPoints := zoneAllPoints(zone)
+	if len(allPoints) != defaultZonePoints {
+		t.Errorf("expected %d points, got %d", defaultZonePoints, len(allPoints))
 	}
 
 	// Центр должен быть в (0, 0).
@@ -266,7 +266,7 @@ func TestGenerateVisibilityZoneFromLLA_Equator(t *testing.T) {
 	hasPositiveLat := false
 	hasNegativeLat := false
 
-	for _, p := range zone.Points {
+	for _, p := range allPoints {
 		if p.Lat > 1.0 {
 			hasPositiveLat = true
 		}
@@ -295,7 +295,7 @@ func TestGenerateVisibilityZoneFromLLA_NorthPole(t *testing.T) {
 	}
 
 	// Все точки контура должны иметь широту > 50° (зона вокруг полюса).
-	for i, p := range zone.Points {
+	for i, p := range zoneAllPoints(zone) {
 		if p.Lat < 50.0 {
 			t.Errorf("point %d: latitude %.2f° too low for North Pole zone", i, p.Lat)
 			break
@@ -316,22 +316,101 @@ func TestGenerateVisibilityZoneFromLLA_Antimeridian(t *testing.T) {
 		t.Fatal("GenerateVisibilityZoneFromLLA (antimeridian) returned nil")
 	}
 
-	// Должны быть точки и с положительной, и с отрицательной долготой.
+	// При пересечении антимеридиана — 2 сегмента.
+	if len(zone.Segments) != 2 {
+		t.Errorf("expected 2 segments for antimeridian zone, got %d", len(zone.Segments))
+	}
+
+	// Должны быть точки и с положительной, и с отрицательной долготой (в разных сегментах).
 	hasPositiveLon := false
 	hasNegativeLon := false
 
-	for _, p := range zone.Points {
-		if p.Lon > 170.0 {
+	for _, p := range zoneAllPoints(zone) {
+		if p.Lon >= 170.0 {
 			hasPositiveLon = true
 		}
 
-		if p.Lon < -170.0 {
+		if p.Lon <= -170.0 {
 			hasNegativeLon = true
 		}
 	}
 
 	if !hasPositiveLon || !hasNegativeLon {
 		t.Error("antimeridian visibility zone should have points on both sides of ±180°")
+	}
+}
+
+func TestGenerateVisibilityZoneFromLLA_PolarClosure(t *testing.T) {
+	// Footprint, пересекающий Северный полюс: lat=67° + radius=58° > 90°.
+	// Проверяем, что сегмент замыкается через полюс (содержит точку lat=90°).
+	lla := &LLA{
+		Lat: 67.0 * Deg2Rad,
+		Lon: 70.0 * Deg2Rad,
+		Alt: 5800.0,
+	}
+
+	zone := GenerateVisibilityZoneFromLLA(lla, 53109, defaultZonePoints)
+	if zone == nil {
+		t.Fatal("returned nil")
+	}
+
+	// Должна быть хотя бы одна точка с lat=90° (замыкание через полюс).
+	found90 := false
+	for _, seg := range zone.Segments {
+		for _, p := range seg {
+			if math.Abs(p.Lat-90.0) < 0.01 {
+				found90 = true
+				break
+			}
+		}
+	}
+
+	if !found90 {
+		t.Error("polar-crossing footprint should have lat=90° boundary points")
+	}
+}
+
+func TestGenerateVisibilityZoneFromLLA_HighOrbitDensified(t *testing.T) {
+	// Спутник на высокой орбите (5800 км) на широте 67°.
+	// Зона видимости ~58° — пересекает Северный полюс.
+	// Проверяем, что уплотнение (densification) корректно:
+	// нет «хвостов» — максимальный разрыв по долготе между соседними точками ≤ порога.
+	lla := &LLA{
+		Lat: 67.0 * Deg2Rad,
+		Lon: 70.0 * Deg2Rad,
+		Alt: 5800.0,
+	}
+
+	zone := GenerateVisibilityZoneFromLLA(lla, 53109, defaultZonePoints)
+	if zone == nil {
+		t.Fatal("GenerateVisibilityZoneFromLLA (high orbit) returned nil")
+	}
+
+	// После уплотнения должно быть больше точек, чем исходные 72.
+	totalPts := 0
+	for _, seg := range zone.Segments {
+		totalPts += len(seg)
+	}
+	if totalPts <= defaultZonePoints {
+		t.Errorf("expected densified contour to have more than %d points, got %d",
+			defaultZonePoints, totalPts)
+	}
+
+	// Проверяем: в каждом сегменте соседние точки не должны быть далеко друг от друга.
+	maxGap := densifyMaxLonGap + 5.0 // допуск на интерполяцию антимеридиана
+	for si, seg := range zone.Segments {
+		for i := 0; i < len(seg)-1; i++ {
+			gap := math.Abs(seg[i].Lon - seg[i+1].Lon)
+			if gap > 180 {
+				gap = 360 - gap
+			}
+			if gap > maxGap {
+				t.Errorf("segment %d, points %d→%d: lon gap %.1f° exceeds max %.1f° "+
+					"(lon %.1f → %.1f, lat %.1f → %.1f)",
+					si, i, i+1, gap, maxGap,
+					seg[i].Lon, seg[i+1].Lon, seg[i].Lat, seg[i+1].Lat)
+			}
+		}
 	}
 }
 
@@ -353,7 +432,7 @@ func TestGenerateVisibilityZone_CoordinatesInRange(t *testing.T) {
 		t.Fatalf("GenerateVisibilityZone: %v", err)
 	}
 
-	for i, p := range zone.Points {
+	for i, p := range zoneAllPoints(zone) {
 		if p.Lat < -90 || p.Lat > 90 {
 			t.Errorf("point %d: latitude %.4f° out of range [-90, 90]", i, p.Lat)
 		}
@@ -392,6 +471,15 @@ func BenchmarkMoveByBearing(b *testing.B) {
 }
 
 // --- Вспомогательные функции ---
+
+// zoneAllPoints собирает все точки из всех сегментов зоны видимости.
+func zoneAllPoints(zone *VisibilityZone) []ZonePoint {
+	var all []ZonePoint
+	for _, seg := range zone.Segments {
+		all = append(all, seg...)
+	}
+	return all
+}
 
 // angularDistance вычисляет угловое расстояние между двумя точками (lat/lon в градусах).
 // Используется формула Haversine.

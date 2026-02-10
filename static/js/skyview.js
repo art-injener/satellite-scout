@@ -108,7 +108,7 @@
         this.observer = {
             lat: 47.23,
             lon: 39.7,
-            name: 'Rostov-on-Don'
+            name: 'Ростов-на-Дону'
         };
 
         // Анимация
