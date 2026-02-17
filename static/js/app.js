@@ -152,12 +152,13 @@
             }
         });
         
-        // При смене спутника: оверлей + загрузка sky path
+        // При смене спутника: оверлей + загрузка sky path + орбитальные параметры
         sm.subscribe(StateEventType.SATELLITE_CHANGE, function(state) {
             console.log('[app.js] Смена спутника:', state.noradId, state.name);
             loadedSkyPathForNoradId = state.noradId;
             loadSkyPathForSatellite(state.noradId);
             showTrackingOverlay(state.noradId, state.name || '');
+            updateOrbitalParams(state);
         });
     }
     
@@ -214,6 +215,29 @@
             var ts = pos.ts || Date.now();
             var d = new Date(ts);
             el('info-time').textContent = d.toISOString().substr(11, 8);
+        }
+    }
+    
+    // Обновление орбитальных параметров (наклонение, период)
+    function updateOrbitalParams(state) {
+        var el = function(id) { return document.getElementById(id); };
+        
+        // Наклонение орбиты
+        if (el('info-orbit') && typeof state.inclination === 'number') {
+            el('info-orbit').textContent = state.inclination.toFixed(2) + '°';
+        }
+        
+        // Орбитальный период
+        if (el('info-period') && typeof state.period === 'number') {
+            var period = state.period;
+            if (period >= 60) {
+                // Показываем в часах если больше часа
+                var hours = Math.floor(period / 60);
+                var mins = Math.round(period % 60);
+                el('info-period').textContent = hours + 'h ' + mins + 'm';
+            } else {
+                el('info-period').textContent = period.toFixed(1) + ' min';
+            }
         }
     }
     

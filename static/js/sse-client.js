@@ -232,7 +232,14 @@ class SSEClient {
             break;
         case 'satellite_change':
             if (typeof data.norad_id === 'number') {
-                this._stateManager.setActiveSatellite(data.norad_id, data.name || '');
+                var orbitalParams = null;
+                if (typeof data.inclination === 'number' || typeof data.period === 'number') {
+                    orbitalParams = {
+                        inclination: data.inclination,
+                        period: data.period
+                    };
+                }
+                this._stateManager.setActiveSatellite(data.norad_id, data.name || '', orbitalParams);
             }
             break;
         default:

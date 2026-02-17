@@ -440,6 +440,7 @@
     SkyView.prototype._drawTrackArrows = function(points, visibleTrack) {
         const arrowInterval = this.options.arrowInterval;
         let lastArrowTime = points[0].time;
+        let arrowDrawn = false;
 
         for (let i = 1; i < points.length - 1; i++) {
             const point = visibleTrack[i];
@@ -455,7 +456,30 @@
 
                 this._drawArrow(curr.x, curr.y, angle);
                 lastArrowTime = point.time;
+                arrowDrawn = true;
             }
+        }
+
+        // На коротких пролётах рисуем одну стрелку в точке TCA (макс. элевация)
+        if (!arrowDrawn && points.length >= 3) {
+            let midIdx = Math.floor((points.length - 1) / 2); // запасной вариант
+            let maxEl = -Infinity;
+            for (let i = 1; i < points.length - 1; i++) {
+                if (points[i].el > maxEl) {
+                    maxEl = points[i].el;
+                    midIdx = i;
+                }
+            }
+
+            const prev = points[midIdx - 1];
+            const curr = points[midIdx];
+            const next = points[midIdx + 1];
+
+            const dx = next.x - prev.x;
+            const dy = next.y - prev.y;
+            const angle = Math.atan2(dy, dx);
+
+            this._drawArrow(curr.x, curr.y, angle);
         }
     };
 

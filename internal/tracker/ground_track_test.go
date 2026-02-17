@@ -434,8 +434,8 @@ func TestGenerateDefaultGroundTrack_ISS(t *testing.T) {
 		t.Fatal("ground track has zero points")
 	}
 
-	// 1.0 период (0.3 назад + 0.7 вперёд) × 92 мин / 30 сек ≈ 184 точки.
-	if total < 160 || total > 220 {
+	// 1.5 периода (0.5 назад + 1.0 вперёд) × 92 мин / 30 сек ≈ 276 точек.
+	if total < 250 || total > 310 {
 		t.Errorf("unexpected point count: %d", total)
 	}
 }

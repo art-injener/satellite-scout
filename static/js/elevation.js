@@ -220,7 +220,7 @@
         ctx.stroke();
 
         // Линии вниз от концов полукруга + нижняя линия
-        const lineLength = outerArcRadius + 5;
+        const lineLength = outerArcRadius + 25;
         // Левая линия
         ctx.beginPath();
         ctx.moveTo(cx - outerArcRadius, cy);
@@ -235,6 +235,19 @@
         ctx.beginPath();
         ctx.moveTo(cx - outerArcRadius, cy + lineLength);
         ctx.lineTo(cx + outerArcRadius, cy + lineLength);
+        ctx.stroke();
+
+        // Трапеция-пьедестал (вид сбоку): шире снизу, уже сверху
+        const trapH  = 35 * s; // высота
+        const trapBW = 50 * s; // полуширина основания (низ)
+        const trapTW = 25 * s; // полуширина верхней грани (верх)
+        const trapTop = cy + lineLength;
+        ctx.beginPath();
+        ctx.moveTo(cx - trapTW, trapTop);          // верхний левый
+        ctx.lineTo(cx + trapTW, trapTop);          // верхний правый
+        ctx.lineTo(cx + trapBW, trapTop + trapH);  // нижний правый
+        ctx.lineTo(cx - trapBW, trapTop + trapH);  // нижний левый
+        ctx.closePath();
         ctx.stroke();
     };
 

@@ -253,9 +253,10 @@ class SatelliteStateManager {
      *
      * @param {number} noradId — NORAD ID спутника.
      * @param {string} [name] — Имя спутника (опционально, из SSE события).
+     * @param {Object} [orbitalParams] — Орбитальные параметры {inclination, period}.
      * @returns {boolean} true если спутник найден или создан.
      */
-    setActiveSatellite(noradId, name) {
+    setActiveSatellite(noradId, name, orbitalParams) {
         if (typeof noradId !== 'number' || noradId <= 0) {
             console.warn('[StateManager] setActiveSatellite: invalid noradId');
             return false;
@@ -270,6 +271,15 @@ class SatelliteStateManager {
             // Устанавливаем имя из SSE если оно есть
             if (name && typeof name === 'string') {
                 state.name = name;
+            }
+            // Устанавливаем орбитальные параметры из SSE
+            if (orbitalParams) {
+                if (typeof orbitalParams.inclination === 'number') {
+                    state.inclination = orbitalParams.inclination;
+                }
+                if (typeof orbitalParams.period === 'number') {
+                    state.period = orbitalParams.period;
+                }
             }
             this._notify(StateEventType.SATELLITE_CHANGE, state);
         }

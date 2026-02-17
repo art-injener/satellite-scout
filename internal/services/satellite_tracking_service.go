@@ -44,10 +44,12 @@ type positionEvent struct {
 
 // satelliteChangeEvent — JSON-структура SSE-события "satellite_change".
 type satelliteChangeEvent struct {
-	NoradID int    `json:"norad_id"`
-	Name    string `json:"name"`
-	Reason  string `json:"reason"` // "auto_track", "pass_ended", "initial"
-	TS      int64  `json:"ts"`
+	NoradID     int     `json:"norad_id"`
+	Name        string  `json:"name"`
+	Reason      string  `json:"reason"`      // "auto_track", "pass_ended", "initial"
+	Inclination float64 `json:"inclination"` // Наклонение орбиты (градусы).
+	Period      float64 `json:"period"`      // Орбитальный период (минуты).
+	TS          int64   `json:"ts"`
 }
 
 // PassProvider — интерфейс для получения пролётов (избегаем циклической зависимости).
@@ -398,6 +400,12 @@ func (s *SatelliteTrackingService) broadcastSatelliteChange(noradID int, name, r
 		Name:    name,
 		Reason:  reason,
 		TS:      time.Now().UTC().UnixMilli(),
+	}
+
+	// Получаем TLE для орбитальных параметров.
+	if tle, ok := s.store.Get(noradID); ok {
+		event.Inclination = roundTo(tle.Inclination, 2)
+		event.Period = roundTo(tle.OrbitalPeriod(), 1)
 	}
 
 	data, err := json.Marshal(event)

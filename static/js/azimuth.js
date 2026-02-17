@@ -182,7 +182,7 @@
      * === ПАРАМЕТРЫ ДЛЯ НАСТРОЙКИ ===
      */
     AzimuthIndicator.prototype.platformBaseConfig = {
-        radius: 40, // Радиус шестигранника
+        radius: 44, // Радиус шестигранника
         lineWidth: 1, // Толщина линии (1 = тонкая, 2 = обычная)
         useDash: false, // Использовать пунктир (true/false)
         dashPattern: [5, 5] // Паттерн пунктира [линия, пробел]

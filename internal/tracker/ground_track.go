@@ -137,8 +137,8 @@ func GenerateGroundTrack(tle *TLE, start, end, now time.Time, step time.Duration
 // Периоды орбиты для автодиапазона наземной трассы: сколько витков назад и вперёд от "сейчас".
 // Дробные значения допустимы, например 0.5 — полвитка.
 const (
-	defaultTrackPeriodsBack  = 0.3 // полпериода назад
-	defaultTrackPeriodsAhead = 0.7 // один период вперёд
+	defaultTrackPeriodsBack  = 0.3
+	defaultTrackPeriodsAhead = 0.7
 )
 
 // GenerateDefaultGroundTrack генерирует трассу орбиты с автодиапазоном:

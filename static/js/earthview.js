@@ -31,19 +31,19 @@
         // Цветовая схема в стиле STSPLUS (улучшенная для читаемости)
         this.colors = {
             background: '#000010', // Тёмно-синий фон (океаны)
-            coastline: '#00d4d4', // Циан - береговые линии
-            grid: '#556677', // Серый - сетка (видимый)
-            gridMajor: '#667788', // Светлее - основные линии
+            coastline: '#4d9999', // #5b8a8a #00d4d4, // Циан - береговые линии
+            grid: '#3a4a4a', // Серый - сетка #556677 #2a3d4d #334455 #3d5566	
+            gridMajor: '#4a5e5e', // Светлее - основные линии #667788 #3a5060 #445566 #4d6677
             orbitFuture: '#00ff00', // Зелёный - будущая орбита
             orbitPast: '#ff4444', // Красный - прошлая орбита
             orbitDots: '#ffff00', // Жёлтый - точки орбиты
             satellite: '#ffffff', // Белый - маркер спутника
             satelliteGlow: '#00ffff', // Циан - свечение спутника
-            footprint: 'rgba(200, 100, 255, 0.60)', // Пурпурный - контур зоны видимости (контрастирует с бирюзой и зелёным)
-            footprintFill: 'rgba(200, 100, 255, 0.10)', // Пурпурный полупрозрачный - заливка зоны
-            observer: '#ff0000', // маркер наблюдателя (кружок)
-            observerLabel: '#ff9500', // подпись города наблюдения — янтарный
-            observerLabelStroke: 'rgba(0,0,0,0.9)', // обводка подписи наблюдателя
+            footprint: 'rgba(200, 100, 255, 0.55)', // Пурпурный - контур зоны видимости (контрастирует с бирюзой и зелёным)
+            footprintFill: 'rgba(200, 100, 255, 0.09)', // Пурпурный полупрозрачный - заливка зоны
+            observer: '#ff0000', // маркер наблюдателя (треугольник)
+            observerLabel: '#ff9500', // цвет треугольника наблюдателя — янтарный
+            observerLabelStroke: 'rgba(0,0,0,0.9)', // обводка треугольника/подписи наблюдателя
             observerLabelBg: 'rgba(220, 220, 228, 0.92)', // фон под подпись наблюдателя — светло-серый
             textPrimary: '#ffffff',
             textSecondary: '#00d4d4', // Циан для подписей
@@ -51,7 +51,7 @@
             satLabel: '#ffeb3b', // подпись спутника — яркий жёлтый
             satLabelStroke: 'rgba(0,0,0,0.85)', // обводка подписи спутника
             satLabelBg: 'rgba(220, 220, 228, 0.92)', // фон под подпись спутника — светло-серый
-            russiaBorder: '#ffcc00', // Границы РФ (жёлто-золотой, хорошо видно на карте)
+            russiaBorder: '#aabbcc', // Границы РФ альтернатива: #8899aa, #66bb6a
             russiaLabel: '#ffcc00' // Подпись «Россия»
         };
 
@@ -374,15 +374,14 @@
             const city = this.cities[i];
             const p = this.project(city.lon, city.lat);
 
-            // Красный кружок без заливки (маленький)
+            // Кружок с мягкой заливкой (маленький)
             ctx.beginPath();
-            ctx.arc(p.x, p.y, 2, 0, Math.PI * 2);
-            ctx.strokeStyle = '#ff0000';
-            ctx.lineWidth = 1;
-            ctx.stroke();
+            ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
+            ctx.fillStyle = '#cc6666';
+            ctx.fill();
 
             // Название города белым (мелкий шрифт)
-            ctx.font = 'bold 12px sans-serif';
+            ctx.font = 'bold 11px sans-serif';
             ctx.fillStyle = '#ffffff';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
@@ -654,24 +653,30 @@
         const ctx = this.ctx;
         const p = this.project(this.observer.lon, this.observer.lat);
 
-        // кружок без заливки (маленький) — в цвет подписи
+        // Треугольник
+        const size = 8;
         ctx.beginPath();
-        ctx.arc(p.x, p.y, 2.5, 0, Math.PI * 2);
-        ctx.strokeStyle = this.colors.observerLabel || '#ff9500';
-        ctx.lineWidth = 2;
+        ctx.moveTo(p.x, p.y - size);           // вершина
+        ctx.lineTo(p.x - size, p.y + size);    // нижний левый
+        ctx.lineTo(p.x + size, p.y + size);    // нижний правый
+        ctx.closePath();
+        ctx.fillStyle = this.colors.observerLabel || '#ff9500';
+        ctx.strokeStyle = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
+        ctx.lineWidth = 1;
+        ctx.fill();
         ctx.stroke();
 
-        // Название точки наблюдения — цвет и обводка (без фона)
+        // Название точки наблюдения — белый цвет
         if (this.observer.name) {
             var obsText = this.observer.name.toLocaleUpperCase();
-            ctx.font = 'bold 10px sans-serif';
+            ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            var labelX = p.x + 5;
-            ctx.strokeStyle = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
+            var labelX = p.x + size + 3;
+            ctx.strokeStyle = 'rgba(0,0,0,0.9)';
             ctx.lineWidth = 2;
             ctx.strokeText(obsText, labelX, p.y);
-            ctx.fillStyle = this.colors.observerLabel || '#ff9500';
+            ctx.fillStyle = '#ffffff';
             ctx.fillText(obsText, labelX, p.y);
         }
     };
