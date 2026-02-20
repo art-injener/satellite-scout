@@ -1,0 +1,176 @@
+/* ===== InfoPanel: вкладки спутников + столбики-карточки ===== */
+
+.info-panel {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    overflow: hidden;
+}
+
+/* --- Строка вкладок --- */
+.info-panel__tabs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    overflow-x: auto;
+}
+
+.info-panel__tab {
+    padding: 5px 14px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    background: transparent;
+    border: 1px solid transparent;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.15s ease;
+}
+
+.info-panel__tab:hover {
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+}
+
+.info-panel__tab.active {
+    color: var(--accent-primary);
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
+.info-panel__tabs-spacer {
+    flex: 1;
+}
+
+/* Кнопка "Сопровождение" */
+.info-panel__track-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-left: auto;
+    padding: 5px 16px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--accent-primary);
+    background: rgba(0, 212, 170, 0.1);
+    border: 1px solid rgba(0, 212, 170, 0.4);
+    cursor: pointer;
+    white-space: nowrap;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: all 0.15s ease;
+}
+
+.info-panel__track-btn svg {
+    flex-shrink: 0;
+}
+
+.info-panel__track-btn:hover {
+    background: rgba(0, 212, 170, 0.2);
+    border-color: var(--accent-primary);
+}
+
+.info-panel__track-btn:active {
+    background: rgba(0, 212, 170, 0.3);
+    transform: scale(0.97);
+}
+
+.info-panel__track-btn:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+/* --- 5 столбиков-карточек --- */
+.info-panel__columns {
+    display: flex;
+    gap: 10px;
+    padding: 10px 12px 12px;
+}
+
+/* Карточка-столбик */
+.info-card {
+    flex: 1;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    overflow: hidden;
+    min-width: 0;
+}
+
+.info-card__title {
+    padding: 6px 12px;
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.info-card__body {
+    padding: 8px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+/* Строка "label — value" внутри карточки */
+.info-card .info-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    gap: 8px;
+}
+
+.info-card .info-label {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.info-card .info-value {
+    color: var(--text-primary);
+    font-size: 1.1rem;
+    font-weight: 600;
+    text-align: right;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.info-card .info-value--accent {
+    color: var(--accent-primary);
+}
+
+/* --- Responsive --- */
+@media (max-width: 1200px) {
+    .info-panel__columns {
+        gap: 6px;
+    }
+    .info-card .info-value {
+        font-size: 1rem;
+    }
+    .info-card .info-label {
+        font-size: 0.78rem;
+    }
+}
+
+@media (max-width: 900px) {
+    .info-panel__columns {
+        flex-wrap: wrap;
+    }
+    .info-card {
+        flex: 1 1 calc(50% - 5px);
+        min-width: 200px;
+    }
+}

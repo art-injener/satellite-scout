@@ -119,13 +119,7 @@ body {
     color: var(--accent-primary);
 }
 
-.sidebar-footer {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: var(--spacing-sm);
-    border-top: 1px solid var(--border-color);
-}
+/* sidebar-footer удалён — SSE-индикатор перенесён в station-footer */
 
 /* Индикатор статуса SSE: три состояния, иконка broadcast */
 .sse-status {
@@ -146,18 +140,8 @@ body {
 }
 
 .sse-status__label {
-    font-size: 0.7rem;
-    max-width: 0;
-    overflow: hidden;
-    opacity: 0;
+    font-size: 0.8rem;
     white-space: nowrap;
-    transition: max-width 0.2s ease, opacity 0.15s ease;
-}
-
-.sidebar-footer:hover .sse-status__label,
-.sse-status:focus-within .sse-status__label {
-    max-width: 5.5em;
-    opacity: 1;
 }
 
 /* Отключено — приглушённый серый */
@@ -207,27 +191,86 @@ body {
     overflow-y: auto;
 }
 
-/* Footer */
-.footer {
+/* ===== Station Footer (статусная строка) ===== */
+.station-footer {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    padding: var(--spacing-xs) var(--spacing-md);
+    justify-content: space-between;
+    height: 44px;
+    padding: 0 12px;
     background: var(--bg-secondary);
     border-top: 1px solid var(--border-color);
     font-family: var(--font-mono);
-    font-size: 0.7rem;
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.station-footer__left,
+.station-footer__right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.station-footer__item,
+.station-footer__badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    padding: 3px 10px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+}
+
+.station-footer__time {
+    color: var(--text-primary);
+    font-weight: 600;
+}
+
+.station-footer__mode {
+    color: var(--accent-success);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+}
+
+.station-footer__mode[data-mode="simulation"] {
+    color: var(--accent-warning);
+}
+
+.station-footer__mode[data-mode="receive"] {
+    color: var(--accent-danger);
+}
+
+.station-footer__sdr {
     color: var(--text-muted);
 }
 
-.status {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
+.station-footer__sdr[data-connected="true"] {
+    color: var(--accent-success);
 }
 
-.status.connected {
-    color: var(--accent-success);
+/* SSE-индикатор в footer */
+.station-footer .sse-status {
+    padding: 3px 10px;
+    min-width: auto;
+    min-height: auto;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+}
+
+.station-footer .sse-status__icon {
+    width: 18px;
+    height: 18px;
+}
+
+.station-footer .sse-status__label {
+    max-width: 6em;
+    opacity: 1;
+    font-size: 1rem;
 }
 
 /* ===== Tracking Layout - Grid: карта слева, графики справа ===== */
@@ -265,55 +308,7 @@ body {
     display: block;
 }
 
-/* ===== Панель информации о спутнике ===== */
-.satellite-info-panel {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-    background: #0a0e14;
-    border: 1px solid #2a3444;
-    border-radius: 8px;
-    padding: 20px 28px;
-    font-family: 'JetBrains Mono', 'Fira Code', monospace;
-    position: relative;
-}
-
-.satellite-info-panel .info-row {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 20px 48px;
-    align-items: flex-end;
-}
-
-.satellite-info-panel .info-cell {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 90px;
-}
-
-.satellite-info-panel .info-cell-name {
-    flex: 1;
-}
-
-.satellite-info-panel .info-label {
-    color: #666666;
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 1px;
-    font-weight: 400;
-}
-
-.satellite-info-panel .info-value {
-    color: #ffffff;
-    font-size: 28px;
-    font-weight: 600;
-    line-height: 1.1;
-}
-
-.satellite-info-panel .info-value-accent {
-    color: #00d4aa;
-}
+/* satellite-info-panel удалён — заменён на .info-panel (info-panel.css) */
 
 /* Мигающая надпись "ИМИТАЦИЯ" в правом нижнем углу */
 .simulation-badge {

@@ -850,14 +850,11 @@
         const pos = this.satellite.position;
         if (!pos) { return; }
 
-        // Обновляем элементы если они существуют
-        const elName = document.getElementById('info-name');
-        const elNorad = document.getElementById('info-norad');
-        const elLat = document.getElementById('info-lat');
-        const elLon = document.getElementById('info-lon');
-        const elAlt = document.getElementById('info-alt');
-        const elObserver = document.getElementById('info-observer');
-        const elTime = document.getElementById('info-time');
+        const elName = document.getElementById('ip-name');
+        const elNorad = document.getElementById('ip-norad');
+        const elLat = document.getElementById('ip-lat');
+        const elLon = document.getElementById('ip-lon');
+        const elAlt = document.getElementById('ip-alt');
 
         if (elName) { elName.textContent = this.satellite.name || 'Unknown'; }
         if (elNorad) { elNorad.textContent = this.satellite.noradId || '-----'; }
@@ -872,18 +869,6 @@
         }
         if (elAlt) {
             elAlt.textContent = (pos.alt || 0).toFixed(0) + ' km';
-        }
-
-        if (elObserver && this.observer) {
-            elObserver.textContent = this.observer.name || 'Unknown';
-        }
-
-        if (elTime) {
-            const date = new Date(time || Date.now());
-            const hours = date.getUTCHours().toString().padStart(2, '0');
-            const mins = date.getUTCMinutes().toString().padStart(2, '0');
-            const secs = date.getUTCSeconds().toString().padStart(2, '0');
-            elTime.textContent = hours + ':' + mins + ':' + secs;
         }
     };
 

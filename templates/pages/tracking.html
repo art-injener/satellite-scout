@@ -18,46 +18,73 @@
                 </div>
             </div>
         </div>
-        <!-- Панель информации о спутнике -->
-        <div class="satellite-info-panel" id="satellite-info">
-            <div class="info-row">
-                <span class="info-cell">
-                    <span class="info-label">NORAD</span>
-                    <span class="info-value" id="info-norad">25544</span>
-                </span>
-                <span class="info-cell info-cell-name">
-                    <span class="info-value info-value-accent" id="info-name">ISS Space Station</span>
-                </span>
-                <span class="info-cell">
-                    <span class="info-label">UTC</span>
-                    <span class="info-value" id="info-time">--:--:--</span>
-                </span>
-                <span class="info-cell">
-                    <span class="info-label">Observer</span>
-                    <span class="info-value" id="info-observer">Ростов-на-Дону</span>
-                </span>
+        <!-- InfoPanel: вкладки спутников + столбики с параметрами -->
+        <div class="info-panel" id="info-panel">
+            <!-- Строка вкладок -->
+            <div class="info-panel__tabs" id="info-panel-tabs">
+                <button class="info-panel__tab active" data-norad="25544">25544</button>
+                <button class="info-panel__tab" data-norad="40069">40069</button>
+                <button class="info-panel__tab" data-norad="43017">43017</button>
+                <div class="info-panel__tabs-spacer"></div>
+                <button class="info-panel__track-btn" id="btn-track" title="Взять на сопровождение">
+                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
+                    </svg>
+                    Сопровождение
+                </button>
             </div>
-            <div class="info-row">
-                <span class="info-cell">
-                    <span class="info-label">Incl</span>
-                    <span class="info-value" id="info-orbit">51.64°</span>
-                </span>
-                <span class="info-cell">
-                    <span class="info-label">Period</span>
-                    <span class="info-value" id="info-period">92.5 min</span>
-                </span>
-                <span class="info-cell">
-                    <span class="info-label">Lat</span>
-                    <span class="info-value info-value-accent" id="info-lat">---.--°</span>
-                </span>
-                <span class="info-cell">
-                    <span class="info-label">Lon</span>
-                    <span class="info-value info-value-accent" id="info-lon">---.--°</span>
-                </span>
-                <span class="info-cell">
-                    <span class="info-label">Alt</span>
-                    <span class="info-value info-value-accent" id="info-alt">--- km</span>
-                </span>
+            <!-- 5 столбиков-карточек -->
+            <div class="info-panel__columns">
+                <!-- Столбик 1: Спутник -->
+                <div class="info-card">
+                    <div class="info-card__title">Спутник</div>
+                    <div class="info-card__body">
+                        <div class="info-row"><span class="info-label">NORAD</span><span class="info-value" id="ip-norad">---</span></div>
+                        <div class="info-row"><span class="info-label">Имя</span><span class="info-value info-value--accent" id="ip-name">---</span></div>
+                        <div class="info-row"><span class="info-label">Группа</span><span class="info-value" id="ip-group">---</span></div>
+                    </div>
+                </div>
+                <!-- Столбик 2: Геоданные -->
+                <div class="info-card">
+                    <div class="info-card__title">Геоданные</div>
+                    <div class="info-card__body">
+                        <div class="info-row"><span class="info-label">Lon</span><span class="info-value info-value--accent" id="ip-lon">---.--°</span></div>
+                        <div class="info-row"><span class="info-label">Lat</span><span class="info-value info-value--accent" id="ip-lat">---.--°</span></div>
+                        <div class="info-row"><span class="info-label">Az</span><span class="info-value" id="ip-az">---°</span></div>
+                        <div class="info-row"><span class="info-label">El</span><span class="info-value" id="ip-el">---°</span></div>
+                        <div class="info-row"><span class="info-label">Alt</span><span class="info-value info-value--accent" id="ip-alt">--- km</span></div>
+                    </div>
+                </div>
+                <!-- Столбик 3: Орбита -->
+                <div class="info-card">
+                    <div class="info-card__title">Орбита</div>
+                    <div class="info-card__body">
+                        <div class="info-row"><span class="info-label">Виток</span><span class="info-value" id="ip-orbit">#---</span></div>
+                        <div class="info-row"><span class="info-label">Период</span><span class="info-value" id="ip-period">#---</span></div>
+                        <div class="info-row"><span class="info-label">Склонение</span><span class="info-value" id="ip-incl">#---°</span></div>
+                        <div class="info-row"><span class="info-label">Статус</span><span class="info-value" id="ip-status">--</span></div>
+                    </div>
+                </div>
+                <!-- Столбик 4: Пролёт -->
+                <div class="info-card">
+                    <div class="info-card__title">Пролёт</div>
+                    <div class="info-card__body">
+                        <div class="info-row"><span class="info-label">AOS</span><span class="info-value" id="ip-aos">--:--:--</span></div>
+                        <div class="info-row"><span class="info-label">TCA</span><span class="info-value" id="ip-tca">--:--:--</span></div>
+                        <div class="info-row"><span class="info-label">LOS</span><span class="info-value" id="ip-los">--:--:--</span></div>
+                        <div class="info-row"><span class="info-label">Длительность</span><span class="info-value" id="ip-dur">--:--</span></div>
+                    </div>
+                </div>
+                <!-- Столбик 5: Радиотехнические характеристики радиолинии-->
+                <div class="info-card">
+                    <div class="info-card__title">Радиолиния</div>
+                    <div class="info-card__body">
+                        <div class="info-row"><span class="info-label">ТМИ</span><span class="info-value" id="ip-tmi">--- MHz</span></div>
+                        <div class="info-row"><span class="info-label">Uplink</span><span class="info-value" id="ip-uplink">--- MHz</span></div>
+                        <div class="info-row"><span class="info-label">Downlink</span><span class="info-value" id="ip-downlink">--- MHz</span></div>
+                        <div class="info-row"><span class="info-label">Модуляция</span><span class="info-value" id="ip-mod">---</span></div>
+                    </div>
+                </div>
             </div>
         </div>
     </section>

@@ -58,7 +58,33 @@
 
         // Initialize canvas placeholders
         initCanvasPlaceholders();
-        
+
+        // Инициализация InfoPanel (вкладки спутников)
+        var infoPanelEl = document.getElementById('info-panel');
+        if (infoPanelEl && typeof window.InfoPanel === 'function') {
+            window._infoPanel = new window.InfoPanel(infoPanelEl);
+        }
+
+        // Часы в station-footer: UTC и местное время (обновление каждую секунду)
+        var sfUtc = document.getElementById('sf-utc');
+        var sfLocal = document.getElementById('sf-local');
+        if (sfUtc || sfLocal) {
+            var pad2 = function(n) { return n < 10 ? '0' + n : '' + n; };
+            var updateFooterClocks = function() {
+                var now = new Date();
+                if (sfUtc) {
+                    sfUtc.textContent = 'UTC ' + pad2(now.getUTCHours()) + ':' + pad2(now.getUTCMinutes()) + ':' + pad2(now.getUTCSeconds());
+                }
+                if (sfLocal) {
+                    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+                    var tzShort = tz.split('/').pop().replace(/_/g, ' ');
+                    sfLocal.textContent = tzShort + ' ' + pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+                }
+            };
+            updateFooterClocks();
+            setInterval(updateFooterClocks, 1000);
+        }
+
         // Инициализация таблицы пролётов, если мы на вкладке /passes
         if (typeof initPassesTable === 'function') {
             var passesContainer = document.getElementById('passes-table-container');
@@ -194,49 +220,37 @@
         }, 3000);
     }
     
-    // Обновление info panel данными спутника
+    // Обновление InfoPanel данными спутника (id с префиксом ip-)
     function updateInfoPanel(state) {
         var pos = state.position;
         if (!pos) return;
         
         var el = function(id) { return document.getElementById(id); };
         
-        // NORAD ID и имя
-        if (el('info-norad')) el('info-norad').textContent = state.noradId || '--';
-        if (el('info-name')) el('info-name').textContent = state.name || '--';
+        if (el('ip-norad')) el('ip-norad').textContent = state.noradId || '--';
+        if (el('ip-name')) el('ip-name').textContent = state.name || '--';
         
-        // Координаты
-        if (el('info-lat')) el('info-lat').textContent = pos.lat ? pos.lat.toFixed(2) + '°' : '---.--°';
-        if (el('info-lon')) el('info-lon').textContent = pos.lon ? pos.lon.toFixed(2) + '°' : '---.--°';
-        if (el('info-alt')) el('info-alt').textContent = pos.alt ? pos.alt.toFixed(0) + ' km' : '--- km';
-        
-        // UTC время
-        if (el('info-time')) {
-            var ts = pos.ts || Date.now();
-            var d = new Date(ts);
-            el('info-time').textContent = d.toISOString().substr(11, 8);
-        }
+        if (el('ip-lat')) el('ip-lat').textContent = pos.lat ? pos.lat.toFixed(2) + '°' : '---.--°';
+        if (el('ip-lon')) el('ip-lon').textContent = pos.lon ? pos.lon.toFixed(2) + '°' : '---.--°';
+        if (el('ip-alt')) el('ip-alt').textContent = pos.alt ? pos.alt.toFixed(0) + ' km' : '--- km';
     }
     
-    // Обновление орбитальных параметров (наклонение, период)
+    // Обновление орбитальных параметров
     function updateOrbitalParams(state) {
         var el = function(id) { return document.getElementById(id); };
         
-        // Наклонение орбиты
-        if (el('info-orbit') && typeof state.inclination === 'number') {
-            el('info-orbit').textContent = state.inclination.toFixed(2) + '°';
+        if (el('ip-incl') && typeof state.inclination === 'number') {
+            el('ip-incl').textContent = state.inclination.toFixed(2) + '°';
         }
         
-        // Орбитальный период
-        if (el('info-period') && typeof state.period === 'number') {
+        if (el('ip-period') && typeof state.period === 'number') {
             var period = state.period;
             if (period >= 60) {
-                // Показываем в часах если больше часа
                 var hours = Math.floor(period / 60);
                 var mins = Math.round(period % 60);
-                el('info-period').textContent = hours + 'h ' + mins + 'm';
+                el('ip-period').textContent = hours + 'h ' + mins + 'm';
             } else {
-                el('info-period').textContent = period.toFixed(1) + ' min';
+                el('ip-period').textContent = period.toFixed(1) + ' min';
             }
         }
     }

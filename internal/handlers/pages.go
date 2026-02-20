@@ -61,7 +61,7 @@ func (h *PageHandler) Index(w http.ResponseWriter, r *http.Request) {
 // Tracking рендерит страницу отслеживания (вкладка 1).
 func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:     "Отслеживание - Satellite Scout",
+		Title:     "Сеанс - Satellite Scout",
 		ActiveTab: "tracking",
 	}
 	h.render(w, templateBaseName, data)
@@ -79,7 +79,7 @@ func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
 // Passes рендерит страницу пролётов (вкладка 2).
 func (h *PageHandler) Passes(w http.ResponseWriter, r *http.Request) {
 	data := PageData{
-		Title:     "Пролёты - Satellite Scout",
+		Title:     "План сеансов - Satellite Scout",
 		ActiveTab: "passes",
 	}
 	h.render(w, templateBaseName, data)
