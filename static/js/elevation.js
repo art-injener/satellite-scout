@@ -212,7 +212,7 @@
         const outerArcRadius = innerArcRadius + 5 * s;
 
         ctx.strokeStyle = this.colors.accent;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = 0.75;
 
         // Неподвижный круг (внешний)
         ctx.beginPath();
@@ -220,7 +220,7 @@
         ctx.stroke();
 
         // Линии вниз от концов полукруга + нижняя линия
-        const lineLength = outerArcRadius + 25;
+        const lineLength = outerArcRadius + 35;
         // Левая линия
         ctx.beginPath();
         ctx.moveTo(cx - outerArcRadius, cy);
