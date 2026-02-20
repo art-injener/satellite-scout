@@ -30,6 +30,8 @@ class PassesTable {
         await this.loadPasses();
         this._startCountdownTimer();
         this._startRefreshTimer();
+        // TODO: SSE-004 — подписка на событие 'passes_update' для real-time обновления статусов
+        // без перезагрузки данных. Событие будет содержать актуальные статусы пролётов.
     }
     
     /**
@@ -93,15 +95,15 @@ class PassesTable {
                     <td class="pass-cell pass-cell--orbit">${pass.orbit_number}</td>
                     <td class="pass-cell pass-cell--time">
                         <span class="time-value">${this._formatTime(pass.aos)}</span>
-                        <span class="az-value">${pass.aos_az.toFixed(0)}°</span>
+                        <span class="az-value">Az:${pass.aos_az.toFixed(0)}°</span>
                     </td>
                     <td class="pass-cell pass-cell--time">
                         <span class="time-value">${this._formatTime(pass.tca)}</span>
-                        <span class="el-value el-value--max">${pass.tca_el.toFixed(1)}°</span>
+                        <span class="el-value el-value--max">El:${pass.tca_el.toFixed(1)}°</span>
                     </td>
                     <td class="pass-cell pass-cell--time">
                         <span class="time-value">${this._formatTime(pass.los)}</span>
-                        <span class="az-value">${pass.los_az.toFixed(0)}°</span>
+                        <span class="az-value">Az:${pass.los_az.toFixed(0)}°</span>
                     </td>
                     <td class="pass-cell pass-cell--duration">${duration}</td>
                     <td class="pass-cell pass-cell--countdown" data-countdown="${pass.aos}">${countdown}</td>
@@ -138,34 +140,77 @@ class PassesTable {
      */
     _renderSVGMiniPath(skyPath) {
         if (!skyPath || skyPath.length === 0) {
-            return '<svg class="mini-path" viewBox="-1.2 -1.2 2.4 2.4" width="50" height="50"></svg>';
+            return '<svg class="mini-path" viewBox="-1.2 -1.2 2.4 2.4" width="96" height="96"></svg>';
         }
         
-        // Строим path из предвычисленных X/Y координат.
-        // X/Y уже в диапазоне [-1, 1], где (0,0) — зенит.
         const pathPoints = skyPath.map((p, i) => {
             const cmd = i === 0 ? 'M' : 'L';
             return `${cmd}${p.x.toFixed(3)},${p.y.toFixed(3)}`;
         }).join(' ');
         
-        // Начальная и конечная точки для маркеров.
         const start = skyPath[0];
         const end = skyPath[skyPath.length - 1];
+        const arrow = this._calculateArrow(skyPath);
         
         return `
-            <svg class="mini-path" viewBox="-1.2 -1.2 2.4 2.4" width="50" height="50">
-                <!-- Круг горизонта -->
+            <svg class="mini-path" viewBox="-1.2 -1.2 2.4 2.4" width="96" height="96">
                 <circle cx="0" cy="0" r="1" class="horizon-circle"/>
-                <!-- Перекрестие (N-S, E-W) -->
+                <circle cx="0" cy="0" r="0.67" class="elevation-30"/>
+                <circle cx="0" cy="0" r="0.33" class="elevation-60"/>
                 <line x1="0" y1="-1" x2="0" y2="1" class="crosshair"/>
                 <line x1="-1" y1="0" x2="1" y2="0" class="crosshair"/>
-                <!-- Траектория -->
                 <path d="${pathPoints}" class="sky-track"/>
-                <!-- Маркеры AOS/LOS -->
-                <circle cx="${start.x.toFixed(3)}" cy="${start.y.toFixed(3)}" r="0.08" class="marker-aos"/>
-                <circle cx="${end.x.toFixed(3)}" cy="${end.y.toFixed(3)}" r="0.08" class="marker-los"/>
+                <circle cx="${start.x.toFixed(3)}" cy="${start.y.toFixed(3)}" r="0.12" class="marker-aos"/>
+                <circle cx="${end.x.toFixed(3)}" cy="${end.y.toFixed(3)}" r="0.12" class="marker-los"/>
+                ${arrow}
             </svg>
         `;
+    }
+    
+    /**
+     * Расчёт стрелки направления на середине траектории.
+     * @param {Array} skyPath — массив точек {x, y}.
+     * @returns {string} — SVG path для стрелки.
+     */
+    _calculateArrow(skyPath) {
+        if (skyPath.length < 2) return '';
+        
+        // Находим точку посередине траектории.
+        const midIdx = Math.floor(skyPath.length / 2);
+        
+        // Берём точки вокруг середины для расчёта направления.
+        const beforeIdx = Math.max(0, midIdx - 1);
+        const afterIdx = Math.min(skyPath.length - 1, midIdx + 1);
+        
+        const before = skyPath[beforeIdx];
+        const mid = skyPath[midIdx];
+        const after = skyPath[afterIdx];
+        
+        // Вектор направления (усреднённый).
+        const dx = after.x - before.x;
+        const dy = after.y - before.y;
+        
+        // Угол поворота стрелки (радианы).
+        const angle = Math.atan2(dy, dx);
+        
+        const arrowSize = 0.20;
+        const arrowWidth = 0.14;
+        
+        // Вершина стрелки в направлении движения.
+        const tipX = mid.x + Math.cos(angle) * arrowSize;
+        const tipY = mid.y + Math.sin(angle) * arrowSize;
+        
+        // Основание стрелки (два угла треугольника).
+        const baseAngle1 = angle + Math.PI * 0.75;
+        const baseAngle2 = angle - Math.PI * 0.75;
+        
+        const base1X = mid.x + Math.cos(baseAngle1) * arrowWidth;
+        const base1Y = mid.y + Math.sin(baseAngle1) * arrowWidth;
+        
+        const base2X = mid.x + Math.cos(baseAngle2) * arrowWidth;
+        const base2Y = mid.y + Math.sin(baseAngle2) * arrowWidth;
+        
+        return `<path d="M${tipX.toFixed(3)},${tipY.toFixed(3)} L${base1X.toFixed(3)},${base1Y.toFixed(3)} L${base2X.toFixed(3)},${base2Y.toFixed(3)} Z" fill="white" opacity="0.9"/>`;
     }
     
     /**

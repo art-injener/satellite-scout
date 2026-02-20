@@ -735,13 +735,14 @@ section h2 {
 
 .passes-header {
     flex-shrink: 0;
+    text-align: center;
 }
 
 .passes-header h2 {
-    font-size: 1.25rem;
+    font-size: 2rem; /* 28px — крупный заголовок */
     font-weight: 600;
     color: var(--text-primary);
-    margin: 0 0 var(--spacing-xs) 0;
+    margin: 0;
     border-bottom: none;
     text-transform: none;
     letter-spacing: normal;

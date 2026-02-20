@@ -1,12 +1,14 @@
 /**
  * Стили таблицы пролётов спутников.
+ * Базовый font-size: 14px (html). Все rem рассчитаны от 14px.
+ * Минимальная читаемая величина: 12px = 0.857rem.
  */
 
 /* Таблица */
 .passes-table {
     width: 100%;
     border-collapse: collapse;
-    font-size: 0.8125rem;
+    font-size: 1.5rem; /* 21px */
 }
 
 .passes-table thead {
@@ -17,37 +19,32 @@
 
 .passes-table th {
     background: var(--bg-tertiary);
-    color: var(--text-muted);
-    font-weight: 600;
-    font-size: 0.6875rem;
+    color: #a0a8b4; /* ярче чем --text-muted, хорошо читается */
+    font-weight: 700;
+    font-size: 1.071rem; /* 15px */
     text-transform: uppercase;
     letter-spacing: 0.5px;
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 12px 16px;
     text-align: left;
     border-bottom: 1px solid var(--border-color);
     white-space: nowrap;
 }
 
-.passes-table th:last-child {
+/* Выравнивание заголовков: Орбита(2), Длит.(6), До пролёта(7), Траектория(8) — по центру */
+.passes-table th:nth-child(2),
+.passes-table th:nth-child(6),
+.passes-table th:nth-child(7),
+.passes-table th:nth-child(8) {
     text-align: center;
 }
 
 /* Строки */
 .pass-row {
-    cursor: pointer;
     transition: background-color 0.15s;
 }
 
 .pass-row:hover {
     background: var(--bg-tertiary);
-}
-
-.pass-row--selected {
-    background: rgba(0, 168, 255, 0.15) !important;
-}
-
-.pass-row--selected:hover {
-    background: rgba(0, 168, 255, 0.2) !important;
 }
 
 /* Статусы строк */
@@ -70,41 +67,40 @@
 }
 
 .pass-row--completed .sat-name {
-    color: var(--text-muted);
+    color: #a0a8b4;
 }
 
 /* Ячейки */
 .pass-cell {
-    padding: var(--spacing-sm) var(--spacing-md);
+    padding: 12px 16px;
     border-bottom: 1px solid var(--border-color);
     vertical-align: middle;
 }
 
 .pass-cell--name {
-    min-width: 140px;
+    white-space: nowrap;
 }
 
 .sat-name {
     display: block;
     color: var(--text-primary);
     font-weight: 500;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    max-width: 140px;
+    font-size: 1.5rem; /* 21px */
 }
 
 .sat-norad {
     display: block;
-    font-size: 0.6875rem;
-    color: var(--text-muted);
+    font-size: 1.143rem; /* 16px */
+    font-family: var(--font-mono);
+    color: var(--accent-primary); /* бирюзовый #00d4aa — выделяется */
+    margin-top: 3px;
 }
 
 .pass-cell--orbit {
     text-align: center;
-    color: var(--text-secondary);
+    color: var(--accent-primary); /* бирюзовый #00d4aa — выделяется */
     font-family: var(--font-mono);
-    font-size: 0.75rem;
+    font-size: 1.5rem; /* 21px */
 }
 
 .pass-cell--time {
@@ -114,32 +110,37 @@
 .time-value {
     display: block;
     font-family: var(--font-mono);
+    font-size: 1.5rem; /* 21px */
     color: var(--text-primary);
 }
 
 .az-value,
 .el-value {
     display: block;
-    font-size: 0.6875rem;
-    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 1.214rem; /* 17px */
+    color: var(--accent-secondary); /* голубой #00a8ff */
+    margin-top: 3px;
 }
 
 .el-value--max {
     color: var(--accent-secondary);
-    font-weight: 500;
+    font-weight: 600;
 }
 
 .pass-cell--duration {
     font-family: var(--font-mono);
-    color: var(--text-secondary);
+    font-size: 1.5rem; /* 21px */
+    color: #c0c8d0;
     text-align: center;
 }
 
 .pass-cell--countdown {
     font-family: var(--font-mono);
+    font-size: 1.5rem; /* 21px */
     color: var(--accent-warning);
     text-align: center;
-    min-width: 70px;
+    min-width: 100px;
 }
 
 .countdown-now {
@@ -149,7 +150,7 @@
 
 .pass-cell--minipath {
     text-align: center;
-    padding: var(--spacing-xs);
+    padding: 6px 8px;
 }
 
 /* SVG мини-проекция */
@@ -160,20 +161,31 @@
 
 .mini-path .horizon-circle {
     fill: none;
-    stroke: var(--border-color);
+    stroke: rgba(255, 255, 255, 0.25);
     stroke-width: 0.04;
 }
 
+.mini-path .elevation-30 {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.15);
+    stroke-width: 0.03;
+}
+
+.mini-path .elevation-60 {
+    fill: none;
+    stroke: rgba(255, 255, 255, 0.12);
+    stroke-width: 0.025;
+}
+
 .mini-path .crosshair {
-    stroke: var(--bg-tertiary);
+    stroke: rgba(255, 255, 255, 0.15);
     stroke-width: 0.02;
-    stroke-dasharray: 0.05 0.05;
 }
 
 .mini-path .sky-track {
     fill: none;
-    stroke: var(--accent-secondary);
-    stroke-width: 0.06;
+    stroke: #00d4ff; /* яркий голубой — контрастный на тёмном фоне */
+    stroke-width: 0.12;
     stroke-linecap: round;
     stroke-linejoin: round;
 }
@@ -194,7 +206,7 @@
     justify-content: center;
     gap: var(--spacing-md);
     padding: calc(var(--spacing-xl) * 2);
-    color: var(--text-muted);
+    color: #a0a8b4;
     min-height: 300px;
 }
 
@@ -204,7 +216,7 @@
 
 .passes-empty p {
     margin: 0;
-    font-size: 0.9375rem;
+    font-size: 1rem;
 }
 
 /* Ошибка */
@@ -225,47 +237,55 @@
 
 .passes-error p {
     margin: 0;
-    color: var(--text-secondary);
+    color: #a0a8b4;
 }
 
-/* Кнопка "Взять на сопровождение" */
-.passes-actions {
-    display: flex;
-    justify-content: flex-end;
-    padding: var(--spacing-md);
-    border-top: 1px solid var(--border-color);
-    background: var(--bg-secondary);
+/* Responsive: экраны до 1200px — уменьшаем на шаг */
+@media (max-width: 1200px) {
+    .passes-table {
+        font-size: 1.214rem; /* 17px */
+    }
+
+    .sat-name,
+    .time-value,
+    .pass-cell--duration,
+    .pass-cell--countdown,
+    .pass-cell--orbit {
+        font-size: 1.214rem;
+    }
+
+    .az-value,
+    .el-value,
+    .sat-norad {
+        font-size: 1rem; /* 14px */
+    }
+
+    .mini-path {
+        width: 72px;
+        height: 72px;
+    }
 }
 
-#btn-track-satellite {
-    min-width: 200px;
-}
-
-#btn-track-satellite:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Responsive */
+/* Responsive: экраны до 900px — компактная таблица */
 @media (max-width: 900px) {
     .passes-table {
-        font-size: 0.75rem;
+        font-size: 1rem; /* 14px */
     }
-    
+
     .passes-table th,
     .pass-cell {
-        padding: var(--spacing-xs) var(--spacing-sm);
+        padding: 8px 10px;
     }
-    
+
     .sat-name {
-        max-width: 100px;
+        font-size: 1rem;
     }
-    
+
     .mini-path {
-        width: 40px;
-        height: 40px;
+        width: 56px;
+        height: 56px;
     }
-    
+
     /* Скрываем орбиту на узких экранах */
     .pass-cell--orbit,
     .passes-table th:nth-child(2) {
@@ -273,8 +293,14 @@
     }
 }
 
+/* Responsive: экраны до 600px — минимум колонок */
 @media (max-width: 600px) {
-    /* Скрываем длительность и TCA на очень узких экранах */
+    .passes-table th,
+    .pass-cell {
+        padding: 6px 8px;
+    }
+
+    /* Скрываем длительность и TCA */
     .passes-table th:nth-child(4),
     .passes-table th:nth-child(6),
     .pass-cell:nth-child(4),

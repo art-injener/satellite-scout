@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
     <link rel="stylesheet" href="/static/css/main.css?v=50">
-    <link rel="stylesheet" href="/static/css/passes-table.css?v=1">
+    <link rel="stylesheet" href="/static/css/passes-table.css?v=3">
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/htmx-sse.js"></script>
 </head>
@@ -14,41 +14,32 @@
     <aside class="sidebar">
         <div class="sidebar-logo" title="SatWatch">🛰️</div>
         <nav class="sidebar-nav" role="tablist">
+            <!-- Вкладка "Сеанс" (бывшая "Отслеживание") -->
             <a href="/tracking" 
                class="sidebar-tab{{if eq .ActiveTab "tracking"}} active{{end}}" 
                role="tab"
-               title="Отслеживание"
-               hx-get="/tracking" 
-               hx-target=".main" 
-               hx-push-url="true"
-               hx-select=".main">
+               title="Сеанс">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/>
                     <path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
                     <path d="M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
                 </svg>
             </a>
+            <!-- Вкладка "План сеансов" (бывшая "Пролёты") -->
             <a href="/passes" 
                class="sidebar-tab{{if eq .ActiveTab "passes"}} active{{end}}" 
                role="tab"
-               title="Пролёты"
-               hx-get="/passes" 
-               hx-target=".main" 
-               hx-push-url="true"
-               hx-select=".main">
+               title="План сеансов">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="10"/>
                     <polyline points="12 6 12 12 16 14"/>
                 </svg>
             </a>
+            <!-- Вкладка "Приёмник" - закомментирована, будет реализована в PHASE-11
             <a href="/receiver" 
                class="sidebar-tab{{if eq .ActiveTab "receiver"}} active{{end}}" 
                role="tab"
-               title="Приёмник"
-               hx-get="/receiver" 
-               hx-target=".main" 
-               hx-push-url="true"
-               hx-select=".main">
+               title="Приёмник">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9"/>
                     <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.4"/>
@@ -57,19 +48,18 @@
                     <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1"/>
                 </svg>
             </a>
+            -->
+            <!-- Вкладка "Имитация" - закомментирована, будет реализована позже
             <a href="/simulation" 
                class="sidebar-tab{{if eq .ActiveTab "simulation"}} active{{end}}" 
                role="tab"
-               title="Имитация"
-               hx-get="/simulation" 
-               hx-target=".main" 
-               hx-push-url="true"
-               hx-select=".main">
+               title="Имитация">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <circle cx="12" cy="12" r="3"/>
                     <path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/>
                 </svg>
             </a>
+            -->
         </nav>
         <div class="sidebar-footer">
             <span class="sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Статус подключения к потоку данных">
@@ -111,7 +101,7 @@
     <script src="/static/js/skyview.js?v=50"></script>
     <script src="/static/js/satellite-state.js?v=2"></script>
     <script src="/static/js/sse-client.js?v=2"></script>
-    <script src="/static/js/passes-table.js?v=2"></script>
+    <script src="/static/js/passes-table.js?v=3"></script>
     <script src="/static/js/app.js?v=51"></script>
 </body>
 </html>
