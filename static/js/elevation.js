@@ -43,6 +43,8 @@
         // Позиция спутника (null = нет данных)
         this.satelliteElevation = null;
         this.satelliteAzimuth = null;
+        // NORAD ID спутника
+        this.noradId = null;
         // Видимость спутника
         this.isVisible = true;
 
@@ -208,26 +210,26 @@
 
         var limbAngle = this._elevationToLimbAngle(this.satelliteElevation, this.satelliteAzimuth || this.currentAzimuth);
         var endR = r - 20;
-        var endX = cx + Math.cos(limbAngle) * endR;
-        var endY = cy - Math.sin(limbAngle) * endR;
+        // var endX = cx + Math.cos(limbAngle) * endR;
+        // var endY = cy - Math.sin(limbAngle) * endR;
 
         // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
-        var lineWidth = 2;          // Толщина пунктирной линии
-        var dashPattern = [6, 4]; // Пунктир
+        // var lineWidth = 2;          // Толщина пунктирной линии
+        // var dashPattern = [6, 4]; // Пунктир
         var markerRadius = 6;         // Радиус маркера на лимбе
         var markerLineWidth = 2;      // Толщина контура маркера
         // ================================
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(endX, endY);
-        ctx.strokeStyle = this.colors.satelliteLine;
-        ctx.lineWidth = lineWidth;
-        ctx.setLineDash(dashPattern);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.restore();
+        // ctx.save();
+        // ctx.beginPath();
+        // ctx.moveTo(cx, cy);
+        // ctx.lineTo(endX, endY);
+        // ctx.strokeStyle = this.colors.satelliteLine;
+        // ctx.lineWidth = lineWidth;
+        // ctx.setLineDash(dashPattern);
+        // ctx.stroke();
+        // ctx.setLineDash([]);
+        // ctx.restore();
 
         // Маркер-кольцо на лимбе (без заливки)
         var markerR = r - 9;
@@ -334,13 +336,16 @@
             this.centerY,
             angle,
             this.antennaScale,
-            this.radius - 9,
+            this.radius - 18,
             'elevation'
         );
     };
 
     /**
-     * Информационная панель внизу canvas (аналогично SkyView)
+     * Информационная панель внизу canvas — 3 колонки в одну строку
+     * Колонка 1: NORAD ID
+     * Колонка 2: El ант.
+     * Колонка 3: El КА
      */
     ElevationIndicator.prototype._drawInfo = function() {
         var ctx = this.ctx;
@@ -350,7 +355,6 @@
 
         var panelPadding = 6;
         var cornerRadius = 6;
-        var textMargin = 10;
 
         ctx.beginPath();
         if (ctx.roundRect) {
@@ -365,27 +369,38 @@
         ctx.stroke();
 
         var rowY = panelY + panelHeight / 2;
-        var leftX = panelPadding + textMargin;
-        var rightX = w - panelPadding - textMargin;
+
+        // 3 колонки с фиксированными позициями
+        var col1X = panelPadding + 10;          // NORAD слева
+        var col2X = col1X + 70;                  // El ант. (отступ 70px от NORAD, было 90px)
+        var col3X = col2X + 100;                 // El КА (отступ 100px от El ант., было 115px)
 
         ctx.font = 'bold 11px monospace';
         ctx.textBaseline = 'middle';
 
-        // Левая группа: «El ант.: значение» — по левому краю
-        var elAntVal = this.currentElevation !== null ? this.currentElevation.toFixed(1) + '°' : '---';
+        // Колонка 1: NORAD ID (слева)
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('El ант.: ', leftX, rowY);
+        ctx.fillText('ID:', col1X, rowY);
         ctx.fillStyle = '#00d4aa';
-        ctx.fillText(elAntVal, leftX + ctx.measureText('El ант.: ').width, rowY);
+        var noradText = this.noradId ? String(this.noradId) : '-----';
+        ctx.fillText(noradText, col1X + ctx.measureText('ID:').width + 3, rowY);  // +3px минимальный отступ
 
-        // Правая группа: «El КА: значение» — по правому краю
-        var elSatVal = this.satelliteElevation !== null ? this.satelliteElevation.toFixed(1) + '°' : '---';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = '#00d4aa';
-        ctx.fillText(elSatVal, rightX, rowY);
+        // Колонка 2: El ант. (центр-слева)
+        ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('El КА:  ', rightX - ctx.measureText(elSatVal).width, rowY);
+        ctx.fillText('El ант.: ', col2X, rowY);
+        ctx.fillStyle = '#00d4aa';
+        var elAntVal = this.currentElevation !== null ? this.currentElevation.toFixed(1) + '°' : '---';
+        ctx.fillText(elAntVal, col2X + ctx.measureText('El ант.: ').width, rowY);
+
+        // Колонка 3: El КА (с отступом от col2)
+        var elSatVal = this.satelliteElevation !== null ? this.satelliteElevation.toFixed(1) + '°' : '---';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('El КА: ', col3X, rowY);
+        ctx.fillStyle = '#00d4aa';
+        ctx.fillText(elSatVal, col3X + ctx.measureText('El КА: ').width, rowY);
     };
 
     /**
@@ -452,6 +467,14 @@
      */
     ElevationIndicator.prototype.setVisible = function(visible) {
         this.isVisible = visible;
+    };
+
+    /**
+     * Установка NORAD ID спутника
+     * @param {number|string|null} noradId - NORAD ID
+     */
+    ElevationIndicator.prototype.setNoradId = function(noradId) {
+        this.noradId = noradId;
     };
 
     ElevationIndicator.prototype.getElevation = function() {

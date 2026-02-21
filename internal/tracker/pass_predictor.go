@@ -521,10 +521,20 @@ func PredictAllPasses(
 		return nil, nil
 	}
 
-	return predictPassesForTLEs(tles, obs, start, end, minElDeg)
+	passes, err := predictPassesForTLEs(tles, obs, start, end, minElDeg)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, p := range passes {
+		p.Group = group
+	}
+
+	return passes, nil
 }
 
 // PredictPassesForAll рассчитывает пролёты для ВСЕХ спутников в хранилище.
+// Итерирует по группам, заполняет поле Pass.Group именем группы.
 // Возвращает пролёты отсортированные по AOS (ближайшие первыми).
 func PredictPassesForAll(
 	store *TLEStore,
@@ -540,13 +550,29 @@ func PredictPassesForAll(
 		return nil, ErrNilObserver
 	}
 
-	// Получаем все TLE из хранилища.
-	tles := store.GetAll()
-	if len(tles) == 0 {
+	groups := store.Groups()
+	if len(groups) == 0 {
 		return nil, nil
 	}
 
-	return predictPassesForTLEs(tles, obs, start, end, minElDeg)
+	var allPasses []*Pass
+
+	for _, group := range groups {
+		passes, err := PredictAllPasses(store, obs, group, start, end, minElDeg)
+		if err != nil {
+			continue
+		}
+		for _, p := range passes {
+			p.Group = group
+		}
+		allPasses = append(allPasses, passes...)
+	}
+
+	sort.Slice(allPasses, func(i, j int) bool {
+		return allPasses[i].AOS < allPasses[j].AOS
+	})
+
+	return allPasses, nil
 }
 
 // predictPassesForTLEs — внутренняя функция расчёта пролётов для списка TLE.

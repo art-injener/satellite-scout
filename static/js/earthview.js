@@ -842,36 +842,6 @@
         this.draw();
     };
 
-    /**
-     * Обновление информационной панели
-     * @param {number} time - Время (timestamp)
-     */
-    EarthView.prototype.updateInfoPanel = function(time) {
-        const pos = this.satellite.position;
-        if (!pos) { return; }
-
-        const elName = document.getElementById('ip-name');
-        const elNorad = document.getElementById('ip-norad');
-        const elLat = document.getElementById('ip-lat');
-        const elLon = document.getElementById('ip-lon');
-        const elAlt = document.getElementById('ip-alt');
-
-        if (elName) { elName.textContent = this.satellite.name || 'Unknown'; }
-        if (elNorad) { elNorad.textContent = this.satellite.noradId || '-----'; }
-
-        if (elLat) {
-            const latDir = pos.lat >= 0 ? 'N' : 'S';
-            elLat.textContent = Math.abs(pos.lat).toFixed(2) + '°' + latDir;
-        }
-        if (elLon) {
-            const lonDir = pos.lon >= 0 ? 'E' : 'W';
-            elLon.textContent = Math.abs(pos.lon).toFixed(2) + '°' + lonDir;
-        }
-        if (elAlt) {
-            elAlt.textContent = (pos.alt || 0).toFixed(0) + ' km';
-        }
-    };
-
     // Экспорт
     window.EarthView = EarthView;
 

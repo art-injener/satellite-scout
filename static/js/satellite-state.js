@@ -277,22 +277,24 @@ class SatelliteStateManager {
         const prevId = this._activeSatelliteId;
         this._activeSatelliteId = noradId;
 
-        // Notify о смене спутника (даже если состояние ещё пустое).
-        if (noradId !== prevId) {
-            const state = this._getOrCreateState(noradId);
-            // Устанавливаем имя из SSE если оно есть
-            if (name && typeof name === 'string') {
-                state.name = name;
+        const state = this._getOrCreateState(noradId);
+
+        if (name && typeof name === 'string') {
+            state.name = name;
+        }
+
+        if (orbitalParams) {
+            if (typeof orbitalParams.inclination === 'number') {
+                state.inclination = orbitalParams.inclination;
             }
-            // Устанавливаем орбитальные параметры из SSE
-            if (orbitalParams) {
-                if (typeof orbitalParams.inclination === 'number') {
-                    state.inclination = orbitalParams.inclination;
-                }
-                if (typeof orbitalParams.period === 'number') {
-                    state.period = orbitalParams.period;
-                }
+            if (typeof orbitalParams.period === 'number') {
+                state.period = orbitalParams.period;
             }
+        }
+
+        // Уведомляем при смене спутника ИЛИ при наличии новых орбитальных параметров
+        // (повторный satellite_change для того же спутника при reconnect/кэше).
+        if (noradId !== prevId || orbitalParams) {
             this._notify(StateEventType.SATELLITE_CHANGE, state);
         }
 

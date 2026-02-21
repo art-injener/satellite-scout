@@ -20,7 +20,7 @@
      * @param {number} centerY - Y координата центра вращения
      * @param {number} angle - Угол поворота в градусах (0 = вверх)
      * @param {number} scale - Масштаб отрисовки
-     * @param {number} arrowEndRadius - Радиус для конца стрелки (опционально)
+     * @param {number} arrowEndRadius - Радиус конца стрелки (внутренний круг лимба)
      * @param {string} viewType - Тип графика: 'azimuth' или 'elevation'
      */
     function drawAntenna(ctx, centerX, centerY, angle, scale, arrowEndRadius, viewType) {
@@ -156,7 +156,7 @@
         ctx.closePath();
         ctx.stroke();
 
-        // === 5. Красная стрелка ===
+        // === 5. Красная стрелка (от шестигранника до внутреннего круга лимба) ===
         if (arrowEndRadius) {
             const hexTopY = hexY - hexRadius;
             const arrowEndY = -arrowEndRadius;

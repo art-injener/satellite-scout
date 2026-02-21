@@ -93,6 +93,7 @@
         // Данные спутника
         this.satellite = {
             name: '',
+            noradId: null,
             track: [],
             currentPos: null
         };
@@ -122,7 +123,7 @@
      */
     SkyView.prototype._updateGeometry = function() {
         const padding = 30; // Отступ для меток азимута
-        const infoPanelHeight = 50; // Высота информационной панели снизу
+        const infoPanelHeight = 55; // Высота информационной панели снизу (увеличена с 50px)
 
         this.infoPanelHeight = infoPanelHeight;
         this.centerX = this.canvas.width / 2;
@@ -804,6 +805,9 @@
 
     /**
      * Отрисовка информационной панели внизу
+     * Колонка 1: NORAD ID / Длительность
+     * Колонка 2: AOS / LOS
+     * Колонка 3: Az / El
      */
     SkyView.prototype._drawInfo = function() {
         const ctx = this.ctx;
@@ -813,7 +817,6 @@
         const panelHeight = this.infoPanelHeight;
         const panelY = h - panelHeight;
 
-        // Рамка информационной панели со скруглёнными углами
         const panelPadding = 6;
         const cornerRadius = 8;
 
@@ -825,95 +828,65 @@
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        // Разделительные линии внутри панели
         const col1X = panelPadding + 8;
-        const col2X = w * 0.35;
-        const col3X = w * 0.65;
-        const row1Y = panelY + 18;
-        const row2Y = panelY + 34;
+        const col2X = w * 0.38;   
+        const col3X = w * 0.70;   
+        const row1Y = panelY + 20;  // Увеличено с 18
+        const row2Y = panelY + 40;  // Увеличено с 34 (больший отступ между строками)
 
-        // === Левая колонка: Азимут и Угол места ===
-        ctx.font = 'bold 12px monospace'; // Увеличен с 10px
-        ctx.textBaseline = 'middle';
-
-        // Азимут
-        ctx.textAlign = 'left';
-        ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('Az:', col1X, row1Y);
-        ctx.fillStyle = this.colors.infoText;
-        const azText = pos ? pos.az.toFixed(1) + '°' : '---.-°';
-        ctx.fillText(azText, col1X + 25, row1Y);
-
-        // Угол места
-        ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('El:', col1X, row2Y);
-        ctx.fillStyle = this.colors.infoText;
-        const elText = pos ? pos.el.toFixed(1) + '°' : '---.-°';
-        ctx.fillText(elText, col1X + 25, row2Y);
-
-        // === Средняя колонка: AOS и LOS времена ===
         const passInfo = this.passInfo;
-        ctx.font = '11px monospace'; // Увеличен с 9px
 
-        // AOS время
+        // === Колонка 1: NORAD ID и Длительность ===
+        ctx.font = 'bold 12px monospace';
+        ctx.textBaseline = 'middle';
+        ctx.textAlign = 'left';
+
+        ctx.fillStyle = this.colors.infoLabel;
+        ctx.fillText('ID:', col1X, row1Y);
+        ctx.fillStyle = this.colors.timeText;
+        const noradText = this.satellite.noradId ? String(this.satellite.noradId) : '-----';
+        ctx.fillText(noradText, col1X + 52, row1Y);
+
+        ctx.fillStyle = this.colors.infoLabel;
+        ctx.fillText('Dur:', col1X, row2Y);
+        if (passInfo.aosTime && passInfo.losTime) {
+            const duration = passInfo.losTime - passInfo.aosTime;
+            ctx.fillStyle = this.colors.timeText;
+            ctx.fillText(this._formatDuration(duration), col1X + 35, row2Y);
+        } else {
+            ctx.fillStyle = this.colors.timeText;
+            ctx.fillText('--:--', col1X + 35, row2Y);
+        }
+
+        // === Колонка 2: AOS и LOS времена ===
+        ctx.font = '12px monospace';
+
         ctx.textAlign = 'left';
         ctx.fillStyle = this.colors.aosMarker;
         ctx.fillText('AOS:', col2X, row1Y);
         ctx.fillStyle = this.colors.timeText;
         ctx.fillText(this._formatTime(passInfo.aosTime), col2X + 32, row1Y);
 
-        // LOS время
         ctx.fillStyle = this.colors.losMarker;
         ctx.fillText('LOS:', col2X, row2Y);
         ctx.fillStyle = this.colors.timeText;
         ctx.fillText(this._formatTime(passInfo.losTime), col2X + 32, row2Y);
 
-        // === Правая колонка: Длительность и название спутника ===
-        // Длительность
+        // === Колонка 3: Азимут и Угол места ===
+        ctx.font = 'bold 12px monospace';
+
         ctx.textAlign = 'left';
         ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('Dur:', col3X, row1Y);
+        ctx.fillText('Az:', col3X, row1Y);
+        ctx.fillStyle = this.colors.infoText;
+        const azText = pos ? pos.az.toFixed(1) + '°' : '---.-°';
+        ctx.fillText(azText, col3X + 25, row1Y);
 
-        if (passInfo.aosTime && passInfo.losTime) {
-            const duration = passInfo.losTime - passInfo.aosTime;
-            ctx.fillStyle = this.colors.timeText;
-            ctx.fillText(this._formatDuration(duration), col3X + 30, row1Y);
-        } else {
-            ctx.fillStyle = this.colors.timeText;
-            ctx.fillText('--:--', col3X + 30, row1Y);
-        }
-
-        // Название спутника (с обрезкой если слишком длинное)
         ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('Sat:', col3X, row2Y);
-        ctx.fillStyle = this.colors.satellite;
-        ctx.font = 'bold 8px monospace';
-        const satName = this.satellite.name || '---';
-        const maxWidth = w - col3X - 35; // Максимальная ширина для имени
-        const truncatedName = this._truncateText(ctx, satName, maxWidth);
-        ctx.fillText(truncatedName, col3X + 28, row2Y);
-    };
-
-    /**
-     * Обрезка текста с добавлением "..." если не помещается
-     * @param {CanvasRenderingContext2D} ctx - Контекст canvas
-     * @param {string} text - Исходный текст
-     * @param {number} maxWidth - Максимальная ширина в пикселях
-     * @returns {string} - Обрезанный текст
-     */
-    SkyView.prototype._truncateText = function(ctx, text, maxWidth) {
-        if (ctx.measureText(text).width <= maxWidth) {
-            return text;
-        }
-        
-        const ellipsis = '…';
-        let truncated = text;
-        
-        while (truncated.length > 0 && ctx.measureText(truncated + ellipsis).width > maxWidth) {
-            truncated = truncated.slice(0, -1);
-        }
-        
-        return truncated + ellipsis;
+        ctx.fillText('El:', col3X, row2Y);
+        ctx.fillStyle = this.colors.infoText;
+        const elText = pos ? pos.el.toFixed(1) + '°' : '---.-°';
+        ctx.fillText(elText, col3X + 25, row2Y);
     };
 
     /**
@@ -947,9 +920,14 @@
 
     /**
      * Установка информации о спутнике
+     * @param {string} name - Название спутника
+     * @param {number|string} [noradId] - NORAD ID спутника
      */
-    SkyView.prototype.setSatelliteInfo = function(name) {
+    SkyView.prototype.setSatelliteInfo = function(name, noradId) {
         this.satellite.name = name;
+        if (noradId !== undefined) {
+            this.satellite.noradId = noradId;
+        }
     };
 
     /**

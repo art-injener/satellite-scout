@@ -86,7 +86,9 @@ func (h *SSEHub) Run(ctx context.Context) {
 			slog.DebugContext(ctx, "SSE client registered", "total_clients", h.clientCount.Load())
 
 			// Отправка кешированных событий новому клиенту.
-			for _, eventType := range []string{"satellite_state_update", "satellite_change"} {
+			// satellite_change ПЕРВЫМ: устанавливает активный спутник и орбитальные параметры
+			// до прихода позиций, иначе auto-activation в updatePosition «украдёт» ID.
+			for _, eventType := range []string{"satellite_change", "satellite_state_update"} {
 				if cached, ok := lastEvents[eventType]; ok {
 					select {
 					case client.events <- cached:

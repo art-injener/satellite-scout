@@ -28,6 +28,7 @@ type AzElPoint struct {
 type Pass struct {
 	NoradID     int         `json:"norad_id"`     // NORAD каталожный номер.
 	SatName     string      `json:"sat_name"`     // Имя спутника.
+	Group       string      `json:"group"`        // TLE-группа спутника (stations, amateur, cubesat и т.д.).
 	OrbitNumber int         `json:"orbit_number"` // Номер орбиты (витка) на момент TCA.
 	AOS         int64       `json:"aos"`          // Acquisition Of Signal — время появления над горизонтом, Unix ms.
 	AOSAz       float64     `json:"aos_az"`       // Азимут в момент AOS, градусы.

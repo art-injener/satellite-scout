@@ -34,6 +34,8 @@
 
         // Позиция спутника (null = нет данных)
         this.satelliteAzimuth = null;
+        // NORAD ID спутника
+        this.noradId = null;
         // Видимость спутника
         this.isVisible = true;
 
@@ -135,26 +137,26 @@
         var cy = this.centerY;
         var r = this.radius;
         var rad = this.degToRad(this.satelliteAzimuth - 90);
-        var endX = cx + Math.cos(rad) * (r - 20);
-        var endY = cy + Math.sin(rad) * (r - 20);
+        // var endX = cx + Math.cos(rad) * (r - 20);
+        // var endY = cy + Math.sin(rad) * (r - 20);
 
         // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
-        var lineWidth = 2;            // Толщина пунктирной линии
-        var dashPattern = [6, 4];     // Пунктир
+        // var lineWidth = 2;            // Толщина пунктирной линии
+        // var dashPattern = [6, 4];     // Пунктир
         var markerRadius = 6;         // Радиус маркера на лимбе
         var markerLineWidth = 2;      // Толщина контура маркера
         // ================================
 
-        ctx.save();
-        ctx.beginPath();
-        ctx.moveTo(cx, cy);
-        ctx.lineTo(endX, endY);
-        ctx.strokeStyle = this.colors.satelliteLine;
-        ctx.lineWidth = lineWidth;
-        ctx.setLineDash(dashPattern);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.restore();
+        // ctx.save();
+        // ctx.beginPath();
+        // ctx.moveTo(cx, cy);
+        // ctx.lineTo(endX, endY);
+        // ctx.strokeStyle = this.colors.satelliteLine;
+        // ctx.lineWidth = lineWidth;
+        // ctx.setLineDash(dashPattern);
+        // ctx.stroke();
+        // ctx.setLineDash([]);
+        // ctx.restore();
 
         // Маркер-кольцо на лимбе (без заливки)
         var markerR = r - 9;
@@ -196,13 +198,16 @@
             this.centerY,
             azimuth,
             this.antennaScale,
-            this.radius - 9,
+            this.radius - 18,
             'azimuth'
         );
     };
 
     /**
-     * Информационная панель внизу canvas (аналогично SkyView)
+     * Информационная панель внизу canvas — 3 колонки в одну строку
+     * Колонка 1: NORAD ID
+     * Колонка 2: Az ант.
+     * Колонка 3: Az КА
      */
     AzimuthIndicator.prototype._drawInfo = function() {
         var ctx = this.ctx;
@@ -213,7 +218,6 @@
 
         var panelPadding = 6;
         var cornerRadius = 6;
-        var textMargin = 10;
 
         ctx.beginPath();
         if (ctx.roundRect) {
@@ -228,27 +232,38 @@
         ctx.stroke();
 
         var rowY = panelY + panelHeight / 2;
-        var leftX = panelPadding + textMargin;
-        var rightX = w - panelPadding - textMargin;
+        
+        // 3 колонки с фиксированными позициями
+        var col1X = panelPadding + 10;          // NORAD слева
+        var col2X = col1X + 70;                  // Az ант. (отступ 70px от NORAD, было 90px)
+        var col3X = col2X + 100;                 // Az КА (отступ 100px от Az ант., было 115px)
 
         ctx.font = 'bold 11px monospace';
         ctx.textBaseline = 'middle';
 
-        // Левая группа: «Az ант.: значение» — по левому краю
-        var azAntVal = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---';
+        // Колонка 1: NORAD ID (слева)
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('Az ант.: ', leftX, rowY);
+        ctx.fillText('ID:', col1X, rowY);
         ctx.fillStyle = '#00d4aa';
-        ctx.fillText(azAntVal, leftX + ctx.measureText('Az ант.: ').width, rowY);
+        var noradText = this.noradId ? String(this.noradId) : '-----';
+        ctx.fillText(noradText, col1X + ctx.measureText('ID:').width + 3, rowY);  // +3px минимальный отступ
 
-        // Правая группа: «Az КА: значение» — по правому краю
-        var azSatVal = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---';
-        ctx.textAlign = 'right';
-        ctx.fillStyle = '#00d4aa';
-        ctx.fillText(azSatVal, rightX, rowY);
+        // Колонка 2: Az ант. (центр-слева)
+        ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
-        ctx.fillText('Az КА:  ', rightX - ctx.measureText(azSatVal).width, rowY);
+        ctx.fillText('Az ант.: ', col2X, rowY);
+        ctx.fillStyle = '#00d4aa';
+        var azAntVal = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---';
+        ctx.fillText(azAntVal, col2X + ctx.measureText('Az ант.: ').width, rowY);
+
+        // Колонка 3: Az КА (с отступом от col2)
+        var azSatVal = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Az КА: ', col3X, rowY);
+        ctx.fillStyle = '#00d4aa';
+        ctx.fillText(azSatVal, col3X + ctx.measureText('Az КА: ').width, rowY);
     };
 
     /**
@@ -339,6 +354,14 @@
      */
     AzimuthIndicator.prototype.setVisible = function(visible) {
         this.isVisible = visible;
+    };
+
+    /**
+     * Установка NORAD ID спутника
+     * @param {number|string|null} noradId - NORAD ID
+     */
+    AzimuthIndicator.prototype.setNoradId = function(noradId) {
+        this.noradId = noradId;
     };
 
     AzimuthIndicator.prototype.getAzimuth = function() {

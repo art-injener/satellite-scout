@@ -56,14 +56,15 @@
             });
         }
 
+        // InfoPanel: сохраняем ссылку на контейнер ДО инициализации SSE,
+        // чтобы ensureSSEAndSubscriptions мог создать InfoPanel с stateManager.
+        var infoPanelEl = document.getElementById('info-panel');
+        if (infoPanelEl) {
+            window._infoPanelEl = infoPanelEl;
+        }
+
         // Initialize canvas placeholders
         initCanvasPlaceholders();
-
-        // Инициализация InfoPanel (кнопка сопровождения)
-        var infoPanelEl = document.getElementById('info-panel');
-        if (infoPanelEl && typeof window.InfoPanel === 'function') {
-            window._infoPanel = new window.InfoPanel(infoPanelEl);
-        }
 
         // Часы в station-footer: UTC и местное время (обновление каждую секунду)
         var sfUtc = document.getElementById('sf-utc');
@@ -120,6 +121,11 @@
             }
         });
         
+        // InfoPanel — подписывается на stateManager для обновления всех полей.
+        if (window._infoPanelEl && typeof window.InfoPanel === 'function') {
+            window._infoPanel = new window.InfoPanel(window._infoPanelEl, window._stateManager);
+        }
+
         console.log('[app.js] Подключение к SSE...');
         window._sseClient.connect();
 
@@ -143,12 +149,11 @@
                     window.earthView.setVisibilityZone(state.visibilityZone.segments);
                 }
                 window.earthView.draw();
-                window.earthView.updateInfoPanel(pos.ts || Date.now());
             }
             
             // Обновление SkyView
             if (window.skyView) {
-                window.skyView.setSatelliteInfo(state.name || '');
+                window.skyView.setSatelliteInfo(state.name || '', state.noradId);
                 window.skyView.setSatellitePosition(pos.az, pos.el);
                 
                 // Загружаем sky path если ещё не загружен для этого спутника
@@ -158,20 +163,22 @@
                 }
             }
             
-            // Обновление индикаторов: позиция спутника + перерисовка
+            // Обновление индикаторов: позиция спутника + NORAD ID + перерисовка
             if (window.azimuthIndicator) {
                 window.azimuthIndicator.setSatellitePosition(pos.az);
                 window.azimuthIndicator.setAzimuth(pos.az);
+                if (state.noradId) {
+                    window.azimuthIndicator.setNoradId(state.noradId);
+                }
             }
             if (window.elevationIndicator) {
                 window.elevationIndicator.setSatellitePosition(pos.el, pos.az);
                 window.elevationIndicator.setPosition(pos.az, pos.el);
+                if (state.noradId) {
+                    window.elevationIndicator.setNoradId(state.noradId);
+                }
             }
 
-            // Инфо-панели Az/El рисуются внутри canvas (см. _drawInfo)
-            
-            // Обновление info panel
-            updateInfoPanel(state);
         });
 
         sm.subscribe(StateEventType.TRACK, function(state) {
@@ -187,7 +194,6 @@
             loadedSkyPathForNoradId = state.noradId;
             loadSkyPathForSatellite(state.noradId);
             showTrackingOverlay(state.noradId, state.name || '');
-            updateOrbitalParams(state);
         });
     }
     
@@ -224,41 +230,6 @@
     }
     
 
-    // Обновление InfoPanel данными спутника (id с префиксом ip-)
-    function updateInfoPanel(state) {
-        var pos = state.position;
-        if (!pos) return;
-        
-        var el = function(id) { return document.getElementById(id); };
-        
-        if (el('ip-norad')) el('ip-norad').textContent = state.noradId || '--';
-        if (el('ip-name')) el('ip-name').textContent = state.name || '--';
-        
-        if (el('ip-lat')) el('ip-lat').textContent = pos.lat ? pos.lat.toFixed(2) + '°' : '---.--°';
-        if (el('ip-lon')) el('ip-lon').textContent = pos.lon ? pos.lon.toFixed(2) + '°' : '---.--°';
-        if (el('ip-alt')) el('ip-alt').textContent = pos.alt ? pos.alt.toFixed(0) + ' km' : '--- km';
-    }
-    
-    // Обновление орбитальных параметров
-    function updateOrbitalParams(state) {
-        var el = function(id) { return document.getElementById(id); };
-        
-        if (el('ip-incl') && typeof state.inclination === 'number') {
-            el('ip-incl').textContent = state.inclination.toFixed(2) + '°';
-        }
-        
-        if (el('ip-period') && typeof state.period === 'number') {
-            var period = state.period;
-            if (period >= 60) {
-                var hours = Math.floor(period / 60);
-                var mins = Math.round(period % 60);
-                el('ip-period').textContent = hours + 'h ' + mins + 'm';
-            } else {
-                el('ip-period').textContent = period.toFixed(1) + ' min';
-            }
-        }
-    }
-    
     // Загрузка sky path для SkyView при смене спутника
     function loadSkyPathForSatellite(noradId) {
         if (!noradId || !window.skyView) return;

@@ -182,17 +182,13 @@
 }
 
 .info-card .info-value {
-    color: var(--text-primary);
+    color: #00d4aa;
     font-size: 1.1rem;
     font-weight: 600;
     text-align: right;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-}
-
-.info-card .info-value--accent {
-    color: var(--accent-primary);
 }
 
 /* --- Responsive --- */
