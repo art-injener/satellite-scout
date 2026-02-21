@@ -299,31 +299,19 @@ func splitZoneAtAntimeridian(points []ZonePoint) [][]ZonePoint {
 
 	// Разбиваем кольцо на сегменты при каждом пересечении антимеридиана.
 	var segments [][]ZonePoint
-	var current []ZonePoint
+	current := make([]ZonePoint, 0, n)
 
 	for i := range n {
 		j := (i + 1) % n
 		current = append(current, points[i])
 
 		if isAntimeridianCrossing(points[i].Lon, points[j].Lon) {
-			// Вычисляем точку пересечения антимеридиана.
 			latCross := interpolateAntimeridianLat(points[i], points[j])
 
-			// Закрываем текущий сегмент точкой на «своей» стороне.
-			if points[i].Lon > 0 {
-				current = append(current, ZonePoint{Lon: 180.0, Lat: latCross})
-			} else {
-				current = append(current, ZonePoint{Lon: -180.0, Lat: latCross})
-			}
+			current = append(current, ZonePoint{Lon: nearestMeridianBoundary(points[i].Lon), Lat: latCross})
 			segments = append(segments, current)
 
-			// Начинаем новый сегмент с точки на другой стороне.
-			current = nil
-			if points[j].Lon > 0 {
-				current = append(current, ZonePoint{Lon: 180.0, Lat: latCross})
-			} else {
-				current = append(current, ZonePoint{Lon: -180.0, Lat: latCross})
-			}
+			current = []ZonePoint{{Lon: nearestMeridianBoundary(points[j].Lon), Lat: latCross}}
 		}
 	}
 
@@ -333,6 +321,14 @@ func splitZoneAtAntimeridian(points []ZonePoint) [][]ZonePoint {
 	}
 
 	return segments
+}
+
+// nearestMeridianBoundary возвращает ±180° в зависимости от знака долготы.
+func nearestMeridianBoundary(lon float64) float64 {
+	if lon > 0 {
+		return 180.0
+	}
+	return -180.0
 }
 
 // isAntimeridianCrossing определяет, пересекают ли две точки антимеридиан (±180°).

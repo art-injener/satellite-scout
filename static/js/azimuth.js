@@ -66,10 +66,10 @@
      * Отрисовка лимба (полный круг 360°)
      */
     AzimuthIndicator.prototype.drawLimb = function() {
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var r = this.radius;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const r = this.radius;
 
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
@@ -87,11 +87,11 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        for (var deg = 0; deg < 360; deg += 15) {
-            var rad = this.degToRad(deg - 90);
-            var isMain = deg % 30 === 0;
-            var innerR = isMain ? r - 15 : r - 10;
-            var outerR = r - 2;
+        for (let deg = 0; deg < 360; deg += 15) {
+            const rad = this.degToRad(deg - 90);
+            const isMain = deg % 30 === 0;
+            const innerR = isMain ? r - 15 : r - 10;
+            const outerR = r - 2;
 
             ctx.beginPath();
             ctx.moveTo(
@@ -107,8 +107,8 @@
             ctx.stroke();
 
             if (isMain) {
-                var labelR = r + 14;
-                var label = deg.toString();
+                const labelR = r + 14;
+                let label = deg.toString();
 
                 if (deg === 0) { label = 'N'; }
                 else if (deg === 90) { label = 'E'; }
@@ -132,19 +132,19 @@
     AzimuthIndicator.prototype.drawSatellitePointer = function() {
         if (this.satelliteAzimuth === null || !this.isVisible) { return; }
 
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var r = this.radius;
-        var rad = this.degToRad(this.satelliteAzimuth - 90);
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const r = this.radius;
+        const rad = this.degToRad(this.satelliteAzimuth - 90);
         // var endX = cx + Math.cos(rad) * (r - 20);
         // var endY = cy + Math.sin(rad) * (r - 20);
 
         // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
         // var lineWidth = 2;            // Толщина пунктирной линии
         // var dashPattern = [6, 4];     // Пунктир
-        var markerRadius = 6;         // Радиус маркера на лимбе
-        var markerLineWidth = 2;      // Толщина контура маркера
+        const markerRadius = 6; // Радиус маркера на лимбе
+        const markerLineWidth = 2; // Толщина контура маркера
         // ================================
 
         // ctx.save();
@@ -159,9 +159,9 @@
         // ctx.restore();
 
         // Маркер-кольцо на лимбе (без заливки)
-        var markerR = r - 9;
-        var mx = cx + Math.cos(rad) * markerR;
-        var my = cy + Math.sin(rad) * markerR;
+        const markerR = r - 9;
+        const mx = cx + Math.cos(rad) * markerR;
+        const my = cy + Math.sin(rad) * markerR;
 
         ctx.beginPath();
         ctx.arc(mx, my, markerRadius, 0, Math.PI * 2);
@@ -174,9 +174,9 @@
      * Сообщение «ВНЕ ЗОНЫ НАБЛЮДЕНИЯ» по центру графика
      */
     AzimuthIndicator.prototype._drawOutOfViewMessage = function() {
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
 
         ctx.save();
         ctx.font = 'bold 11px monospace';
@@ -210,14 +210,14 @@
      * Колонка 3: Az КА
      */
     AzimuthIndicator.prototype._drawInfo = function() {
-        var ctx = this.ctx;
-        var w = this.logicalWidth;
-        var h = this.logicalHeight;
-        var panelHeight = this.infoPanelHeight;
-        var panelY = h - panelHeight;
+        const ctx = this.ctx;
+        const w = this.logicalWidth;
+        const h = this.logicalHeight;
+        const panelHeight = this.infoPanelHeight;
+        const panelY = h - panelHeight;
 
-        var panelPadding = 6;
-        var cornerRadius = 6;
+        const panelPadding = 6;
+        const cornerRadius = 6;
 
         ctx.beginPath();
         if (ctx.roundRect) {
@@ -231,12 +231,12 @@
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        var rowY = panelY + panelHeight / 2;
-        
+        const rowY = panelY + panelHeight / 2;
+
         // 3 колонки с фиксированными позициями
-        var col1X = panelPadding + 10;          // NORAD слева
-        var col2X = col1X + 70;                  // Az ант. (отступ 70px от NORAD, было 90px)
-        var col3X = col2X + 100;                 // Az КА (отступ 100px от Az ант., было 115px)
+        const col1X = panelPadding + 10; // NORAD слева
+        const col2X = col1X + 70; // Az ант. (отступ 70px от NORAD, было 90px)
+        const col3X = col2X + 110; // Az КА (отступ 110px от Az ант., было 115px)
 
         ctx.font = 'bold 11px monospace';
         ctx.textBaseline = 'middle';
@@ -246,19 +246,19 @@
         ctx.fillStyle = '#ffffff';
         ctx.fillText('ID:', col1X, rowY);
         ctx.fillStyle = '#00d4aa';
-        var noradText = this.noradId ? String(this.noradId) : '-----';
-        ctx.fillText(noradText, col1X + ctx.measureText('ID:').width + 3, rowY);  // +3px минимальный отступ
+        const noradText = this.noradId ? String(this.noradId) : '-----';
+        ctx.fillText(noradText, col1X + ctx.measureText('ID:').width + 3, rowY); // +3px минимальный отступ
 
         // Колонка 2: Az ант. (центр-слева)
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
         ctx.fillText('Az ант.: ', col2X, rowY);
         ctx.fillStyle = '#00d4aa';
-        var azAntVal = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---';
+        const azAntVal = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---';
         ctx.fillText(azAntVal, col2X + ctx.measureText('Az ант.: ').width, rowY);
 
         // Колонка 3: Az КА (с отступом от col2)
-        var azSatVal = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---';
+        const azSatVal = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---';
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
         ctx.fillText('Az КА: ', col3X, rowY);
@@ -270,7 +270,7 @@
      * Главная функция отрисовки
      */
     AzimuthIndicator.prototype.draw = function() {
-        var ctx = this.ctx;
+        const ctx = this.ctx;
 
         ctx.fillStyle = this.colors.bgPrimary;
         ctx.fillRect(0, 0, this.logicalWidth, this.logicalHeight);
@@ -301,10 +301,10 @@
     };
 
     AzimuthIndicator.prototype.drawPlatformBase = function() {
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var cfg = this.platformBaseConfig;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const cfg = this.platformBaseConfig;
 
         ctx.strokeStyle = this.colors.accent;
         ctx.lineWidth = cfg.lineWidth;
@@ -314,10 +314,10 @@
         }
 
         ctx.beginPath();
-        for (var i = 0; i < 6; i++) {
-            var angle = (i * 60 + 30) * Math.PI / 180;
-            var x = cx + Math.cos(angle) * cfg.radius;
-            var y = cy + Math.sin(angle) * cfg.radius;
+        for (let i = 0; i < 6; i++) {
+            const angle = (i * 60 + 30) * Math.PI / 180;
+            const x = cx + Math.cos(angle) * cfg.radius;
+            const y = cy + Math.sin(angle) * cfg.radius;
             if (i === 0) {
                 ctx.moveTo(x, y);
             } else {

@@ -671,8 +671,8 @@ func BenchmarkPredictPasses_ISS24h(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-		require.NoError(b, err)
+		_, benchErr := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
+		require.NoError(b, benchErr)
 	}
 }
 
@@ -688,8 +688,8 @@ func BenchmarkPredictPasses_Polar24h(b *testing.B) {
 	b.ResetTimer()
 
 	for b.Loop() {
-		_, err := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
-		require.NoError(b, err)
+		_, benchErr := PredictPasses(prop, ppObserver, start, end, DefaultMinElevation)
+		require.NoError(b, benchErr)
 	}
 }
 

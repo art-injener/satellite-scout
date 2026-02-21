@@ -219,10 +219,11 @@ func (s *PassService) InvalidateCacheForGroup(group string) {
 }
 
 // CacheStats возвращает статистику кеша.
-func (s *PassService) CacheStats() (entries int, expired int) {
+func (s *PassService) CacheStats() (int, int) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
+	var entries, expired int
 	for _, entry := range s.cache {
 		entries++
 		if entry.isExpired(s.cacheTTL) {
@@ -288,7 +289,7 @@ func ftoa(f float64, decimals int) string {
 	}
 	// Умножаем для получения нужного количества знаков после запятой.
 	mul := 1
-	for i := 0; i < decimals; i++ {
+	for range decimals {
 		mul *= 10
 	}
 	rounded := int(f*float64(mul) + 0.5)

@@ -399,7 +399,7 @@ func TestGenerateVisibilityZoneFromLLA_HighOrbitDensified(t *testing.T) {
 	// Проверяем: в каждом сегменте соседние точки не должны быть далеко друг от друга.
 	maxGap := densifyMaxLonGap + 5.0 // допуск на интерполяцию антимеридиана
 	for si, seg := range zone.Segments {
-		for i := 0; i < len(seg)-1; i++ {
+		for i := range len(seg) - 1 {
 			gap := math.Abs(seg[i].Lon - seg[i+1].Lon)
 			if gap > 180 {
 				gap = 360 - gap

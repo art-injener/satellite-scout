@@ -15,14 +15,14 @@ class PassesTable {
             refreshInterval: 60000, // 60 сек
             ...options
         };
-        
+
         this.passes = [];
         this.countdownTimer = null;
         this.refreshTimer = null;
-        
+
         this._boundUpdateCountdowns = this._updateCountdowns.bind(this);
     }
-    
+
     /**
      * Инициализация таблицы: загрузка данных и настройка таймеров.
      */
@@ -33,21 +33,21 @@ class PassesTable {
         // TODO: SSE-004 — подписка на событие 'passes_update' для real-time обновления статусов
         // без перезагрузки данных. Событие будет содержать актуальные статусы пролётов.
     }
-    
+
     /**
      * Загрузка пролётов с API (все группы).
      */
     async loadPasses() {
         this._showLoading();
-        
+
         try {
             // Без параметра group — загружаем все группы.
             const response = await fetch(this.options.apiUrl);
-            
+
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}`);
             }
-            
+
             const data = await response.json();
             this.passes = data.passes || [];
             this._render();
@@ -56,13 +56,13 @@ class PassesTable {
             this._showError('Не удалось загрузить пролёты. Попробуйте позже.');
         }
     }
-    
+
     /**
      * Рендер таблицы пролётов.
      */
     _render() {
-        if (!this.container) return;
-        
+        if (!this.container) {return;}
+
         if (this.passes.length === 0) {
             this.container.innerHTML = `
                 <div class="passes-empty">
@@ -75,15 +75,15 @@ class PassesTable {
             `;
             return;
         }
-        
+
         const now = Date.now();
-        
+
         const rows = this.passes.map(pass => {
             const status = this._getPassStatus(pass, now);
             const countdown = this._formatCountdown(pass.aos - now);
             const duration = this._formatDuration(pass.duration);
             const svgMiniPath = this._renderSVGMiniPath(pass.sky_path);
-            
+
             return `
                 <tr class="pass-row pass-row--${status}" 
                     data-norad-id="${pass.norad_id}"
@@ -111,7 +111,7 @@ class PassesTable {
                 </tr>
             `;
         }).join('');
-        
+
         this.container.innerHTML = `
             <table class="passes-table">
                 <thead>
@@ -132,7 +132,7 @@ class PassesTable {
             </table>
         `;
     }
-    
+
     /**
      * Генерация SVG мини-проекции траектории пролёта.
      * @param {Array} skyPath — массив точек {x, y} из API (предвычислены на backend).
@@ -142,16 +142,16 @@ class PassesTable {
         if (!skyPath || skyPath.length === 0) {
             return '<svg class="mini-path" viewBox="-1.2 -1.2 2.4 2.4" width="96" height="96"></svg>';
         }
-        
+
         const pathPoints = skyPath.map((p, i) => {
             const cmd = i === 0 ? 'M' : 'L';
             return `${cmd}${p.x.toFixed(3)},${p.y.toFixed(3)}`;
         }).join(' ');
-        
+
         const start = skyPath[0];
         const end = skyPath[skyPath.length - 1];
         const arrow = this._calculateArrow(skyPath);
-        
+
         return `
             <svg class="mini-path" viewBox="-1.2 -1.2 2.4 2.4" width="96" height="96">
                 <circle cx="0" cy="0" r="1" class="horizon-circle"/>
@@ -166,53 +166,53 @@ class PassesTable {
             </svg>
         `;
     }
-    
+
     /**
      * Расчёт стрелки направления на середине траектории.
      * @param {Array} skyPath — массив точек {x, y}.
      * @returns {string} — SVG path для стрелки.
      */
     _calculateArrow(skyPath) {
-        if (skyPath.length < 2) return '';
-        
+        if (skyPath.length < 2) {return '';}
+
         // Находим точку посередине траектории.
         const midIdx = Math.floor(skyPath.length / 2);
-        
+
         // Берём точки вокруг середины для расчёта направления.
         const beforeIdx = Math.max(0, midIdx - 1);
         const afterIdx = Math.min(skyPath.length - 1, midIdx + 1);
-        
+
         const before = skyPath[beforeIdx];
         const mid = skyPath[midIdx];
         const after = skyPath[afterIdx];
-        
+
         // Вектор направления (усреднённый).
         const dx = after.x - before.x;
         const dy = after.y - before.y;
-        
+
         // Угол поворота стрелки (радианы).
         const angle = Math.atan2(dy, dx);
-        
+
         const arrowSize = 0.20;
         const arrowWidth = 0.14;
-        
+
         // Вершина стрелки в направлении движения.
         const tipX = mid.x + Math.cos(angle) * arrowSize;
         const tipY = mid.y + Math.sin(angle) * arrowSize;
-        
+
         // Основание стрелки (два угла треугольника).
         const baseAngle1 = angle + Math.PI * 0.75;
         const baseAngle2 = angle - Math.PI * 0.75;
-        
+
         const base1X = mid.x + Math.cos(baseAngle1) * arrowWidth;
         const base1Y = mid.y + Math.sin(baseAngle1) * arrowWidth;
-        
+
         const base2X = mid.x + Math.cos(baseAngle2) * arrowWidth;
         const base2Y = mid.y + Math.sin(baseAngle2) * arrowWidth;
-        
+
         return `<path d="M${tipX.toFixed(3)},${tipY.toFixed(3)} L${base1X.toFixed(3)},${base1Y.toFixed(3)} L${base2X.toFixed(3)},${base2Y.toFixed(3)} Z" fill="white" opacity="0.9"/>`;
     }
-    
+
     /**
      * Определение статуса пролёта.
      * @param {Object} pass — данные пролёта.
@@ -228,7 +228,7 @@ class PassesTable {
             return 'completed';
         }
     }
-    
+
     /**
      * Форматирование времени (HH:MM:SS UTC).
      * @param {number} timestamp — Unix ms.
@@ -238,7 +238,7 @@ class PassesTable {
         const date = new Date(timestamp);
         return date.toISOString().substr(11, 8);
     }
-    
+
     /**
      * Форматирование длительности.
      * @param {number} seconds — секунды.
@@ -249,7 +249,7 @@ class PassesTable {
         const secs = Math.floor(seconds % 60);
         return `${mins}:${secs.toString().padStart(2, '0')}`;
     }
-    
+
     /**
      * Форматирование обратного отсчёта.
      * @param {number} ms — миллисекунды до события.
@@ -259,12 +259,12 @@ class PassesTable {
         if (ms <= 0) {
             return '<span class="countdown-now">сейчас</span>';
         }
-        
+
         const totalSecs = Math.floor(ms / 1000);
         const hours = Math.floor(totalSecs / 3600);
         const mins = Math.floor((totalSecs % 3600) / 60);
         const secs = totalSecs % 60;
-        
+
         if (hours > 0) {
             return `${hours}ч ${mins}м`;
         } else if (mins > 0) {
@@ -273,7 +273,7 @@ class PassesTable {
             return `${secs}с`;
         }
     }
-    
+
     /**
      * Запуск таймера обратного отсчёта (каждую секунду).
      */
@@ -283,7 +283,7 @@ class PassesTable {
         }
         this.countdownTimer = setInterval(this._boundUpdateCountdowns, 1000);
     }
-    
+
     /**
      * Запуск таймера автообновления данных.
      */
@@ -295,20 +295,20 @@ class PassesTable {
             this.loadPasses();
         }, this.options.refreshInterval);
     }
-    
+
     /**
      * Обновление всех ячеек обратного отсчёта.
      */
     _updateCountdowns() {
         const now = Date.now();
         const cells = this.container.querySelectorAll('.pass-cell--countdown[data-countdown]');
-        
+
         cells.forEach(cell => {
             const aos = parseInt(cell.dataset.countdown, 10);
             const diff = aos - now;
             cell.innerHTML = this._formatCountdown(diff);
         });
-        
+
         // Обновляем статусы строк.
         const rows = this.container.querySelectorAll('.pass-row');
         rows.forEach(row => {
@@ -320,7 +320,7 @@ class PassesTable {
             }
         });
     }
-    
+
     /**
      * Показ индикатора загрузки.
      */
@@ -334,7 +334,7 @@ class PassesTable {
             `;
         }
     }
-    
+
     /**
      * Показ ошибки.
      * @param {string} message — текст ошибки.
@@ -354,7 +354,7 @@ class PassesTable {
             `;
         }
     }
-    
+
     /**
      * Экранирование HTML.
      * @param {string} str — строка.
@@ -365,7 +365,7 @@ class PassesTable {
         div.textContent = str;
         return div.innerHTML;
     }
-    
+
     /**
      * Очистка ресурсов.
      */
@@ -388,15 +388,14 @@ let passesTable = null;
  * Инициализация таблицы пролётов.
  * Вызывается при загрузке страницы /passes.
  */
-function initPassesTable() {
-    // Очищаем предыдущий экземпляр.
+window.initPassesTable = function initPassesTable() {
     if (passesTable) {
         passesTable.destroy();
     }
-    
+
     const container = document.getElementById('passes-table-container');
     if (container) {
         passesTable = new PassesTable('passes-table-container');
         passesTable.init();
     }
-}
+};

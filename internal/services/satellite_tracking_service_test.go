@@ -315,7 +315,7 @@ func TestSatelliteStateUpdateJSON(t *testing.T) {
 	}
 
 	// tracks_included = false → tracks отсутствует (omitempty).
-	if _, ok := m["tracks"]; ok {
+	if _, hasTracks := m["tracks"]; hasTracks {
 		t.Error("tracks should be omitted when tracks_included=false and tracks is nil")
 	}
 }

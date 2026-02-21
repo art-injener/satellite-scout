@@ -85,17 +85,7 @@ func (h *SSEHub) Run(ctx context.Context) {
 			h.clientCount.Add(1)
 			slog.DebugContext(ctx, "SSE client registered", "total_clients", h.clientCount.Load())
 
-			// Отправка кешированных событий новому клиенту.
-			// satellite_change ПЕРВЫМ: устанавливает активный спутник и орбитальные параметры
-			// до прихода позиций, иначе auto-activation в updatePosition «украдёт» ID.
-			for _, eventType := range []string{"satellite_change", "satellite_state_update"} {
-				if cached, ok := lastEvents[eventType]; ok {
-					select {
-					case client.events <- cached:
-					default:
-					}
-				}
-			}
+			sendCachedEvents(client, lastEvents)
 
 		case client := <-h.unregister:
 			if _, exists := clients[client]; exists {
@@ -106,21 +96,36 @@ func (h *SSEHub) Run(ctx context.Context) {
 			}
 
 		case event := <-h.broadcast:
-			// Кешируем последние события по типу.
 			lastEvents[event.Type] = event
-
-			for client := range clients {
-				select {
-				case client.events <- event:
-					// Событие отправлено.
-				default:
-					// Буфер клиента полон — пропускаем (защита от медленных клиентов).
-					slog.WarnContext(ctx, "SSE client buffer full, dropping event", "event_type", event.Type)
-				}
-			}
+			broadcastToClients(ctx, event, clients)
 
 		case <-ctx.Done():
 			return
+		}
+	}
+}
+
+// sendCachedEvents отправляет кешированные события новому клиенту.
+// satellite_change ПЕРВЫМ: устанавливает активный спутник и орбитальные параметры
+// до прихода позиций, иначе auto-activation в updatePosition «украдёт» ID.
+func sendCachedEvents(client *sseClient, lastEvents map[string]SSEEvent) {
+	for _, eventType := range []string{"satellite_change", "satellite_state_update"} {
+		if cached, ok := lastEvents[eventType]; ok {
+			select {
+			case client.events <- cached:
+			default:
+			}
+		}
+	}
+}
+
+// broadcastToClients рассылает событие всем подключённым клиентам.
+func broadcastToClients(ctx context.Context, event SSEEvent, clients map[*sseClient]bool) {
+	for client := range clients {
+		select {
+		case client.events <- event:
+		default:
+			slog.WarnContext(ctx, "SSE client buffer full, dropping event", "event_type", event.Type)
 		}
 	}
 }

@@ -64,7 +64,7 @@ func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
 		Title:     "Сеанс - Satellite Scout",
 		ActiveTab: "tracking",
 	}
-	h.render(w, templateBaseName, data)
+	h.render(w, data)
 }
 
 // Receiver рендерит страницу приёмника (вкладка 3).
@@ -73,7 +73,7 @@ func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
 		Title:     "Приёмник - Satellite Scout",
 		ActiveTab: "receiver",
 	}
-	h.render(w, templateBaseName, data)
+	h.render(w, data)
 }
 
 // Passes рендерит страницу пролётов (вкладка 2).
@@ -82,7 +82,7 @@ func (h *PageHandler) Passes(w http.ResponseWriter, r *http.Request) {
 		Title:     "План сеансов - Satellite Scout",
 		ActiveTab: "passes",
 	}
-	h.render(w, templateBaseName, data)
+	h.render(w, data)
 }
 
 // Simulation рендерит страницу имитации (вкладка 4).
@@ -91,7 +91,7 @@ func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
 		Title:     "Имитация - Satellite Scout",
 		ActiveTab: "simulation",
 	}
-	h.render(w, templateBaseName, data)
+	h.render(w, data)
 }
 
 func (h *PageHandler) loadTemplates() error {
@@ -130,7 +130,7 @@ func (h *PageHandler) loadTemplates() error {
 	return nil
 }
 
-func (h *PageHandler) render(w http.ResponseWriter, name string, data any) {
+func (h *PageHandler) render(w http.ResponseWriter, data any) {
 	if h.devMode {
 		if err := h.loadTemplates(); err != nil {
 			slog.Error("failed to reload templates", slogKeyError, err)
@@ -144,8 +144,8 @@ func (h *PageHandler) render(w http.ResponseWriter, name string, data any) {
 	h.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	if err := tmpl.ExecuteTemplate(w, name, data); err != nil {
-		slog.Error("failed to render template", "name", name, slogKeyError, err)
+	if err := tmpl.ExecuteTemplate(w, templateBaseName, data); err != nil {
+		slog.Error("failed to render template", slogKeyError, err)
 		http.Error(w, "Render error", http.StatusInternalServerError)
 	}
 }

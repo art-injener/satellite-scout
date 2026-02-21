@@ -303,7 +303,7 @@ func (s *SatelliteTrackingService) updateAutoTrack() {
 	}
 
 	// Получаем пролёты на ближайшие 24 часа.
-	passes, err := provider.GetAllGroupsPasses(24, 5.0)
+	passes, err := provider.GetAllGroupsPasses(24, tracker.DefaultMinElevation)
 	if err != nil {
 		slog.Debug("auto-track: failed to get passes", "error", err)
 		return

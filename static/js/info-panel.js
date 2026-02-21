@@ -8,7 +8,7 @@
 (function() {
     'use strict';
 
-    var MODAL_ID = 'track-end-session-modal';
+    const MODAL_ID = 'track-end-session-modal';
 
     /**
      * @param {HTMLElement} containerEl — контейнер info-panel.
@@ -22,14 +22,14 @@
 
         // Кэш элементов DOM по id (ip-norad, ip-name и т.д.)
         this._els = {};
-        var ids = [
+        const ids = [
             'ip-norad', 'ip-name', 'ip-group',
             'ip-lon', 'ip-lat', 'ip-az', 'ip-el', 'ip-alt',
             'ip-orbit', 'ip-period', 'ip-incl', 'ip-status',
             'ip-aos', 'ip-tca', 'ip-los', 'ip-dur',
             'ip-tmi', 'ip-uplink', 'ip-downlink', 'ip-mod'
         ];
-        for (var i = 0; i < ids.length; i++) {
+        for (let i = 0; i < ids.length; i++) {
             this._els[ids[i]] = document.getElementById(ids[i]);
         }
 
@@ -44,19 +44,19 @@
     // ── Вспомогательные методы ────────────────────────────────
 
     InfoPanel.prototype._setEl = function(id, text) {
-        var el = this._els[id];
-        if (el) el.textContent = text;
+        const el = this._els[id];
+        if (el) {el.textContent = text;}
     };
 
     /**
      * Форматирование Unix ms → "HH:MM:SS UTC".
      */
     InfoPanel.prototype._fmtTime = function(ms) {
-        if (!ms) return '--:--:--';
-        var d = new Date(ms);
-        var hh = d.getUTCHours();
-        var mm = d.getUTCMinutes();
-        var ss = d.getUTCSeconds();
+        if (!ms) {return '--:--:--';}
+        const d = new Date(ms);
+        const hh = d.getUTCHours();
+        const mm = d.getUTCMinutes();
+        const ss = d.getUTCSeconds();
         return (hh < 10 ? '0' : '') + hh + ':' +
                (mm < 10 ? '0' : '') + mm + ':' +
                (ss < 10 ? '0' : '') + ss + ' UTC';
@@ -66,9 +66,9 @@
      * Форматирование длительности (секунды) → "Xm Ys".
      */
     InfoPanel.prototype._fmtDuration = function(sec) {
-        if (!sec || sec <= 0) return '--:--';
-        var m = Math.floor(sec / 60);
-        var s = Math.round(sec % 60);
+        if (!sec || sec <= 0) {return '--:--';}
+        const m = Math.floor(sec / 60);
+        const s = Math.round(sec % 60);
         return m + 'm ' + (s < 10 ? '0' : '') + s + 's';
     };
 
@@ -76,10 +76,10 @@
      * Форматирование орбитального периода (минуты) → "Xh Ym" или "X.Y min".
      */
     InfoPanel.prototype._fmtPeriod = function(minutes) {
-        if (typeof minutes !== 'number') return '---';
+        if (typeof minutes !== 'number') {return '---';}
         if (minutes >= 60) {
-            var h = Math.floor(minutes / 60);
-            var m = Math.round(minutes % 60);
+            const h = Math.floor(minutes / 60);
+            const m = Math.round(minutes % 60);
             return h + 'h ' + m + 'm';
         }
         return minutes.toFixed(1) + ' min';
@@ -91,29 +91,29 @@
         if (this.trackBtn) {
             this.trackBtn.addEventListener('click', this._onTrackClick.bind(this));
         }
-        if (!this.modal) return;
+        if (!this.modal) {return;}
 
-        var backdrop = this.modal.querySelector('#track-end-session-backdrop');
-        var btnNo = document.getElementById('track-end-session-no');
-        var btnYes = document.getElementById('track-end-session-yes');
+        const backdrop = this.modal.querySelector('#track-end-session-backdrop');
+        const btnNo = document.getElementById('track-end-session-no');
+        const btnYes = document.getElementById('track-end-session-yes');
 
-        if (backdrop) backdrop.addEventListener('click', this._closeModal.bind(this));
-        if (btnNo) btnNo.addEventListener('click', this._closeModal.bind(this));
-        if (btnYes) btnYes.addEventListener('click', this._onConfirmEndSession.bind(this));
+        if (backdrop) {backdrop.addEventListener('click', this._closeModal.bind(this));}
+        if (btnNo) {btnNo.addEventListener('click', this._closeModal.bind(this));}
+        if (btnYes) {btnYes.addEventListener('click', this._onConfirmEndSession.bind(this));}
     };
 
     InfoPanel.prototype._onTrackClick = function() {
-        var noradText = this._els['ip-norad'] ? this._els['ip-norad'].textContent.trim() : '';
-        if (!noradText || noradText === '---' || noradText === '--') return;
+        const noradText = this._els['ip-norad'] ? this._els['ip-norad'].textContent.trim() : '';
+        if (!noradText || noradText === '---' || noradText === '--') {return;}
         this._openModal();
     };
 
     InfoPanel.prototype._openModal = function() {
-        if (this.modal) this.modal.classList.remove('modal--hidden');
+        if (this.modal) {this.modal.classList.remove('modal--hidden');}
     };
 
     InfoPanel.prototype._closeModal = function() {
-        if (this.modal) this.modal.classList.add('modal--hidden');
+        if (this.modal) {this.modal.classList.add('modal--hidden');}
     };
 
     InfoPanel.prototype._onConfirmEndSession = function() {
@@ -124,10 +124,10 @@
     // ── Подписки на StateManager ──────────────────────────────
 
     InfoPanel.prototype._subscribeToState = function() {
-        if (!this._stateManager) return;
+        if (!this._stateManager) {return;}
 
-        var self = this;
-        var SE = window.StateEventType;
+        const self = this;
+        const SE = window.StateEventType;
 
         this._stateManager.subscribe(SE.POSITION, function(state) {
             self._updateFromPosition(state);
@@ -142,9 +142,9 @@
      * Подтягивание данных, уже имеющихся в StateManager на момент создания InfoPanel.
      */
     InfoPanel.prototype._initFromCurrentState = function() {
-        if (!this._stateManager) return;
-        var state = this._stateManager.getActiveState();
-        if (!state) return;
+        if (!this._stateManager) {return;}
+        const state = this._stateManager.getActiveState();
+        if (!state) {return;}
 
         if (state.position) {
             this._updateFromPosition(state);
@@ -160,16 +160,16 @@
      * Обновление полей из позиции (1 Гц).
      */
     InfoPanel.prototype._updateFromPosition = function(state) {
-        var pos = state.position;
-        if (!pos) return;
+        const pos = state.position;
+        if (!pos) {return;}
 
         // Столбик «Спутник»
         this._setEl('ip-norad', state.noradId || '---');
         this._setEl('ip-name', state.name || '---');
 
         // Столбик «Геоданные»
-        var latDir = pos.lat >= 0 ? 'N' : 'S';
-        var lonDir = pos.lon >= 0 ? 'E' : 'W';
+        const latDir = pos.lat >= 0 ? 'N' : 'S';
+        const lonDir = pos.lon >= 0 ? 'E' : 'W';
         this._setEl('ip-lat', Math.abs(pos.lat).toFixed(2) + '°' + latDir);
         this._setEl('ip-lon', Math.abs(pos.lon).toFixed(2) + '°' + lonDir);
         this._setEl('ip-az', pos.az.toFixed(1) + '°');
@@ -186,7 +186,7 @@
      * При смене спутника: обновить орбитальные параметры и загрузить данные пролёта.
      */
     InfoPanel.prototype._onSatelliteChange = function(state) {
-        var noradId = state.noradId;
+        const noradId = state.noradId;
 
         // Орбитальные параметры из SSE satellite_change
         this._setEl('ip-incl', typeof state.inclination === 'number'
@@ -219,19 +219,19 @@
      * Загрузка данных ближайшего пролёта для спутника.
      */
     InfoPanel.prototype._fetchPassData = function(noradId) {
-        var self = this;
+        const self = this;
 
         fetch('/api/passes?hours=24')
             .then(function(resp) { return resp.json(); })
             .then(function(data) {
-                if (!data.passes || data.passes.length === 0) return;
-                if (self._activeNoradId !== noradId) return;
+                if (!data.passes || data.passes.length === 0) {return;}
+                if (self._activeNoradId !== noradId) {return;}
 
-                var now = Date.now();
-                var pass = null;
+                const now = Date.now();
+                let pass = null;
 
-                for (var i = 0; i < data.passes.length; i++) {
-                    var p = data.passes[i];
+                for (let i = 0; i < data.passes.length; i++) {
+                    const p = data.passes[i];
                     if (p.norad_id === noradId) {
                         if ((p.aos <= now && now <= p.los) || now < p.aos) {
                             pass = p;

@@ -392,8 +392,8 @@ class SatelliteStateManager {
 }
 
 // Экспорт для использования в других модулях и тестах.
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { SatelliteStateManager, SatelliteState, StateEventType };
+if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
+    module.exports = { SatelliteStateManager, SatelliteState, StateEventType }; // eslint-disable-line no-undef
 }
 
 // Экспорт для использования в браузере.

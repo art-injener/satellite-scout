@@ -83,7 +83,7 @@
 
             // Информационный блок
             infoText: '#00d4aa',
-            infoLabel: '#ffffff',  // Белый для надписей (было #888888)
+            infoLabel: '#ffffff', // Белый для надписей (было #888888)
             timeText: '#00a8ff'
         };
 
@@ -829,10 +829,10 @@
         ctx.stroke();
 
         const col1X = panelPadding + 8;
-        const col2X = w * 0.38;   
-        const col3X = w * 0.70;   
-        const row1Y = panelY + 20;  // Увеличено с 18
-        const row2Y = panelY + 40;  // Увеличено с 34 (больший отступ между строками)
+        const col2X = w * 0.38;
+        const col3X = w * 0.70;
+        const row1Y = panelY + 20; // Увеличено с 18
+        const row2Y = panelY + 40; // Увеличено с 34 (больший отступ между строками)
 
         const passInfo = this.passInfo;
 

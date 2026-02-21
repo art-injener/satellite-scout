@@ -22,6 +22,9 @@ var (
 	ErrEpochTooShort     = errors.New("epoch string too short")
 )
 
+// Ключ для slog-атрибута ошибки.
+const slogKeyError = "error"
+
 // alpha5Map маппинг букв Alpha-5 формата на числовые префиксы.
 // Alpha-5 используется для NORAD ID > 99999 (например, Starlink).
 // Буквы I и O не используются (путаются с 1 и 0).
@@ -115,57 +118,53 @@ func ParseTLE(lines []string) (*TLE, error) {
 func ParseTLEBatch(data string) ([]*TLE, error) {
 	lines := strings.Split(data, "\n")
 	var tles []*TLE
-	currentLines := make([]string, 0, 3) // Обычно 3 строки (имя + line1 + line2)
+	currentLines := make([]string, 0, 3)
 
 	for i := range lines {
 		trimmed := strings.TrimSpace(lines[i])
 
-		// Пропускаем пустые строки и комментарии (например, заголовки от прокси/кеша)
 		if trimmed == "" {
 			if len(currentLines) >= 2 {
-				tle, err := ParseTLE(currentLines)
-				if err != nil {
-					slog.Default().Debug("skipped invalid TLE block", "lines", currentLines, "error", err)
-					currentLines = nil
-				} else {
-					tles = append(tles, tle)
-					currentLines = nil
+				if parsed := parseTLEBlock(currentLines); parsed != nil {
+					tles = append(tles, parsed)
 				}
+				currentLines = nil
 			}
-
 			continue
 		}
 		if trimmed[0] == '#' {
-			// Строка-комментарий — не включаем в блок TLE
 			continue
 		}
 
 		currentLines = append(currentLines, trimmed)
 
-		// Проверяем, готов ли TLE к парсингу
-		if tle := tryParseTLE(currentLines); tle != nil {
-			parsed, err := ParseTLE(currentLines)
-			if err != nil {
-				slog.Default().Debug("skipped invalid TLE block", "lines", currentLines, "error", err)
-				currentLines = nil
-			} else {
+		if tryParseTLE(currentLines) != nil {
+			if parsed := parseTLEBlock(currentLines); parsed != nil {
 				tles = append(tles, parsed)
-				currentLines = nil
 			}
+			currentLines = nil
 		}
 	}
 
-	// Обработка последнего TLE
-	if len(currentLines) >= 2 {
-		tle, err := ParseTLE(currentLines)
-		if err != nil {
-			slog.Default().Debug("skipped invalid TLE block", "lines", currentLines, "error", err)
-		} else {
-			tles = append(tles, tle)
-		}
+	if parsed := parseTLEBlock(currentLines); parsed != nil {
+		tles = append(tles, parsed)
 	}
 
 	return tles, nil
+}
+
+// parseTLEBlock пытается распарсить накопленные строки как TLE.
+// Возвращает nil если строк менее 2 или при ошибке парсинга.
+func parseTLEBlock(lines []string) *TLE {
+	if len(lines) < 2 {
+		return nil
+	}
+	tle, err := ParseTLE(lines)
+	if err != nil {
+		slog.Default().Debug("skipped invalid TLE block", "lines", lines, slogKeyError, err)
+		return nil
+	}
+	return tle
 }
 
 // tryParseTLE проверяет, можно ли распарсить накопленные строки как TLE.

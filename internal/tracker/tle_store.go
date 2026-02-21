@@ -130,7 +130,7 @@ func (s *TLEStore) Start(ctx context.Context) error {
 
 	// Загрузка всех настроенных групп
 	if err := s.LoadAllGroups(ctx); err != nil {
-		s.logger.WarnContext(ctx, "initial TLE load had errors", "error", err)
+		s.logger.WarnContext(ctx, "initial TLE load had errors", slogKeyError, err)
 		// Не возвращаем ошибку — можем работать с частичными данными
 	}
 
@@ -274,7 +274,7 @@ func (s *TLEStore) LoadAllGroups(ctx context.Context) error {
 		if err := s.LoadGroup(ctx, group); err != nil {
 			s.logger.WarnContext(ctx, "failed to load group",
 				"group", group,
-				"error", err,
+				slogKeyError, err,
 			)
 			lastErr = err
 		}
@@ -303,7 +303,7 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 	if err != nil {
 		s.logger.WarnContext(ctx, "failed to fetch from Celestrak, trying cache",
 			"group", group,
-			"error", err,
+			slogKeyError, err,
 		)
 
 		// Fallback на файловый кеш
@@ -311,7 +311,7 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 		if err != nil {
 			s.logger.WarnContext(ctx, "failed to load from cache",
 				"group", group,
-				"error", err,
+				slogKeyError, err,
 			)
 			return fmt.Errorf("%w: %s (celestrak and cache both failed)", ErrLoadGroupFailed, group)
 		}
@@ -325,7 +325,7 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 		if saveErr := s.saveGroupToCache(group, tles); saveErr != nil {
 			s.logger.WarnContext(ctx, "failed to save to cache",
 				"group", group,
-				"error", saveErr,
+				slogKeyError, saveErr,
 			)
 		}
 	}
@@ -396,7 +396,7 @@ func (s *TLEStore) startUpdater(ctx context.Context) {
 		case <-ticker.C:
 			s.logger.InfoContext(ctx, "starting scheduled TLE update")
 			if err := s.LoadAllGroups(ctx); err != nil {
-				s.logger.WarnContext(ctx, "scheduled TLE update had errors", "error", err)
+				s.logger.WarnContext(ctx, "scheduled TLE update had errors", slogKeyError, err)
 			}
 		}
 	}
@@ -515,7 +515,7 @@ func (s *TLEStore) saveGroupToCache(group string, tles []*TLE) error {
 	// Обновляем метаданные
 	meta, err := s.loadCacheMeta()
 	if err != nil {
-		s.logger.Warn("failed to load cache meta", "error", err)
+		s.logger.Warn("failed to load cache meta", slogKeyError, err)
 		meta = &CacheMeta{Groups: make(map[string]CacheGroupMeta)}
 	}
 
@@ -526,7 +526,7 @@ func (s *TLEStore) saveGroupToCache(group string, tles []*TLE) error {
 
 	err = s.saveCacheMeta(meta)
 	if err != nil {
-		s.logger.Warn("failed to save cache meta", "error", err)
+		s.logger.Warn("failed to save cache meta", slogKeyError, err)
 	}
 
 	return nil

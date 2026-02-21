@@ -47,13 +47,13 @@ class MockEventSource {
     /** Эмуляция ошибки с закрытием соединения. */
     _emitErrorClosed() {
         this.readyState = MockEventSource.CLOSED;
-        if (this.onerror) this.onerror(new Event('error'));
+        if (this.onerror) {this.onerror(new Event('error'));}
     }
 
     /** Эмуляция ошибки с попыткой переподключения браузером. */
     _emitErrorConnecting() {
         this.readyState = MockEventSource.CONNECTING;
-        if (this.onerror) this.onerror(new Event('error'));
+        if (this.onerror) {this.onerror(new Event('error'));}
     }
 
     /** Эмуляция успешного подключения (open + connected event). */
@@ -89,8 +89,6 @@ const assert = require('assert');
 
 let passed = 0;
 let failed = 0;
-const pendingTimers = [];
-
 function test(name, fn) {
     MockEventSource._reset();
     try {
@@ -327,7 +325,7 @@ test('satellite_state_update with invalid data is handled gracefully', () => {
 
     const origWarn = console.warn;
     let warned = false;
-    console.warn = (msg) => { if (msg.includes('invalid satellite_state_update')) warned = true; };
+    console.warn = (msg) => { if (msg.includes('invalid satellite_state_update')) {warned = true;} };
 
     MockEventSource._lastInstance._emit('satellite_state_update', { no_positions: true });
 
@@ -433,7 +431,7 @@ test('invalid JSON in event is handled gracefully', () => {
 
     const origError = console.error;
     let errorLogged = false;
-    console.error = (msg) => { if (msg.includes('failed to parse')) errorLogged = true; };
+    console.error = (msg) => { if (msg.includes('failed to parse')) {errorLogged = true;} };
 
     // Отправляем сырую невалидную строку.
     const listeners = MockEventSource._lastInstance._listeners['satellite_state_update'] || [];

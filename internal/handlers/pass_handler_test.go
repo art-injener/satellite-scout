@@ -7,8 +7,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/art-injener/satellite-scout/internal/tracker"
 	"github.com/stretchr/testify/require"
+
+	"github.com/art-injener/satellite-scout/internal/tracker"
 )
 
 // --- Mock сервисы ---

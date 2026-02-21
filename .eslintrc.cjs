@@ -2,10 +2,10 @@ module.exports = {
     root: true,
     env: {
         browser: true,
-        es2021: true
+        es2022: true
     },
     parserOptions: {
-        ecmaVersion: 2021,
+        ecmaVersion: 2022,
         sourceType: 'script'
     },
     extends: [
@@ -42,5 +42,13 @@ module.exports = {
         'space-before-blocks': 'error',
         'space-before-function-paren': ['error', { anonymous: 'never', named: 'never', asyncArrow: 'always' }],
         'eol-last': 'error'
-    }
+    },
+    overrides: [
+        {
+            files: ['**/*.test.js'],
+            env: {
+                node: true
+            }
+        }
+    ]
 };

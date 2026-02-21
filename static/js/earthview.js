@@ -32,7 +32,7 @@
         this.colors = {
             background: '#000010', // Тёмно-синий фон (океаны)
             coastline: '#4d9999', // #5b8a8a #00d4d4, // Циан - береговые линии
-            grid: '#3a4a4a', // Серый - сетка #556677 #2a3d4d #334455 #3d5566	
+            grid: '#3a4a4a', // Серый - сетка #556677 #2a3d4d #334455 #3d5566
             gridMajor: '#4a5e5e', // Светлее - основные линии #667788 #3a5060 #445566 #4d6677
             orbitFuture: '#00ff00', // Зелёный - будущая орбита
             orbitPast: '#ff4444', // Красный - прошлая орбита
@@ -108,13 +108,13 @@
      */
     EarthView.prototype._setupCanvasSize = function() {
         // clientWidth/Height = размер отображения, заданный CSS (100% контейнера)
-        var displayWidth = this.canvas.clientWidth;
-        var displayHeight = this.canvas.clientHeight;
+        const displayWidth = this.canvas.clientWidth;
+        const displayHeight = this.canvas.clientHeight;
         if (displayWidth <= 0 || displayHeight <= 0) { return; }
 
-        var dpr = window.devicePixelRatio || 1;
-        var backingWidth = Math.round(displayWidth * dpr);
-        var backingHeight = Math.round(displayHeight * dpr);
+        const dpr = window.devicePixelRatio || 1;
+        const backingWidth = Math.round(displayWidth * dpr);
+        const backingHeight = Math.round(displayHeight * dpr);
 
         // Устанавливаем только буфер, НЕ style (style задан CSS)
         if (this.canvas.width !== backingWidth || this.canvas.height !== backingHeight) {
@@ -190,7 +190,7 @@
     };
 
     /**
-     * Загрузка границ РФ 
+     * Загрузка границ РФ
      * @param {string} url - URL GeoJSON файла
      * @returns {Promise}
      */
@@ -481,8 +481,8 @@
             return track.length > 0;
         }
         if (track && typeof track === 'object' && (track.past || track.future)) {
-            var pastLen = (track.past && track.past.length) ? track.past.reduce(function(s, seg) { return s + seg.length; }, 0) : 0;
-            var futureLen = (track.future && track.future.length) ? track.future.reduce(function(s, seg) { return s + seg.length; }, 0) : 0;
+            const pastLen = (track.past && track.past.length) ? track.past.reduce(function(s, seg) { return s + seg.length; }, 0) : 0;
+            const futureLen = (track.future && track.future.length) ? track.future.reduce(function(s, seg) { return s + seg.length; }, 0) : 0;
             return pastLen > 0 || futureLen > 0;
         }
         return false;
@@ -503,8 +503,8 @@
         }
 
         if (track && track.past) {
-            for (var i = 0; i < track.past.length; i++) {
-                var seg = track.past[i];
+            for (let i = 0; i < track.past.length; i++) {
+                const seg = track.past[i];
                 if (seg && seg.length >= 2) {
                     this.ctx.setLineDash([4, 4]);
                     this._drawTrackSegment(seg, this.colors.orbitPast);
@@ -513,8 +513,8 @@
             }
         }
         if (track && track.future) {
-            for (var j = 0; j < track.future.length; j++) {
-                var segF = track.future[j];
+            for (let j = 0; j < track.future.length; j++) {
+                const segF = track.future[j];
                 if (segF && segF.length >= 2) {
                     this._drawTrackSegment(segF, this.colors.orbitFuture);
                 }
@@ -535,15 +535,15 @@
         // Отрисовка линии
         if (mode === 'line' || mode === 'both') {
             ctx.strokeStyle = color;
-            ctx.lineWidth = 1.2; 
+            ctx.lineWidth = 1.5;
             ctx.beginPath();
 
-            var prevP = null;
-            var moved = false;
+            let prevP = null;
+            let moved = false;
 
-            for (var i = 0; i < points.length; i++) {
-                var pt = points[i];
-                var p = this.project(pt.lon, pt.lat);
+            for (let i = 0; i < points.length; i++) {
+                const pt = points[i];
+                const p = this.project(pt.lon, pt.lat);
 
                 // Проверка на пересечение антимеридиана
                 if (prevP && Math.abs(p.x - prevP.x) > this.width / 2) {
@@ -568,15 +568,15 @@
         // Отрисовка точек (минутные метки) - жёлтым цветом
         if (mode === 'dots' || mode === 'both') {
             ctx.fillStyle = this.colors.orbitDots; // Жёлтый
-            var lastDotTime = -Infinity;
+            let lastDotTime = -Infinity;
 
-            for (var k = 0; k < points.length; k++) {
-                var point = points[k];
-                var t = point.ts != null ? point.ts : point.time;
+            for (let k = 0; k < points.length; k++) {
+                const point = points[k];
+                const t = point.ts !== null ? point.ts : point.time;
                 if (t - lastDotTime >= dotInterval) {
-                    var pp = this.project(point.lon, point.lat);
+                    const pp = this.project(point.lon, point.lat);
                     ctx.beginPath();
-                    ctx.arc(pp.x, pp.y, 2, 0, Math.PI * 2); // Очень маленькие точки
+                    ctx.arc(pp.x, pp.y, 2.5, 0, Math.PI * 2); // Очень маленькие точки
                     ctx.fill();
                     lastDotTime = t;
                 }
@@ -593,8 +593,8 @@
         const p = this.project(pos.lon, pos.lat);
 
         // Масштаб для HiDPI (буфер увеличен на dpr, значит пиксели нужно масштабировать)
-        var dpr = window.devicePixelRatio || 1;
-        var s = dpr * 1.2; // базовый множитель для увеличения
+        const dpr = window.devicePixelRatio || 1;
+        const s = dpr * 1.2; // базовый множитель для увеличения
 
         ctx.strokeStyle = this.colors.satellite;
         ctx.fillStyle = this.colors.satellite;
@@ -608,23 +608,23 @@
 
         // Иконка спутника в стиле STSPLUS (упрощённая МКС)
         // Центральный модуль
-        ctx.fillRect(p.x - 3*s, p.y - 8*s, 6*s, 16*s);
+        ctx.fillRect(p.x - 3 * s, p.y - 8 * s, 6 * s, 16 * s);
 
         // Солнечные панели (горизонтальные)
-        ctx.fillRect(p.x - 16*s, p.y - 3*s, 10*s, 6*s);
-        ctx.fillRect(p.x + 6*s, p.y - 3*s, 10*s, 6*s);
+        ctx.fillRect(p.x - 16 * s, p.y - 3 * s, 10 * s, 6 * s);
+        ctx.fillRect(p.x + 6 * s, p.y - 3 * s, 10 * s, 6 * s);
 
         // Дополнительные элементы панелей
         ctx.lineWidth = 1.5 * s;
         ctx.beginPath();
-        ctx.moveTo(p.x - 16*s, p.y);
-        ctx.lineTo(p.x - 19*s, p.y - 4*s);
-        ctx.moveTo(p.x - 16*s, p.y);
-        ctx.lineTo(p.x - 19*s, p.y + 4*s);
-        ctx.moveTo(p.x + 16*s, p.y);
-        ctx.lineTo(p.x + 19*s, p.y - 4*s);
-        ctx.moveTo(p.x + 16*s, p.y);
-        ctx.lineTo(p.x + 19*s, p.y + 4*s);
+        ctx.moveTo(p.x - 16 * s, p.y);
+        ctx.lineTo(p.x - 19 * s, p.y - 4 * s);
+        ctx.moveTo(p.x - 16 * s, p.y);
+        ctx.lineTo(p.x - 19 * s, p.y + 4 * s);
+        ctx.moveTo(p.x + 16 * s, p.y);
+        ctx.lineTo(p.x + 19 * s, p.y - 4 * s);
+        ctx.moveTo(p.x + 16 * s, p.y);
+        ctx.lineTo(p.x + 19 * s, p.y + 4 * s);
         ctx.stroke();
 
         // Сброс свечения
@@ -633,11 +633,11 @@
 
         // Название спутника — цвет и обводка (без фона)
         if (this.satellite.name) {
-            var fontSize = Math.round(12 * s);
+            const fontSize = Math.round(12 * s);
             ctx.font = 'bold ' + fontSize + 'px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            var labelY = p.y + 12 * s;
+            const labelY = p.y + 12 * s;
             ctx.strokeStyle = this.colors.satLabelStroke || 'rgba(0,0,0,0.85)';
             ctx.lineWidth = 2.5;
             ctx.strokeText(this.satellite.name, p.x, labelY);
@@ -656,9 +656,9 @@
         // Треугольник
         const size = 8;
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y - size);           // вершина
-        ctx.lineTo(p.x - size, p.y + size);    // нижний левый
-        ctx.lineTo(p.x + size, p.y + size);    // нижний правый
+        ctx.moveTo(p.x, p.y - size); // вершина
+        ctx.lineTo(p.x - size, p.y + size); // нижний левый
+        ctx.lineTo(p.x + size, p.y + size); // нижний правый
         ctx.closePath();
         ctx.fillStyle = this.colors.observerLabel || '#ff9500';
         ctx.strokeStyle = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
@@ -668,11 +668,11 @@
 
         // Название точки наблюдения — белый цвет
         if (this.observer.name) {
-            var obsText = this.observer.name.toLocaleUpperCase();
+            const obsText = this.observer.name.toLocaleUpperCase();
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            var labelX = p.x + size + 3;
+            const labelX = p.x + size + 3;
             ctx.strokeStyle = 'rgba(0,0,0,0.9)';
             ctx.lineWidth = 2;
             ctx.strokeText(obsText, labelX, p.y);
@@ -687,27 +687,27 @@
      * Каждый сегмент рисуется как замкнутый контур с заливкой.
      */
     EarthView.prototype._drawVisibilityZone = function() {
-        var ctx = this.ctx;
-        var segments = this.satellite.visibilityZone;
+        const ctx = this.ctx;
+        const segments = this.satellite.visibilityZone;
 
         if (!segments || segments.length === 0) { return; }
 
-        var dpr = window.devicePixelRatio || 1;
+        const dpr = window.devicePixelRatio || 1;
 
-        for (var k = 0; k < segments.length; k++) {
-            var seg = segments[k];
+        for (let k = 0; k < segments.length; k++) {
+            const seg = segments[k];
             if (!seg || seg.length < 3) { continue; }
 
             // Проецируем точки сегмента
-            var projected = [];
-            for (var i = 0; i < seg.length; i++) {
+            const projected = [];
+            for (let i = 0; i < seg.length; i++) {
                 projected.push(this.project(seg[i].lon, seg[i].lat));
             }
 
             // Заливка
             ctx.beginPath();
             ctx.moveTo(projected[0].x, projected[0].y);
-            for (var j = 1; j < projected.length; j++) {
+            for (let j = 1; j < projected.length; j++) {
                 ctx.lineTo(projected[j].x, projected[j].y);
             }
             ctx.closePath();
@@ -720,7 +720,7 @@
             ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(projected[0].x, projected[0].y);
-            for (var m = 1; m < projected.length; m++) {
+            for (let m = 1; m < projected.length; m++) {
                 ctx.lineTo(projected[m].x, projected[m].y);
             }
             ctx.closePath();
@@ -735,7 +735,7 @@
      * @returns {Promise}
      */
     EarthView.prototype.init = function() {
-        var self = this;
+        const self = this;
         this._setupCanvasSize();
         if (typeof ResizeObserver !== 'undefined') {
             this._resizeObserver = new ResizeObserver(function() {

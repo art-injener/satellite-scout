@@ -176,7 +176,7 @@ class SSEClient {
      * @param {MessageEvent} _e — событие EventSource.
      * @private
      */
-    _onConnected(_e) {
+    _onConnected() {
         this._reconnectDelay = SSEClient.RECONNECT_MIN_DELAY;
         this._setStatus(SSEConnectionStatus.CONNECTED);
         console.log('[SSEClient] connected to', this._url);
@@ -220,23 +220,23 @@ class SSEClient {
         }
 
         switch (eventType) {
-        case 'satellite_state_update':
-            this._handleStateUpdate(data);
-            break;
-        case 'satellite_change':
-            if (typeof data.norad_id === 'number') {
-                var orbitalParams = null;
-                if (typeof data.inclination === 'number' || typeof data.period === 'number') {
-                    orbitalParams = {
-                        inclination: data.inclination,
-                        period: data.period
-                    };
+            case 'satellite_state_update':
+                this._handleStateUpdate(data);
+                break;
+            case 'satellite_change':
+                if (typeof data.norad_id === 'number') {
+                    let orbitalParams = null;
+                    if (typeof data.inclination === 'number' || typeof data.period === 'number') {
+                        orbitalParams = {
+                            inclination: data.inclination,
+                            period: data.period
+                        };
+                    }
+                    this._stateManager.setActiveSatellite(data.norad_id, data.name || '', orbitalParams);
                 }
-                this._stateManager.setActiveSatellite(data.norad_id, data.name || '', orbitalParams);
-            }
-            break;
-        default:
-            console.warn(`[SSEClient] unhandled event type: ${eventType}`);
+                break;
+            default:
+                console.warn(`[SSEClient] unhandled event type: ${eventType}`);
         }
     }
 
@@ -344,8 +344,8 @@ class SSEClient {
 }
 
 // Экспорт для использования в других модулях и тестах.
-if (typeof module !== 'undefined' && module.exports) {
-    module.exports = { SSEClient, SSEConnectionStatus };
+if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
+    module.exports = { SSEClient, SSEConnectionStatus }; // eslint-disable-line no-undef
 }
 
 // Экспорт для использования в браузере.

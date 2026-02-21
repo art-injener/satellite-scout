@@ -33,7 +33,7 @@
         this.centerX = this.logicalWidth / 2;
         this.radius = this.logicalWidth / 2 - 25;
 
-        var topPadding = 15;
+        const topPadding = 15;
         this.centerY = this.radius + topPadding + 5;
 
         // Позиция антенны
@@ -66,12 +66,12 @@
         this.antennaScale = this.radius / 100 * 0.95;
 
         // Вычисляем нижнюю точку постамента для позиционирования инфо-панели
-        var s = this.antennaScale;
-        var mountHeight = 16 * s;
-        var innerArcR = mountHeight / 2 + 6 * s;
-        var outerArcR = innerArcR + 5 * s;
-        var lineLen = outerArcR + 35;
-        var trapH = 35 * s;
+        const s = this.antennaScale;
+        const mountHeight = 16 * s;
+        const innerArcR = mountHeight / 2 + 6 * s;
+        const outerArcR = innerArcR + 5 * s;
+        const lineLen = outerArcR + 35;
+        const trapH = 35 * s;
         this.pedestalBottom = this.centerY + lineLen + trapH;
         this.infoPanelY = this.pedestalBottom + 4;
     }
@@ -86,7 +86,7 @@
      * @returns {boolean} true = западная полусфера (левая зона)
      */
     ElevationIndicator.prototype.isWesternHemisphere = function(az) {
-        var a = (az !== undefined) ? az : this.currentAzimuth;
+        const a = (az !== undefined) ? az : this.currentAzimuth;
         return a > 180 || a === 0;
     };
 
@@ -94,10 +94,10 @@
      * Отрисовка полулимба с двумя зонами
      */
     ElevationIndicator.prototype.drawLimb = function() {
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var r = this.radius;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const r = this.radius;
 
         ctx.beginPath();
         ctx.arc(cx, cy, r, Math.PI, 0, false);
@@ -123,15 +123,15 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        for (var i = 0; i <= 6; i++) {
-            var scaleValue = i * 15;
-            var labelValue = 90 - scaleValue;
-            var isMain = scaleValue % 30 === 0;
-            var innerR = isMain ? r - 15 : r - 10;
-            var outerR = r - 2;
+        for (let i = 0; i <= 6; i++) {
+            const scaleValue = i * 15;
+            const labelValue = 90 - scaleValue;
+            const isMain = scaleValue % 30 === 0;
+            const innerR = isMain ? r - 15 : r - 10;
+            const outerR = r - 2;
 
-            var radLeft = Math.PI / 2 + scaleValue * Math.PI / 180;
-            var radRight = Math.PI / 2 - scaleValue * Math.PI / 180;
+            const radLeft = Math.PI / 2 + scaleValue * Math.PI / 180;
+            const radRight = Math.PI / 2 - scaleValue * Math.PI / 180;
 
             // Левая сторона
             ctx.beginPath();
@@ -142,8 +142,8 @@
             ctx.stroke();
 
             if (isMain) {
-                var labelR = r + 12;
-                var label = labelValue.toString() + '°';
+                const labelR = r + 12;
+                const label = labelValue.toString() + '°';
 
                 ctx.fillStyle = (labelValue === 90) ? this.colors.textPrimary : this.colors.textSecondary;
                 ctx.fillText(label, cx + Math.cos(radLeft) * labelR, cy - Math.sin(radLeft) * labelR);
@@ -159,8 +159,8 @@
                 ctx.stroke();
 
                 if (isMain) {
-                    var labelR2 = r + 12;
-                    var label2 = labelValue.toString() + '°';
+                    const labelR2 = r + 12;
+                    const label2 = labelValue.toString() + '°';
 
                     ctx.fillStyle = this.colors.textSecondary;
                     ctx.fillText(label2, cx + Math.cos(radRight) * labelR2, cy - Math.sin(radRight) * labelR2);
@@ -184,9 +184,9 @@
      * @returns {number} угол в радианах для позиционирования на полулимбе
      */
     ElevationIndicator.prototype._elevationToLimbAngle = function(el, az) {
-        var western = this.isWesternHemisphere(az);
+        const western = this.isWesternHemisphere(az);
         // 90° - el = угол наклона от вертикали
-        var tilt = 90 - el;
+        const tilt = 90 - el;
         if (western) {
             // Левая сторона: PI/2 + tilt° от вертикали
             return Math.PI / 2 + tilt * Math.PI / 180;
@@ -203,21 +203,18 @@
     ElevationIndicator.prototype.drawSatellitePointer = function() {
         if (this.satelliteElevation === null || !this.isVisible) { return; }
 
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var r = this.radius;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const r = this.radius;
 
-        var limbAngle = this._elevationToLimbAngle(this.satelliteElevation, this.satelliteAzimuth || this.currentAzimuth);
-        var endR = r - 20;
-        // var endX = cx + Math.cos(limbAngle) * endR;
-        // var endY = cy - Math.sin(limbAngle) * endR;
+        const limbAngle = this._elevationToLimbAngle(this.satelliteElevation, this.satelliteAzimuth || this.currentAzimuth);
 
         // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
         // var lineWidth = 2;          // Толщина пунктирной линии
         // var dashPattern = [6, 4]; // Пунктир
-        var markerRadius = 6;         // Радиус маркера на лимбе
-        var markerLineWidth = 2;      // Толщина контура маркера
+        const markerRadius = 6; // Радиус маркера на лимбе
+        const markerLineWidth = 2; // Толщина контура маркера
         // ================================
 
         // ctx.save();
@@ -232,9 +229,9 @@
         // ctx.restore();
 
         // Маркер-кольцо на лимбе (без заливки)
-        var markerR = r - 9;
-        var mx = cx + Math.cos(limbAngle) * markerR;
-        var my = cy - Math.sin(limbAngle) * markerR;
+        const markerR = r - 9;
+        const mx = cx + Math.cos(limbAngle) * markerR;
+        const my = cy - Math.sin(limbAngle) * markerR;
 
         ctx.beginPath();
         ctx.arc(mx, my, markerRadius, 0, Math.PI * 2);
@@ -247,10 +244,10 @@
      * Сообщение «ВНЕ ЗОНЫ НАБЛЮДЕНИЯ» по центру графика
      */
     ElevationIndicator.prototype._drawOutOfViewMessage = function() {
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var msgY = cy - this.radius * 0.3;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const msgY = cy - this.radius * 0.3;
 
         ctx.save();
         ctx.font = 'bold 11px monospace';
@@ -266,14 +263,14 @@
      * Отрисовка неподвижного постамента
      */
     ElevationIndicator.prototype.drawPedestal = function() {
-        var ctx = this.ctx;
-        var cx = this.centerX;
-        var cy = this.centerY;
-        var s = this.antennaScale;
+        const ctx = this.ctx;
+        const cx = this.centerX;
+        const cy = this.centerY;
+        const s = this.antennaScale;
 
-        var mountHeight = 16 * s;
-        var innerArcRadius = mountHeight / 2 + 6 * s;
-        var outerArcRadius = innerArcRadius + 5 * s;
+        const mountHeight = 16 * s;
+        const innerArcRadius = mountHeight / 2 + 6 * s;
+        const outerArcRadius = innerArcRadius + 5 * s;
 
         ctx.strokeStyle = this.colors.accent;
         ctx.lineWidth = 0.75;
@@ -282,7 +279,7 @@
         ctx.arc(cx, cy, outerArcRadius, 0, Math.PI * 2, false);
         ctx.stroke();
 
-        var lineLength = outerArcRadius + 35;
+        const lineLength = outerArcRadius + 35;
 
         ctx.beginPath();
         ctx.moveTo(cx - outerArcRadius, cy);
@@ -299,10 +296,10 @@
         ctx.lineTo(cx + outerArcRadius, cy + lineLength);
         ctx.stroke();
 
-        var trapH  = 35 * s;
-        var trapBW = 50 * s;
-        var trapTW = 25 * s;
-        var trapTop = cy + lineLength;
+        const trapH = 35 * s;
+        const trapBW = 50 * s;
+        const trapTW = 25 * s;
+        const trapTop = cy + lineLength;
 
         ctx.beginPath();
         ctx.moveTo(cx - trapTW, trapTop);
@@ -317,7 +314,7 @@
      * Вычисление угла поворота антенны для AntennaDrawing
      */
     ElevationIndicator.prototype.calculateAntennaAngle = function(elevation) {
-        var tilt = 90 - elevation;
+        const tilt = 90 - elevation;
         if (this.isWesternHemisphere()) {
             return -tilt;
         } else {
@@ -329,7 +326,7 @@
      * Отрисовка антенны
      */
     ElevationIndicator.prototype.drawAntenna = function(elevation) {
-        var angle = this.calculateAntennaAngle(elevation);
+        const angle = this.calculateAntennaAngle(elevation);
         window.AntennaDrawing.draw(
             this.ctx,
             this.centerX,
@@ -348,13 +345,13 @@
      * Колонка 3: El КА
      */
     ElevationIndicator.prototype._drawInfo = function() {
-        var ctx = this.ctx;
-        var w = this.logicalWidth;
-        var panelHeight = this.infoPanelHeight;
-        var panelY = this.infoPanelY;
+        const ctx = this.ctx;
+        const w = this.logicalWidth;
+        const panelHeight = this.infoPanelHeight;
+        const panelY = this.infoPanelY;
 
-        var panelPadding = 6;
-        var cornerRadius = 6;
+        const panelPadding = 6;
+        const cornerRadius = 6;
 
         ctx.beginPath();
         if (ctx.roundRect) {
@@ -368,12 +365,12 @@
         ctx.lineWidth = 1;
         ctx.stroke();
 
-        var rowY = panelY + panelHeight / 2;
+        const rowY = panelY + panelHeight / 2;
 
         // 3 колонки с фиксированными позициями
-        var col1X = panelPadding + 10;          // NORAD слева
-        var col2X = col1X + 70;                  // El ант. (отступ 70px от NORAD, было 90px)
-        var col3X = col2X + 100;                 // El КА (отступ 100px от El ант., было 115px)
+        const col1X = panelPadding + 10; // NORAD слева
+        const col2X = col1X + 70; // El ант. (отступ 70px от NORAD, было 90px)
+        const col3X = col2X + 100; // El КА (отступ 100px от El ант., было 115px)
 
         ctx.font = 'bold 11px monospace';
         ctx.textBaseline = 'middle';
@@ -383,19 +380,19 @@
         ctx.fillStyle = '#ffffff';
         ctx.fillText('ID:', col1X, rowY);
         ctx.fillStyle = '#00d4aa';
-        var noradText = this.noradId ? String(this.noradId) : '-----';
-        ctx.fillText(noradText, col1X + ctx.measureText('ID:').width + 3, rowY);  // +3px минимальный отступ
+        const noradText = this.noradId ? String(this.noradId) : '-----';
+        ctx.fillText(noradText, col1X + ctx.measureText('ID:').width + 3, rowY); // +3px минимальный отступ
 
         // Колонка 2: El ант. (центр-слева)
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
         ctx.fillText('El ант.: ', col2X, rowY);
         ctx.fillStyle = '#00d4aa';
-        var elAntVal = this.currentElevation !== null ? this.currentElevation.toFixed(1) + '°' : '---';
+        const elAntVal = this.currentElevation !== null ? this.currentElevation.toFixed(1) + '°' : '---';
         ctx.fillText(elAntVal, col2X + ctx.measureText('El ант.: ').width, rowY);
 
         // Колонка 3: El КА (с отступом от col2)
-        var elSatVal = this.satelliteElevation !== null ? this.satelliteElevation.toFixed(1) + '°' : '---';
+        const elSatVal = this.satelliteElevation !== null ? this.satelliteElevation.toFixed(1) + '°' : '---';
         ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
         ctx.fillText('El КА: ', col3X, rowY);
@@ -407,7 +404,7 @@
      * Главная функция отрисовки
      */
     ElevationIndicator.prototype.draw = function() {
-        var ctx = this.ctx;
+        const ctx = this.ctx;
 
         ctx.fillStyle = this.colors.bgPrimary;
         ctx.fillRect(0, 0, this.logicalWidth, this.logicalHeight);
