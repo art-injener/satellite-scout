@@ -1,4 +1,4 @@
-/* ===== InfoPanel: вкладки спутников + столбики-карточки ===== */
+/* ===== InfoPanel: столбики-карточки с параметрами спутника ===== */
 
 .info-panel {
     background: var(--bg-primary);
@@ -8,56 +8,18 @@
     overflow: hidden;
 }
 
-/* --- Строка вкладок --- */
-.info-panel__tabs {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 8px 14px;
-    border-bottom: 1px solid var(--border-color);
-    background: var(--bg-secondary);
-    overflow-x: auto;
-}
-
-.info-panel__tab {
-    padding: 5px 14px;
-    border-radius: var(--radius-sm);
-    font-family: var(--font-mono);
-    font-size: 1rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    background: transparent;
-    border: 1px solid transparent;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: all 0.15s ease;
-}
-
-.info-panel__tab:hover {
-    color: var(--text-secondary);
-    background: var(--bg-tertiary);
-}
-
-.info-panel__tab.active {
-    color: var(--accent-primary);
-    background: var(--bg-tertiary);
-    border-color: var(--accent-primary);
-}
-
-.info-panel__tabs-spacer {
-    flex: 1;
-}
-
 /* Кнопка "Сопровождение" */
 .info-panel__track-btn {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    margin-left: auto;
-    padding: 5px 16px;
+    justify-content: center;
+    gap: 4px;
+    margin-top: 6px;
+    padding: 4px 10px;
+    width: 100%;
     border-radius: var(--radius-sm);
     font-family: var(--font-mono);
-    font-size: 0.9rem;
+    font-size: 0.75rem;
     font-weight: 600;
     color: var(--accent-primary);
     background: rgba(0, 212, 170, 0.1);
@@ -88,11 +50,91 @@
     cursor: not-allowed;
 }
 
+/* --- Модальное окно подтверждения завершения сеанса --- */
+.modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+}
+
+.modal.modal--hidden {
+    display: none;
+}
+
+.modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    cursor: pointer;
+}
+
+.modal__box {
+    position: relative;
+    max-width: 450px;
+    width: 100%;
+    padding: 20px 24px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.modal__text {
+    margin: 0 0 20px 0;
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    line-height: 1.45;
+    color: var(--text-primary);
+}
+
+.modal__actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.modal__btn {
+    padding: 8px 18px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: all 0.15s ease;
+}
+
+.modal__btn--primary {
+    color: var(--bg-primary);
+    background: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.modal__btn--primary:hover {
+    filter: brightness(1.1);
+}
+
+.modal__btn--secondary {
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+.modal__btn--secondary:hover {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+}
+
 /* --- 5 столбиков-карточек --- */
 .info-panel__columns {
     display: flex;
-    gap: 10px;
-    padding: 10px 12px 12px;
+    gap: 8px;
+    padding: 8px 10px;
 }
 
 /* Карточка-столбик */
@@ -106,21 +148,22 @@
 }
 
 .info-card__title {
-    padding: 6px 12px;
-    font-size: 0.75rem;
+    padding: 4px 10px;
+    font-size: 0.85rem;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--accent-secondary);
     text-transform: uppercase;
     letter-spacing: 0.8px;
+    text-align: center;
     background: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
 }
 
 .info-card__body {
-    padding: 8px 12px;
+    padding: 6px 10px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 5px;
 }
 
 /* Строка "label — value" внутри карточки */
@@ -132,8 +175,8 @@
 }
 
 .info-card .info-label {
-    color: var(--text-muted);
-    font-size: 0.85rem;
+    color: #ffffff;
+    font-size: 0.9rem;
     white-space: nowrap;
     flex-shrink: 0;
 }
@@ -158,10 +201,10 @@
         gap: 6px;
     }
     .info-card .info-value {
-        font-size: 1rem;
+        font-size: 1.05rem;
     }
     .info-card .info-label {
-        font-size: 0.78rem;
+        font-size: 0.85rem;
     }
 }
 

@@ -15,17 +15,23 @@
     function ElevationIndicator(canvas) {
         this.canvas = canvas;
 
-        var logicalWidth = parseInt(canvas.getAttribute('width'), 10);
-        var logicalHeight = parseInt(canvas.getAttribute('height'), 10);
+        // Логические размеры canvas (из HTML-атрибутов, фиксированные)
+        this.logicalWidth = parseInt(canvas.getAttribute('width'), 10);
+        this.logicalHeight = parseInt(canvas.getAttribute('height'), 10);
 
         if (window.CanvasUtils) {
-            this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, logicalWidth, logicalHeight);
+            this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, this.logicalWidth, this.logicalHeight);
+            canvas.style.width = '';
+            canvas.style.height = '';
         } else {
             this.ctx = canvas.getContext('2d');
         }
 
-        this.centerX = logicalWidth / 2;
-        this.radius = logicalWidth / 2 - 25;
+        // Высота инфо-панели внизу canvas (как в SkyView)
+        this.infoPanelHeight = 30;
+
+        this.centerX = this.logicalWidth / 2;
+        this.radius = this.logicalWidth / 2 - 25;
 
         var topPadding = 15;
         this.centerY = this.radius + topPadding + 5;
@@ -56,6 +62,16 @@
         };
 
         this.antennaScale = this.radius / 100 * 0.95;
+
+        // Вычисляем нижнюю точку постамента для позиционирования инфо-панели
+        var s = this.antennaScale;
+        var mountHeight = 16 * s;
+        var innerArcR = mountHeight / 2 + 6 * s;
+        var outerArcR = innerArcR + 5 * s;
+        var lineLen = outerArcR + 35;
+        var trapH = 35 * s;
+        this.pedestalBottom = this.centerY + lineLen + trapH;
+        this.infoPanelY = this.pedestalBottom + 4;
     }
 
     ElevationIndicator.prototype.degToRad = function(deg) {
@@ -197,7 +213,7 @@
 
         // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
         var lineWidth = 2;          // Толщина пунктирной линии
-        var dashPattern = [6, 4, 2, 4]; // Паттерн: [dash, gap, dot, gap]
+        var dashPattern = [6, 4]; // Пунктир
         var markerRadius = 6;         // Радиус маркера на лимбе
         var markerLineWidth = 2;      // Толщина контура маркера
         // ================================
@@ -324,16 +340,62 @@
     };
 
     /**
+     * Информационная панель внизу canvas (аналогично SkyView)
+     */
+    ElevationIndicator.prototype._drawInfo = function() {
+        var ctx = this.ctx;
+        var w = this.logicalWidth;
+        var panelHeight = this.infoPanelHeight;
+        var panelY = this.infoPanelY;
+
+        var panelPadding = 6;
+        var cornerRadius = 6;
+        var textMargin = 10;
+
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(panelPadding, panelY, w - panelPadding * 2, panelHeight, cornerRadius);
+        } else {
+            ctx.rect(panelPadding, panelY, w - panelPadding * 2, panelHeight);
+        }
+        ctx.fillStyle = 'rgba(20, 30, 45, 0.9)';
+        ctx.fill();
+        ctx.strokeStyle = '#006666';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        var rowY = panelY + panelHeight / 2;
+        var leftX = panelPadding + textMargin;
+        var rightX = w - panelPadding - textMargin;
+
+        ctx.font = 'bold 11px monospace';
+        ctx.textBaseline = 'middle';
+
+        // Левая группа: «El ант.: значение» — по левому краю
+        var elAntVal = this.currentElevation !== null ? this.currentElevation.toFixed(1) + '°' : '---';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('El ант.: ', leftX, rowY);
+        ctx.fillStyle = '#00d4aa';
+        ctx.fillText(elAntVal, leftX + ctx.measureText('El ант.: ').width, rowY);
+
+        // Правая группа: «El КА: значение» — по правому краю
+        var elSatVal = this.satelliteElevation !== null ? this.satelliteElevation.toFixed(1) + '°' : '---';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#00d4aa';
+        ctx.fillText(elSatVal, rightX, rowY);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('El КА:  ', rightX - ctx.measureText(elSatVal).width, rowY);
+    };
+
+    /**
      * Главная функция отрисовки
      */
     ElevationIndicator.prototype.draw = function() {
         var ctx = this.ctx;
-        var size = window.CanvasUtils ?
-            window.CanvasUtils.getLogicalSize(this.canvas) :
-            { width: this.canvas.width, height: this.canvas.height };
 
         ctx.fillStyle = this.colors.bgPrimary;
-        ctx.fillRect(0, 0, size.width, size.height);
+        ctx.fillRect(0, 0, this.logicalWidth, this.logicalHeight);
 
         this.drawLimb();
 
@@ -346,6 +408,8 @@
         if (!this.isVisible) {
             this._drawOutOfViewMessage();
         }
+
+        this._drawInfo();
     };
 
     /**

@@ -12,19 +12,24 @@
     function AzimuthIndicator(canvas) {
         this.canvas = canvas;
 
-        // Настройка HiDPI canvas
-        var logicalWidth = parseInt(canvas.getAttribute('width'), 10);
-        var logicalHeight = parseInt(canvas.getAttribute('height'), 10);
+        // Логические размеры canvas (из HTML-атрибутов, фиксированные)
+        this.logicalWidth = parseInt(canvas.getAttribute('width'), 10);
+        this.logicalHeight = parseInt(canvas.getAttribute('height'), 10);
 
         if (window.CanvasUtils) {
-            this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, logicalWidth, logicalHeight);
+            this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, this.logicalWidth, this.logicalHeight);
+            canvas.style.width = '';
+            canvas.style.height = '';
         } else {
             this.ctx = canvas.getContext('2d');
         }
 
-        this.centerX = logicalWidth / 2;
-        this.centerY = logicalHeight / 2;
-        this.radius = Math.min(logicalWidth, logicalHeight) / 2 - 25;
+        // Высота инфо-панели внизу canvas (как в SkyView)
+        this.infoPanelHeight = 30;
+
+        this.centerX = this.logicalWidth / 2;
+        this.centerY = (this.logicalHeight - this.infoPanelHeight) / 2;
+        this.radius = Math.min(this.logicalWidth, this.logicalHeight - this.infoPanelHeight) / 2 - 25;
         this.currentAzimuth = 0;
 
         // Позиция спутника (null = нет данных)
@@ -134,8 +139,8 @@
         var endY = cy + Math.sin(rad) * (r - 20);
 
         // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
-        var lineWidth = 2;          // Толщина пунктирной линии
-        var dashPattern = [6, 4, 2, 4]; // Паттерн: [dash, gap, dot, gap]
+        var lineWidth = 2;            // Толщина пунктирной линии
+        var dashPattern = [6, 4];     // Пунктир
         var markerRadius = 6;         // Радиус маркера на лимбе
         var markerLineWidth = 2;      // Толщина контура маркера
         // ================================
@@ -197,16 +202,63 @@
     };
 
     /**
+     * Информационная панель внизу canvas (аналогично SkyView)
+     */
+    AzimuthIndicator.prototype._drawInfo = function() {
+        var ctx = this.ctx;
+        var w = this.logicalWidth;
+        var h = this.logicalHeight;
+        var panelHeight = this.infoPanelHeight;
+        var panelY = h - panelHeight;
+
+        var panelPadding = 6;
+        var cornerRadius = 6;
+        var textMargin = 10;
+
+        ctx.beginPath();
+        if (ctx.roundRect) {
+            ctx.roundRect(panelPadding, panelY + 2, w - panelPadding * 2, panelHeight - 4, cornerRadius);
+        } else {
+            ctx.rect(panelPadding, panelY + 2, w - panelPadding * 2, panelHeight - 4);
+        }
+        ctx.fillStyle = 'rgba(20, 30, 45, 0.9)';
+        ctx.fill();
+        ctx.strokeStyle = '#006666';
+        ctx.lineWidth = 1;
+        ctx.stroke();
+
+        var rowY = panelY + panelHeight / 2;
+        var leftX = panelPadding + textMargin;
+        var rightX = w - panelPadding - textMargin;
+
+        ctx.font = 'bold 11px monospace';
+        ctx.textBaseline = 'middle';
+
+        // Левая группа: «Az ант.: значение» — по левому краю
+        var azAntVal = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---';
+        ctx.textAlign = 'left';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Az ант.: ', leftX, rowY);
+        ctx.fillStyle = '#00d4aa';
+        ctx.fillText(azAntVal, leftX + ctx.measureText('Az ант.: ').width, rowY);
+
+        // Правая группа: «Az КА: значение» — по правому краю
+        var azSatVal = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---';
+        ctx.textAlign = 'right';
+        ctx.fillStyle = '#00d4aa';
+        ctx.fillText(azSatVal, rightX, rowY);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillText('Az КА:  ', rightX - ctx.measureText(azSatVal).width, rowY);
+    };
+
+    /**
      * Главная функция отрисовки
      */
     AzimuthIndicator.prototype.draw = function() {
         var ctx = this.ctx;
-        var size = window.CanvasUtils ?
-            window.CanvasUtils.getLogicalSize(this.canvas) :
-            { width: this.canvas.width, height: this.canvas.height };
 
         ctx.fillStyle = this.colors.bgPrimary;
-        ctx.fillRect(0, 0, size.width, size.height);
+        ctx.fillRect(0, 0, this.logicalWidth, this.logicalHeight);
 
         this.drawLimb();
 
@@ -219,6 +271,8 @@
         if (!this.isVisible) {
             this._drawOutOfViewMessage();
         }
+
+        this._drawInfo();
     };
 
     /**

@@ -1,86 +1,54 @@
 /**
- * InfoPanel — управление вкладками спутников и кнопкой «Сопровождение».
- * Пока без привязки к данным (SSE), только визуальная логика.
+ * InfoPanel — кнопка «Сопровождение» и модальное окно подтверждения.
  */
 (function() {
     'use strict';
 
+    var MODAL_ID = 'track-end-session-modal';
+
     function InfoPanel(containerEl) {
         this.container = containerEl;
-        this.tabsContainer = containerEl.querySelector('.info-panel__tabs');
         this.trackBtn = containerEl.querySelector('#btn-track');
-        this.activeNorad = null;
+        this.modal = document.getElementById(MODAL_ID);
 
-        this._init();
+        this._bindEvents();
     }
 
-    InfoPanel.prototype._init = function() {
-        if (!this.tabsContainer) return;
-
-        this.tabsContainer.addEventListener('click', function(e) {
-            var tab = e.target.closest('.info-panel__tab');
-            if (tab) {
-                this._activateTab(tab);
-                return;
-            }
-            if (e.target.closest('#btn-track')) {
-                this._onTrackClick();
-            }
-        }.bind(this));
-
-        var activeTab = this.tabsContainer.querySelector('.info-panel__tab.active');
-        if (activeTab) {
-            this.activeNorad = activeTab.getAttribute('data-norad');
+    InfoPanel.prototype._bindEvents = function() {
+        if (this.trackBtn) {
+            this.trackBtn.addEventListener('click', this._onTrackClick.bind(this));
         }
-    };
+        if (!this.modal) return;
 
-    InfoPanel.prototype._activateTab = function(tab) {
-        var tabs = this.tabsContainer.querySelectorAll('.info-panel__tab');
-        for (var i = 0; i < tabs.length; i++) {
-            tabs[i].classList.remove('active');
-        }
-        tab.classList.add('active');
-        this.activeNorad = tab.getAttribute('data-norad');
-        // TODO: обновить контент секций данными выбранного спутника
+        var backdrop = this.modal.querySelector('#track-end-session-backdrop');
+        var btnNo = document.getElementById('track-end-session-no');
+        var btnYes = document.getElementById('track-end-session-yes');
+
+        if (backdrop) backdrop.addEventListener('click', this._closeModal.bind(this));
+        if (btnNo) btnNo.addEventListener('click', this._closeModal.bind(this));
+        if (btnYes) btnYes.addEventListener('click', this._onConfirmEndSession.bind(this));
     };
 
     InfoPanel.prototype._onTrackClick = function() {
-        if (!this.activeNorad) return;
-        console.log('[InfoPanel] Сопровождение:', this.activeNorad);
-        // TODO: POST /api/tracking/current → смена primary спутника
+        var noradEl = document.getElementById('ip-norad');
+        var noradId = noradEl ? noradEl.textContent.trim() : null;
+        if (!noradId || noradId === '---' || noradId === '--') return;
+
+        this._openModal();
     };
 
-    /** Обновить данные спутника по NORAD ID */
-    InfoPanel.prototype.updateSatelliteData = function(noradId, data) {
-        // TODO: заполнить секции данными если noradId === activeNorad
+    InfoPanel.prototype._openModal = function() {
+        if (this.modal) this.modal.classList.remove('modal--hidden');
     };
 
-    /** Добавить вкладку спутника */
-    InfoPanel.prototype.addTab = function(noradId) {
-        if (this.tabsContainer.querySelector('[data-norad="' + noradId + '"]')) return;
-
-        var btn = document.createElement('button');
-        btn.className = 'info-panel__tab';
-        btn.setAttribute('data-norad', noradId);
-        btn.textContent = noradId;
-
-        var spacer = this.tabsContainer.querySelector('.info-panel__tabs-spacer');
-        if (spacer) {
-            this.tabsContainer.insertBefore(btn, spacer);
-        }
+    InfoPanel.prototype._closeModal = function() {
+        if (this.modal) this.modal.classList.add('modal--hidden');
     };
 
-    /** Удалить вкладку спутника */
-    InfoPanel.prototype.removeTab = function(noradId) {
-        var tab = this.tabsContainer.querySelector('[data-norad="' + noradId + '"]');
-        if (tab) {
-            var wasActive = tab.classList.contains('active');
-            tab.remove();
-            if (wasActive) {
-                var first = this.tabsContainer.querySelector('.info-panel__tab');
-                if (first) this._activateTab(first);
-            }
-        }
+    /** Пока без обработчика — только закрытие модалки */
+    InfoPanel.prototype._onConfirmEndSession = function() {
+        this._closeModal();
+        // TODO: завершение сеанса, POST /api/...
     };
 
     window.InfoPanel = InfoPanel;

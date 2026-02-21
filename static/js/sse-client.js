@@ -1,4 +1,4 @@
-// sse-client.js — FE-002: SSE Client
+// sse-client.js — FE-002: SSE Client (SSE-004: групповые события)
 // Единственный канал получения данных с backend через Server-Sent Events.
 // Маршрутизирует SSE-события в SatelliteStateManager.
 
@@ -22,7 +22,7 @@ const SSEConnectionStatus = Object.freeze({
  *
  * Функции:
  * - Подключение к /api/sse через EventSource
- * - Маршрутизация событий (position, track, satellite_change) в StateManager
+ * - Маршрутизация событий (satellite_state_update, satellite_change) в StateManager
  * - Автопереподключение с exponential backoff
  * - Индикация статуса соединения через callback
  *
@@ -157,12 +157,8 @@ class SSEClient {
         });
 
         // Бизнес-события: маршрутизация в StateManager.
-        this._eventSource.addEventListener('position', (e) => {
-            this._handleEvent('position', e);
-        });
-
-        this._eventSource.addEventListener('track', (e) => {
-            this._handleEvent('track', e);
+        this._eventSource.addEventListener('satellite_state_update', (e) => {
+            this._handleEvent('satellite_state_update', e);
         });
 
         this._eventSource.addEventListener('satellite_change', (e) => {
@@ -224,11 +220,8 @@ class SSEClient {
         }
 
         switch (eventType) {
-        case 'position':
-            this._stateManager.updatePosition(data);
-            break;
-        case 'track':
-            this._stateManager.updateTrack(data);
+        case 'satellite_state_update':
+            this._handleStateUpdate(data);
             break;
         case 'satellite_change':
             if (typeof data.norad_id === 'number') {
@@ -244,6 +237,36 @@ class SSEClient {
             break;
         default:
             console.warn(`[SSEClient] unhandled event type: ${eventType}`);
+        }
+    }
+
+    /**
+     * Обработка группового события satellite_state_update.
+     * Содержит positions[] и опционально tracks[].
+     * @param {Object} data — данные группового события.
+     * @param {Array} data.positions — массив позиций спутников.
+     * @param {Array} [data.tracks] — массив треков (если tracks_included=true).
+     * @param {boolean} data.tracks_included — флаг наличия треков.
+     * @param {number} data.ts — общий timestamp.
+     * @private
+     */
+    _handleStateUpdate(data) {
+        if (!data || !Array.isArray(data.positions)) {
+            console.warn('[SSEClient] invalid satellite_state_update: missing positions array');
+            return;
+        }
+
+        const ts = data.ts || Date.now();
+
+        for (const pos of data.positions) {
+            pos.ts = ts;
+            this._stateManager.updatePosition(pos);
+        }
+
+        if (data.tracks_included && Array.isArray(data.tracks)) {
+            for (const track of data.tracks) {
+                this._stateManager.updateTrack(track);
+            }
         }
     }
 

@@ -59,7 +59,7 @@
         // Initialize canvas placeholders
         initCanvasPlaceholders();
 
-        // Инициализация InfoPanel (вкладки спутников)
+        // Инициализация InfoPanel (кнопка сопровождения)
         var infoPanelEl = document.getElementById('info-panel');
         if (infoPanelEl && typeof window.InfoPanel === 'function') {
             window._infoPanel = new window.InfoPanel(infoPanelEl);
@@ -168,8 +168,7 @@
                 window.elevationIndicator.setPosition(pos.az, pos.el);
             }
 
-            // Обновление DOM инфо-панелей Az/El
-            updateAzElInfoPanels(pos);
+            // Инфо-панели Az/El рисуются внутри canvas (см. _drawInfo)
             
             // Обновление info panel
             updateInfoPanel(state);
@@ -224,21 +223,6 @@
         }, 3000);
     }
     
-    // Обновление DOM инфо-панелей под графиками Az/El
-    function updateAzElInfoPanels(pos) {
-        var azSat = document.getElementById('az-satellite');
-        var elSat = document.getElementById('el-satellite');
-        var azRot = document.getElementById('az-rotator');
-        var elRot = document.getElementById('el-rotator');
-        
-        if (azSat) { azSat.textContent = pos.az.toFixed(1) + '°'; }
-        if (elSat) { elSat.textContent = pos.el.toFixed(1) + '°'; }
-        
-        // TODO: Временно дублируем значения спутника для антенны.
-        // После реализации ROTATOR-003 (SSE rotator_position) заменить на реальные данные антенны.
-        if (azRot) { azRot.textContent = pos.az.toFixed(1) + '°'; }
-        if (elRot) { elRot.textContent = pos.el.toFixed(1) + '°'; }
-    }
 
     // Обновление InfoPanel данными спутника (id с префиксом ip-)
     function updateInfoPanel(state) {

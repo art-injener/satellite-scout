@@ -28,8 +28,17 @@ const (
 	visibilityZonePoints = 72
 )
 
-// positionEvent — JSON-структура SSE-события "position".
-type positionEvent struct {
+// satelliteStateUpdate — JSON-структура группового SSE-события "satellite_state_update".
+// Объединяет позиции и (опционально) треки всех отслеживаемых спутников в одно событие.
+type satelliteStateUpdate struct {
+	Positions      []positionData         `json:"positions"`
+	Tracks         []*tracker.GroundTrack `json:"tracks,omitempty"`
+	TracksIncluded bool                   `json:"tracks_included"`
+	TS             int64                  `json:"ts"`
+}
+
+// positionData — данные позиции одного спутника внутри группового события.
+type positionData struct {
 	NoradID        int                     `json:"norad_id"`
 	Name           string                  `json:"name"`
 	Lat            float64                 `json:"lat"`
@@ -39,7 +48,6 @@ type positionEvent struct {
 	El             float64                 `json:"el"`
 	Range          float64                 `json:"range"`
 	VisibilityZone *tracker.VisibilityZone `json:"visibility_zone,omitempty"`
-	TS             int64                   `json:"ts"`
 }
 
 // satelliteChangeEvent — JSON-структура SSE-события "satellite_change".
@@ -103,6 +111,11 @@ type SatelliteTrackingService struct {
 
 	mu      sync.RWMutex
 	tracked map[int]*trackedSatellite // noradID → trackedSatellite.
+
+	// Кеш последних трасс — включается в каждый satellite_state_update,
+	// чтобы Hub-кеш всегда содержал полные данные для новых клиентов.
+	// Доступ только из горутины Run (потокобезопасен без дополнительной синхронизации).
+	lastTracks []*tracker.GroundTrack
 
 	// Авто-трекинг: автоматическое переключение на ближайший спутник.
 	passProvider    PassProvider // Сервис пролётов (устанавливается через SetPassProvider).
@@ -194,9 +207,8 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 
 	// Немедленный выбор начального спутника и отправка данных (не ждём 10 сек до первого тика авто-трекинга).
 	s.updateAutoTrack()
-	// Первая позиция и трасса — сразу после выбора спутника.
-	s.computeAndBroadcastPositions()
-	s.computeAndBroadcastTracks()
+	// Первые позиции + трассы — сразу после выбора спутника.
+	s.computeAndBroadcastState(true)
 
 	for {
 		select {
@@ -204,9 +216,9 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 			slog.InfoContext(ctx, "satellite tracking service stopped")
 			return
 		case <-posTicker.C:
-			s.computeAndBroadcastPositions()
+			s.computeAndBroadcastState(false)
 		case <-trackTicker.C:
-			s.computeAndBroadcastTracks()
+			s.computeAndBroadcastState(true)
 		case <-autoTrackTicker.C:
 			s.updateAutoTrack()
 		}
@@ -362,11 +374,12 @@ func (s *SatelliteTrackingService) findNearestPass(
 
 // switchToSatellite переключает отслеживание на указанный спутник.
 func (s *SatelliteTrackingService) switchToSatellite(noradID int, name, reason string) {
-	// Очищаем предыдущее отслеживание.
+	// Очищаем предыдущее отслеживание и кеш трасс.
 	s.mu.Lock()
 	oldID := s.currentNoradID
 	s.tracked = make(map[int]*trackedSatellite)
 	s.currentNoradID = noradID
+	s.lastTracks = nil
 	s.mu.Unlock()
 
 	// Добавляем новый спутник.
@@ -389,8 +402,8 @@ func (s *SatelliteTrackingService) switchToSatellite(noradID int, name, reason s
 	// Отправляем событие смены спутника.
 	s.broadcastSatelliteChange(noradID, name, reason)
 
-	// Немедленно отправляем трассу нового спутника.
-	s.computeAndBroadcastTracks()
+	// Немедленно отправляем позиции + трассу нового спутника.
+	s.computeAndBroadcastState(true)
 }
 
 // broadcastSatelliteChange отправляет SSE-событие о смене спутника.
@@ -417,9 +430,13 @@ func (s *SatelliteTrackingService) broadcastSatelliteChange(noradID int, name, r
 	s.hub.Broadcast("satellite_change", data)
 }
 
-// computeAndBroadcastPositions рассчитывает позиции всех отслеживаемых спутников
-// и отправляет результаты через SSE Hub (event: position).
-func (s *SatelliteTrackingService) computeAndBroadcastPositions() {
+// computeAndBroadcastState рассчитывает позиции (и опционально треки)
+// всех отслеживаемых спутников, собирает в одно групповое событие
+// "satellite_state_update" и отправляет через SSE Hub.
+// refreshTracks=true — пересчитать наземные трассы (каждые 30 секунд).
+// Кешированные треки включаются в каждое событие, чтобы Hub-кеш
+// всегда содержал полные данные для вновь подключающихся клиентов.
+func (s *SatelliteTrackingService) computeAndBroadcastState(refreshTracks bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -429,8 +446,37 @@ func (s *SatelliteTrackingService) computeAndBroadcastPositions() {
 
 	now := time.Now().UTC()
 
+	positions := make([]positionData, 0, len(s.tracked))
+
+	// Пересчёт трасс при запросе (каждые 30 секунд или при смене спутника).
+	if refreshTracks {
+		freshTracks := make([]*tracker.GroundTrack, 0, len(s.tracked))
+		for _, sat := range s.tracked {
+			tle, ok := s.store.Get(sat.noradID)
+			if !ok {
+				slog.Debug("TLE not found for track generation",
+					"norad_id", sat.noradID,
+					"name", sat.name,
+				)
+				continue
+			}
+
+			track, err := tracker.GenerateDefaultGroundTrack(tle, now)
+			if err != nil {
+				slog.Debug("failed to generate ground track",
+					"norad_id", sat.noradID,
+					"name", sat.name,
+					"error", err,
+				)
+				continue
+			}
+			freshTracks = append(freshTracks, track)
+		}
+		s.lastTracks = freshTracks
+	}
+
 	for _, sat := range s.tracked {
-		event, err := s.computePosition(sat, now)
+		pos, err := s.computePosition(sat, now)
 		if err != nil {
 			slog.Debug("failed to compute position",
 				"norad_id", sat.noradID,
@@ -439,67 +485,31 @@ func (s *SatelliteTrackingService) computeAndBroadcastPositions() {
 			)
 			continue
 		}
-
-		data, err := json.Marshal(event)
-		if err != nil {
-			slog.Error("failed to marshal position event",
-				"norad_id", sat.noradID,
-				"error", err,
-			)
-			continue
-		}
-
-		s.hub.Broadcast("position", data)
+		positions = append(positions, *pos)
 	}
-}
 
-// computeAndBroadcastTracks генерирует наземные трассы всех отслеживаемых спутников
-// и отправляет результаты через SSE Hub (event: track).
-func (s *SatelliteTrackingService) computeAndBroadcastTracks() {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	if len(s.tracked) == 0 {
+	if len(positions) == 0 {
 		return
 	}
 
-	now := time.Now().UTC()
-
-	for _, sat := range s.tracked {
-		tle, ok := s.store.Get(sat.noradID)
-		if !ok {
-			slog.Debug("TLE not found for track generation",
-				"norad_id", sat.noradID,
-				"name", sat.name,
-			)
-			continue
-		}
-
-		track, err := tracker.GenerateDefaultGroundTrack(tle, now)
-		if err != nil {
-			slog.Debug("failed to generate ground track",
-				"norad_id", sat.noradID,
-				"name", sat.name,
-				"error", err,
-			)
-			continue
-		}
-
-		data, err := json.Marshal(track)
-		if err != nil {
-			slog.Error("failed to marshal track event",
-				"norad_id", sat.noradID,
-				"error", err,
-			)
-			continue
-		}
-
-		s.hub.Broadcast("track", data)
+	update := satelliteStateUpdate{
+		Positions:      positions,
+		Tracks:         s.lastTracks,
+		TracksIncluded: len(s.lastTracks) > 0,
+		TS:             now.UnixMilli(),
 	}
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		slog.Error("failed to marshal satellite_state_update", "error", err)
+		return
+	}
+
+	s.hub.Broadcast("satellite_state_update", data)
 }
 
 // computePosition рассчитывает позицию одного спутника.
-func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now time.Time) (*positionEvent, error) {
+func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now time.Time) (*positionData, error) {
 	// SGP4 → ECI.
 	eci, err := sat.propagator.Propagate(now)
 	if err != nil {
@@ -516,7 +526,7 @@ func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now ti
 	// Зона видимости (72 точки контура).
 	zone := tracker.GenerateVisibilityZoneFromLLA(lla, sat.noradID, visibilityZonePoints)
 
-	return &positionEvent{
+	return &positionData{
 		NoradID:        sat.noradID,
 		Name:           sat.name,
 		Lat:            roundTo(lla.LatDeg(), 4),
@@ -526,7 +536,6 @@ func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now ti
 		El:             roundTo(aer.ElDeg(), 1),
 		Range:          roundTo(aer.Range, 1),
 		VisibilityZone: zone,
-		TS:             now.UnixMilli(),
 	}, nil
 }
 

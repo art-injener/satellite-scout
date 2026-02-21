@@ -170,69 +170,63 @@ func TestComputePosition(t *testing.T) {
 	sat := svc.tracked[issNoradID]
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC) // Близко к эпохе TLE.
 
-	event, err := svc.computePosition(sat, now)
+	pos, err := svc.computePosition(sat, now)
 	if err != nil {
 		t.Fatalf("computePosition failed: %v", err)
 	}
 
-	// Проверяем базовые поля.
-	if event.NoradID != issNoradID {
-		t.Errorf("expected norad_id %d, got %d", issNoradID, event.NoradID)
+	if pos.NoradID != issNoradID {
+		t.Errorf("expected norad_id %d, got %d", issNoradID, pos.NoradID)
 	}
 
-	if event.Name != "ISS (ZARYA)" {
-		t.Errorf("expected name 'ISS (ZARYA)', got '%s'", event.Name)
+	if pos.Name != "ISS (ZARYA)" {
+		t.Errorf("expected name 'ISS (ZARYA)', got '%s'", pos.Name)
 	}
 
 	// Широта ISS должна быть в пределах ±52° (наклонение 51.6°).
-	if event.Lat < -52 || event.Lat > 52 {
-		t.Errorf("ISS latitude out of range: %.4f", event.Lat)
+	if pos.Lat < -52 || pos.Lat > 52 {
+		t.Errorf("ISS latitude out of range: %.4f", pos.Lat)
 	}
 
 	// Долгота: -180..180.
-	if event.Lon < -180 || event.Lon > 180 {
-		t.Errorf("ISS longitude out of range: %.4f", event.Lon)
+	if pos.Lon < -180 || pos.Lon > 180 {
+		t.Errorf("ISS longitude out of range: %.4f", pos.Lon)
 	}
 
 	// Высота ISS: ~400-430 км.
-	if event.Alt < 350 || event.Alt > 500 {
-		t.Errorf("ISS altitude out of range: %.1f km", event.Alt)
+	if pos.Alt < 350 || pos.Alt > 500 {
+		t.Errorf("ISS altitude out of range: %.1f km", pos.Alt)
 	}
 
 	// Азимут: 0-360.
-	if event.Az < 0 || event.Az > 360 {
-		t.Errorf("azimuth out of range: %.1f", event.Az)
+	if pos.Az < 0 || pos.Az > 360 {
+		t.Errorf("azimuth out of range: %.1f", pos.Az)
 	}
 
 	// Элевация: -90..90.
-	if event.El < -90 || event.El > 90 {
-		t.Errorf("elevation out of range: %.1f", event.El)
+	if pos.El < -90 || pos.El > 90 {
+		t.Errorf("elevation out of range: %.1f", pos.El)
 	}
 
 	// Дальность: > 0.
-	if event.Range <= 0 {
-		t.Errorf("range should be positive: %.1f", event.Range)
+	if pos.Range <= 0 {
+		t.Errorf("range should be positive: %.1f", pos.Range)
 	}
 
 	// Зона видимости: не nil, сегменты содержат ~72 точки (+ граничные при антимеридиане).
-	if event.VisibilityZone == nil {
+	if pos.VisibilityZone == nil {
 		t.Fatal("visibility zone should not be nil")
 	}
 	totalPts := 0
-	for _, seg := range event.VisibilityZone.Segments {
+	for _, seg := range pos.VisibilityZone.Segments {
 		totalPts += len(seg)
 	}
 	if totalPts < visibilityZonePoints {
 		t.Errorf("expected >= %d zone points, got %d", visibilityZonePoints, totalPts)
 	}
-
-	// Timestamp.
-	if event.TS <= 0 {
-		t.Errorf("timestamp should be positive: %d", event.TS)
-	}
 }
 
-func TestPositionEventJSON(t *testing.T) {
+func TestPositionDataJSON(t *testing.T) {
 	svc, cancel := setupTrackingService(t)
 	defer cancel()
 
@@ -243,32 +237,141 @@ func TestPositionEventJSON(t *testing.T) {
 	sat := svc.tracked[issNoradID]
 	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
 
-	event, err := svc.computePosition(sat, now)
+	pos, err := svc.computePosition(sat, now)
 	if err != nil {
 		t.Fatalf("computePosition failed: %v", err)
 	}
 
-	data, err := json.Marshal(event)
+	data, err := json.Marshal(pos)
 	if err != nil {
 		t.Fatalf("json.Marshal failed: %v", err)
 	}
 
-	// Проверяем что JSON содержит все необходимые ключи.
 	var m map[string]any
 	if unmarshalErr := json.Unmarshal(data, &m); unmarshalErr != nil {
 		t.Fatalf("json.Unmarshal failed: %v", unmarshalErr)
 	}
 
-	requiredKeys := []string{"norad_id", "name", "lat", "lon", "alt", "az", "el", "range", "ts"}
+	requiredKeys := []string{"norad_id", "name", "lat", "lon", "alt", "az", "el", "range"}
 	for _, key := range requiredKeys {
 		if _, ok := m[key]; !ok {
-			t.Errorf("missing key in JSON: %s", key)
+			t.Errorf("missing key in positionData JSON: %s", key)
 		}
 	}
 
-	// visibility_zone должна присутствовать.
 	if _, ok := m["visibility_zone"]; !ok {
-		t.Error("missing visibility_zone in JSON")
+		t.Error("missing visibility_zone in positionData JSON")
+	}
+
+	// TS теперь не в positionData, а в satelliteStateUpdate.
+	if _, ok := m["ts"]; ok {
+		t.Error("positionData should not contain 'ts' field (moved to satelliteStateUpdate)")
+	}
+}
+
+func TestSatelliteStateUpdateJSON(t *testing.T) {
+	svc, cancel := setupTrackingService(t)
+	defer cancel()
+
+	if err := svc.TrackSatellite(issNoradID); err != nil {
+		t.Fatalf("failed to track ISS: %v", err)
+	}
+
+	sat := svc.tracked[issNoradID]
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	pos, err := svc.computePosition(sat, now)
+	if err != nil {
+		t.Fatalf("computePosition failed: %v", err)
+	}
+
+	update := satelliteStateUpdate{
+		Positions:      []positionData{*pos},
+		TracksIncluded: false,
+		TS:             now.UnixMilli(),
+	}
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var m map[string]any
+	if unmarshalErr := json.Unmarshal(data, &m); unmarshalErr != nil {
+		t.Fatalf("json.Unmarshal failed: %v", unmarshalErr)
+	}
+
+	requiredKeys := []string{"positions", "tracks_included", "ts"}
+	for _, key := range requiredKeys {
+		if _, ok := m[key]; !ok {
+			t.Errorf("missing key in satelliteStateUpdate JSON: %s", key)
+		}
+	}
+
+	// positions должен быть массивом с одним элементом.
+	positions, ok := m["positions"].([]any)
+	if !ok || len(positions) != 1 {
+		t.Fatalf("expected 1 position, got %v", m["positions"])
+	}
+
+	// tracks_included = false → tracks отсутствует (omitempty).
+	if _, ok := m["tracks"]; ok {
+		t.Error("tracks should be omitted when tracks_included=false and tracks is nil")
+	}
+}
+
+func TestSatelliteStateUpdateWithTracks(t *testing.T) {
+	svc, cancel := setupTrackingService(t)
+	defer cancel()
+
+	if err := svc.TrackSatellite(issNoradID); err != nil {
+		t.Fatalf("failed to track ISS: %v", err)
+	}
+
+	sat := svc.tracked[issNoradID]
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	pos, err := svc.computePosition(sat, now)
+	if err != nil {
+		t.Fatalf("computePosition failed: %v", err)
+	}
+
+	tle, ok := svc.store.Get(issNoradID)
+	if !ok {
+		t.Fatal("ISS TLE not found in store")
+	}
+
+	track, err := tracker.GenerateDefaultGroundTrack(tle, now)
+	if err != nil {
+		t.Fatalf("GenerateDefaultGroundTrack failed: %v", err)
+	}
+
+	update := satelliteStateUpdate{
+		Positions:      []positionData{*pos},
+		Tracks:         []*tracker.GroundTrack{track},
+		TracksIncluded: true,
+		TS:             now.UnixMilli(),
+	}
+
+	data, err := json.Marshal(update)
+	if err != nil {
+		t.Fatalf("json.Marshal failed: %v", err)
+	}
+
+	var m map[string]any
+	if unmarshalErr := json.Unmarshal(data, &m); unmarshalErr != nil {
+		t.Fatalf("json.Unmarshal failed: %v", unmarshalErr)
+	}
+
+	// tracks_included = true → tracks присутствует.
+	tracks, ok := m["tracks"].([]any)
+	if !ok || len(tracks) != 1 {
+		t.Fatalf("expected 1 track, got %v", m["tracks"])
+	}
+
+	tracksIncluded, ok := m["tracks_included"].(bool)
+	if !ok || !tracksIncluded {
+		t.Errorf("expected tracks_included=true, got %v", m["tracks_included"])
 	}
 }
 
@@ -336,7 +439,7 @@ func TestRunEmptyTrackedNoBroadcast(t *testing.T) {
 	// Если дошли без паники — тест пройден.
 }
 
-func TestComputeAndBroadcastTracks(t *testing.T) {
+func TestComputeAndBroadcastStatePositionsOnly(t *testing.T) {
 	svc, cancel := setupTrackingService(t)
 	defer cancel()
 
@@ -344,11 +447,11 @@ func TestComputeAndBroadcastTracks(t *testing.T) {
 		t.Fatalf("failed to track ISS: %v", err)
 	}
 
-	// Вызываем computeAndBroadcastTracks напрямую — не должно паниковать.
-	svc.computeAndBroadcastTracks()
+	// includeTracks=false — только позиции, не должно паниковать.
+	svc.computeAndBroadcastState(false)
 }
 
-func TestComputeAndBroadcastTracksJSON(t *testing.T) {
+func TestComputeAndBroadcastStateWithTracks(t *testing.T) {
 	svc, cancel := setupTrackingService(t)
 	defer cancel()
 
@@ -356,56 +459,11 @@ func TestComputeAndBroadcastTracksJSON(t *testing.T) {
 		t.Fatalf("failed to track ISS: %v", err)
 	}
 
-	// Получаем TLE и генерируем трассу напрямую для проверки формата.
-	tle, ok := svc.store.Get(issNoradID)
-	if !ok {
-		t.Fatal("ISS TLE not found in store")
-	}
-
-	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
-	track, err := tracker.GenerateDefaultGroundTrack(tle, now)
-	if err != nil {
-		t.Fatalf("GenerateDefaultGroundTrack failed: %v", err)
-	}
-
-	data, err := json.Marshal(track)
-	if err != nil {
-		t.Fatalf("json.Marshal failed: %v", err)
-	}
-
-	// Проверяем JSON-ключи.
-	var m map[string]any
-	if unmarshalErr := json.Unmarshal(data, &m); unmarshalErr != nil {
-		t.Fatalf("json.Unmarshal failed: %v", unmarshalErr)
-	}
-
-	requiredKeys := []string{"past", "future", "norad_id"}
-	for _, key := range requiredKeys {
-		if _, exists := m[key]; !exists {
-			t.Errorf("missing key in track JSON: %s", key)
-		}
-	}
-
-	// norad_id должен совпадать.
-	if id, isFloat := m["norad_id"].(float64); !isFloat || int(id) != issNoradID {
-		t.Errorf("expected norad_id %d, got %v", issNoradID, m["norad_id"])
-	}
-
-	// Трасса ISS должна содержать точки.
-	if track.TotalPoints() == 0 {
-		t.Error("expected non-empty ground track for ISS")
-	}
-
-	// Должны быть и past, и future сегменты.
-	if len(track.Past) == 0 {
-		t.Error("expected non-empty past segments")
-	}
-	if len(track.Future) == 0 {
-		t.Error("expected non-empty future segments")
-	}
+	// includeTracks=true — позиции + трассы, не должно паниковать.
+	svc.computeAndBroadcastState(true)
 }
 
-func TestComputeAndBroadcastTracksEmpty(t *testing.T) {
+func TestComputeAndBroadcastStateEmpty(t *testing.T) {
 	ctx := t.Context()
 
 	hub := handlers.NewSSEHub()
@@ -417,7 +475,8 @@ func TestComputeAndBroadcastTracksEmpty(t *testing.T) {
 	svc := NewSatelliteTrackingService(hub, store, observer)
 
 	// Без отслеживаемых спутников — не должно паниковать.
-	svc.computeAndBroadcastTracks()
+	svc.computeAndBroadcastState(false)
+	svc.computeAndBroadcastState(true)
 }
 
 func TestRunBroadcastsBothPositionsAndTracks(t *testing.T) {

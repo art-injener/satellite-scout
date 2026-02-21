@@ -18,21 +18,8 @@
                 </div>
             </div>
         </div>
-        <!-- InfoPanel: вкладки спутников + столбики с параметрами -->
+        <!-- InfoPanel: столбики с параметрами спутника -->
         <div class="info-panel" id="info-panel">
-            <!-- Строка вкладок -->
-            <div class="info-panel__tabs" id="info-panel-tabs">
-                <button class="info-panel__tab active" data-norad="25544">25544</button>
-                <button class="info-panel__tab" data-norad="40069">40069</button>
-                <button class="info-panel__tab" data-norad="43017">43017</button>
-                <div class="info-panel__tabs-spacer"></div>
-                <button class="info-panel__track-btn" id="btn-track" title="Взять на сопровождение">
-                    <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
-                        <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
-                    </svg>
-                    Сопровождение
-                </button>
-            </div>
             <!-- 5 столбиков-карточек -->
             <div class="info-panel__columns">
                 <!-- Столбик 1: Спутник -->
@@ -42,6 +29,12 @@
                         <div class="info-row"><span class="info-label">NORAD</span><span class="info-value" id="ip-norad">---</span></div>
                         <div class="info-row"><span class="info-label">Имя</span><span class="info-value info-value--accent" id="ip-name">---</span></div>
                         <div class="info-row"><span class="info-label">Группа</span><span class="info-value" id="ip-group">---</span></div>
+                        <button class="info-panel__track-btn" id="btn-track" title="Взять на сопровождение">
+                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
+                                <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
+                            </svg>
+                            Сопровождение
+                        </button>
                     </div>
                 </div>
                 <!-- Столбик 2: Геоданные -->
@@ -93,33 +86,27 @@
     <section class="charts-column">
         <div class="azimuth-container">
             <canvas id="azimuth-view" width="300" height="300"></canvas>
-            <div class="indicator-info">
-                <span class="indicator-group">
-                    <span class="indicator-label">Az ант.:</span>
-                    <span class="indicator-value" id="az-rotator">---</span>
-                </span>
-                <span class="indicator-group">
-                    <span class="indicator-label">Az КА:</span>
-                    <span class="indicator-value indicator-value--sat" id="az-satellite">---</span>
-                </span>
-            </div>
         </div>
         <div class="sky-view-container">
             <canvas id="sky-view" width="300" height="350"></canvas>
         </div>
         <div class="elevation-container">
-            <canvas id="elevation-view" width="300" height="250"></canvas>
-            <div class="indicator-info">
-                <span class="indicator-group">
-                    <span class="indicator-label">El ант.:</span>
-                    <span class="indicator-value" id="el-rotator">---</span>
-                </span>
-                <span class="indicator-group">
-                    <span class="indicator-label">El КА:</span>
-                    <span class="indicator-value indicator-value--sat" id="el-satellite">---</span>
-                </span>
-            </div>
+            <canvas id="elevation-view" width="300" height="280"></canvas>
         </div>
     </section>
+</div>
+
+<!-- Модальное окно подтверждения завершения сеанса -->
+<div id="track-end-session-modal" class="modal modal--hidden" role="dialog" aria-labelledby="track-end-session-title" aria-modal="true">
+    <div class="modal__backdrop" id="track-end-session-backdrop"></div>
+    <div class="modal__box">
+        <p id="track-end-session-title" class="modal__text">
+            В данный момент идёт сеанс приёма данных от КА.<br> Вы действительно хотите завершить сеанс?
+        </p>
+        <div class="modal__actions">
+            <button type="button" class="modal__btn modal__btn--primary" id="track-end-session-yes">Да</button>
+            <button type="button" class="modal__btn modal__btn--secondary" id="track-end-session-no">Нет</button>
+        </div>
+    </div>
 </div>
 {{end}}

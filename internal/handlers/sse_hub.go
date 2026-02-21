@@ -85,8 +85,8 @@ func (h *SSEHub) Run(ctx context.Context) {
 			h.clientCount.Add(1)
 			slog.DebugContext(ctx, "SSE client registered", "total_clients", h.clientCount.Load())
 
-			// Отправка кешированных событий новому клиенту (track, position).
-			for _, eventType := range []string{"track", "position"} {
+			// Отправка кешированных событий новому клиенту.
+			for _, eventType := range []string{"satellite_state_update", "satellite_change"} {
 				if cached, ok := lastEvents[eventType]; ok {
 					select {
 					case client.events <- cached:

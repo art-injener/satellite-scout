@@ -187,7 +187,7 @@ body {
 /* Main Content */
 .main {
     flex: 1;
-    padding: var(--spacing-md);
+    padding: 4px;
     overflow-y: auto;
 }
 
@@ -276,9 +276,9 @@ body {
 /* ===== Tracking Layout - Grid: карта слева, графики справа ===== */
 .tracking-layout {
     display: grid;
-    grid-template-columns: 1fr 320px;
-    gap: var(--spacing-md);
-    height: calc(100vh - 80px); /* Учитываем footer */
+    grid-template-columns: 1fr minmax(220px, 22vw);
+    gap: 4px;
+    height: calc(100vh - 52px);
     min-height: 0;
 }
 
@@ -286,7 +286,7 @@ body {
 .map-column {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-sm);
+    gap: 4px;
     min-height: 0;
 }
 
@@ -296,7 +296,7 @@ body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: var(--spacing-xs);
+    padding: 2px;
     overflow: hidden;
     min-height: 200px;
 }
@@ -341,8 +341,9 @@ body {
 .charts-column {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-sm);
-    overflow-y: auto;
+    gap: 4px;
+    min-height: 0;
+    overflow: hidden;
 }
 
 .azimuth-container,
@@ -351,10 +352,18 @@ body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: var(--spacing-sm);
-    text-align: center;
-    flex-shrink: 0;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: 0;
+    overflow: hidden;
 }
+
+/* Пропорциональное распределение высоты (300:350:250) */
+.azimuth-container  { flex: 300 1 0; }
+.sky-view-container { flex: 350 1 0; }
+.elevation-container { flex: 280 1 0; }
 
 .charts-column h3 {
     font-size: 0.7rem;
@@ -367,28 +376,16 @@ body {
 
 .charts-column canvas {
     display: block;
-    margin: 0 auto;
+    flex: 1 1 0;
+    min-height: 0;
+    max-width: 100%;
     background: var(--bg-primary);
     border-radius: var(--radius-sm);
 }
 
-/* Азимут: 300x300 */
-.azimuth-container canvas {
-    width: 300px;
-    height: 300px;
-}
-
-/* Sky View: 300x350 */
-.sky-view-container canvas {
-    width: 300px;
-    height: 350px;
-}
-
-/* Угол места: 300x230 */
-.elevation-container canvas {
-    width: 300px;
-    height: 250px;
-}
+.azimuth-container canvas  { aspect-ratio: 1 / 1; }
+.sky-view-container canvas { aspect-ratio: 6 / 7; }
+.elevation-container canvas { aspect-ratio: 15 / 14; }
 
 /* Receiver Layout */
 .receiver-layout {
@@ -670,8 +667,7 @@ section h2 {
 }
 
 /* Responsive */
-@media (max-width: 1200px) {
-    /* На узких экранах графики под картой */
+@media (max-width: 800px) {
     .tracking-layout {
         grid-template-columns: 1fr;
         grid-template-rows: 1fr auto;

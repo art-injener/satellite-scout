@@ -245,48 +245,52 @@ test('connected event sets status to connected', () => {
     client.disconnect();
 });
 
-// ── Event routing: position ───────────────────────────────
+// ── Event routing: satellite_state_update (positions) ─────
 
-console.log('\nSSEClient — event routing: position');
+console.log('\nSSEClient — event routing: satellite_state_update (positions)');
 
-test('position event routes to stateManager.updatePosition', () => {
+test('satellite_state_update routes positions to stateManager.updatePosition', () => {
     const sm = new SatelliteStateManager();
     const client = new SSEClient(sm);
     client.connect();
     MockEventSource._lastInstance._simulateOpen();
 
-    const posData = {
-        norad_id: 25544,
-        name: 'ISS',
-        lat: 47.3, lon: 39.8, alt: 418,
-        az: 215, el: 42, range: 623,
+    MockEventSource._lastInstance._emit('satellite_state_update', {
+        positions: [{
+            norad_id: 25544,
+            name: 'ISS',
+            lat: 47.3, lon: 39.8, alt: 418,
+            az: 215, el: 42, range: 623,
+        }],
+        tracks_included: false,
         ts: 1738900000000,
-    };
-
-    MockEventSource._lastInstance._emit('position', posData);
+    });
 
     const state = sm.getState(25544);
     assert.ok(state, 'state should exist');
     assert.strictEqual(state.position.lat, 47.3);
     assert.strictEqual(state.position.lon, 39.8);
+    assert.strictEqual(state.position.ts, 1738900000000, 'ts from update should be set');
     assert.strictEqual(state.name, 'ISS');
     client.disconnect();
 });
 
-test('position event with visibility_zone', () => {
+test('satellite_state_update with visibility_zone', () => {
     const sm = new SatelliteStateManager();
     const client = new SSEClient(sm);
     client.connect();
     MockEventSource._lastInstance._simulateOpen();
 
-    const posData = {
-        norad_id: 25544, name: 'ISS',
-        lat: 47.3, lon: 39.8, alt: 418,
-        az: 215, el: 42, ts: 1738900000000,
-        visibility_zone: { points: [{ lon: 20, lat: 30 }], radius_deg: 20.1 },
-    };
-
-    MockEventSource._lastInstance._emit('position', posData);
+    MockEventSource._lastInstance._emit('satellite_state_update', {
+        positions: [{
+            norad_id: 25544, name: 'ISS',
+            lat: 47.3, lon: 39.8, alt: 418,
+            az: 215, el: 42,
+            visibility_zone: { points: [{ lon: 20, lat: 30 }], radius_deg: 20.1 },
+        }],
+        tracks_included: false,
+        ts: 1738900000000,
+    });
 
     const state = sm.getState(25544);
     assert.ok(state.visibilityZone);
@@ -294,29 +298,97 @@ test('position event with visibility_zone', () => {
     client.disconnect();
 });
 
-// ── Event routing: track ──────────────────────────────────
-
-console.log('\nSSEClient — event routing: track');
-
-test('track event routes to stateManager.updateTrack', () => {
+test('satellite_state_update with multiple positions', () => {
     const sm = new SatelliteStateManager();
     const client = new SSEClient(sm);
     client.connect();
     MockEventSource._lastInstance._simulateOpen();
 
-    const trackData = {
-        norad_id: 25544,
-        past: [[{ lon: 38, lat: 46, ts: 100 }]],
-        future: [[{ lon: 40, lat: 48, ts: 200 }]],
-    };
+    MockEventSource._lastInstance._emit('satellite_state_update', {
+        positions: [
+            { norad_id: 25544, name: 'ISS', lat: 47, lon: 39, alt: 418, az: 215, el: 42 },
+            { norad_id: 40069, name: 'METEOR-M2', lat: 55, lon: 37, alt: 820, az: 180, el: 20 },
+        ],
+        tracks_included: false,
+        ts: 100,
+    });
 
-    MockEventSource._lastInstance._emit('track', trackData);
+    assert.strictEqual(sm.satelliteCount, 2);
+    assert.strictEqual(sm.getState(25544).position.lat, 47);
+    assert.strictEqual(sm.getState(40069).position.lat, 55);
+    client.disconnect();
+});
+
+test('satellite_state_update with invalid data is handled gracefully', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    const origWarn = console.warn;
+    let warned = false;
+    console.warn = (msg) => { if (msg.includes('invalid satellite_state_update')) warned = true; };
+
+    MockEventSource._lastInstance._emit('satellite_state_update', { no_positions: true });
+
+    console.warn = origWarn;
+    assert.strictEqual(warned, true, 'should warn about missing positions');
+    assert.strictEqual(sm.satelliteCount, 0);
+    client.disconnect();
+});
+
+// ── Event routing: satellite_state_update (tracks) ────────
+
+console.log('\nSSEClient — event routing: satellite_state_update (tracks)');
+
+test('satellite_state_update with tracks routes to stateManager.updateTrack', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    MockEventSource._lastInstance._emit('satellite_state_update', {
+        positions: [{
+            norad_id: 25544, name: 'ISS',
+            lat: 47.3, lon: 39.8, alt: 418,
+            az: 215, el: 42,
+        }],
+        tracks: [{
+            norad_id: 25544,
+            past: [[{ lon: 38, lat: 46, ts: 100 }]],
+            future: [[{ lon: 40, lat: 48, ts: 200 }]],
+        }],
+        tracks_included: true,
+        ts: 1738900000000,
+    });
 
     const state = sm.getState(25544);
     assert.ok(state, 'state should exist');
-    assert.ok(state.track);
+    assert.ok(state.track, 'track should be set');
     assert.strictEqual(state.track.past.length, 1);
     assert.strictEqual(state.track.future.length, 1);
+    assert.ok(state.position, 'position should also be set');
+    client.disconnect();
+});
+
+test('satellite_state_update without tracks_included does not set tracks', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    MockEventSource._lastInstance._emit('satellite_state_update', {
+        positions: [{
+            norad_id: 25544, name: 'ISS',
+            lat: 47.3, lon: 39.8, alt: 418, az: 215, el: 42,
+        }],
+        tracks_included: false,
+        ts: 100,
+    });
+
+    const state = sm.getState(25544);
+    assert.ok(state.position, 'position should be set');
+    assert.strictEqual(state.track, null, 'track should remain null');
     client.disconnect();
 });
 
@@ -364,7 +436,7 @@ test('invalid JSON in event is handled gracefully', () => {
     console.error = (msg) => { if (msg.includes('failed to parse')) errorLogged = true; };
 
     // Отправляем сырую невалидную строку.
-    const listeners = MockEventSource._lastInstance._listeners['position'] || [];
+    const listeners = MockEventSource._lastInstance._listeners['satellite_state_update'] || [];
     for (const cb of listeners) {
         cb({ data: '{invalid json' });
     }
@@ -515,50 +587,52 @@ test('scheduleReconnect is idempotent (no double timers)', () => {
 
 console.log('\nSSEClient — sequence of events');
 
-test('full data flow: position then track', () => {
+test('full data flow: positions + tracks in one event', () => {
     const sm = new SatelliteStateManager();
     const client = new SSEClient(sm);
     client.connect();
     MockEventSource._lastInstance._simulateOpen();
 
-    // Позиция.
-    MockEventSource._lastInstance._emit('position', {
-        norad_id: 25544, name: 'ISS',
-        lat: 47.3, lon: 39.8, alt: 418,
-        az: 215, el: 42, ts: 100,
-    });
-
-    // Трек.
-    MockEventSource._lastInstance._emit('track', {
-        norad_id: 25544,
-        past: [[{ lon: 38, lat: 46, ts: 90 }]],
-        future: [[{ lon: 40, lat: 48, ts: 110 }]],
+    // Групповое событие с позициями и треками.
+    MockEventSource._lastInstance._emit('satellite_state_update', {
+        positions: [{
+            norad_id: 25544, name: 'ISS',
+            lat: 47.3, lon: 39.8, alt: 418,
+            az: 215, el: 42,
+        }],
+        tracks: [{
+            norad_id: 25544,
+            past: [[{ lon: 38, lat: 46, ts: 90 }]],
+            future: [[{ lon: 40, lat: 48, ts: 110 }]],
+        }],
+        tracks_included: true,
+        ts: 100,
     });
 
     const state = sm.getState(25544);
     assert.ok(state.position);
     assert.ok(state.track);
     assert.strictEqual(state.position.lat, 47.3);
+    assert.strictEqual(state.position.ts, 100, 'ts from group event');
     assert.strictEqual(state.track.past[0][0].lon, 38);
     assert.strictEqual(sm.getActiveSatelliteId(), 25544);
 
     client.disconnect();
 });
 
-test('events for multiple satellites', () => {
+test('multiple satellites in one satellite_state_update', () => {
     const sm = new SatelliteStateManager();
     const client = new SSEClient(sm);
     client.connect();
     MockEventSource._lastInstance._simulateOpen();
 
-    MockEventSource._lastInstance._emit('position', {
-        norad_id: 25544, name: 'ISS',
-        lat: 47, lon: 39, alt: 418, az: 215, el: 42, ts: 100,
-    });
-
-    MockEventSource._lastInstance._emit('position', {
-        norad_id: 40069, name: 'METEOR-M2',
-        lat: 55, lon: 37, alt: 820, az: 180, el: 20, ts: 100,
+    MockEventSource._lastInstance._emit('satellite_state_update', {
+        positions: [
+            { norad_id: 25544, name: 'ISS', lat: 47, lon: 39, alt: 418, az: 215, el: 42 },
+            { norad_id: 40069, name: 'METEOR-M2', lat: 55, lon: 37, alt: 820, az: 180, el: 20 },
+        ],
+        tracks_included: false,
+        ts: 100,
     });
 
     assert.strictEqual(sm.satelliteCount, 2);

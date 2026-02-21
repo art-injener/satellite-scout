@@ -234,12 +234,24 @@ class SatelliteStateManager {
         const noradId = data.norad_id;
         const state = this._getOrCreateState(noradId);
 
+        const newPast = data.past || [];
+        const newFuture = data.future || [];
+
+        // Пропускаем нотификацию, если трек не изменился (тот же размер сегментов).
+        // Треки пересчитываются на бэкенде каждые 30 секунд, между обновлениями
+        // приходят кешированные данные — дублировать перерисовку не нужно.
+        const oldTrack = state.track;
+        if (oldTrack &&
+            oldTrack.past.length === newPast.length &&
+            oldTrack.future.length === newFuture.length) {
+            return;
+        }
+
         state.track = {
-            past: data.past || [],
-            future: data.future || [],
+            past: newPast,
+            future: newFuture,
         };
 
-        // Notify только для активного спутника.
         if (noradId === this._activeSatelliteId) {
             this._notify(StateEventType.TRACK, state);
         }
