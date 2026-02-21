@@ -1,5 +1,6 @@
 // Azimuth Indicator - Индикатор азимута с антенной
 // Использует AntennaDrawing для отрисовки антенны
+// Стрелка спутника: тонкая пунктирная линия с точками (задний план)
 
 (function() {
     'use strict';
@@ -12,8 +13,8 @@
         this.canvas = canvas;
 
         // Настройка HiDPI canvas
-        const logicalWidth = parseInt(canvas.getAttribute('width'), 10);
-        const logicalHeight = parseInt(canvas.getAttribute('height'), 10);
+        var logicalWidth = parseInt(canvas.getAttribute('width'), 10);
+        var logicalHeight = parseInt(canvas.getAttribute('height'), 10);
 
         if (window.CanvasUtils) {
             this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, logicalWidth, logicalHeight);
@@ -21,11 +22,15 @@
             this.ctx = canvas.getContext('2d');
         }
 
-        // Используем логические размеры для расчётов
         this.centerX = logicalWidth / 2;
         this.centerY = logicalHeight / 2;
-        this.radius = Math.min(logicalWidth, logicalHeight) / 2 - 25; // Отступ для подписей
+        this.radius = Math.min(logicalWidth, logicalHeight) / 2 - 25;
         this.currentAzimuth = 0;
+
+        // Позиция спутника (null = нет данных)
+        this.satelliteAzimuth = null;
+        // Видимость спутника
+        this.isVisible = true;
 
         // Цвета
         this.colors = {
@@ -37,16 +42,15 @@
             accentRed: '#ff6b6b',
             textPrimary: '#e6e8eb',
             textSecondary: '#8b919a',
-            textMuted: '#5c6370'
+            textMuted: '#5c6370',
+            satelliteLine: 'rgba(255, 255, 255, 0.5)',
+            satelliteMarker: '#ffffff',
+            outOfView: 'rgba(255, 107, 107, 0.7)'
         };
 
-        // Масштаб антенны (увеличен для заполнения пространства)
         this.antennaScale = this.radius / 100 * 0.95;
     }
 
-    /**
-     * Конвертация градусов в радианы
-     */
     AzimuthIndicator.prototype.degToRad = function(deg) {
         return deg * Math.PI / 180;
     };
@@ -55,37 +59,33 @@
      * Отрисовка лимба (полный круг 360°)
      */
     AzimuthIndicator.prototype.drawLimb = function() {
-        const ctx = this.ctx;
-        const cx = this.centerX;
-        const cy = this.centerY;
-        const r = this.radius;
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+        var r = this.radius;
 
-        // Внешний круг
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.accentBlue;
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Внутренний круг
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 2; // Толще
+        ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Деления и подписи
         ctx.font = '11px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        for (let deg = 0; deg < 360; deg += 15) {
-            const rad = this.degToRad(deg - 90); // 0° = север (вверх)
-            const isMain = deg % 30 === 0;
-            const innerR = isMain ? r - 15 : r - 10;
-            const outerR = r - 2;
+        for (var deg = 0; deg < 360; deg += 15) {
+            var rad = this.degToRad(deg - 90);
+            var isMain = deg % 30 === 0;
+            var innerR = isMain ? r - 15 : r - 10;
+            var outerR = r - 2;
 
-            // Линии делений
             ctx.beginPath();
             ctx.moveTo(
                 cx + Math.cos(rad) * innerR,
@@ -99,16 +99,14 @@
             ctx.lineWidth = isMain ? 2 : 1;
             ctx.stroke();
 
-            // Подписи
             if (isMain) {
-                const labelR = r + 14;
-                let label = deg.toString();
+                var labelR = r + 14;
+                var label = deg.toString();
 
-                // Стороны света
-                if (deg === 0) {label = 'N';}
-                else if (deg === 90) {label = 'E';}
-                else if (deg === 180) {label = 'S';}
-                else if (deg === 270) {label = 'W';}
+                if (deg === 0) { label = 'N'; }
+                else if (deg === 90) { label = 'E'; }
+                else if (deg === 180) { label = 'S'; }
+                else if (deg === 270) { label = 'W'; }
 
                 ctx.fillStyle = (deg % 90 === 0) ? this.colors.textPrimary : this.colors.textSecondary;
                 ctx.fillText(
@@ -121,92 +119,136 @@
     };
 
     /**
+     * Стрелка спутника: тонкая пунктирная линия с точками из центра + маркер на лимбе
+     * Рисуется на заднем плане (до антенны)
+     */
+    AzimuthIndicator.prototype.drawSatellitePointer = function() {
+        if (this.satelliteAzimuth === null || !this.isVisible) { return; }
+
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+        var r = this.radius;
+        var rad = this.degToRad(this.satelliteAzimuth - 90);
+        var endX = cx + Math.cos(rad) * (r - 20);
+        var endY = cy + Math.sin(rad) * (r - 20);
+
+        // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
+        var lineWidth = 2;          // Толщина пунктирной линии
+        var dashPattern = [6, 4, 2, 4]; // Паттерн: [dash, gap, dot, gap]
+        var markerRadius = 6;         // Радиус маркера на лимбе
+        var markerLineWidth = 2;      // Толщина контура маркера
+        // ================================
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(endX, endY);
+        ctx.strokeStyle = this.colors.satelliteLine;
+        ctx.lineWidth = lineWidth;
+        ctx.setLineDash(dashPattern);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+
+        // Маркер-кольцо на лимбе (без заливки)
+        var markerR = r - 9;
+        var mx = cx + Math.cos(rad) * markerR;
+        var my = cy + Math.sin(rad) * markerR;
+
+        ctx.beginPath();
+        ctx.arc(mx, my, markerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = this.colors.satelliteMarker;
+        ctx.lineWidth = markerLineWidth;
+        ctx.stroke();
+    };
+
+    /**
+     * Сообщение «ВНЕ ЗОНЫ НАБЛЮДЕНИЯ» по центру графика
+     */
+    AzimuthIndicator.prototype._drawOutOfViewMessage = function() {
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+
+        ctx.save();
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = this.colors.outOfView;
+        ctx.fillText('ВНЕ ЗОНЫ', cx, cy - 8);
+        ctx.fillText('НАБЛЮДЕНИЯ', cx, cy + 8);
+        ctx.restore();
+    };
+
+    /**
      * Отрисовка антенны с использованием общей функции
      */
     AzimuthIndicator.prototype.drawAntenna = function(azimuth) {
-        // При angle=0 антенна смотрит вверх (отрицательный Y в canvas).
-        // ctx.rotate() вращает по часовой стрелке — совпадает с азимутом (0°=N, 90°=E).
-        // Поэтому передаём azimuth напрямую без преобразований.
         window.AntennaDrawing.draw(
             this.ctx,
             this.centerX,
             this.centerY,
             azimuth,
             this.antennaScale,
-            this.radius - 9, // arrowEndRadius
-            'azimuth' // viewType
+            this.radius - 9,
+            'azimuth'
         );
-    };
-
-    /**
-     * Числовое значение азимута
-     */
-    AzimuthIndicator.prototype.drawAzimuthValue = function(azimuth) {
-        const ctx = this.ctx;
-
-        ctx.font = 'bold 16px monospace';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = this.colors.accent;
-        ctx.fillText(azimuth.toFixed(1) + '°', 8, 8);
     };
 
     /**
      * Главная функция отрисовки
      */
     AzimuthIndicator.prototype.draw = function() {
-        const ctx = this.ctx;
-
-        // Получаем логические размеры для очистки
-        const size = window.CanvasUtils ?
+        var ctx = this.ctx;
+        var size = window.CanvasUtils ?
             window.CanvasUtils.getLogicalSize(this.canvas) :
             { width: this.canvas.width, height: this.canvas.height };
 
-        // Очистка
         ctx.fillStyle = this.colors.bgPrimary;
         ctx.fillRect(0, 0, size.width, size.height);
 
-        // Статический лимб
         this.drawLimb();
 
-        // Основание платформы на заднем плане
-        this.drawPlatformBase();
+        // Стрелка спутника на заднем плане (под антенной)
+        this.drawSatellitePointer();
 
-        // Динамическая антенна
+        this.drawPlatformBase();
         this.drawAntenna(this.currentAzimuth);
-        this.drawAzimuthValue(this.currentAzimuth);
+
+        if (!this.isVisible) {
+            this._drawOutOfViewMessage();
+        }
     };
 
     /**
      * Отрисовка основания платформы (шестигранник)
-     * === ПАРАМЕТРЫ ДЛЯ НАСТРОЙКИ ===
      */
     AzimuthIndicator.prototype.platformBaseConfig = {
-        radius: 44, // Радиус шестигранника
-        lineWidth: 1, // Толщина линии (1 = тонкая, 2 = обычная)
-        useDash: false, // Использовать пунктир (true/false)
-        dashPattern: [5, 5] // Паттерн пунктира [линия, пробел]
+        radius: 40,
+        lineWidth: 1,
+        useDash: false,
+        dashPattern: [5, 5]
     };
 
     AzimuthIndicator.prototype.drawPlatformBase = function() {
-        const ctx = this.ctx;
-        const cx = this.centerX;
-        const cy = this.centerY;
-        const cfg = this.platformBaseConfig;
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+        var cfg = this.platformBaseConfig;
 
         ctx.strokeStyle = this.colors.accent;
         ctx.lineWidth = cfg.lineWidth;
 
-        // Пунктир
         if (cfg.useDash) {
             ctx.setLineDash(cfg.dashPattern);
         }
 
         ctx.beginPath();
-        for (let i = 0; i < 6; i++) {
-            const angle = (i * 60 + 30) * Math.PI / 180;
-            const x = cx + Math.cos(angle) * cfg.radius;
-            const y = cy + Math.sin(angle) * cfg.radius;
+        for (var i = 0; i < 6; i++) {
+            var angle = (i * 60 + 30) * Math.PI / 180;
+            var x = cx + Math.cos(angle) * cfg.radius;
+            var y = cy + Math.sin(angle) * cfg.radius;
             if (i === 0) {
                 ctx.moveTo(x, y);
             } else {
@@ -216,12 +258,11 @@
         ctx.closePath();
         ctx.stroke();
 
-        // Сброс пунктира
         ctx.setLineDash([]);
     };
 
     /**
-     * Установка азимута и перерисовка
+     * Установка азимута антенны и перерисовка
      */
     AzimuthIndicator.prototype.setAzimuth = function(deg) {
         this.currentAzimuth = ((deg % 360) + 360) % 360;
@@ -229,14 +270,27 @@
     };
 
     /**
-     * Получение текущего азимута
+     * Установка позиции спутника
+     * @param {number|null} az - азимут спутника (null = нет данных)
      */
+    AzimuthIndicator.prototype.setSatellitePosition = function(az) {
+        this.satelliteAzimuth = (az !== null && az !== undefined)
+            ? ((az % 360) + 360) % 360
+            : null;
+    };
+
+    /**
+     * Установка видимости спутника
+     * @param {boolean} visible
+     */
+    AzimuthIndicator.prototype.setVisible = function(visible) {
+        this.isVisible = visible;
+    };
+
     AzimuthIndicator.prototype.getAzimuth = function() {
         return this.currentAzimuth;
     };
 
-
-    // Экспорт
     window.AzimuthIndicator = AzimuthIndicator;
 
 })();

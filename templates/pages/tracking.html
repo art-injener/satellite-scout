@@ -92,15 +92,33 @@
     <!-- Правая колонка: графики в вертикальный столбик -->
     <section class="charts-column">
         <div class="azimuth-container">
-            <h3>Азимут</h3>
             <canvas id="azimuth-view" width="300" height="300"></canvas>
+            <div class="indicator-info">
+                <span class="indicator-group">
+                    <span class="indicator-label">Az ант.:</span>
+                    <span class="indicator-value" id="az-rotator">---</span>
+                </span>
+                <span class="indicator-group">
+                    <span class="indicator-label">Az КА:</span>
+                    <span class="indicator-value indicator-value--sat" id="az-satellite">---</span>
+                </span>
+            </div>
         </div>
         <div class="sky-view-container">
             <canvas id="sky-view" width="300" height="350"></canvas>
         </div>
         <div class="elevation-container">
-            <h3>Угол места</h3>
             <canvas id="elevation-view" width="300" height="250"></canvas>
+            <div class="indicator-info">
+                <span class="indicator-group">
+                    <span class="indicator-label">El ант.:</span>
+                    <span class="indicator-value" id="el-rotator">---</span>
+                </span>
+                <span class="indicator-group">
+                    <span class="indicator-label">El КА:</span>
+                    <span class="indicator-value indicator-value--sat" id="el-satellite">---</span>
+                </span>
+            </div>
         </div>
     </section>
 </div>

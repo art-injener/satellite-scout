@@ -83,7 +83,7 @@
 
             // Информационный блок
             infoText: '#00d4aa',
-            infoLabel: '#888888',
+            infoLabel: '#ffffff',  // Белый для надписей (было #888888)
             timeText: '#00a8ff'
         };
 
@@ -833,7 +833,7 @@
         const row2Y = panelY + 34;
 
         // === Левая колонка: Азимут и Угол места ===
-        ctx.font = 'bold 10px monospace';
+        ctx.font = 'bold 12px monospace'; // Увеличен с 10px
         ctx.textBaseline = 'middle';
 
         // Азимут
@@ -853,7 +853,7 @@
 
         // === Средняя колонка: AOS и LOS времена ===
         const passInfo = this.passInfo;
-        ctx.font = '9px monospace';
+        ctx.font = '11px monospace'; // Увеличен с 9px
 
         // AOS время
         ctx.textAlign = 'left';

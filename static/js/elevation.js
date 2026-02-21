@@ -3,6 +3,7 @@
 // Шкала: 0° по краям (горизонт W/E), 90° в центре (зенит)
 // - Левая зона (W): западная полусфера (азимут > 180° или az == 0°)
 // - Правая зона (E): восточная полусфера (0° < азимут ≤ 180°)
+// Стрелка спутника: тонкая пунктирная линия с точками (задний план)
 
 (function() {
     'use strict';
@@ -14,9 +15,8 @@
     function ElevationIndicator(canvas) {
         this.canvas = canvas;
 
-        // Настройка HiDPI canvas
-        const logicalWidth = parseInt(canvas.getAttribute('width'), 10);
-        const logicalHeight = parseInt(canvas.getAttribute('height'), 10);
+        var logicalWidth = parseInt(canvas.getAttribute('width'), 10);
+        var logicalHeight = parseInt(canvas.getAttribute('height'), 10);
 
         if (window.CanvasUtils) {
             this.ctx = window.CanvasUtils.setupHiDPICanvas(canvas, logicalWidth, logicalHeight);
@@ -24,22 +24,22 @@
             this.ctx = canvas.getContext('2d');
         }
 
-        // Используем логические размеры для расчётов
         this.centerX = logicalWidth / 2;
+        this.radius = logicalWidth / 2 - 25;
 
-        // Радиус зависит только от ширины, чтобы масштаб не менялся при изменении высоты
-        this.radius = logicalWidth / 2 - 25; // 125px для canvas 300px
-
-        // Центр Y рассчитывается так, чтобы полукруг полностью помещался в canvas
-        // Нужно место для: радиус + метки (≈15px сверху) + смещение вниз (5px)
-        const topPadding = 15;
+        var topPadding = 15;
         this.centerY = this.radius + topPadding + 5;
 
-        // Текущие значения
-        this.currentElevation = 45; // 0-90°
-        this.currentAzimuth = 270;  // 0-360° (по умолчанию западная полусфера)
+        // Позиция антенны
+        this.currentElevation = 45;
+        this.currentAzimuth = 270;
 
-        // Цвета
+        // Позиция спутника (null = нет данных)
+        this.satelliteElevation = null;
+        this.satelliteAzimuth = null;
+        // Видимость спутника
+        this.isVisible = true;
+
         this.colors = {
             bgPrimary: '#0a0e14',
             bgSecondary: '#12171f',
@@ -49,55 +49,51 @@
             accentRed: '#ff6b6b',
             textPrimary: '#e6e8eb',
             textSecondary: '#8b919a',
-            textMuted: '#5c6370'
+            textMuted: '#5c6370',
+            satelliteLine: 'rgba(255, 255, 255, 0.5)',
+            satelliteMarker: '#ffffff',
+            outOfView: 'rgba(255, 107, 107, 0.7)'
         };
 
-        // Масштаб антенны (такой же как для азимута)
         this.antennaScale = this.radius / 100 * 0.95;
     }
 
-    /**
-     * Конвертация градусов в радианы
-     */
     ElevationIndicator.prototype.degToRad = function(deg) {
         return deg * Math.PI / 180;
     };
 
     /**
      * Определение полусферы по азимуту
-     * @returns {boolean} true = западная полусфера (левая зона), false = восточная (правая)
+     * @param {number} az - азимут (если не передан, используется currentAzimuth)
+     * @returns {boolean} true = западная полусфера (левая зона)
      */
-    ElevationIndicator.prototype.isWesternHemisphere = function() {
-        // Западная полусфера: az > 180° или az == 0° (север относим к западной)
-        return this.currentAzimuth > 180 || this.currentAzimuth === 0;
+    ElevationIndicator.prototype.isWesternHemisphere = function(az) {
+        var a = (az !== undefined) ? az : this.currentAzimuth;
+        return a > 180 || a === 0;
     };
 
     /**
      * Отрисовка полулимба с двумя зонами
-     * Горизонт = 0° (края), Зенит = 90° (центр)
-     * Шкала: 0° (W) → 30° → 60° → 90° (зенит) ← 60° ← 30° ← 0° (E)
      */
     ElevationIndicator.prototype.drawLimb = function() {
-        const ctx = this.ctx;
-        const cx = this.centerX;
-        const cy = this.centerY;
-        const r = this.radius;
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+        var r = this.radius;
 
-        // Внешняя дуга (полукруг сверху)
         ctx.beginPath();
         ctx.arc(cx, cy, r, Math.PI, 0, false);
         ctx.strokeStyle = this.colors.accentBlue;
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Внутренняя дуга
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, Math.PI, 0, false);
         ctx.strokeStyle = this.colors.border;
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Вертикальная разделительная линия (зенит = 90°)
+        // Зенит = 90°
         ctx.beginPath();
         ctx.moveTo(cx, cy - r + 2);
         ctx.lineTo(cx, cy - r + 15);
@@ -105,172 +101,209 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // Деления и подписи
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        // Шкала: 0° по краям (горизонт), 90° в центре (зенит)
-        // Левая сторона: 0° (лево) → 30° → 60° → 90° (верх)
-        // Правая сторона: 90° (верх) → 60° → 30° → 0° (право)
-        for (let i = 0; i <= 6; i++) {
-            const scaleValue = i * 15; // 0, 15, 30, 45, 60, 75, 90
-            const labelValue = 90 - scaleValue; // Инвертируем: 90, 75, 60, 45, 30, 15, 0
-            const isMain = scaleValue % 30 === 0;
-            const innerR = isMain ? r - 15 : r - 10;
-            const outerR = r - 2;
+        for (var i = 0; i <= 6; i++) {
+            var scaleValue = i * 15;
+            var labelValue = 90 - scaleValue;
+            var isMain = scaleValue % 30 === 0;
+            var innerR = isMain ? r - 15 : r - 10;
+            var outerR = r - 2;
 
-            // Левая сторона: угол от PI/2 (верх, 90°) до PI (лево, 0°)
-            // scaleValue=0 → rad=PI/2, scaleValue=90 → rad=PI
-            const radLeft = Math.PI / 2 + scaleValue * Math.PI / 180;
+            var radLeft = Math.PI / 2 + scaleValue * Math.PI / 180;
+            var radRight = Math.PI / 2 - scaleValue * Math.PI / 180;
 
-            // Правая сторона: угол от PI/2 (верх, 90°) до 0 (право, 0°)
-            // scaleValue=0 → rad=PI/2, scaleValue=90 → rad=0
-            const radRight = Math.PI / 2 - scaleValue * Math.PI / 180;
-
-            // === Левая сторона ===
+            // Левая сторона
             ctx.beginPath();
-            ctx.moveTo(
-                cx + Math.cos(radLeft) * innerR,
-                cy - Math.sin(radLeft) * innerR
-            );
-            ctx.lineTo(
-                cx + Math.cos(radLeft) * outerR,
-                cy - Math.sin(radLeft) * outerR
-            );
+            ctx.moveTo(cx + Math.cos(radLeft) * innerR, cy - Math.sin(radLeft) * innerR);
+            ctx.lineTo(cx + Math.cos(radLeft) * outerR, cy - Math.sin(radLeft) * outerR);
             ctx.strokeStyle = isMain ? this.colors.accentBlue : this.colors.border;
             ctx.lineWidth = isMain ? 2 : 1;
             ctx.stroke();
 
-            // Подписи для левой стороны (основные деления)
             if (isMain) {
-                const labelR = r + 12;
-                const label = labelValue.toString() + '°';
+                var labelR = r + 12;
+                var label = labelValue.toString() + '°';
 
                 ctx.fillStyle = (labelValue === 90) ? this.colors.textPrimary : this.colors.textSecondary;
-                ctx.fillText(
-                    label,
-                    cx + Math.cos(radLeft) * labelR,
-                    cy - Math.sin(radLeft) * labelR
-                );
+                ctx.fillText(label, cx + Math.cos(radLeft) * labelR, cy - Math.sin(radLeft) * labelR);
             }
 
-            // === Правая сторона (кроме 90° в центре, чтобы не дублировать) ===
+            // Правая сторона (кроме 90° в центре)
             if (scaleValue > 0) {
                 ctx.beginPath();
-                ctx.moveTo(
-                    cx + Math.cos(radRight) * innerR,
-                    cy - Math.sin(radRight) * innerR
-                );
-                ctx.lineTo(
-                    cx + Math.cos(radRight) * outerR,
-                    cy - Math.sin(radRight) * outerR
-                );
+                ctx.moveTo(cx + Math.cos(radRight) * innerR, cy - Math.sin(radRight) * innerR);
+                ctx.lineTo(cx + Math.cos(radRight) * outerR, cy - Math.sin(radRight) * outerR);
                 ctx.strokeStyle = isMain ? this.colors.accentBlue : this.colors.border;
                 ctx.lineWidth = isMain ? 2 : 1;
                 ctx.stroke();
 
-                // Подписи для правой стороны
                 if (isMain) {
-                    const labelR = r + 12;
-                    const label = labelValue.toString() + '°';
+                    var labelR2 = r + 12;
+                    var label2 = labelValue.toString() + '°';
 
                     ctx.fillStyle = this.colors.textSecondary;
-                    ctx.fillText(
-                        label,
-                        cx + Math.cos(radRight) * labelR,
-                        cy - Math.sin(radRight) * labelR
-                    );
+                    ctx.fillText(label2, cx + Math.cos(radRight) * labelR2, cy - Math.sin(radRight) * labelR2);
                 }
             }
         }
 
-        // Подписи сторон света W и E под цифрами 0°
+        // W и E
         ctx.font = 'bold 11px monospace';
         ctx.fillStyle = this.colors.textMuted;
-
-        // W слева (под 0° левой стороны)
         ctx.textAlign = 'center';
         ctx.fillText('W', cx - r - 12, cy + 15);
-
-        // E справа (под 0° правой стороны)
         ctx.fillText('E', cx + r + 12, cy + 15);
     };
 
     /**
-     * Отрисовка неподвижного полукруга с шестигранником
+     * Вычисление угла на полулимбе для elevation + azimuth
+     * Возвращает угол в радианах от горизонтальной оси (PI..0, т.е. верхний полукруг)
+     * @param {number} el - угол места 0-90°
+     * @param {number} az - азимут 0-360°
+     * @returns {number} угол в радианах для позиционирования на полулимбе
+     */
+    ElevationIndicator.prototype._elevationToLimbAngle = function(el, az) {
+        var western = this.isWesternHemisphere(az);
+        // 90° - el = угол наклона от вертикали
+        var tilt = 90 - el;
+        if (western) {
+            // Левая сторона: PI/2 + tilt° от вертикали
+            return Math.PI / 2 + tilt * Math.PI / 180;
+        } else {
+            // Правая сторона: PI/2 - tilt° от вертикали
+            return Math.PI / 2 - tilt * Math.PI / 180;
+        }
+    };
+
+    /**
+     * Стрелка спутника: тонкая пунктирная линия с точками из центра + маркер на полулимбе
+     * Рисуется на заднем плане (до антенны)
+     */
+    ElevationIndicator.prototype.drawSatellitePointer = function() {
+        if (this.satelliteElevation === null || !this.isVisible) { return; }
+
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+        var r = this.radius;
+
+        var limbAngle = this._elevationToLimbAngle(this.satelliteElevation, this.satelliteAzimuth || this.currentAzimuth);
+        var endR = r - 20;
+        var endX = cx + Math.cos(limbAngle) * endR;
+        var endY = cy - Math.sin(limbAngle) * endR;
+
+        // === НАСТРОЙКИ СТРЕЛКИ СПУТНИКА ===
+        var lineWidth = 2;          // Толщина пунктирной линии
+        var dashPattern = [6, 4, 2, 4]; // Паттерн: [dash, gap, dot, gap]
+        var markerRadius = 6;         // Радиус маркера на лимбе
+        var markerLineWidth = 2;      // Толщина контура маркера
+        // ================================
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(endX, endY);
+        ctx.strokeStyle = this.colors.satelliteLine;
+        ctx.lineWidth = lineWidth;
+        ctx.setLineDash(dashPattern);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.restore();
+
+        // Маркер-кольцо на лимбе (без заливки)
+        var markerR = r - 9;
+        var mx = cx + Math.cos(limbAngle) * markerR;
+        var my = cy - Math.sin(limbAngle) * markerR;
+
+        ctx.beginPath();
+        ctx.arc(mx, my, markerRadius, 0, Math.PI * 2);
+        ctx.strokeStyle = this.colors.satelliteMarker;
+        ctx.lineWidth = markerLineWidth;
+        ctx.stroke();
+    };
+
+    /**
+     * Сообщение «ВНЕ ЗОНЫ НАБЛЮДЕНИЯ» по центру графика
+     */
+    ElevationIndicator.prototype._drawOutOfViewMessage = function() {
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+        var msgY = cy - this.radius * 0.3;
+
+        ctx.save();
+        ctx.font = 'bold 11px monospace';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = this.colors.outOfView;
+        ctx.fillText('ВНЕ ЗОНЫ', cx, msgY - 8);
+        ctx.fillText('НАБЛЮДЕНИЯ', cx, msgY + 8);
+        ctx.restore();
+    };
+
+    /**
+     * Отрисовка неподвижного постамента
      */
     ElevationIndicator.prototype.drawPedestal = function() {
-        const ctx = this.ctx;
-        const cx = this.centerX;
-        const cy = this.centerY;
-        const s = this.antennaScale;
+        var ctx = this.ctx;
+        var cx = this.centerX;
+        var cy = this.centerY;
+        var s = this.antennaScale;
 
-        // Радиус внешнего неподвижного полукруга (чуть больше вращающегося)
-        const mountHeight = 16 * s;
-        const innerArcRadius = mountHeight / 2 + 6 * s;
-        const outerArcRadius = innerArcRadius + 5 * s;
+        var mountHeight = 16 * s;
+        var innerArcRadius = mountHeight / 2 + 6 * s;
+        var outerArcRadius = innerArcRadius + 5 * s;
 
         ctx.strokeStyle = this.colors.accent;
         ctx.lineWidth = 0.75;
 
-        // Неподвижный круг (внешний)
         ctx.beginPath();
         ctx.arc(cx, cy, outerArcRadius, 0, Math.PI * 2, false);
         ctx.stroke();
 
-        // Линии вниз от концов полукруга + нижняя линия
-        const lineLength = outerArcRadius + 35;
-        // Левая линия
+        var lineLength = outerArcRadius + 35;
+
         ctx.beginPath();
         ctx.moveTo(cx - outerArcRadius, cy);
         ctx.lineTo(cx - outerArcRadius, cy + lineLength);
         ctx.stroke();
-        // Правая линия
+
         ctx.beginPath();
         ctx.moveTo(cx + outerArcRadius, cy);
         ctx.lineTo(cx + outerArcRadius, cy + lineLength);
         ctx.stroke();
-        // Нижняя линия (соединяет концы)
+
         ctx.beginPath();
         ctx.moveTo(cx - outerArcRadius, cy + lineLength);
         ctx.lineTo(cx + outerArcRadius, cy + lineLength);
         ctx.stroke();
 
-        // Трапеция-пьедестал (вид сбоку): шире снизу, уже сверху
-        const trapH  = 35 * s; // высота
-        const trapBW = 50 * s; // полуширина основания (низ)
-        const trapTW = 25 * s; // полуширина верхней грани (верх)
-        const trapTop = cy + lineLength;
+        var trapH  = 35 * s;
+        var trapBW = 50 * s;
+        var trapTW = 25 * s;
+        var trapTop = cy + lineLength;
+
         ctx.beginPath();
-        ctx.moveTo(cx - trapTW, trapTop);          // верхний левый
-        ctx.lineTo(cx + trapTW, trapTop);          // верхний правый
-        ctx.lineTo(cx + trapBW, trapTop + trapH);  // нижний правый
-        ctx.lineTo(cx - trapBW, trapTop + trapH);  // нижний левый
+        ctx.moveTo(cx - trapTW, trapTop);
+        ctx.lineTo(cx + trapTW, trapTop);
+        ctx.lineTo(cx + trapBW, trapTop + trapH);
+        ctx.lineTo(cx - trapBW, trapTop + trapH);
         ctx.closePath();
         ctx.stroke();
     };
 
     /**
      * Вычисление угла поворота антенны для AntennaDrawing
-     * @param {number} elevation - угол места 0-90°
-     * @returns {number} угол поворота для отрисовки (0 = вверх)
-     * 
-     * Шкала: 0° = зенит (антенна вверх), 90° = горизонт (антенна в сторону)
-     * Угол на шкале = 90° - elevation
      */
     ElevationIndicator.prototype.calculateAntennaAngle = function(elevation) {
-        // Угол наклона от вертикали = 90° - elevation
-        // elevation 90° (зенит) → наклон 0° (антенна вверх)
-        // elevation 0° (горизонт) → наклон 90° (антенна в сторону)
-        const tilt = 90 - elevation;
-
-        // Для западной полусферы: антенна наклоняется влево (отрицательный угол)
-        // Для восточной полусферы: антенна наклоняется вправо (положительный угол)
+        var tilt = 90 - elevation;
         if (this.isWesternHemisphere()) {
-            return -tilt; // влево
+            return -tilt;
         } else {
-            return tilt;  // вправо
+            return tilt;
         }
     };
 
@@ -278,67 +311,45 @@
      * Отрисовка антенны
      */
     ElevationIndicator.prototype.drawAntenna = function(elevation) {
-        const ctx = this.ctx;
-        const cx = this.centerX;
-        const cy = this.centerY;
-
-        const angle = this.calculateAntennaAngle(elevation);
-
-        // Рисуем антенну (включает вращающуюся дугу)
+        var angle = this.calculateAntennaAngle(elevation);
         window.AntennaDrawing.draw(
-            ctx,
-            cx,
-            cy,
+            this.ctx,
+            this.centerX,
+            this.centerY,
             angle,
             this.antennaScale,
             this.radius - 9,
-            'elevation' // viewType
+            'elevation'
         );
-    };
-
-    /**
-     * Числовое значение угла места
-     */
-    ElevationIndicator.prototype.drawElevationValue = function(elevation) {
-        const ctx = this.ctx;
-
-        ctx.font = 'bold 16px monospace';
-        ctx.textAlign = 'left';
-        ctx.textBaseline = 'top';
-        ctx.fillStyle = this.colors.accent;
-        ctx.fillText(elevation.toFixed(1) + '°', 8, 8);
     };
 
     /**
      * Главная функция отрисовки
      */
     ElevationIndicator.prototype.draw = function() {
-        const ctx = this.ctx;
-
-        // Получаем логические размеры для очистки
-        const size = window.CanvasUtils ?
+        var ctx = this.ctx;
+        var size = window.CanvasUtils ?
             window.CanvasUtils.getLogicalSize(this.canvas) :
             { width: this.canvas.width, height: this.canvas.height };
 
-        // Очистка
         ctx.fillStyle = this.colors.bgPrimary;
         ctx.fillRect(0, 0, size.width, size.height);
 
-        // Статический лимб
         this.drawLimb();
 
-        // Сначала постамент (будет под антенной)
-        this.drawPedestal();
+        // Стрелка спутника на заднем плане (под антенной)
+        this.drawSatellitePointer();
 
-        // Потом антенна (будет поверх постамента)
+        this.drawPedestal();
         this.drawAntenna(this.currentElevation);
-        this.drawElevationValue(this.currentElevation);
+
+        if (!this.isVisible) {
+            this._drawOutOfViewMessage();
+        }
     };
 
     /**
-     * Установка позиции (азимут + угол места)
-     * @param {number} az - азимут 0-360°
-     * @param {number} el - угол места 0-90°
+     * Установка позиции антенны (азимут + угол места)
      */
     ElevationIndicator.prototype.setPosition = function(az, el) {
         this.currentAzimuth = Math.max(0, Math.min(360, az));
@@ -348,37 +359,45 @@
 
     /**
      * Установка угла места (обратная совместимость)
-     * @param {number} deg - угол места
      */
     ElevationIndicator.prototype.setElevation = function(deg) {
-        // Для обратной совместимости: если передан отрицательный угол,
-        // интерпретируем как западную полусферу, положительный — как восточную
         if (deg < 0) {
-            this.currentAzimuth = 270; // Западная полусфера
+            this.currentAzimuth = 270;
             this.currentElevation = Math.max(0, Math.min(90, Math.abs(deg)));
         } else {
-            this.currentAzimuth = 90; // Восточная полусфера
+            this.currentAzimuth = 90;
             this.currentElevation = Math.max(0, Math.min(90, deg));
         }
         this.draw();
     };
 
     /**
-     * Получение текущего угла места
+     * Установка позиции спутника
+     * @param {number|null} el - угол места спутника (null = нет данных)
+     * @param {number|null} az - азимут спутника (для определения полусферы)
      */
+    ElevationIndicator.prototype.setSatellitePosition = function(el, az) {
+        this.satelliteElevation = (el !== null && el !== undefined)
+            ? Math.max(0, Math.min(90, el))
+            : null;
+        this.satelliteAzimuth = (az !== null && az !== undefined) ? az : null;
+    };
+
+    /**
+     * Установка видимости спутника
+     */
+    ElevationIndicator.prototype.setVisible = function(visible) {
+        this.isVisible = visible;
+    };
+
     ElevationIndicator.prototype.getElevation = function() {
         return this.currentElevation;
     };
 
-    /**
-     * Получение текущего азимута
-     */
     ElevationIndicator.prototype.getAzimuth = function() {
         return this.currentAzimuth;
     };
 
-
-    // Экспорт
     window.ElevationIndicator = ElevationIndicator;
 
 })();

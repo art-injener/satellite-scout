@@ -158,14 +158,18 @@
                 }
             }
             
-            // Обновление индикаторов
+            // Обновление индикаторов: позиция спутника + перерисовка
             if (window.azimuthIndicator) {
+                window.azimuthIndicator.setSatellitePosition(pos.az);
                 window.azimuthIndicator.setAzimuth(pos.az);
-                window.azimuthIndicator.draw();
             }
             if (window.elevationIndicator) {
+                window.elevationIndicator.setSatellitePosition(pos.el, pos.az);
                 window.elevationIndicator.setPosition(pos.az, pos.el);
             }
+
+            // Обновление DOM инфо-панелей Az/El
+            updateAzElInfoPanels(pos);
             
             // Обновление info panel
             updateInfoPanel(state);
@@ -220,6 +224,22 @@
         }, 3000);
     }
     
+    // Обновление DOM инфо-панелей под графиками Az/El
+    function updateAzElInfoPanels(pos) {
+        var azSat = document.getElementById('az-satellite');
+        var elSat = document.getElementById('el-satellite');
+        var azRot = document.getElementById('az-rotator');
+        var elRot = document.getElementById('el-rotator');
+        
+        if (azSat) { azSat.textContent = pos.az.toFixed(1) + '°'; }
+        if (elSat) { elSat.textContent = pos.el.toFixed(1) + '°'; }
+        
+        // TODO: Временно дублируем значения спутника для антенны.
+        // После реализации ROTATOR-003 (SSE rotator_position) заменить на реальные данные антенны.
+        if (azRot) { azRot.textContent = pos.az.toFixed(1) + '°'; }
+        if (elRot) { elRot.textContent = pos.el.toFixed(1) + '°'; }
+    }
+
     // Обновление InfoPanel данными спутника (id с префиксом ip-)
     function updateInfoPanel(state) {
         var pos = state.position;
