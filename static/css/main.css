@@ -1,6 +1,24 @@
 /* SatWatch - Dark Theme Satellite Tracker */
 
 :root {
+    /* Высота нижней панели = блок графика + внутренние отступы вкладки (8px) */
+    --bottom-panel-height: calc(var(--indicator-block-height) + 10px);
+    --footer-height: 44px;
+
+    /* Правая панель: под SkyView 300×300 px, таблица пролётов и отступы */
+    --right-panel-width: 340px;
+
+    /* Панели информации (SkyView, Az/El): фиксированные размеры, текст вписывается с выравниванием */
+    --info-panel-height: 28px;
+    /* Размер области графика для SkyView и Az/El — единое значение для одинаковой высоты */
+    --indicator-graph-size: 300px;
+    /* Ширина блока SkyView в правой панели (график остаётся 300×300, блок шире для инфо) */
+    --skyview-block-width: 320px;
+    /* Общая высота блока «график + инфо-панель» для всех трёх индикаторов */
+    --indicator-block-height: calc(var(--indicator-graph-size) + var(--info-panel-height));
+    --info-panel-padding-x: 8px;
+    --info-panel-padding-y: 4px;
+
     /* Colors - Dark space theme */
     --bg-primary: #0a0e14;
     --bg-secondary: #12171f;
@@ -8,8 +26,9 @@
     --bg-elevated: #222938;
     
     --text-primary: #e6e8eb;
-    --text-secondary: #8b919a;
-    --text-muted: #5c6370;
+    /* Подписи и вторичный текст — белый  */
+    --text-secondary: #e6e8eb;
+    --text-muted: #e6e8eb;
     
     --accent-primary: #00d4aa;
     --accent-secondary: #00a8ff;
@@ -37,6 +56,22 @@
     --radius-lg: 12px;
 }
 
+/* Инфо-панели под графиками (SkyView, Az/El) — единая высота и шрифт */
+.skyview-info,
+.bp-indicator-info {
+    min-height: var(--info-panel-height);
+    max-height: var(--info-panel-height);
+    height: var(--info-panel-height);
+    box-sizing: border-box;
+    overflow: hidden;
+    padding: var(--info-panel-padding-y) var(--info-panel-padding-x);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
 /* Reset & Base */
 *, *::before, *::after {
     box-sizing: border-box;
@@ -46,6 +81,7 @@
 
 html {
     font-size: 14px;
+    overflow-x: hidden;
 }
 
 body {
@@ -54,17 +90,22 @@ body {
     color: var(--text-primary);
     line-height: 1.5;
     min-height: 100vh;
+    height: 100vh;
+    overflow-x: hidden;
     display: grid;
     grid-template-columns: 50px 1fr;
+    /* Строка 1: карта+правая панель; строка 2: нижняя панель; строка 3: footer */
+    grid-template-rows: 1fr var(--bottom-panel-height) var(--footer-height);
 }
 
-/* ===== Sidebar (вертикальное меню) ===== */
+/* ===== Sidebar (вертикальное меню) — только по высоте первой строки (карта+правая панель) ===== */
 .sidebar {
+    grid-row: 1;
     display: flex;
     flex-direction: column;
     background: var(--bg-secondary);
     border-right: 1px solid var(--border-color);
-    height: 100vh;
+    height: calc(100vh - var(--bottom-panel-height) - var(--footer-height));
     position: sticky;
     top: 0;
     z-index: 100;
@@ -83,7 +124,7 @@ body {
 .sidebar-nav {
     display: flex;
     flex-direction: column;
-    gap: var(--spacing-xs);
+    gap: var(--spacing-sm);
     padding: var(--spacing-sm);
     flex: 1;
 }
@@ -92,20 +133,21 @@ body {
     display: flex;
     align-items: center;
     justify-content: center;
-    width: 34px;
-    height: 34px;
+    width: 38px;
+    height: 38px;
     background: transparent;
     border: 1px solid transparent;
     border-radius: var(--radius-md);
     color: var(--text-secondary);
     text-decoration: none;
+    transition: all 0.15s ease;
     transition: all 0.2s ease;
     cursor: pointer;
 }
 
 .sidebar-tab svg {
-    width: 20px;
-    height: 20px;
+    width: 22px;
+    height: 22px;
 }
 
 .sidebar-tab:hover {
@@ -117,6 +159,81 @@ body {
     background: var(--bg-tertiary);
     border-color: var(--accent-primary);
     color: var(--accent-primary);
+}
+
+/* Группа в sidebar: иконка + аккордеон под ней */
+.sidebar-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    align-items: center;
+}
+
+/* Разделитель между группами */
+.sidebar-divider {
+    width: 24px;
+    height: 1px;
+    background: var(--border-color);
+    margin: var(--spacing-xs) auto;
+    opacity: 0.5;
+}
+
+/* Аккордеон под вкладкой «Сеанс»: подпункты с визуальной связью */
+.sidebar-accordion {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    width: 100%;
+    align-items: center;
+    position: relative;
+    padding-left: 4px;
+    margin-top: 2px;
+}
+
+/* Вертикальная линия-индикатор вложенности */
+.sidebar-accordion::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    background: var(--accent-primary);
+    opacity: 0.3;
+    border-radius: 1px;
+}
+
+.sidebar-accordion__btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 30px;
+    padding: 0;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.15s ease;
+    margin-left: 4px;
+}
+
+.sidebar-accordion__btn svg {
+    width: 18px;
+    height: 18px;
+}
+
+.sidebar-accordion__btn:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+}
+
+.sidebar-accordion__btn.active {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+    background: rgba(0, 212, 170, 0.1);
 }
 
 /* sidebar-footer удалён — SSE-индикатор перенесён в station-footer */
@@ -176,34 +293,68 @@ body {
     opacity: 1;
 }
 
-/* ===== Main Wrapper ===== */
+/* ===== Main Wrapper — на странице отслеживания: 3 строки (main | bottom-panel | footer) ===== */
+/* overflow: visible обязательно: при overflow-y:hidden браузер меняет overflow-x на auto,
+   и нижняя панель с margin-left отрицательным обрезается, боковая полоска не видна */
 .main-wrapper {
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-    overflow: hidden;
+    grid-column: 2;
+    grid-row: 1 / -1;
+    display: grid;
+    grid-template-rows: 1fr var(--footer-height);
+    grid-template-columns: 1fr;
+    min-height: 0;
+    overflow: visible;
 }
 
-/* Main Content */
+.main-wrapper.tracking-page {
+    grid-template-columns: 1fr var(--right-panel-width);
+    grid-template-rows: 1fr var(--bottom-panel-height) var(--footer-height);
+}
+
+/* Main Content — левая колонка (карта + infoPanel), только строка 1 */
 .main {
-    flex: 1;
+    grid-row: 1;
+    grid-column: 1;
     padding: 4px;
     overflow-y: auto;
+    overflow-x: visible;
+    min-height: 0;
 }
 
-/* ===== Station Footer (статусная строка) ===== */
+/* Левая колонка страницы отслеживания: карта + infoPanel под картой */
+.tracking-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    height: 100%;
+    min-height: 0;
+}
+
+.tracking-left .map-area {
+    flex: 1;
+    min-height: 0;
+}
+
+/* ===== Station Footer — на всю ширину (обе колонки на странице отслеживания) ===== */
 .station-footer {
+    grid-column: 1 / -1;
+    grid-row: 3;
+    position: relative;
+    left: -50px;
+    width: calc(100% + 50px);
+    padding-left: 0;
+    padding-right: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    height: 44px;
-    padding: 0 12px;
+    height: var(--footer-height);
     background: var(--bg-secondary);
     border-top: 1px solid var(--border-color);
     font-family: var(--font-mono);
     font-size: 1.1rem;
     color: var(--text-secondary);
     flex-shrink: 0;
+    box-sizing: border-box;
 }
 
 .station-footer__left,
@@ -211,6 +362,11 @@ body {
     display: flex;
     align-items: center;
     gap: 8px;
+}
+
+
+.station-footer__left .station-footer__item:first-child {
+    padding-left: 2;
 }
 
 .station-footer__item,
@@ -273,32 +429,49 @@ body {
     font-size: 1rem;
 }
 
-/* ===== Tracking Layout - Grid: карта слева, графики справа ===== */
-.tracking-layout {
-    display: grid;
-    grid-template-columns: 1fr minmax(220px, 22vw);
-    gap: 4px;
-    height: calc(100vh - 52px);
-    min-height: 0;
+/* Правая панель свёрнута → минимизация по ширине (30px), класс на main-wrapper */
+.main-wrapper.tracking-page.right-collapsed {
+    grid-template-columns: 1fr 30px;
+    transition: grid-template-columns 300ms ease;
 }
 
-/* Левая колонка: карта + инфо под ней */
-.map-column {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
+.main-wrapper.tracking-page.right-collapsed .right-panel .panel-header__title {
+    display: none;
+}
+
+.main-wrapper.tracking-page.right-collapsed .right-panel .panel-header {
+    justify-content: center;
+    padding: 0 4px;
+}
+
+.main-wrapper.tracking-page.right-collapsed .right-panel .panel-collapse-btn {
+    margin: 0;
+}
+
+.main-wrapper.tracking-page.right-collapsed .right-panel__body {
+    display: none;
+}
+
+/* Нижняя панель свёрнута: уменьшаем вторую строку main-wrapper (класс выставляет JS) */
+.main-wrapper.bottom-panel-collapsed {
+    grid-template-rows: 1fr 30px var(--footer-height);
+}
+
+/* ─── Зона карты ─── */
+.map-area {
+    position: relative;
     min-height: 0;
+    overflow: hidden;
 }
 
 .earth-view-container {
-    flex: 1;
     position: relative;
+    width: 100%;
+    height: 100%;
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    padding: 2px;
     overflow: hidden;
-    min-height: 200px;
 }
 
 /* Отображаемый размер = 100% контейнера; буфер для HiDPI задаётся в JS */
@@ -308,9 +481,150 @@ body {
     display: block;
 }
 
-/* satellite-info-panel удалён — заменён на .info-panel (info-panel.css) */
+/* ─── Правая панель: вся высота окна (строка 1+2), рядом с картой и нижней панелью ─── */
+.right-panel {
+    grid-column: 2;
+    grid-row: 1 / 3;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    min-height: 0;
+    overflow: hidden;
+}
 
-/* Мигающая надпись "ИМИТАЦИЯ" в правом нижнем углу */
+.right-panel__body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    overflow: hidden;
+    padding: 4px;
+}
+
+/* ─── Нижняя панель: тянем влево на 50px; отступы как у main (4px), чтобы полосы совпадали ─── */
+.bottom-panel {
+    grid-column: 1;
+    grid-row: 2;
+    position: relative;
+    width: calc(100% + 50px);
+    margin-left: -50px;
+    padding-left: 54px;
+    padding-right: 4px;
+    display: flex;
+    flex-direction: row;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: visible;
+    min-height: 0;
+}
+
+/* Боковая полоска 50px — под сайдбаром (полоса 1), выравнивание по ширине с меню */
+.bottom-panel__side {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 50px;
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 4px;
+    background: var(--bg-tertiary);
+    border-right: 1px solid var(--border-color);
+    z-index: 2;
+}
+
+/* Режим панели — буквы столбиком, крупнее и по центру высоты */
+.bottom-panel__mode {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    min-height: 0;
+}
+
+.bottom-panel__mode span {
+    display: block;
+    line-height: 1.25;
+}
+
+/* ─── Общий заголовок панелей ─── */
+.panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 30px;
+    padding: 0 8px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    gap: 8px;
+}
+
+.panel-header__title {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+}
+
+.panel-collapse-btn {
+    background: none;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 10px;
+    padding: 2px 6px;
+    line-height: 1;
+    flex-shrink: 0;
+    transition: all 0.15s ease;
+}
+
+.panel-collapse-btn:hover {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+/* Тело нижней панели — контейнер вкладок, занимает всю ширину и оставшуюся высоту */
+.bottom-panel__body {
+    flex: 1;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 120px;
+    overflow: hidden;
+}
+
+/* При сворачивании — скрываем тело, в полоске только кнопка */
+.bottom-panel--collapsed .bottom-panel__body {
+    display: none;
+}
+
+.bottom-panel--collapsed .bottom-panel__side {
+    justify-content: center;
+}
+
+.bottom-panel--collapsed .bottom-panel__mode {
+    display: none;
+}
+
+/* Мигающая надпись "ИМИТАЦИЯ" в правом нижнем углу карты */
 .simulation-badge {
     position: absolute;
     bottom: 12px;
@@ -336,56 +650,6 @@ body {
         transform: scale(0.95);
     }
 }
-
-/* Правая колонка: графики вертикально */
-.charts-column {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-height: 0;
-    overflow: hidden;
-}
-
-.azimuth-container,
-.sky-view-container,
-.elevation-container {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-md);
-    padding: 4px;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    min-height: 0;
-    overflow: hidden;
-}
-
-/* Пропорциональное распределение высоты (300:350:250) */
-.azimuth-container  { flex: 300 1 0; }
-.sky-view-container { flex: 350 1 0; }
-.elevation-container { flex: 280 1 0; }
-
-.charts-column h3 {
-    font-size: 0.7rem;
-    font-weight: 500;
-    color: var(--text-muted);
-    margin-bottom: var(--spacing-xs);
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.charts-column canvas {
-    display: block;
-    flex: 1 1 0;
-    min-height: 0;
-    max-width: 100%;
-    background: var(--bg-primary);
-    border-radius: var(--radius-sm);
-}
-
-.azimuth-container canvas  { aspect-ratio: 1 / 1; }
-.sky-view-container canvas { aspect-ratio: 6 / 7; }
-.elevation-container canvas { aspect-ratio: 15 / 14; }
 
 /* Receiver Layout */
 .receiver-layout {
@@ -667,18 +931,27 @@ section h2 {
 }
 
 /* Responsive */
+@media (max-width: 1100px) {
+    .main-wrapper.tracking-page {
+        grid-template-columns: 1fr 280px;
+    }
+}
+
 @media (max-width: 800px) {
-    .tracking-layout {
+    .main-wrapper.tracking-page {
         grid-template-columns: 1fr;
-        grid-template-rows: 1fr auto;
+        grid-template-rows: 1fr 200px 200px;
         height: auto;
     }
-    
-    .charts-column {
-        flex-direction: row;
-        flex-wrap: wrap;
-        justify-content: center;
-        overflow-y: visible;
+
+    .right-panel {
+        grid-column: 1;
+        grid-row: 3;
+    }
+
+    .bottom-panel {
+        grid-column: 1;
+        grid-row: 2;
     }
 }
 

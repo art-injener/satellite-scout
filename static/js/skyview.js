@@ -98,11 +98,15 @@
             currentPos: null
         };
 
-        // Данные о пролёте (времена)
+        // Данные о пролёте (времена и позиции маркеров для синхронизации надписей)
         this.passInfo = {
-            aosTime: null, // Время начала наблюдения (timestamp)
-            losTime: null, // Время окончания наблюдения (timestamp)
-            maxElTime: null // Время максимального угла места
+            aosTime: null,
+            losTime: null,
+            maxElTime: null,
+            aosCanvasY: null, // Y маркера AOS на canvas (верхняя/нижняя полусфера)
+            losCanvasY: null,
+            aosAz: null,  // азимут AOS (для сортировки при одной полусфере)
+            losAz: null
         };
 
         // Observer
@@ -115,21 +119,25 @@
         // Анимация
         this._animationPhase = 0;
         this._lastAnimTime = 0;
+
+        // Опциональные DOM-элементы для текстового блока под графиком (обновляются при setSatelliteInfo/setPassTimes и раз в секунду для «Осталось»)
+        this._infoEls = { norad: null, aos: null, los: null, dur: null, remaining: null };
     }
 
     /**
-     * Обновление геометрии при изменении размера
-     * Учитывает дополнительное пространство снизу для информационной панели
+     * Обновление геометрии: окружность ВСЕГДА занимает квадратную область с минимальными полями
+     * (только под метки сторон света N/S/E/W и цифры азимута)
      */
     SkyView.prototype._updateGeometry = function() {
-        const padding = 30; // Отступ для меток азимута
-        const infoPanelHeight = 55; // Высота информационной панели снизу (увеличена с 50px)
+        var w = this.canvas.width;
+        var h = this.canvas.height;
+        // Минимальный отступ — только для вывода символов сторон света и меток азимута
+        var padding = 16;
 
-        this.infoPanelHeight = infoPanelHeight;
-        this.centerX = this.canvas.width / 2;
-        // Смещаем центр вверх, чтобы освободить место для инфо-панели
-        this.centerY = (this.canvas.height - infoPanelHeight) / 2;
-        this.radius = Math.min(this.centerX, this.centerY) - padding;
+        this.centerX = w / 2;
+        this.centerY = h / 2;
+        this.radius = Math.min(w, h) / 2 - padding;
+        if (this.radius < 20) { this.radius = 20; }
     };
 
     /**
@@ -244,13 +252,13 @@
             ctx.setLineDash([]);
         }
 
-        // Метки сторон света
-        ctx.font = 'bold 12px sans-serif';
-        ctx.fillStyle = this.colors.gridText;
+        // Метки сторон света — белым цветом снаружи окружности, тем же шрифтом что и цифры
+        ctx.font = '12px sans-serif';
+        ctx.fillStyle = '#ffffff';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        const labelOffset = r + 16;
+        const labelOffset = r + 10; // Снаружи окружности
         ctx.fillText('N', cx, cy - labelOffset);
         ctx.fillText('S', cx, cy + labelOffset);
         ctx.fillText('E', cx + labelOffset, cy);
@@ -264,7 +272,7 @@
     };
 
     /**
-     * Отрисовка меток азимута по внешней окружности
+     * Отрисовка меток азимута по внешней окружности: засечки от окружности, подписи чуть дальше
      */
     SkyView.prototype._drawAzimuthLabels = function() {
         const ctx = this.ctx;
@@ -272,22 +280,32 @@
         const cy = this.centerY;
         const r = this.radius;
         const step = this.options.azimuthStep;
+        const tickLen = 5;      // длина засечки от окружности
+        const labelOffset = 14; // отступ подписи от окружности (было 8)
 
         ctx.font = '9px sans-serif';
         ctx.fillStyle = this.colors.azimuthLabel;
 
-        // Рисуем метки кроме основных направлений (N, E, S, W)
         for (let az = step; az < 360; az += step) {
-            // Пропускаем основные направления
-            if (az === 90 || az === 180 || az === 270) {continue;}
+            if (az === 90 || az === 180 || az === 270) { continue; }
 
             const azRad = az * Math.PI / 180;
             const phi = Math.PI / 2 - azRad;
+            const cosP = Math.cos(phi);
+            const sinP = Math.sin(phi);
 
-            // Позиция метки чуть за пределами круга
-            const labelR = r + 8;
-            const x = cx + labelR * Math.cos(phi);
-            const y = cy - labelR * Math.sin(phi);
+            // Засечка: от окружности наружу
+            ctx.strokeStyle = this.colors.azimuthLabel;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(cx + r * cosP, cy - r * sinP);
+            ctx.lineTo(cx + (r + tickLen) * cosP, cy - (r + tickLen) * sinP);
+            ctx.stroke();
+
+            // Подпись градусов чуть дальше от окружности
+            const labelR = r + labelOffset;
+            const x = cx + labelR * cosP;
+            const y = cy - labelR * sinP;
 
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
@@ -377,118 +395,128 @@
 
     /**
      * Отрисовка траектории пролёта
-     * Траектория — плавная кривая от внешней окружности до внешней окружности
+     * Линия продлевается до окружности горизонта (el=0) для совпадения с маркерами AOS/LOS
      */
     SkyView.prototype._drawTrack = function() {
         const ctx = this.ctx;
         const track = this.satellite.track;
 
         if (!track || track.length < 2) {
+            this.passInfo.aosCanvasY = null;
+            this.passInfo.losCanvasY = null;
+            this.passInfo.aosAz = null;
+            this.passInfo.losAz = null;
             return;
         }
 
-        // Фильтруем видимые точки (el >= 0, включая горизонт)
         const visibleTrack = track.filter(function(p) { return p.el >= 0; });
         if (visibleTrack.length < 2) {
+            this.passInfo.aosCanvasY = null;
+            this.passInfo.losCanvasY = null;
+            this.passInfo.aosAz = null;
+            this.passInfo.losAz = null;
             return;
         }
 
-        // Сохраняем времена пролёта
         this.passInfo.aosTime = visibleTrack[0].time;
         this.passInfo.losTime = visibleTrack[visibleTrack.length - 1].time;
 
-        // Преобразуем все точки в координаты canvas
-        const points = [];
+        // Азимуты пересечения с горизонтом (el=0) для AOS и LOS
+        const startAz = this._findHorizonCrossing(visibleTrack[0], visibleTrack[1]);
+        const endAz = this._findHorizonCrossing(
+            visibleTrack[visibleTrack.length - 1],
+            visibleTrack[visibleTrack.length - 2]
+        );
+
+        const aosEdge = this.azElToXY(startAz, 0);
+        const losEdge = this.azElToXY(endAz, 0);
+
+        // Внутренние точки (видимая часть трека) — для стрелок
+        const innerPoints = [];
         for (let i = 0; i < visibleTrack.length; i++) {
-            const trackPoint = visibleTrack[i];
-            const p = this.azElToXY(trackPoint.az, trackPoint.el);
-            points.push({
-                x: p.x,
-                y: p.y,
-                time: trackPoint.time,
-                el: trackPoint.el,
-                az: trackPoint.az
-            });
+            const tp = visibleTrack[i];
+            const p = this.azElToXY(tp.az, tp.el);
+            innerPoints.push({ x: p.x, y: p.y, time: tp.time, el: tp.el, az: tp.az });
         }
 
-        // Рисуем линию траектории
+        // Полный путь: от края окружности (AOS) через видимые точки до края (LOS)
+        const allPoints = [
+            { x: aosEdge.x, y: aosEdge.y, time: visibleTrack[0].time, el: 0, az: startAz }
+        ].concat(innerPoints).concat([
+            { x: losEdge.x, y: losEdge.y, time: visibleTrack[visibleTrack.length - 1].time, el: 0, az: endAz }
+        ]);
+
+        // Рисуем линию через все точки (от края до края окружности)
         ctx.strokeStyle = this.colors.track;
         ctx.lineWidth = 2;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
         ctx.beginPath();
 
-        for (let i = 0; i < points.length; i++) {
+        for (let i = 0; i < allPoints.length; i++) {
             if (i === 0) {
-                ctx.moveTo(points[i].x, points[i].y);
+                ctx.moveTo(allPoints[i].x, allPoints[i].y);
             } else {
-                ctx.lineTo(points[i].x, points[i].y);
+                ctx.lineTo(allPoints[i].x, allPoints[i].y);
             }
         }
 
         ctx.stroke();
 
-        // Стрелки направления на траектории
-        this._drawTrackArrows(points, visibleTrack);
+        // Стрелки — только на внутренних точках (не на краях окружности)
+        this._drawTrackArrows(innerPoints, visibleTrack);
 
-        // Маркеры AOS (зелёный) и LOS (красный) на концах траектории
-        this._drawAosLosMarkers(points);
+        // Маркеры AOS/LOS — точно на концах линии
+        this._drawAosLosMarkers(allPoints);
     };
 
     /**
-     * Отрисовка стрелок направления на траектории
+     * Отрисовка стрелок направления на траектории.
+     * Всегда рисует стрелку в точке TCA (макс. элевация) + дополнительные по интервалу.
      */
     SkyView.prototype._drawTrackArrows = function(points, visibleTrack) {
-        const arrowInterval = this.options.arrowInterval;
-        let lastArrowTime = points[0].time;
-        let arrowDrawn = false;
+        if (points.length < 3) {return;}
 
+        // Стрелка в точке TCA (максимальная элевация) — рисуется всегда
+        let tcaIdx = Math.floor((points.length - 1) / 2);
+        let maxEl = -Infinity;
         for (let i = 1; i < points.length - 1; i++) {
-            const point = visibleTrack[i];
-
-            if (point.time - lastArrowTime >= arrowInterval) {
-                const prev = points[i - 1];
-                const curr = points[i];
-                const next = points[i + 1];
-
-                const dx = next.x - prev.x;
-                const dy = next.y - prev.y;
-                const angle = Math.atan2(dy, dx);
-
-                this._drawArrow(curr.x, curr.y, angle);
-                lastArrowTime = point.time;
-                arrowDrawn = true;
+            if (points[i].el > maxEl) {
+                maxEl = points[i].el;
+                tcaIdx = i;
             }
         }
 
-        // На коротких пролётах рисуем одну стрелку в точке TCA (макс. элевация)
-        if (!arrowDrawn && points.length >= 3) {
-            let midIdx = Math.floor((points.length - 1) / 2); // запасной вариант
-            let maxEl = -Infinity;
-            for (let i = 1; i < points.length - 1; i++) {
-                if (points[i].el > maxEl) {
-                    maxEl = points[i].el;
-                    midIdx = i;
-                }
+        var prev = points[tcaIdx - 1];
+        var curr = points[tcaIdx];
+        var next = points[tcaIdx + 1];
+        var dx = next.x - prev.x;
+        var dy = next.y - prev.y;
+        this._drawArrow(curr.x, curr.y, Math.atan2(dy, dx));
+
+        // Дополнительные стрелки по интервалу (для длинных пролётов)
+        const arrowInterval = this.options.arrowInterval;
+        let lastArrowTime = points[0].time;
+
+        for (let i = 1; i < points.length - 1; i++) {
+            if (i === tcaIdx) {continue;}
+
+            const point = visibleTrack[i];
+            if (point.time - lastArrowTime >= arrowInterval) {
+                prev = points[i - 1];
+                curr = points[i];
+                next = points[i + 1];
+                dx = next.x - prev.x;
+                dy = next.y - prev.y;
+                this._drawArrow(curr.x, curr.y, Math.atan2(dy, dx));
+                lastArrowTime = point.time;
             }
-
-            const prev = points[midIdx - 1];
-            const curr = points[midIdx];
-            const next = points[midIdx + 1];
-
-            const dx = next.x - prev.x;
-            const dy = next.y - prev.y;
-            const angle = Math.atan2(dy, dx);
-
-            this._drawArrow(curr.x, curr.y, angle);
         }
     };
 
     /**
-     * Отрисовка маркеров AOS (начало) и LOS (конец) точно на внешней окружности
-     * Маркеры размещаются на пересечении траектории с горизонтом (el=0)
-     * Используем экстраполяцию для нахождения точного азимута пересечения
-     * @param {Array} points - Массив точек траектории с координатами
+     * Отрисовка маркеров AOS и LOS точно на концах линии траектории
+     * @param {Array} points - Полный массив точек (первая = AOS на окружности, последняя = LOS)
      */
     SkyView.prototype._drawAosLosMarkers = function(points) {
         if (points.length < 2) {return;}
@@ -496,21 +524,15 @@
         const ctx = this.ctx;
         const markerRadius = 6;
 
-        // Находим азимут точки пересечения траектории с горизонтом (el=0)
-        // Экстраполируем между первыми двумя точками
-        const startAz = this._findHorizonCrossing(points[0], points[1]);
+        const aosPoint = points[0];
+        const losPoint = points[points.length - 1];
 
-        // Экстраполируем между последними двумя точками
-        const endAz = this._findHorizonCrossing(
-            points[points.length - 1],
-            points[points.length - 2]
-        );
+        this.passInfo.aosCanvasY = aosPoint.y;
+        this.passInfo.losCanvasY = losPoint.y;
+        this.passInfo.aosAz = aosPoint.az;
+        this.passInfo.losAz = losPoint.az;
 
-        // Вычисляем координаты маркеров точно на внешней окружности (el=0)
-        const aosPoint = this.azElToXY(startAz, 0);
-        const losPoint = this.azElToXY(endAz, 0);
-
-        // AOS маркер (зелёный) - начало видимости
+        // AOS маркер (зелёный) — начало видимости
         ctx.beginPath();
         ctx.arc(aosPoint.x, aosPoint.y, markerRadius, 0, Math.PI * 2);
         ctx.fillStyle = this.colors.aosMarker;
@@ -519,7 +541,7 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        // LOS маркер (красный) - конец видимости
+        // LOS маркер (красный) — конец видимости
         ctx.beginPath();
         ctx.arc(losPoint.x, losPoint.y, markerRadius, 0, Math.PI * 2);
         ctx.fillStyle = this.colors.losMarker;
@@ -563,49 +585,6 @@
         while (az >= 360) {az -= 360;}
 
         return az;
-    };
-
-    /**
-     * Отрисовка маркеров AOS и LOS в указанных точках
-     * @param {Object} aosPoint - Координаты {x, y} для AOS маркера
-     * @param {Object} losPoint - Координаты {x, y} для LOS маркера
-     */
-    SkyView.prototype._drawAosLosMarkersAtPoints = function(aosPoint, losPoint) {
-        const ctx = this.ctx;
-        const markerRadius = 6;
-
-        // Маркер AOS (зелёный) - начало видимости
-        ctx.beginPath();
-        ctx.arc(aosPoint.x, aosPoint.y, markerRadius, 0, Math.PI * 2);
-        ctx.fillStyle = this.colors.aosMarker;
-        ctx.fill();
-        ctx.strokeStyle = this.colors.markerBorder;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-
-        // Маркер LOS (красный) - конец видимости
-        ctx.beginPath();
-        ctx.arc(losPoint.x, losPoint.y, markerRadius, 0, Math.PI * 2);
-        ctx.fillStyle = this.colors.losMarker;
-        ctx.fill();
-        ctx.strokeStyle = this.colors.markerBorder;
-        ctx.lineWidth = 2;
-        ctx.stroke();
-    };
-
-    /**
-     * @deprecated Используйте _drawAosLosMarkersAtPoints
-     * Оставлено для обратной совместимости
-     */
-    SkyView.prototype._drawAosLosMarkers = function(visibleTrack) {
-        if (visibleTrack.length < 2) {return;}
-
-        const startAz = visibleTrack[0].az;
-        const endAz = visibleTrack[visibleTrack.length - 1].az;
-        const aosPoint = this.azElToXY(startAz, 0);
-        const losPoint = this.azElToXY(endAz, 0);
-
-        this._drawAosLosMarkersAtPoints(aosPoint, losPoint);
     };
 
     /**
@@ -804,92 +783,6 @@
     };
 
     /**
-     * Отрисовка информационной панели внизу
-     * Колонка 1: NORAD ID / Длительность
-     * Колонка 2: AOS / LOS
-     * Колонка 3: Az / El
-     */
-    SkyView.prototype._drawInfo = function() {
-        const ctx = this.ctx;
-        const pos = this.satellite.currentPos;
-        const w = this.canvas.width;
-        const h = this.canvas.height;
-        const panelHeight = this.infoPanelHeight;
-        const panelY = h - panelHeight;
-
-        const panelPadding = 6;
-        const cornerRadius = 8;
-
-        ctx.beginPath();
-        ctx.roundRect(panelPadding, panelY + 4, w - panelPadding * 2, panelHeight - 8, cornerRadius);
-        ctx.fillStyle = 'rgba(20, 30, 45, 0.9)';
-        ctx.fill();
-        ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        const col1X = panelPadding + 8;
-        const col2X = w * 0.38;
-        const col3X = w * 0.70;
-        const row1Y = panelY + 20; // Увеличено с 18
-        const row2Y = panelY + 40; // Увеличено с 34 (больший отступ между строками)
-
-        const passInfo = this.passInfo;
-
-        // === Колонка 1: NORAD ID и Длительность ===
-        ctx.font = 'bold 12px monospace';
-        ctx.textBaseline = 'middle';
-        ctx.textAlign = 'left';
-
-        ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('ID:', col1X, row1Y);
-        ctx.fillStyle = this.colors.timeText;
-        const noradText = this.satellite.noradId ? String(this.satellite.noradId) : '-----';
-        ctx.fillText(noradText, col1X + 52, row1Y);
-
-        ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('Dur:', col1X, row2Y);
-        if (passInfo.aosTime && passInfo.losTime) {
-            const duration = passInfo.losTime - passInfo.aosTime;
-            ctx.fillStyle = this.colors.timeText;
-            ctx.fillText(this._formatDuration(duration), col1X + 35, row2Y);
-        } else {
-            ctx.fillStyle = this.colors.timeText;
-            ctx.fillText('--:--', col1X + 35, row2Y);
-        }
-
-        // === Колонка 2: AOS и LOS времена ===
-        ctx.font = '12px monospace';
-
-        ctx.textAlign = 'left';
-        ctx.fillStyle = this.colors.aosMarker;
-        ctx.fillText('AOS:', col2X, row1Y);
-        ctx.fillStyle = this.colors.timeText;
-        ctx.fillText(this._formatTime(passInfo.aosTime), col2X + 32, row1Y);
-
-        ctx.fillStyle = this.colors.losMarker;
-        ctx.fillText('LOS:', col2X, row2Y);
-        ctx.fillStyle = this.colors.timeText;
-        ctx.fillText(this._formatTime(passInfo.losTime), col2X + 32, row2Y);
-
-        // === Колонка 3: Азимут и Угол места ===
-        ctx.font = 'bold 12px monospace';
-
-        ctx.textAlign = 'left';
-        ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('Az:', col3X, row1Y);
-        ctx.fillStyle = this.colors.infoText;
-        const azText = pos ? pos.az.toFixed(1) + '°' : '---.-°';
-        ctx.fillText(azText, col3X + 25, row1Y);
-
-        ctx.fillStyle = this.colors.infoLabel;
-        ctx.fillText('El:', col3X, row2Y);
-        ctx.fillStyle = this.colors.infoText;
-        const elText = pos ? pos.el.toFixed(1) + '°' : '---.-°';
-        ctx.fillText(elText, col3X + 25, row2Y);
-    };
-
-    /**
      * Обновление фазы анимации
      */
     SkyView.prototype._updateAnimation = function() {
@@ -915,7 +808,6 @@
         this._drawSatelliteAura(); // Круг на заднем плане (до траектории и спутника)
         this._drawTrack();
         this._drawSatellite();
-        this._drawInfo();
     };
 
     /**
@@ -928,6 +820,7 @@
         if (noradId !== undefined) {
             this.satellite.noradId = noradId;
         }
+        this._updateInfoPanelDOM();
     };
 
     /**
@@ -936,7 +829,13 @@
      * @param {number} el - Угол места в градусах
      */
     SkyView.prototype.setSatellitePosition = function(az, el) {
-        this.satellite.currentPos = { az: az, el: el };
+        var a = Number(az);
+        var e = Number(el);
+        if (isNaN(a) || isNaN(e)) {
+            this.satellite.currentPos = null;
+            return;
+        }
+        this.satellite.currentPos = { az: a, el: e };
     };
 
     /**
@@ -944,7 +843,8 @@
      */
     SkyView.prototype.clearTrack = function() {
         this.satellite.track = [];
-        this.passInfo = { aosTime: null, losTime: null, maxElTime: null };
+        this.passInfo = { aosTime: null, losTime: null, maxElTime: null, aosCanvasY: null, losCanvasY: null, aosAz: null, losAz: null };
+        this._updateInfoPanelDOM();
     };
 
     /**
@@ -972,6 +872,7 @@
                 this.passInfo.losTime = visible[visible.length - 1].time;
             }
         }
+        this._updateInfoPanelDOM();
     };
 
     /**
@@ -982,6 +883,43 @@
     SkyView.prototype.setPassTimes = function(aosTime, losTime) {
         this.passInfo.aosTime = aosTime;
         this.passInfo.losTime = losTime;
+        this._updateInfoPanelDOM();
+    };
+
+    /**
+     * Привязка DOM-элементов для текстового блока под графиком (AOS, LOS, Длит., Осталось)
+     * @param {Object} els - { aos, los, dur, remaining } — id строки или HTMLElement
+     */
+    SkyView.prototype.setInfoElements = function(els) {
+        var getEl = function(v) {
+            if (!v) return null;
+            return typeof v === 'string' ? document.getElementById(v) : v;
+        };
+        this._infoEls = {
+            norad: getEl(els.norad),
+            aos: getEl(els.aos),
+            los: getEl(els.los),
+            dur: getEl(els.dur),
+            remaining: getEl(els.remaining)
+        };
+        this._updateInfoPanelDOM();
+    };
+
+    /** Обновление текстового блока под графиком: AOS, LOS, Длит., время до конца сеанса (Осталось) */
+    SkyView.prototype._updateInfoPanelDOM = function() {
+        var e = this._infoEls;
+        if (!e.aos && !e.los && !e.dur && !e.remaining) return;
+        var aosStr = this._formatTime(this.passInfo.aosTime);
+        var losStr = this._formatTime(this.passInfo.losTime);
+        var durMs = (this.passInfo.aosTime && this.passInfo.losTime) ? (this.passInfo.losTime - this.passInfo.aosTime) : 0;
+        var durStr = this._formatDuration(durMs);
+        var remainingMs = this.passInfo.losTime ? this.passInfo.losTime - Date.now() : 0;
+        var remainingStr = remainingMs > 0 ? this._formatDuration(remainingMs) : '—';
+        if (e.norad) e.norad.textContent = this.satellite.noradId ? String(this.satellite.noradId) : '—';
+        if (e.aos) e.aos.textContent = aosStr;
+        if (e.los) e.los.textContent = losStr;
+        if (e.dur) e.dur.textContent = durStr;
+        if (e.remaining) e.remaining.textContent = remainingStr;
     };
 
     /**

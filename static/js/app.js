@@ -56,9 +56,9 @@
             });
         }
 
-        // InfoPanel: сохраняем ссылку на контейнер ДО инициализации SSE,
-        // чтобы ensureSSEAndSubscriptions мог создать InfoPanel с stateManager.
-        const infoPanelEl = document.getElementById('info-panel');
+        // Overlay-панель: сохраняем ссылку ДО инициализации SSE,
+        // чтобы ensureSSEAndSubscriptions мог создать InfoPanel и OverlayPanel.
+        const infoPanelEl = document.getElementById('sat-overlay-panel');
         if (infoPanelEl) {
             window._infoPanelEl = infoPanelEl;
         }
@@ -93,6 +93,63 @@
                 window.initPassesTable();
             }
         }
+
+        // Компактная таблица пролётов в правой панели (/tracking)
+        initRightPanel();
+
+        // Нижняя панель: переключение вкладок + водопад
+        initBottomPanel();
+
+        // ── Нижняя панель: сворачивание (класс на main-wrapper уменьшает высоту строки 2 grid) ──
+        const mainWrapper = document.querySelector('.main-wrapper');
+        const bottomPanel = document.getElementById('bottom-panel');
+        const bottomToggle = document.getElementById('bottom-panel-toggle');
+        if (mainWrapper && bottomPanel && bottomToggle) {
+            const LS_BOTTOM = 'ux.bottomCollapsed';
+            if (localStorage.getItem(LS_BOTTOM) === '1') {
+                bottomPanel.classList.add('bottom-panel--collapsed');
+                mainWrapper.classList.add('bottom-panel-collapsed');
+                bottomToggle.textContent = '▲';
+                bottomToggle.setAttribute('title', 'Развернуть');
+            } else {
+                bottomToggle.setAttribute('title', 'Свернуть');
+            }
+            bottomToggle.addEventListener('click', function() {
+                const collapsed = bottomPanel.classList.toggle('bottom-panel--collapsed');
+                mainWrapper.classList.toggle('bottom-panel-collapsed', collapsed);
+                bottomToggle.textContent = collapsed ? '▲' : '▼';
+                bottomToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
+                localStorage.setItem(LS_BOTTOM, collapsed ? '1' : '0');
+                // После разворота панели — принудительное обновление водопада и шкалы
+                if (!collapsed && window._bottomPanel && typeof window._bottomPanel.refreshWaterfall === 'function') {
+                    requestAnimationFrame(function() {
+                        requestAnimationFrame(function() {
+                            window._bottomPanel.refreshWaterfall();
+                        });
+                    });
+                }
+            });
+        }
+
+        // ── Правая панель: минимизация по ширине (30px), класс на main-wrapper ──
+        const rightPanelWrapper = document.querySelector('.main-wrapper.tracking-page');
+        const rightToggle = document.getElementById('right-panel-toggle');
+        if (rightPanelWrapper && rightToggle) {
+            const LS_RIGHT = 'ux.rightCollapsed';
+            if (localStorage.getItem(LS_RIGHT) === '1') {
+                rightPanelWrapper.classList.add('right-collapsed');
+                rightToggle.textContent = '▶';
+                rightToggle.setAttribute('title', 'Развернуть');
+            } else {
+                rightToggle.setAttribute('title', 'Свернуть');
+            }
+            rightToggle.addEventListener('click', function() {
+                const collapsed = rightPanelWrapper.classList.toggle('right-collapsed');
+                rightToggle.textContent = collapsed ? '▶' : '◀';
+                rightToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
+                localStorage.setItem(LS_RIGHT, collapsed ? '1' : '0');
+            });
+        }
     });
 
     // Инициализация StateManager и SSE Client один раз (подписки и подключение).
@@ -121,9 +178,14 @@
             }
         });
 
-        // InfoPanel — подписывается на stateManager для обновления всех полей.
+        // InfoPanel — обновляет поля #ip-* в overlay-панели через StateManager.
         if (window._infoPanelEl && typeof window.InfoPanel === 'function') {
             window._infoPanel = new window.InfoPanel(window._infoPanelEl, window._stateManager);
+        }
+
+        // OverlayPanel — управляет видимостью overlay-панели (show/hide).
+        if (window._infoPanelEl && typeof window.OverlayPanel === 'function') {
+            window._overlayPanel = new window.OverlayPanel(window._infoPanelEl, window._stateManager);
         }
 
         console.log('[app.js] Подключение к SSE...');
@@ -279,6 +341,30 @@
             });
     }
 
+    // Инициализация нижней панели: вкладки + водопад
+    function initBottomPanel() {
+        if (window._bottomPanel) {
+            window._bottomPanel.destroy();
+            window._bottomPanel = null;
+        }
+        if (document.getElementById('bottom-panel-body') && typeof window.BottomPanel === 'function') {
+            window._bottomPanel = new window.BottomPanel();
+        }
+    }
+
+    // Инициализация компактной таблицы пролётов в правой панели
+    function initRightPanel() {
+        if (window._rightPanelTable) {
+            window._rightPanelTable.destroy();
+            window._rightPanelTable = null;
+        }
+        var tbody = document.getElementById('passes-compact-body');
+        if (tbody && typeof window.RightPanelTable === 'function') {
+            window._rightPanelTable = new window.RightPanelTable();
+            window._rightPanelTable.init();
+        }
+    }
+
     // Initialize canvas elements with placeholder content
     function initCanvasPlaceholders() {
         ensureSSEAndSubscriptions();
@@ -320,10 +406,26 @@
             drawPlaceholder(earthCanvas, 'Earth View', 'Карта мира появится здесь');
         }
 
-        // Sky View — азимутальная проекция неба, данные с SSE
+        // Sky View — азимутальная проекция неба (в правой панели), данные с SSE
         const skyCanvas = document.getElementById('sky-view');
         if (skyCanvas && window.SkyView) {
             window.skyView = new window.SkyView(skyCanvas);
+
+            // Панель информации под графиком: AOS, LOS, Длит., Осталось 
+            window.skyView.setInfoElements({
+                aos: 'skyview-info-aos',
+                los: 'skyview-info-los',
+                dur: 'skyview-info-dur',
+                remaining: 'skyview-info-remaining'
+            });
+
+            // Canvas SkyView всегда 300×300 px — квадратный буфер, окружность без искажений
+            var skySize = 300;
+            if (skyCanvas.width !== skySize || skyCanvas.height !== skySize) {
+                skyCanvas.width = skySize;
+                skyCanvas.height = skySize;
+            }
+
             window.skyView.draw();
 
             // Запуск цикла анимации для SkyView (плавная отрисовка)
@@ -340,18 +442,48 @@
             drawPlaceholder(skyCanvas, '', 'Небесная сфера');
         }
 
-        // Azimuth indicator — данные с SSE
+        // Azimuth indicator — данные с SSE; панель информации отдельно под canvas
         const azCanvas = document.getElementById('azimuth-view');
         if (azCanvas && window.AzimuthIndicator) {
             window.azimuthIndicator = new window.AzimuthIndicator(azCanvas);
-            window.azimuthIndicator.draw();
+            window.azimuthIndicator.setInfoElements({ ant: 'az-info-ant', sat: 'az-info-sat' });
+            const azWrap = azCanvas.parentElement;
+            if (azWrap && typeof ResizeObserver !== 'undefined') {
+                const syncAzSize = function() {
+                    const w = azWrap.clientWidth;
+                    const h = azWrap.clientHeight;
+                    if (w > 0 && h > 0 && window.azimuthIndicator) {
+                        window.azimuthIndicator.resize(w, h);
+                    }
+                };
+                const azRo = new ResizeObserver(syncAzSize);
+                azRo.observe(azWrap);
+                syncAzSize();
+            } else {
+                window.azimuthIndicator.draw();
+            }
         }
 
-        // Elevation indicator — данные с SSE
+        // Elevation indicator — данные с SSE; панель информации отдельно под canvas
         const elCanvas = document.getElementById('elevation-view');
         if (elCanvas && window.ElevationIndicator) {
             window.elevationIndicator = new window.ElevationIndicator(elCanvas);
-            window.elevationIndicator.draw();
+            window.elevationIndicator.setInfoElements({ ant: 'el-info-ant', sat: 'el-info-sat' });
+            const elWrap = elCanvas.parentElement;
+            if (elWrap && typeof ResizeObserver !== 'undefined') {
+                const syncElSize = function() {
+                    const w = elWrap.clientWidth;
+                    const h = elWrap.clientHeight;
+                    if (w > 0 && h > 0 && window.elevationIndicator) {
+                        window.elevationIndicator.resize(w, h);
+                    }
+                };
+                const elRo = new ResizeObserver(syncElSize);
+                elRo.observe(elWrap);
+                syncElSize();
+            } else {
+                window.elevationIndicator.draw();
+            }
         }
 
         // Waterfall placeholder
@@ -440,6 +572,9 @@
                 window.initPassesTable();
             }
         }
+
+        initRightPanel();
+        initBottomPanel();
     });
 
     // Переключение активного класса на табах при клике
@@ -463,9 +598,23 @@
             cancelAnimationFrame(skyViewAnimationId);
         }
 
+        var frameCount = 0;
         function animate() {
             if (window.skyView) {
+                // Синхронизация позиции из state на каждый кадр — спутник не теряется при пропуске событий
+                if (window._stateManager) {
+                    var state = window._stateManager.getActiveState();
+                    if (state && state.position && (state.position.az != null && state.position.el != null)) {
+                        window.skyView.setSatellitePosition(state.position.az, state.position.el);
+                    }
+                }
                 window.skyView.draw();
+                // Раз в секунду обновляем «Осталось» в панели SkyView
+                frameCount++;
+                if (frameCount >= 60) {
+                    frameCount = 0;
+                    window.skyView._updateInfoPanelDOM();
+                }
             }
             skyViewAnimationId = requestAnimationFrame(animate);
         }

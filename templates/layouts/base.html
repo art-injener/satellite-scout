@@ -4,8 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css?v=53">
+    <link rel="stylesheet" href="/static/css/main.css?v=56">
+    <link rel="stylesheet" href="/static/css/overlay-panel.css?v=1">
     <link rel="stylesheet" href="/static/css/info-panel.css?v=5">
+    <link rel="stylesheet" href="/static/css/right-panel.css?v=1">
+    <link rel="stylesheet" href="/static/css/bottom-panel.css?v=1">
     <link rel="stylesheet" href="/static/css/passes-table.css?v=3">
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/htmx-sse.js"></script>
@@ -13,27 +16,142 @@
 <body>
     <!-- Боковое вертикальное меню -->
     <aside class="sidebar">
-        <div class="sidebar-logo" title="SatWatch">🛰️</div>
+        <div class="sidebar-logo" title="SatWatch">
+            <svg class="nav-satellite-icon" viewBox="-20 -20 140 140" width="38" height="38">
+                <style>
+                    @keyframes sat-orbit {
+                        0%, 100% { transform: translateY(0) rotate(0deg); }
+                        50% { transform: translateY(0) rotate(3deg); }
+                    }
+                    @keyframes wave-pulse {
+                        0% { opacity: 0; stroke-width: 2; }
+                        30% { opacity: 1; stroke-width: 4; }
+                        100% { opacity: 0; stroke-width: 2; }
+                    }
+                    @keyframes horn-blink {
+                        0%, 100% { fill: #00d4aa; filter: none; }
+                        50% { fill: #ffffff; filter: drop-shadow(0 0 6px #00d4aa); }
+                    }
+                    .nav-satellite-icon {
+                        animation: sat-orbit 5s ease-in-out infinite;
+                        filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4));
+                    }
+                    .sat-wave-1 { animation: wave-pulse 2s infinite 0s; }
+                    .sat-wave-2 { animation: wave-pulse 2s infinite 0.4s; }
+                    .sat-wave-3 { animation: wave-pulse 2s infinite 0.8s; }
+                    .sat-horn { animation: horn-blink 1.5s infinite; }
+                </style>
+                <g transform="rotate(-45, 50, 50)">
+                    <!-- Connecting arms -->
+                    <rect x="25" y="44" width="50" height="6" fill="#8b919a" stroke="#0a0e14" stroke-width="2.5" />
+                    
+                    <!-- Left panel -->
+                    <rect x="0" y="24" width="30" height="46" rx="3" fill="#00d4aa" stroke="#0a0e14" stroke-width="2.5" />
+                    <path d="M 0 39 L 30 39 M 0 54 L 30 54 M 10 24 L 10 70 M 20 24 L 20 70" stroke="#0a0e14" stroke-width="2" />
+                    
+                    <!-- Right panel -->
+                    <rect x="70" y="24" width="30" height="46" rx="3" fill="#00d4aa" stroke="#0a0e14" stroke-width="2.5" />
+                    <path d="M 70 39 L 100 39 M 70 54 L 100 54 M 80 24 L 80 70 M 90 24 L 90 70" stroke="#0a0e14" stroke-width="2" />
+                    
+                    <!-- Body cap -->
+                    <path d="M 40 17 L 44 4 L 56 4 L 60 17 Z" fill="#8b919a" stroke="#0a0e14" stroke-width="2.5" stroke-linejoin="round" />
+                    
+                    <!-- Body main (удлиненный) -->
+                    <rect x="36" y="17" width="28" height="50" rx="3" fill="#e6e8eb" stroke="#0a0e14" stroke-width="2.5" />
+                    
+                    <!-- Bands -->
+                    <rect x="34" y="24" width="32" height="8" rx="1.5" fill="#222938" stroke="#0a0e14" stroke-width="2.5" />
+                    <circle cx="40" cy="28" r="2" fill="#00d4aa" />
+                    <circle cx="50" cy="28" r="2" fill="#00d4aa" />
+                    <circle cx="60" cy="28" r="2" fill="#00d4aa" />
+                    
+                    <rect x="34" y="48" width="32" height="8" rx="1.5" fill="#222938" stroke="#0a0e14" stroke-width="2.5" />
+                    <circle cx="40" cy="52" r="2" fill="#ffb347" />
+                    <circle cx="50" cy="52" r="2" fill="#ffb347" />
+                    <circle cx="60" cy="52" r="2" fill="#ffb347" />
+
+                    <!-- Dish -->
+                    <path d="M 15 70 Q 50 50 85 70 Q 50 62 15 70 Z" fill="#e6e8eb" stroke="#0a0e14" stroke-width="2.5" stroke-linejoin="round" />
+                    
+                    <!-- Supports -->
+                    <line x1="30" y1="67" x2="50" y2="86" stroke="#0a0e14" stroke-width="2.5" stroke-linecap="round" />
+                    <line x1="70" y1="67" x2="50" y2="86" stroke="#0a0e14" stroke-width="2.5" stroke-linecap="round" />
+                    
+                    <!-- Feed horn -->
+                    <circle cx="50" cy="86" r="4.5" class="sat-horn" stroke="#0a0e14" stroke-width="2" />
+                    
+                    <!-- Waves -->
+                    <path d="M 41.5 94.5 A 12 12 0 0 0 58.5 94.5" class="sat-wave-1" stroke="#00d4aa" fill="none" stroke-linecap="round" />
+                    <path d="M 34.5 101.5 A 22 22 0 0 0 65.5 101.5" class="sat-wave-2" stroke="#00d4aa" fill="none" stroke-linecap="round" />
+                    <path d="M 27.4 108.6 A 32 32 0 0 0 72.6 108.6" class="sat-wave-3" stroke="#00d4aa" fill="none" stroke-linecap="round" />
+                </g>
+            </svg>
+        </div>
         <nav class="sidebar-nav" role="tablist">
-            <!-- Вкладка "Сеанс" -->
-            <a href="/tracking" 
-               class="sidebar-tab{{if eq .ActiveTab "tracking"}} active{{end}}" 
-               role="tab"
-               title="Сеанс">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="3"/>
-                    <path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
-                    <path d="M4.22 4.22l2.83 2.83M16.95 16.95l2.83 2.83M4.22 19.78l2.83-2.83M16.95 7.05l2.83-2.83"/>
-                </svg>
-            </a>
-            <!-- Вкладка "План сеансов"-->
+            <!-- Группа "Сеанс" + аккордеон (Антенна / Спектр / ТМИ) -->
+            <div class="sidebar-group">
+                <a href="/tracking" 
+                   class="sidebar-tab{{if eq .ActiveTab "tracking"}} active{{end}}" 
+                   role="tab"
+                   title="Сеанс">
+                    <!-- Радар/локатор — символ активного сеанса -->
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                        <circle cx="12" cy="12" r="9" opacity="0.3"/>
+                        <circle cx="12" cy="12" r="6" opacity="0.5"/>
+                        <circle cx="12" cy="12" r="3"/>
+                        <line x1="12" y1="12" x2="18" y2="6" stroke-width="2"/>
+                        <circle cx="17" cy="7" r="2" fill="currentColor"/>
+                    </svg>
+                </a>
+                {{if eq .ActiveTab "tracking"}}
+                <div class="sidebar-accordion" id="sidebar-panel-tools">
+                    <button type="button" class="sidebar-accordion__btn" data-tab="antenna" title="Антенна" aria-label="Антенна">
+                        <!-- Lucide: Radio Tower -->
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9"/>
+                            <path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5"/>
+                            <circle cx="12" cy="9" r="2"/>
+                            <path d="M16.2 4.7a6.14 6.14 0 0 1 .8 7.5"/>
+                            <path d="M19.1 1.9a10.3 10.3 0 0 1 0 14.2"/>
+                            <path d="M12 11v10"/>
+                            <path d="M8 21h8"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="sidebar-accordion__btn" data-tab="spectrum" title="Спектр" aria-label="Спектр">
+                        <!-- Спектр/волна -->
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                            <path d="M2 12c2-3 4-6 6 0s4 3 6 0 4-3 6 0 2 3 2 0" stroke-width="2" stroke-linecap="round"/>
+                            <line x1="2" y1="17" x2="22" y2="17" opacity="0.4"/>
+                            <line x1="2" y1="7" x2="22" y2="7" opacity="0.4"/>
+                        </svg>
+                    </button>
+                    <button type="button" class="sidebar-accordion__btn" data-tab="tmi" title="ТМИ" aria-label="ТМИ">
+                        <!-- Терминал/данные -->
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                            <rect x="3" y="4" width="18" height="16" rx="2"/>
+                            <path d="M7 9l3 3-3 3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                            <line x1="13" y1="15" x2="17" y2="15" stroke-linecap="round"/>
+                        </svg>
+                    </button>
+                </div>
+                {{end}}
+            </div>
+            
+            <div class="sidebar-divider"></div>
+            
+            <!-- Вкладка "План сеансов" -->
             <a href="/passes" 
                class="sidebar-tab{{if eq .ActiveTab "passes"}} active{{end}}" 
                role="tab"
                title="План сеансов">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                    <circle cx="12" cy="12" r="10"/>
-                    <polyline points="12 6 12 12 16 14"/>
+                <!-- Календарь с часами -->
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                    <rect x="3" y="4" width="18" height="18" rx="2"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <circle cx="12" cy="15" r="3"/>
+                    <polyline points="12 14 12 15 13.5 16" stroke-linecap="round"/>
                 </svg>
             </a>
             <!-- Вкладка "Приёмник" - закомментирована, будет реализована в PHASE-11
@@ -66,7 +184,7 @@
     </aside>
 
     <!-- Основная область -->
-    <div class="main-wrapper">
+    <div class="main-wrapper{{if eq .ActiveTab "tracking"}} tracking-page{{end}}">
         <main class="main" role="tabpanel">
             {{if eq .ActiveTab "tracking"}}
                 {{template "tracking-content" .}}
@@ -78,15 +196,12 @@
                 {{template "simulation-content" .}}
             {{end}}
         </main>
-
+        {{if eq .ActiveTab "tracking"}}
+            {{template "tracking-right-panel" .}}
+            {{template "tracking-bottom-panel" .}}
+        {{end}}
         <footer class="station-footer" id="station-footer">
             <div class="station-footer__left">
-                <span class="station-footer__item" id="sf-city" title="Город наблюдателя">Ростов-на-Дону</span>
-                <span class="station-footer__item" id="sf-coords" title="Геокоординаты">47.24°N 39.72°E</span>
-                <span class="station-footer__item station-footer__time" id="sf-local" title="Местное время">MSK --:--:--</span>
-                <span class="station-footer__item station-footer__time" id="sf-utc" title="Время UTC">UTC --:--:--</span>
-            </div>
-            <div class="station-footer__right">
                 <span class="station-footer__badge station-footer__mode" id="sf-mode" title="Режим работы">Режим: ОБЗОР</span>
                 <span class="station-footer__badge station-footer__sdr" id="sf-sdr" title="Подключение SDR">SDR: ---</span>
                 <span class="station-footer__badge sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Подключение к бэкенду">
@@ -98,6 +213,12 @@
                     </svg>
                     <span class="sse-status__label" id="connection-status-label">Отключено</span>
                 </span>
+            </div>
+            <div class="station-footer__right">
+                <span class="station-footer__item" id="sf-city" title="Город наблюдателя">Ростов-на-Дону</span>
+                <span class="station-footer__item" id="sf-coords" title="Геокоординаты">47.24°N 39.72°E</span>
+                <span class="station-footer__item station-footer__time" id="sf-local" title="Местное время">MSK --:--:--</span>
+                <span class="station-footer__item station-footer__time" id="sf-utc" title="Время UTC">UTC --:--:--</span>
             </div>
         </footer>
     </div>
@@ -111,7 +232,10 @@
     <script src="/static/js/satellite-state.js?v=3"></script>
     <script src="/static/js/sse-client.js?v=2"></script>
     <script src="/static/js/info-panel.js?v=3"></script>
+    <script src="/static/js/overlay-panel.js?v=1"></script>
+    <script src="/static/js/right-panel.js?v=1"></script>
+    <script src="/static/js/bottom-panel.js?v=1"></script>
     <script src="/static/js/passes-table.js?v=3"></script>
-    <script src="/static/js/app.js?v=55"></script>
+    <script src="/static/js/app.js?v=58"></script>
 </body>
 </html>

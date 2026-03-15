@@ -1,0 +1,131 @@
+/* ===== Overlay-панель параметров КА =====
+   Полупрозрачная панель поверх карты в левом верхнем углу.
+   Видна в режиме «Сеанс», скрыта в «Обзор».
+*/
+
+.overlay-panel {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 200px;
+    background: rgba(10, 14, 20, 0.88);
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-md);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    z-index: 20;
+    display: none;
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
+    user-select: none;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+}
+
+.overlay-panel--visible {
+    display: block;
+}
+
+/* Заголовок */
+.overlay-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 4px 8px;
+    border-bottom: 1px solid rgba(0, 212, 170, 0.25);
+    height: 24px;
+}
+
+.overlay-panel__title {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+}
+
+.overlay-panel__close {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    padding: 0 2px;
+    transition: color 0.15s ease;
+}
+
+.overlay-panel__close:hover {
+    color: var(--text-primary);
+}
+
+/* Тело панели — компактно по контенту */
+.overlay-panel__body {
+    padding: 2px 0;
+}
+
+/* Группа параметров (Спутник, Геоданные, Орбита, Пролёт, Радиолиния) */
+.overlay-group {
+    padding: 3px 8px;
+    border-bottom: 1px solid rgba(42, 52, 68, 0.6);
+}
+
+.overlay-group:last-child {
+    border-bottom: none;
+}
+
+/* Строка label | value */
+.overlay-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 1px 0;
+    gap: 4px;
+    line-height: 1.55;
+}
+
+.overlay-label {
+    color: var(--text-secondary);
+    font-size: 10px;
+    flex-shrink: 0;
+    min-width: 52px;
+}
+
+.overlay-value {
+    color: var(--accent-primary);
+    font-size: 11px;
+    font-weight: 500;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Кнопка «КА» — показать параметры (видна, когда overlay закрыт вручную) */
+.overlay-panel__restore {
+    display: none;
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    z-index: 19;
+    padding: 4px 10px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    background: rgba(10, 14, 20, 0.88);
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.overlay-panel__restore:hover {
+    background: rgba(0, 212, 170, 0.15);
+    color: var(--text-primary);
+}
+
+.earth-view-container.overlay-manually-closed .overlay-panel__restore {
+    display: block;
+}

@@ -1,0 +1,395 @@
+/* ===== Нижняя панель: вкладки Антенна / Спектр / ТМИ ===== */
+
+/* Общий контейнер вкладки — на всю ширину и высоту тела панели */
+.bp-pane {
+    flex: 1;
+    display: flex;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.bp-pane--hidden {
+    display: none !important;
+}
+
+/* ===== Вкладка: Антенна ===== */
+
+/* Компоновка: Az (квадрат) | Водопад (1fr) | El (квадрат). stretch — контейнер водопада на всю высоту, шапка и шкала сверху */
+#bp-pane-antenna {
+    gap: 4px;
+    padding: 4px;
+    align-items: stretch;
+    flex-direction: row;
+}
+
+/* Контейнер Az/El: та же высота блока, что у SkyView (--indicator-block-height) */
+.bp-az-container,
+.bp-el-container {
+    width: var(--indicator-graph-size);
+    height: var(--indicator-block-height);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+/* Область графика — фиксированный квадрат 300×300 */
+.bp-indicator-canvas-wrap {
+    width: var(--indicator-graph-size);
+    height: var(--indicator-graph-size);
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bp-indicator-canvas-wrap canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Специфика Az/El: фон и ширина (общая высота/шрифт — в main.css) */
+.bp-indicator-info {
+    flex-shrink: 0;
+    width: 100%;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-color);
+}
+
+/* Аз. ант. — слева, Аз. КА — справа (аналогично для El) */
+.bp-indicator-info__row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 100%;
+    line-height: 1;
+}
+
+.bp-indicator-info__group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.bp-indicator-info__label {
+    color: var(--text-muted);
+}
+
+.bp-indicator-info__value {
+    font-variant-numeric: tabular-nums;
+    color: #00a8ff;
+}
+
+/* Контейнер водопада — занимает оставшееся место; min-height чтобы область не схлопывалась до 0 до layout */
+.bp-waterfall-container {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 100px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    position: relative;
+}
+
+.bp-waterfall-header {
+    height: 20px;
+    line-height: 20px;
+    padding: 0 8px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.bp-waterfall-title {
+    flex-shrink: 0;
+}
+
+.bp-wf-freq {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.bp-wf-res {
+    flex-shrink: 0;
+    color: var(--text-muted);
+}
+
+.bp-wf-sep {
+    color: var(--border-color);
+    margin: 0 3px;
+}
+
+/* Полоса шкалы частот над водопадом */
+.bp-freq-scale-wrap {
+    height: 18px;
+    flex-shrink: 0;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.bp-freq-scale-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Canvas водопада — на всю доступную высоту контейнера */
+.bp-waterfall-canvas {
+    flex: 1;
+    display: block;
+    width: 100%;
+    min-height: 60px;
+}
+
+/* ===== Вкладка: Спектр ===== */
+
+/* Компоновка: 70% (FFT+Водопад) | 30% (SDR панель) */
+#bp-pane-spectrum {
+    gap: 4px;
+    padding: 4px;
+    align-items: stretch;
+}
+
+/* Левая часть: FFT + водопад */
+.bp-spectrum-charts {
+    flex: 7;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.bp-fft-container {
+    flex: 4;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    min-height: 0;
+}
+
+.bp-specwf-container {
+    flex: 6;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    min-height: 0;
+}
+
+.bp-chart-label {
+    height: 20px;
+    line-height: 20px;
+    padding: 0 8px;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+}
+
+.bp-stub-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* Правая часть: настройки SDR + статистика */
+.bp-sdr-panel {
+    flex: 3;
+    min-width: 200px;
+    max-width: 280px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+.bp-sdr-section {
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px 8px;
+    flex-shrink: 0;
+}
+
+.bp-sdr-title {
+    font-family: var(--font-mono);
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 6px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.bp-sdr-field {
+    margin-bottom: 5px;
+}
+
+.bp-sdr-label {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    color: var(--text-muted);
+    margin-bottom: 2px;
+}
+
+.bp-input {
+    width: 100%;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 2px 5px;
+    box-sizing: border-box;
+}
+
+.bp-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.bp-range {
+    width: 100%;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.bp-sdr-btn {
+    width: 100%;
+    margin-top: 4px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--accent-primary);
+    border-radius: var(--radius-sm);
+    color: var(--accent-primary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.12s ease;
+}
+
+.bp-sdr-btn:hover {
+    background: rgba(0, 212, 170, 0.12);
+}
+
+/* Строки статистики демодулятора */
+.bp-stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 0;
+    border-bottom: 1px solid rgba(42, 52, 68, 0.3);
+}
+
+.bp-stat-row:last-child {
+    border-bottom: none;
+}
+
+.bp-stat-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.bp-stat-val {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.bp-stat-val--no {
+    color: var(--accent-danger);
+}
+
+.bp-stat-val--yes {
+    color: var(--accent-primary);
+}
+
+/* ===== Вкладка: ТМИ ===== */
+
+#bp-pane-tmi {
+    flex-direction: column;
+    padding: 0;
+}
+
+.bp-tmi-table-wrap {
+    flex: 1;
+    overflow-y: auto;
+    overflow-x: auto;
+    min-height: 0;
+}
+
+.bp-tmi-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.bp-tmi-table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.bp-tmi-table th {
+    padding: 4px 8px;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.bp-tmi-table td {
+    padding: 3px 8px;
+    color: var(--text-secondary);
+    border-bottom: 1px solid rgba(42, 52, 68, 0.3);
+    white-space: nowrap;
+}
+
+.bp-tmi-empty {
+    text-align: center !important;
+    color: var(--text-muted) !important;
+    padding: 20px 8px !important;
+    font-style: italic;
+}

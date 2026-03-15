@@ -1,0 +1,267 @@
+/* ===== Правая панель: таблица пролётов + кнопки ===== */
+
+/* Компактная таблица пролётов — занимает всю доступную высоту правой панели */
+.passes-compact {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.passes-compact__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    table-layout: fixed;
+}
+
+.passes-compact__table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.passes-compact__table th {
+    padding: 3px 6px;
+    font-size: 9px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    text-align: left;
+    white-space: nowrap;
+}
+
+.passes-compact__table th:nth-child(1) { width: 38%; }
+.passes-compact__table th:nth-child(2) { width: 22%; }
+.passes-compact__table th:nth-child(3) { width: 18%; }
+.passes-compact__table th:nth-child(4) { width: 22%; }
+
+.passes-compact__table td {
+    padding: 3px 6px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-secondary);
+    border-bottom: 1px solid rgba(42, 52, 68, 0.4);
+}
+
+/* Строка таблицы */
+.pc-row {
+    cursor: pointer;
+    transition: background 0.1s ease;
+    height: 26px;
+}
+
+.pc-row:hover {
+    background: var(--bg-tertiary);
+}
+
+/* Выделенная строка */
+.pc-row--selected {
+    background: rgba(0, 168, 255, 0.1);
+}
+
+/* Текущий КА — бирюзовый левый бордер */
+.pc-row--active {
+    border-left: 3px solid var(--accent-primary);
+}
+
+.pc-row--active td:first-child {
+    padding-left: 3px;
+}
+
+/* Длительность пролёта */
+.pc-duration {
+    font-variant-numeric: tabular-nums;
+    color: var(--text-secondary);
+}
+
+/* Имя КА */
+.pc-name {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.pc-row--active .pc-name {
+    color: var(--accent-primary);
+}
+
+/* Обратный отсчёт */
+.pc-countdown {
+    font-variant-numeric: tabular-nums;
+}
+
+.pc-countdown--soon {
+    color: var(--accent-warning);
+}
+
+.pc-countdown--now {
+    color: var(--accent-primary);
+    font-weight: 700;
+}
+
+/* Пустое состояние */
+.pc-empty {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 11px;
+    padding: 12px 8px;
+}
+
+/* ===== Кнопки управления (привязаны к ширине панели/таблицы) ===== */
+.right-panel__controls {
+    display: flex;
+    gap: 6px;
+    padding: 6px;
+    flex-shrink: 0;
+    width: 100%;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.rp-ctrl {
+    flex: 1;
+    min-width: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    padding: 6px 8px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    white-space: nowrap;
+    transition: all 0.12s ease;
+    line-height: 1;
+}
+
+.rp-ctrl:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+}
+
+.rp-ctrl:disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+/* Checkbox Авто */
+.rp-ctrl--auto {
+    cursor: pointer;
+}
+
+.rp-ctrl--auto input[type="checkbox"] {
+    accent-color: var(--accent-primary);
+    margin: 0;
+    width: 16px;
+    height: 16px;
+}
+
+/* Кнопка Сопровождение */
+.rp-ctrl--track:not(:disabled):hover {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+/* Кнопка Сброс */
+.rp-ctrl--reset:not(:disabled):hover {
+    color: var(--accent-danger);
+    border-color: var(--accent-danger);
+}
+
+/* ===== SkyView: расширенный блок по ширине; центровка по правой панели ===== */
+.right-panel__skyview {
+    width: var(--skyview-block-width);
+    height: var(--indicator-block-height);
+    flex-shrink: 0;
+    align-self: center;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    margin-top: 4px;
+}
+
+/* Окно отрисовки — квадрат 300×300, не растягивать по ширине блока, центрировать */
+.right-panel__skyview-canvas {
+    width: var(--indicator-graph-size);
+    height: var(--indicator-graph-size);
+    flex-shrink: 0;
+    flex-grow: 0;
+    align-self: center;
+}
+
+.right-panel__skyview-canvas canvas {
+    display: block;
+    width: var(--indicator-graph-size);
+    height: var(--indicator-graph-size);
+    background: var(--bg-primary);
+}
+
+/* Специфика SkyView: фон и ширина (общая высота/шрифт — в main.css) */
+.skyview-info {
+    width: 100%;
+    flex-shrink: 0;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-color);
+}
+
+/* Вся строка в одну линию: AOS | LOS | Ост. */
+.skyview-info__row {
+    display: flex;
+    flex-wrap: nowrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0 16px;
+    width: 100%;
+    height: 100%;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.skyview-info__group {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex-shrink: 0;
+}
+
+.skyview-info__group .skyview-info__value {
+    min-width: 0;
+}
+
+/* Шрифт подписей (AOS, LOS, Длит.) — размер наследуется от .skyview-info */
+.skyview-info__label {
+    font-family: var(--font-mono);
+}
+
+.skyview-info__label--aos {
+    color: #00cc00; /* зелёный — подпись AOS */
+}
+
+.skyview-info__label--los {
+    color: #ff4444; /* красный — подпись LOS */
+}
+
+.skyview-info__label--dur,
+.skyview-info__label--rem {
+    color: var(--text-muted); /* подпись Длит., Осталось */
+}
+
+.skyview-info__value {
+    font-variant-numeric: tabular-nums;
+    color: #00a8ff; /* синий — значения */
+}

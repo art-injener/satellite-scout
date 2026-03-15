@@ -24,12 +24,11 @@
             this.ctx = canvas.getContext('2d');
         }
 
-        // Высота инфо-панели внизу canvas (как в SkyView)
-        this.infoPanelHeight = 30;
-
+        // Круг на весь canvas (максимальный масштаб)
+        this.infoPanelHeight = 0;
         this.centerX = this.logicalWidth / 2;
-        this.centerY = (this.logicalHeight - this.infoPanelHeight) / 2;
-        this.radius = Math.min(this.logicalWidth, this.logicalHeight - this.infoPanelHeight) / 2 - 25;
+        this.centerY = this.logicalHeight / 2;
+        this.radius = Math.min(this.logicalWidth, this.logicalHeight) / 2 - 25;
         this.currentAzimuth = 0;
 
         // Позиция спутника (null = нет данных)
@@ -56,7 +55,33 @@
         };
 
         this.antennaScale = this.radius / 100 * 0.95;
+
+        this._infoEls = { ant: null, sat: null };
     }
+
+    /**
+     * Подстройка размера canvas под контейнер (квадрат по меньшей стороне)
+     * @param {number} w - ширина
+     * @param {number} h - высота
+     */
+    AzimuthIndicator.prototype.resize = function(w, h) {
+        const size = Math.min(w, h);
+        if (size <= 0) { return; }
+        this.logicalWidth = size;
+        this.logicalHeight = size;
+        this.centerX = size / 2;
+        this.centerY = size / 2;
+        this.radius = size / 2 - 25;
+        this.antennaScale = this.radius / 100 * 0.95;
+
+        if (window.CanvasUtils) {
+            this.ctx = window.CanvasUtils.setupHiDPICanvas(this.canvas, size, size);
+        } else {
+            this.canvas.width = size;
+            this.canvas.height = size;
+        }
+        this.draw();
+    };
 
     AzimuthIndicator.prototype.degToRad = function(deg) {
         return deg * Math.PI / 180;
@@ -204,66 +229,24 @@
     };
 
     /**
-     * Информационная панель внизу canvas — 3 колонки в одну строку
-     * Колонка 1: NORAD ID
-     * Колонка 2: Az ант.
-     * Колонка 3: Az КА
+     * Привязка DOM-элементов панели информации (Az ант., Az КА)
      */
-    AzimuthIndicator.prototype._drawInfo = function() {
-        const ctx = this.ctx;
-        const w = this.logicalWidth;
-        const h = this.logicalHeight;
-        const panelHeight = this.infoPanelHeight;
-        const panelY = h - panelHeight;
+    AzimuthIndicator.prototype.setInfoElements = function(els) {
+        var getEl = function(v) {
+            if (!v) return null;
+            return typeof v === 'string' ? document.getElementById(v) : v;
+        };
+        this._infoEls = { ant: getEl(els.ant), sat: getEl(els.sat) };
+        this._updateInfoPanelDOM();
+    };
 
-        const panelPadding = 6;
-        const cornerRadius = 6;
-
-        ctx.beginPath();
-        if (ctx.roundRect) {
-            ctx.roundRect(panelPadding, panelY + 2, w - panelPadding * 2, panelHeight - 4, cornerRadius);
-        } else {
-            ctx.rect(panelPadding, panelY + 2, w - panelPadding * 2, panelHeight - 4);
-        }
-        ctx.fillStyle = 'rgba(20, 30, 45, 0.9)';
-        ctx.fill();
-        ctx.strokeStyle = '#006666';
-        ctx.lineWidth = 1;
-        ctx.stroke();
-
-        const rowY = panelY + panelHeight / 2;
-
-        // 3 колонки с фиксированными позициями
-        const col1X = panelPadding + 10; // NORAD слева
-        const col2X = col1X + 70; // Az ант. (отступ 70px от NORAD, было 90px)
-        const col3X = col2X + 110; // Az КА (отступ 110px от Az ант., было 115px)
-
-        ctx.font = 'bold 11px monospace';
-        ctx.textBaseline = 'middle';
-
-        // Колонка 1: NORAD ID (слева)
-        ctx.textAlign = 'left';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('ID:', col1X, rowY);
-        ctx.fillStyle = '#00d4aa';
-        const noradText = this.noradId ? String(this.noradId) : '-----';
-        ctx.fillText(noradText, col1X + ctx.measureText('ID:').width + 3, rowY); // +3px минимальный отступ
-
-        // Колонка 2: Az ант. (центр-слева)
-        ctx.textAlign = 'left';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Az ант.: ', col2X, rowY);
-        ctx.fillStyle = '#00d4aa';
-        const azAntVal = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---';
-        ctx.fillText(azAntVal, col2X + ctx.measureText('Az ант.: ').width, rowY);
-
-        // Колонка 3: Az КА (с отступом от col2)
-        const azSatVal = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---';
-        ctx.textAlign = 'left';
-        ctx.fillStyle = '#ffffff';
-        ctx.fillText('Az КА: ', col3X, rowY);
-        ctx.fillStyle = '#00d4aa';
-        ctx.fillText(azSatVal, col3X + ctx.measureText('Az КА: ').width, rowY);
+    AzimuthIndicator.prototype._updateInfoPanelDOM = function() {
+        var e = this._infoEls;
+        if (!e.ant && !e.sat) return;
+        var antStr = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---°';
+        var satStr = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---°';
+        if (e.ant) e.ant.textContent = antStr;
+        if (e.sat) e.sat.textContent = satStr;
     };
 
     /**
@@ -287,7 +270,7 @@
             this._drawOutOfViewMessage();
         }
 
-        this._drawInfo();
+        this._updateInfoPanelDOM();
     };
 
     /**
@@ -346,6 +329,7 @@
         this.satelliteAzimuth = (az !== null && az !== undefined)
             ? ((az % 360) + 360) % 360
             : null;
+        this._updateInfoPanelDOM();
     };
 
     /**

@@ -1,97 +1,67 @@
 {{define "tracking-content"}}
-<div class="tracking-layout">
-    <!-- Левая колонка: карта + информация о спутнике -->
-    <section class="map-column">
+<!-- Левая колонка: карта с оверлеем параметров КА слева поверх карты -->
+<div class="tracking-left" id="tracking-layout">
+    <section class="map-area">
         <div class="earth-view-container">
             <canvas id="earth-view" width="800" height="400"></canvas>
-            <!-- Оверлей при смене спутника -->
+            <!-- Оверлей при смене спутника (loading spinner) -->
             <div id="tracking-overlay" class="tracking-overlay hidden">
                 <div class="tracking-overlay-content">
                     <div class="tracking-spinner"></div>
-                    <div class="tracking-overlay-text">
-                        Берём на сопровождение
-                    </div>
+                    <div class="tracking-overlay-text">Берём на сопровождение</div>
                     <div class="tracking-overlay-sat" id="tracking-overlay-sat">
                         NORAD <span id="tracking-overlay-norad">---</span>
                     </div>
                     <div class="tracking-overlay-name" id="tracking-overlay-name">---</div>
                 </div>
             </div>
-        </div>
-        <!-- InfoPanel: столбики с параметрами спутника -->
-        <div class="info-panel" id="info-panel">
-            <!-- 5 столбиков-карточек -->
-            <div class="info-panel__columns">
-                <!-- Столбик 1: Спутник -->
-                <div class="info-card">
-                    <div class="info-card__title">Спутник</div>
-                    <div class="info-card__body">
-                        <div class="info-row"><span class="info-label">NORAD</span><span class="info-value" id="ip-norad">---</span></div>
-                        <div class="info-row"><span class="info-label">Имя</span><span class="info-value" id="ip-name">---</span></div>
-                        <div class="info-row"><span class="info-label">Группа</span><span class="info-value" id="ip-group">---</span></div>
-                        <button class="info-panel__track-btn" id="btn-track" title="Взять на сопровождение">
-                            <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2">
-                                <circle cx="12" cy="12" r="3"/><path d="M12 1v4M12 19v4M1 12h4M19 12h4"/>
-                            </svg>
-                            Сопровождение
-                        </button>
+            <!-- Overlay-панель параметров КА — слева поверх карты -->
+            <div class="overlay-panel" id="sat-overlay-panel">
+                <div class="overlay-panel__header">
+                    <span class="overlay-panel__title">КА</span>
+                    <button class="overlay-panel__close" id="overlay-panel-close" title="Скрыть">×</button>
+                </div>
+                <div class="overlay-panel__body">
+                    <!-- Группа: Спутник -->
+                    <div class="overlay-group">
+                        <div class="overlay-row"><span class="overlay-label">NORAD</span><span class="overlay-value" id="ip-norad">---</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Имя</span><span class="overlay-value" id="ip-name">---</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Группа</span><span class="overlay-value" id="ip-group">---</span></div>
+                    </div>
+                    <!-- Группа: Геоданные -->
+                    <div class="overlay-group">
+                        <div class="overlay-row"><span class="overlay-label">Lon</span><span class="overlay-value" id="ip-lon">---.--°</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Lat</span><span class="overlay-value" id="ip-lat">---.--°</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Az</span><span class="overlay-value" id="ip-az">---°</span></div>
+                        <div class="overlay-row"><span class="overlay-label">El</span><span class="overlay-value" id="ip-el">---°</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Alt</span><span class="overlay-value" id="ip-alt">--- km</span></div>
+                    </div>
+                    <!-- Группа: Орбита -->
+                    <div class="overlay-group">
+                        <div class="overlay-row"><span class="overlay-label">Виток</span><span class="overlay-value" id="ip-orbit">#---</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Период</span><span class="overlay-value" id="ip-period">---</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Наклон</span><span class="overlay-value" id="ip-incl">---°</span></div>
+                    </div>
+                    <!-- Группа: Пролёт -->
+                    <div class="overlay-group">
+                        <div class="overlay-row"><span class="overlay-label">AOS</span><span class="overlay-value" id="ip-aos">--:--:--</span></div>
+                        <div class="overlay-row"><span class="overlay-label">TCA</span><span class="overlay-value" id="ip-tca">--:--:--</span></div>
+                        <div class="overlay-row"><span class="overlay-label">LOS</span><span class="overlay-value" id="ip-los">--:--:--</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Длит.</span><span class="overlay-value" id="ip-dur">--:--</span></div>
+                    </div>
+                    <!-- Группа: Радиолиния -->
+                    <div class="overlay-group">
+                        <div class="overlay-row"><span class="overlay-label">ТМИ</span><span class="overlay-value" id="ip-tmi">--- MHz</span></div>
+                        <div class="overlay-row"><span class="overlay-label">Downlink</span><span class="overlay-value" id="ip-downlink">--- MHz</span></div>
                     </div>
                 </div>
-                <!-- Столбик 2: Геоданные -->
-                <div class="info-card">
-                    <div class="info-card__title">Геоданные</div>
-                    <div class="info-card__body">
-                        <div class="info-row"><span class="info-label">Lon</span><span class="info-value" id="ip-lon">---.--°</span></div>
-                        <div class="info-row"><span class="info-label">Lat</span><span class="info-value" id="ip-lat">---.--°</span></div>
-                        <div class="info-row"><span class="info-label">Az</span><span class="info-value" id="ip-az">---°</span></div>
-                        <div class="info-row"><span class="info-label">El</span><span class="info-value" id="ip-el">---°</span></div>
-                        <div class="info-row"><span class="info-label">Alt</span><span class="info-value" id="ip-alt">--- km</span></div>
-                    </div>
-                </div>
-                <!-- Столбик 3: Орбита -->
-                <div class="info-card">
-                    <div class="info-card__title">Орбита</div>
-                    <div class="info-card__body">
-                        <div class="info-row"><span class="info-label">Виток</span><span class="info-value" id="ip-orbit">#---</span></div>
-                        <div class="info-row"><span class="info-label">Период</span><span class="info-value" id="ip-period">#---</span></div>
-                        <div class="info-row"><span class="info-label">Склонение</span><span class="info-value" id="ip-incl">#---°</span></div>
-                        <div class="info-row"><span class="info-label">Статус</span><span class="info-value" id="ip-status">--</span></div>
-                    </div>
-                </div>
-                <!-- Столбик 4: Пролёт -->
-                <div class="info-card">
-                    <div class="info-card__title">Пролёт</div>
-                    <div class="info-card__body">
-                        <div class="info-row"><span class="info-label">AOS</span><span class="info-value" id="ip-aos">--:--:--</span></div>
-                        <div class="info-row"><span class="info-label">TCA</span><span class="info-value" id="ip-tca">--:--:--</span></div>
-                        <div class="info-row"><span class="info-label">LOS</span><span class="info-value" id="ip-los">--:--:--</span></div>
-                        <div class="info-row"><span class="info-label">Длительность</span><span class="info-value" id="ip-dur">--:--</span></div>
-                    </div>
-                </div>
-                <!-- Столбик 5: Радиотехнические характеристики радиолинии-->
-                <div class="info-card">
-                    <div class="info-card__title">Радиолиния</div>
-                    <div class="info-card__body">
-                        <div class="info-row"><span class="info-label">ТМИ</span><span class="info-value" id="ip-tmi">--- MHz</span></div>
-                        <div class="info-row"><span class="info-label">Uplink</span><span class="info-value" id="ip-uplink">--- MHz</span></div>
-                        <div class="info-row"><span class="info-label">Downlink</span><span class="info-value" id="ip-downlink">--- MHz</span></div>
-                        <div class="info-row"><span class="info-label">Модуляция</span><span class="info-value" id="ip-mod">---</span></div>
-                    </div>
-                </div>
+                <!-- Скрытые элементы: совместимость с InfoPanel (ip-status, ip-uplink, ip-mod) -->
+                <span style="display:none" id="ip-status"></span>
+                <span style="display:none" id="ip-uplink"></span>
+                <span style="display:none" id="ip-mod"></span>
             </div>
-        </div>
-    </section>
-
-    <!-- Правая колонка: графики в вертикальный столбик -->
-    <section class="charts-column">
-        <div class="azimuth-container">
-            <canvas id="azimuth-view" width="300" height="300"></canvas>
-        </div>
-        <div class="sky-view-container">
-            <canvas id="sky-view" width="300" height="350"></canvas>
-        </div>
-        <div class="elevation-container">
-            <canvas id="elevation-view" width="300" height="280"></canvas>
+            <!-- Кнопка восстановления overlay (видна, когда панель закрыта вручную) -->
+            <button type="button" class="overlay-panel__restore" id="overlay-panel-restore" title="Показать параметры КА">КА</button>
         </div>
     </section>
 </div>
@@ -109,4 +79,192 @@
         </div>
     </div>
 </div>
+{{end}}
+
+{{define "tracking-right-panel"}}
+<!-- Боковая панель: таблица пролётов + SkyView, на всю высоту окна -->
+<section class="right-panel" id="right-panel">
+    <div class="panel-header">
+        <span class="panel-header__title">ПЛАН СЕАНСОВ</span>
+        <button class="panel-collapse-btn" id="right-panel-toggle" title="Свернуть">◀</button>
+    </div>
+    <div class="right-panel__body">
+        <div class="passes-compact" id="passes-compact">
+            <table class="passes-compact__table">
+                <thead>
+                    <tr>
+                        <th>КА</th>
+                        <th>AOS</th>
+                        <th>Длит.</th>
+                        <th>T−</th>
+                    </tr>
+                </thead>
+                <tbody id="passes-compact-body"></tbody>
+            </table>
+        </div>
+        <div class="right-panel__controls">
+            <label class="rp-ctrl rp-ctrl--auto" title="Автосопровождение ближайшего КА">
+                <input type="checkbox" id="rp-auto" checked>
+                <span>Авто</span>
+            </label>
+            <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Взять на сопровождение">⊕ Сопров.</button>
+            <button class="rp-ctrl rp-ctrl--reset" id="rp-reset" disabled title="Снять с сопровождения">✕ Сброс</button>
+        </div>
+        <!-- SkyView: окружность 300×300 px + отдельная панель информации (не влияет на размер окна отрисовки) -->
+        <div class="right-panel__skyview" id="right-panel-skyview">
+            <div class="right-panel__skyview-canvas">
+                <canvas id="sky-view" width="300" height="300"></canvas>
+            </div>
+            <div class="skyview-info" id="skyview-info">
+                <div class="skyview-info__row">
+                    <div class="skyview-info__group">
+                        <span class="skyview-info__label skyview-info__label--aos">AOS:</span>
+                        <span class="skyview-info__value" id="skyview-info-aos">--:--:--</span>
+                    </div>
+                    <div class="skyview-info__group">
+                        <span class="skyview-info__label skyview-info__label--los">LOS:</span>
+                        <span class="skyview-info__value" id="skyview-info-los">--:--:--</span>
+                    </div>
+                    <!-- <div class="skyview-info__group">
+                        <span class="skyview-info__label skyview-info__label--dur">Длит.:</span>
+                        <span class="skyview-info__value" id="skyview-info-dur">—</span>
+                    </div> -->
+                    <div class="skyview-info__group">
+                        <span class="skyview-info__label skyview-info__label--rem">Ост.:</span>
+                        <span class="skyview-info__value" id="skyview-info-remaining">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+{{end}}
+
+{{define "tracking-bottom-panel"}}
+<!-- Нижняя панель: вынесена в main-wrapper (вторая строка grid), от края до края по ширине -->
+<section class="bottom-panel" id="bottom-panel">
+    <div class="bottom-panel__side">
+        <span class="bottom-panel__mode" id="bottom-panel-mode">Антенна</span>
+        <button class="panel-collapse-btn" id="bottom-panel-toggle" title="Свернуть">▼</button>
+    </div>
+    <div class="bottom-panel__body" id="bottom-panel-body">
+
+        <!-- Вкладка: Антенна (Az | Водопад | El) -->
+        <div class="bp-pane" id="bp-pane-antenna">
+            <div class="bp-az-container">
+                <div class="bp-indicator-canvas-wrap">
+                    <canvas id="azimuth-view" width="200" height="200"></canvas>
+                </div>
+                <div class="bp-indicator-info" id="azimuth-info">
+                    <div class="bp-indicator-info__row">
+                        <div class="bp-indicator-info__group">
+                            <span class="bp-indicator-info__label">Азим. ант.:</span>
+                            <span class="bp-indicator-info__value" id="az-info-ant">---°</span>
+                        </div>
+                        <div class="bp-indicator-info__group">
+                            <span class="bp-indicator-info__label">Азим. КА:</span>
+                            <span class="bp-indicator-info__value" id="az-info-sat">---°</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="bp-waterfall-container">
+                <div class="bp-waterfall-header">
+                    <span class="bp-waterfall-title">Waterfall</span>
+                    <span class="bp-wf-freq" id="wf-freq">435.605 – 435.645 MHz</span>
+                    <span class="bp-wf-res" id="wf-res">41 Hz/pix</span>
+                </div>
+                <div class="bp-freq-scale-wrap">
+                    <canvas id="waterfall-freq-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
+                </div>
+                <canvas id="waterfall-compact" class="bp-waterfall-canvas"></canvas>
+            </div>
+            <div class="bp-el-container">
+                <div class="bp-indicator-canvas-wrap">
+                    <canvas id="elevation-view" width="200" height="200"></canvas>
+                </div>
+                <div class="bp-indicator-info" id="elevation-info">
+                    <div class="bp-indicator-info__row">
+                        <div class="bp-indicator-info__group">
+                            <span class="bp-indicator-info__label">Уг.мес. ант.:</span>
+                            <span class="bp-indicator-info__value" id="el-info-ant">---°</span>
+                        </div>
+                        <div class="bp-indicator-info__group">
+                            <span class="bp-indicator-info__label">Уг.мес. КА:</span>
+                            <span class="bp-indicator-info__value" id="el-info-sat">---°</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Спектр (заглушка SDR) -->
+        <div class="bp-pane bp-pane--hidden" id="bp-pane-spectrum">
+            <div class="bp-spectrum-charts">
+                <div class="bp-fft-container">
+                    <div class="bp-chart-label">FFT Спектр</div>
+                    <canvas id="fft-spectrum" class="bp-stub-canvas"></canvas>
+                </div>
+                <div class="bp-specwf-container">
+                    <canvas id="spectrum-waterfall" class="bp-stub-canvas"></canvas>
+                </div>
+            </div>
+            <div class="bp-sdr-panel">
+                <div class="bp-sdr-section">
+                    <div class="bp-sdr-title">Настройки SDR</div>
+                    <div class="bp-sdr-field">
+                        <label class="bp-sdr-label">Устройство</label>
+                        <select id="sdr-device" class="bp-input"><option>RTL-SDR #0</option><option>Нет устройства</option></select>
+                    </div>
+                    <div class="bp-sdr-field">
+                        <label class="bp-sdr-label">Частота (MHz)</label>
+                        <input type="number" id="sdr-freq" class="bp-input" value="437.365" step="0.001" min="0" max="2000">
+                    </div>
+                    <div class="bp-sdr-field">
+                        <label class="bp-sdr-label">Усиление: <span id="sdr-gain-val">30</span> dB</label>
+                        <input type="range" id="sdr-gain" class="bp-range" min="0" max="50" value="30">
+                    </div>
+                    <div class="bp-sdr-field">
+                        <label class="bp-sdr-label">Полоса (kHz)</label>
+                        <input type="number" id="sdr-bw" class="bp-input" value="192" step="8" min="8" max="3200">
+                    </div>
+                    <div class="bp-sdr-field">
+                        <label class="bp-sdr-label">Модуляция</label>
+                        <select id="sdr-mod" class="bp-input">
+                            <option>FSK</option><option>AFSK</option><option>BPSK</option><option>QPSK</option>
+                        </select>
+                    </div>
+                    <div class="bp-sdr-field">
+                        <label class="bp-sdr-label">Baud rate</label>
+                        <input type="number" id="sdr-baud" class="bp-input" value="9600" step="100" min="300">
+                    </div>
+                    <button class="bp-sdr-btn" id="sdr-start">Установить</button>
+                </div>
+                <div class="bp-sdr-section">
+                    <div class="bp-sdr-title">Демодулятор</div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Пакетов</span><span class="bp-stat-val" id="stat-pkts">---</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Потеряно</span><span class="bp-stat-val" id="stat-lost">---</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">BER</span><span class="bp-stat-val" id="stat-ber">---</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">SNR</span><span class="bp-stat-val" id="stat-snr">---</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Синхро</span><span class="bp-stat-val bp-stat-val--no" id="stat-sync">НЕТ</span></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: ТМИ (заглушка телеметрии) -->
+        <div class="bp-pane bp-pane--hidden" id="bp-pane-tmi">
+            <div class="bp-tmi-table-wrap">
+                <table class="bp-tmi-table">
+                    <thead>
+                        <tr><th>Время</th><th>HEX</th><th>Параметр</th><th>Значение</th><th>Ед.</th></tr>
+                    </thead>
+                    <tbody id="tmi-tbody">
+                        <tr><td colspan="5" class="bp-tmi-empty">Ожидание данных телеметрии…</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+    </div>
+</section>
 {{end}}

@@ -18,10 +18,12 @@
         // Настройки по умолчанию
         this.options = Object.assign({
             coastlineUrl: '/static/data/ne_110m_coastline.json',
+            landUrl: '/static/data/ne_110m_land.json', // полигоны суши для заливки материков
             russiaBordersUrl: '/static/data/russia_110m.geojson',
             gridStep: 30, // Шаг сетки в градусах
             showGrid: true,
             showCoastlines: true,
+            showLandFill: true, // заливка материков (границы поверх)
             showRussiaBorders: true, // Границы РФ и подпись «Россия»
             showFootprint: true, // Круг видимости спутника
             trackMode: 'both', // 'line', 'dots', 'both'
@@ -31,6 +33,7 @@
         // Цветовая схема в стиле STSPLUS (улучшенная для читаемости)
         this.colors = {
             background: '#000010', // Тёмно-синий фон (океаны)
+            landFill: '#0d1a22', // Заливка материков (тёмный сине-зелёный)
             coastline: '#4d9999', // #5b8a8a #00d4d4, // Циан - береговые линии
             grid: '#3a4a4a', // Серый - сетка #556677 #2a3d4d #334455 #3d5566
             gridMajor: '#4a5e5e', // Светлее - основные линии #667788 #3a5060 #445566 #4d6677
@@ -57,6 +60,9 @@
 
         // Данные береговых линий (GeoJSON)
         this.coastlineData = null;
+
+        // Данные полигонов суши (GeoJSON) — для заливки материков
+        this.landData = null;
 
         // Данные границ РФ (GeoJSON)
         this.russiaData = null;
@@ -190,6 +196,36 @@
     };
 
     /**
+     * Загрузка полигонов суши (материки) для заливки
+     * @param {string} url - URL GeoJSON файла
+     * @returns {Promise}
+     */
+    EarthView.prototype.loadLand = function(url) {
+        const self = this;
+        url = url || this.options.landUrl;
+
+        return fetch(url)
+            .then(function(response) {
+                if (!response.ok) {
+                    throw new Error('Ошибка загрузки: ' + response.status);
+                }
+                return response.json();
+            })
+            .then(function(data) {
+                self.landData = data;
+                // eslint-disable-next-line no-console
+                console.log('EarthView: загружены полигоны суши', data.features ? data.features.length : 0, 'объектов');
+                return data;
+            })
+            .catch(function(error) {
+                // eslint-disable-next-line no-console
+                console.warn('EarthView: полигоны суши не загружены:', error.message);
+                self.landData = null;
+                return null;
+            });
+    };
+
+    /**
      * Загрузка границ РФ
      * @param {string} url - URL GeoJSON файла
      * @returns {Promise}
@@ -233,6 +269,11 @@
         // Слои отрисовки (порядок важен!)
         if (this.options.showGrid) {
             this._drawGrid();
+        }
+
+        // Заливка материков (полигоны суши) — перед береговыми линиями
+        if (this.options.showLandFill && this.landData && this.landData.features) {
+            this._drawLand();
         }
 
         if (this.options.showCoastlines && this.coastlineData) {
@@ -338,6 +379,108 @@
             const label = lat.toString();
             ctx.fillText(label, 24, p.y);
         }
+    };
+
+    /**
+     * Отрисовка заливки материков (полигоны суши)
+     */
+    EarthView.prototype._drawLand = function() {
+        const ctx = this.ctx;
+        const features = this.landData.features;
+
+        ctx.fillStyle = this.colors.landFill;
+
+        for (let i = 0; i < features.length; i++) {
+            const geometry = features[i].geometry;
+            if (!geometry || !geometry.coordinates) { continue; }
+
+            if (geometry.type === 'Polygon') {
+                this._fillPolygonRing(geometry.coordinates[0]); // только внешний контур
+            } else if (geometry.type === 'MultiPolygon') {
+                for (let p = 0; p < geometry.coordinates.length; p++) {
+                    const poly = geometry.coordinates[p];
+                    if (poly && poly[0]) {
+                        this._fillPolygonRing(poly[0]);
+                    }
+                }
+            }
+        }
+    };
+
+    /**
+     * Заливка одного кольца полигона (внешний контур).
+     *
+     * Полярные полигоны (Антарктика, Арктика) содержат координаты широты ±90° и пересекают
+     * антимеридиан по нижнему/верхнему краю карты. Прежний подход разбивал путь на
+     * сегменты и замыкал каждый по краю карты, что давало неверную заливку: при
+     * возврате по краю от yPrev к yStart вверх (на север) создавался лишний залитый
+     * прямоугольник в океане, а closePath второго сегмента проводил диагональ через океан.
+     *
+     * Исправление: для полярных полигонов используем ЕДИНЫЙ путь с обходом через угол
+     * полюса при пересечении антимеридиана. closePath() в конце замыкает путь прямо в
+     * начальную точку (moveTo), не создавая лишних диагоналей.
+     *
+     * @param {Array} coords - Массив координат [[lon, lat], ...]
+     */
+    EarthView.prototype._fillPolygonRing = function(coords) {
+        if (!coords || coords.length < 3) { return; }
+
+        const ctx = this.ctx;
+        const w = this.width;
+        const h = this.height;
+
+        // Определяем тип полигона: содержит ли он южный или северный полюс
+        let hasSouthPole = false, hasNorthPole = false;
+        for (let i = 0; i < coords.length; i++) {
+            if (coords[i][1] <= -89.5) { hasSouthPole = true; }
+            if (coords[i][1] >= 89.5)  { hasNorthPole = true; }
+        }
+
+        ctx.beginPath();
+        let prevP = null;
+        let moved = false;
+
+        for (let i = 0; i < coords.length; i++) {
+            const lon = coords[i][0];
+            const lat = coords[i][1];
+            const p = this.project(lon, lat);
+            const px = Math.max(0, Math.min(w, p.x));
+            const py = Math.max(0, Math.min(h, p.y));
+
+            if (prevP && Math.abs(p.x - prevP.x) > w / 2) {
+                // Пересечение антимеридиана
+                const goingRightToLeft = p.x < prevP.x;
+                const edgeX         = goingRightToLeft ? w : 0;
+                const oppositeEdgeX = goingRightToLeft ? 0 : w;
+                const yPrev = Math.max(0, Math.min(h, prevP.y));
+
+                ctx.lineTo(edgeX, yPrev);
+
+                if (hasSouthPole) {
+                    // Антарктика: обходим через нижний край (южный полюс = y = h)
+                    ctx.lineTo(edgeX, h);
+                    ctx.lineTo(oppositeEdgeX, h);
+                } else if (hasNorthPole) {
+                    // Арктика: обходим через верхний край (северный полюс = y = 0)
+                    ctx.lineTo(edgeX, 0);
+                    ctx.lineTo(oppositeEdgeX, 0);
+                }
+
+                ctx.lineTo(px, py);
+                moved = true;
+            } else if (!moved) {
+                ctx.moveTo(px, py);
+                moved = true;
+            } else {
+                ctx.lineTo(px, py);
+            }
+
+            prevP = p;
+        }
+
+        // closePath замыкает путь прямо в начальную точку (moveTo)
+        ctx.closePath();
+        ctx.fill();
     };
 
     /**
@@ -747,6 +890,7 @@
         }
         return Promise.all([
             this.loadCoastlines(),
+            this.loadLand(),
             this.loadRussiaBorders()
         ]).then(function() {
             self.draw();
