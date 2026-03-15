@@ -129,12 +129,22 @@
         const self = this;
         const SE = window.StateEventType;
 
-        this._stateManager.subscribe(SE.POSITION, function(state) {
-            self._updateFromPosition(state);
+        // Позиция обновляется для selected, но overlay показывает tracking.
+        // Поэтому InfoPanel читает позицию tracking-спутника из кеша.
+        this._stateManager.subscribe(SE.POSITION, function() {
+            const trackId = self._stateManager.getTrackingSatelliteId();
+            if (!trackId) { return; }
+            const trkState = self._stateManager.getState(trackId);
+            if (trkState) { self._updateFromPosition(trkState); }
         });
 
-        this._stateManager.subscribe(SE.SATELLITE_CHANGE, function(state) {
-            self._onSatelliteChange(state);
+        // При смене сопровождения — обновляем данные.
+        this._stateManager.subscribe(SE.TRACKING_CHANGE, function(state) {
+            if (state && state.noradId) {
+                self._onSatelliteChange(state);
+            } else {
+                self._clearAll();
+            }
         });
     };
 
@@ -143,14 +153,25 @@
      */
     InfoPanel.prototype._initFromCurrentState = function() {
         if (!this._stateManager) {return;}
-        const state = this._stateManager.getActiveState();
-        if (!state) {return;}
+        // Инициализация из tracking (если уже есть).
+        const trackId = this._stateManager.getTrackingSatelliteId();
+        if (!trackId) { return; }
+        const state = this._stateManager.getState(trackId);
+        if (!state) { return; }
 
         if (state.position) {
             this._updateFromPosition(state);
         }
         if (state.noradId) {
             this._onSatelliteChange(state);
+        }
+    };
+
+    InfoPanel.prototype._clearAll = function() {
+        this._activeNoradId = null;
+        this._currentPass = null;
+        for (const id in this._els) {
+            if (this._els[id]) { this._els[id].textContent = '---'; }
         }
     };
 

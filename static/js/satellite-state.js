@@ -46,11 +46,17 @@ class SatelliteState {
  * @enum {string}
  */
 const StateEventType = Object.freeze({
-    /** Обновление позиции активного спутника. */
+    /** Обновление позиции выбранного спутника (для карты/SkyView). */
     POSITION: 'position',
-    /** Обновление трека активного спутника. */
+    /** Обновление трека выбранного спутника. */
     TRACK: 'track',
-    /** Смена активного спутника. */
+    /** Смена выбранного спутника (selected) — клик в таблице или авто из группы. */
+    SELECTED_CHANGE: 'selected_change',
+    /** Смена спутника на сопровождении (tracking) — только кнопка «Сопровождение». */
+    TRACKING_CHANGE: 'tracking_change',
+    /** Обновление группы скользящего окна. */
+    SATELLITE_GROUP_UPDATE: 'satellite_group_update',
+    /** @deprecated Использовать SELECTED_CHANGE / TRACKING_CHANGE. */
     SATELLITE_CHANGE: 'satellite_change',
 });
 
@@ -67,28 +73,47 @@ const StateEventType = Object.freeze({
  */
 class SatelliteStateManager {
     constructor() {
-        /**
-         * Хранилище состояний спутников: noradId → SatelliteState.
-         * @type {Map<number, SatelliteState>}
-         */
+        /** Хранилище состояний спутников: noradId → SatelliteState. */
         this._satellites = new Map();
 
         /**
-         * NORAD ID активного (отображаемого) спутника.
+         * Устанавливается : клик по строке таблицы или авто из primary_id группы.
          * @type {?number}
          */
-        this._activeSatelliteId = null;
+        this._selectedSatelliteId = null;
 
         /**
-         * Подписчики: eventType → Set<callback>.
-         * @type {Map<string, Set<Function>>}
+         * Спутник на сопровождении (красный/зелёный + overlay + az/el).
+         * Устанавливается: только кнопка «Сопровождение» → API → SSE.
+         * @type {?number}
          */
-        this._subscribers = new Map();
+        this._trackingSatelliteId = null;
 
-        // Инициализация каналов подписок.
+        /**
+         * Флаг ручного выбора строки в таблице (чтобы авто-selected
+         * из satellite_group_update не перебивал пользовательский выбор).
+         */
+        this._manualTableSelection = false;
+
+        /** Текущая группа спутников из SSE-события satellite_group_update. */
+        this._satelliteGroup = null;
+
+        /**
+         * Флаг: получен ли уже хотя бы один group_update.
+         * Первый (кешированный) group_update при подключении может содержать
+         * устаревший tracking_id от предыдущей сессии → не применяем tracking_id,
+         * чтобы не было мелькания «сопровождения» при обновлении страницы.
+         */
+        this._firstGroupUpdateReceived = false;
+
+        /** Подписчики: eventType → Set<callback>. */
+        this._subscribers = new Map();
         for (const eventType of Object.values(StateEventType)) {
             this._subscribers.set(eventType, new Set());
         }
+
+        /** @deprecated Совместимость — alias для _selectedSatelliteId */
+        this._activeSatelliteId = null;
     }
 
     // ── Observer pattern ──────────────────────────────────────
@@ -205,13 +230,14 @@ class SatelliteStateManager {
             state.visibilityZone = data.visibility_zone;
         }
 
-        // Автоустановка активного спутника при первом обновлении.
-        if (this._activeSatelliteId === null) {
+        // Автоустановка selected при первом обновлении.
+        if (this._selectedSatelliteId === null) {
+            this._selectedSatelliteId = noradId;
             this._activeSatelliteId = noradId;
         }
 
-        // Notify только для активного спутника.
-        if (noradId === this._activeSatelliteId) {
+        // POSITION стреляет для selected-спутника (основной вид карты).
+        if (noradId === this._selectedSatelliteId) {
             this._notify(StateEventType.POSITION, state);
         }
     }
@@ -237,13 +263,15 @@ class SatelliteStateManager {
         const newPast = data.past || [];
         const newFuture = data.future || [];
 
-        // Пропускаем нотификацию, если трек не изменился (тот же размер сегментов).
+        // Пропускаем, если трек не изменился (тот же размер сегментов).
         // Треки пересчитываются на бэкенде каждые 30 секунд, между обновлениями
         // приходят кешированные данные — дублировать перерисовку не нужно.
         const oldTrack = state.track;
-        if (oldTrack &&
-            oldTrack.past.length === newPast.length &&
-            oldTrack.future.length === newFuture.length) {
+        const changed = !oldTrack ||
+            oldTrack.past.length !== newPast.length ||
+            oldTrack.future.length !== newFuture.length;
+
+        if (!changed) {
             return;
         }
 
@@ -252,61 +280,118 @@ class SatelliteStateManager {
             future: newFuture,
         };
 
-        if (noradId === this._activeSatelliteId) {
-            this._notify(StateEventType.TRACK, state);
-        }
+        // Уведомление НЕ отправляем здесь — только через forceTrackRefresh()
+        // после того, как batch из satellite_state_update полностью обработан.
+        // Это гарантирует, что треки вторичных спутников уже в кеше к моменту
+        // вызова _updateSecondaryTracks() в app.js.
+
+        return changed;
     }
 
-    // ── Активный спутник ──────────────────────────────────────
+    /**
+     * Принудительное уведомление TRACK для активного спутника.
+     * Вызывается после batch-обработки всех треков из satellite_state_update,
+     * гарантируя что треки вторичных спутников уже сохранены в кеше.
+     */
+    forceTrackRefresh() {
+        if (this._activeSatelliteId === null) { return; }
+        const state = this._satellites.get(this._activeSatelliteId);
+        if (!state) { return; }
+        this._notify(StateEventType.TRACK, state);
+    }
+
+    // ── Выбранный спутник (selected) ───────────────────────────
 
     /**
-     * Установка активного спутника.
-     * Вызывает satellite_change event с состоянием нового спутника.
+     * Установка выбранного спутника
+     * Вызывается: клик по строке таблицы или авто из группы.
      *
-     * @param {number} noradId — NORAD ID спутника.
-     * @param {string} [name] — Имя спутника (опционально, из SSE события).
-     * @param {Object} [orbitalParams] — Орбитальные параметры {inclination, period}.
-     * @returns {boolean} true если спутник найден или создан.
+     * @param {number} noradId — NORAD ID.
+     * @param {string} [name] — имя.
+     * @param {boolean} [manual=false] — ручной выбор в таблице.
+     * @returns {boolean}
      */
-    setActiveSatellite(noradId, name, orbitalParams) {
-        if (typeof noradId !== 'number' || noradId <= 0) {
-            console.warn('[StateManager] setActiveSatellite: invalid noradId');
-            return false;
-        }
+    setSelectedSatellite(noradId, name, manual = false) {
+        if (typeof noradId !== 'number' || noradId <= 0) { return false; }
 
-        const prevId = this._activeSatelliteId;
-        this._activeSatelliteId = noradId;
+        const prevId = this._selectedSatelliteId;
+        this._selectedSatelliteId = noradId;
+        this._activeSatelliteId = noradId; // backward compat
+        this._manualTableSelection = manual;
 
         const state = this._getOrCreateState(noradId);
+        if (name) { state.name = name; }
 
-        if (name && typeof name === 'string') {
-            state.name = name;
-        }
-
-        if (orbitalParams) {
-            if (typeof orbitalParams.inclination === 'number') {
-                state.inclination = orbitalParams.inclination;
+        if (noradId !== prevId) {
+            this._notify(StateEventType.SELECTED_CHANGE, state);
+            // Немедленно пушим кешированные данные для нового selected.
+            if (state.position) {
+                this._notify(StateEventType.POSITION, state);
             }
-            if (typeof orbitalParams.period === 'number') {
-                state.period = orbitalParams.period;
-            }
+            this._notify(StateEventType.TRACK, state);
         }
-
-        // Уведомляем при смене спутника ИЛИ при наличии новых орбитальных параметров
-        // (повторный satellite_change для того же спутника при reconnect/кэше).
-        if (noradId !== prevId || orbitalParams) {
-            this._notify(StateEventType.SATELLITE_CHANGE, state);
-        }
-
         return true;
     }
 
+    /** NORAD ID выбранного спутника. */
+    getSelectedSatelliteId() {
+        return this._selectedSatelliteId;
+    }
+
+    // ── Спутник на сопровождении (tracking) ──────────────────
+
     /**
-     * NORAD ID активного спутника.
-     * @returns {?number}
+     * Установка спутника на сопровождение.
+     * Вызывается из SSE-события (reason "manual") после подтверждения бэкендом.
+     *
+     * @param {number} noradId — NORAD ID.
+     * @param {string} [name] — имя.
+     * @param {Object} [orbitalParams] — {inclination, period}.
      */
+    setTrackingSatellite(noradId, name, orbitalParams) {
+        if (typeof noradId !== 'number' || noradId <= 0) { return; }
+
+        const prevId = this._trackingSatelliteId;
+        this._trackingSatelliteId = noradId;
+
+        const state = this._getOrCreateState(noradId);
+        if (name) { state.name = name; }
+        if (orbitalParams) {
+            if (typeof orbitalParams.inclination === 'number') { state.inclination = orbitalParams.inclination; }
+            if (typeof orbitalParams.period === 'number') { state.period = orbitalParams.period; }
+        }
+
+        if (noradId !== prevId) {
+            this._notify(StateEventType.TRACKING_CHANGE, state);
+        }
+    }
+
+    /**
+     * Сброс сопровождения (tracking_ended или ручной сброс).
+     */
+    clearTrackingSatellite() {
+        if (this._trackingSatelliteId === null) { return; }
+        this._trackingSatelliteId = null;
+        this._notify(StateEventType.TRACKING_CHANGE, null);
+    }
+
+    /** NORAD ID спутника на сопровождении (null = нет). */
+    getTrackingSatelliteId() {
+        return this._trackingSatelliteId;
+    }
+
+    // ── Backward compat ──────────────────────────────────────
+
+    /**
+     * @deprecated Использовать setSelectedSatellite / setTrackingSatellite.
+     */
+    setActiveSatellite(noradId, name, orbitalParams) {
+        return this.setSelectedSatellite(noradId, name, false);
+    }
+
+    /** @deprecated Использовать getSelectedSatelliteId. */
     getActiveSatelliteId() {
-        return this._activeSatelliteId;
+        return this._selectedSatelliteId;
     }
 
     // ── Чтение состояния ──────────────────────────────────────
@@ -347,6 +432,86 @@ class SatelliteStateManager {
         return this._satellites.size;
     }
 
+    /**
+     * Обновление группы спутников из SSE-события satellite_group_update.
+     * Уведомляет подписчиков на SATELLITE_GROUP_UPDATE.
+     *
+     * @param {Object} data — данные события.
+     * @param {Array}  data.satellites — список спутников в группе.
+     * @param {number} data.primary_id — NORAD ID primary спутника.
+     * @param {Object} data.time_window — временное окно {start, end} (Unix ms).
+     * @param {number} data.ts — timestamp события.
+     */
+    setSatelliteGroup(data) {
+        if (!data || !Array.isArray(data.satellites)) {
+            console.warn('[StateManager] setSatelliteGroup: invalid data');
+            return;
+        }
+        this._satelliteGroup = data;
+
+        // Авто-выбор selected из primary_id (если нет ручного выбора в таблице).
+        if (!this._manualTableSelection && typeof data.primary_id === 'number' && data.primary_id > 0) {
+            const prevSel = this._selectedSatelliteId;
+            this._selectedSatelliteId = data.primary_id;
+            this._activeSatelliteId = data.primary_id;
+            if (data.primary_id !== prevSel) {
+                const satInfo = data.satellites.find(s => s.norad_id === data.primary_id);
+                const state = this._getOrCreateState(data.primary_id, satInfo ? satInfo.sat_name : '');
+                this._notify(StateEventType.SELECTED_CHANGE, state);
+                if (state.position) { this._notify(StateEventType.POSITION, state); }
+                this._notify(StateEventType.TRACK, state);
+            }
+        }
+
+        // Синхронизация tracking_id из бэкенда.
+        // Первый group_update — из кеша Hub (snapshot при подключении, satellite_change НЕ кешируется).
+        // Игнорируем tracking_id из него: пользователь должен явно нажать «Сопровождение» в этой сессии.
+        // Последующие group_update (от живого бэкенда) — применяем tracking_id.
+        const rawTrackingId = (typeof data.tracking_id === 'number' && data.tracking_id > 0) ? data.tracking_id : null;
+        const newTrackingId = this._firstGroupUpdateReceived ? rawTrackingId : null;
+        this._firstGroupUpdateReceived = true;
+
+        if (newTrackingId !== this._trackingSatelliteId) {
+            this._trackingSatelliteId = newTrackingId;
+            if (newTrackingId) {
+                const st = this._getOrCreateState(newTrackingId);
+                this._notify(StateEventType.TRACKING_CHANGE, st);
+            } else {
+                this._notify(StateEventType.TRACKING_CHANGE, null);
+            }
+        }
+
+        this._notify(StateEventType.SATELLITE_GROUP_UPDATE, data);
+    }
+
+    /**
+     * Получить текущую группу спутников.
+     * @returns {?Object} группа или null.
+     */
+    getSatelliteGroup() {
+        return this._satelliteGroup;
+    }
+
+    /**
+     * Получить primary (активный) спутник из группы.
+     * @returns {?Object} PassInfo или null.
+     */
+    getPrimarySatellite() {
+        if (!this._satelliteGroup) { return null; }
+        const id = this._satelliteGroup.primary_id;
+        return this._satelliteGroup.satellites.find(s => s.norad_id === id) || null;
+    }
+
+    /**
+     * Получить secondary (не primary) спутники из группы.
+     * @returns {Array} массив PassInfo (может быть пустым).
+     */
+    getSecondarySatellites() {
+        if (!this._satelliteGroup) { return []; }
+        const id = this._satelliteGroup.primary_id;
+        return this._satelliteGroup.satellites.filter(s => s.norad_id !== id);
+    }
+
     // ── Очистка ───────────────────────────────────────────────
 
     /**
@@ -358,18 +523,19 @@ class SatelliteStateManager {
      */
     removeSatellite(noradId) {
         const deleted = this._satellites.delete(noradId);
-        if (deleted && this._activeSatelliteId === noradId) {
+        if (deleted && this._selectedSatelliteId === noradId) {
+            this._selectedSatelliteId = null;
             this._activeSatelliteId = null;
         }
         return deleted;
     }
 
-    /**
-     * Полная очистка хранилища и сброс активного спутника.
-     */
     clear() {
         this._satellites.clear();
+        this._selectedSatelliteId = null;
+        this._trackingSatelliteId = null;
         this._activeSatelliteId = null;
+        this._manualTableSelection = false;
     }
 
     // ── Внутренние методы ─────────────────────────────────────

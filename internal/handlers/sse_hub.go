@@ -36,6 +36,9 @@ type SSEHub struct {
 	unregister chan *sseClient // Канал отписки клиентов.
 	broadcast  chan SSEEvent   // Канал для рассылки событий всем клиентам.
 
+	// notifyOnConnect — при регистрации клиента сюда отправляется сигнал, об отправки состояния спутников
+	notifyOnConnect chan struct{}
+
 	clientCount atomic.Int64 // Атомарный счётчик подключённых клиентов.
 
 	done chan struct{} // Закрывается при завершении Run.
@@ -87,6 +90,14 @@ func (h *SSEHub) Run(ctx context.Context) {
 
 			sendCachedEvents(client, lastEvents)
 
+			// Запрос немедленной рассылки состояния (чтобы новый клиент получил данные без ожидания тикера).
+			if h.notifyOnConnect != nil {
+				select {
+				case h.notifyOnConnect <- struct{}{}:
+				default:
+				}
+			}
+
 		case client := <-h.unregister:
 			if _, exists := clients[client]; exists {
 				close(client.events)
@@ -106,10 +117,18 @@ func (h *SSEHub) Run(ctx context.Context) {
 }
 
 // sendCachedEvents отправляет кешированные события новому клиенту.
-// satellite_change ПЕРВЫМ: устанавливает активный спутник и орбитальные параметры
-// до прихода позиций, иначе auto-activation в updatePosition «украдёт» ID.
+// Порядок важен:
+//  1. satellite_group_update — состав группы, primary, tracking_id (источник истины для новых клиентов)
+//  2. satellite_state_update — последние позиции/треки
+//
+// satellite_change НЕ кешируется: это событие-транзакция («что произошло»),
+// актуально только для живых клиентов. Отправлять его новому клиенту бессмысленно
+// и вызывает мелькание сопровождения при обновлении страницы.
 func sendCachedEvents(client *sseClient, lastEvents map[string]SSEEvent) {
-	for _, eventType := range []string{"satellite_change", "satellite_state_update"} {
+	for _, eventType := range []string{
+		"satellite_group_update",
+		"satellite_state_update",
+	} {
 		if cached, ok := lastEvents[eventType]; ok {
 			select {
 			case client.events <- cached:
@@ -140,6 +159,12 @@ func (h *SSEHub) Broadcast(eventType string, data []byte) {
 	case <-h.done:
 		// Hub уже остановлен — событие игнорируется.
 	}
+}
+
+// SetNotifyOnConnect задаёт канал, в который отправляется сигнал при регистрации нового клиента.
+// Буфер 1, чтобы не блокировать Hub. Вызывать до Run().
+func (h *SSEHub) SetNotifyOnConnect(ch chan struct{}) {
+	h.notifyOnConnect = ch
 }
 
 // ClientCount возвращает количество подключённых клиентов.

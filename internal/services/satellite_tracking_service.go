@@ -21,8 +21,8 @@ const (
 	// Интервал обновления наземных трасс по умолчанию (1 раз/30 сек).
 	DefaultTrackInterval = 30 * time.Second
 
-	// Интервал проверки авто-трекинга (переключение на ближайший спутник).
-	DefaultAutoTrackInterval = 10 * time.Second
+	// Интервал обновления группы (проверка скользящего окна и смена primary).
+	DefaultGroupUpdateInterval = 5 * time.Second
 
 	// Количество точек контура зоны видимости.
 	visibilityZonePoints = 72
@@ -35,6 +35,32 @@ type satelliteStateUpdate struct {
 	Tracks         []*tracker.GroundTrack `json:"tracks,omitempty"`
 	TracksIncluded bool                   `json:"tracks_included"`
 	TS             int64                  `json:"ts"`
+}
+
+// satelliteGroupUpdate — JSON-структура SSE-события "satellite_group_update".
+// Отправляется при изменении состава группы скользящего окна или смене primary.
+type satelliteGroupUpdate struct {
+	Satellites []groupSatInfo `json:"satellites"`
+	PrimaryID  int            `json:"primary_id"`
+	TrackingID int            `json:"tracking_id"` // NORAD ID спутника на сопровождении (0 = нет).
+	TimeWindow groupTimeWin   `json:"time_window"`
+	TS         int64          `json:"ts"`
+}
+
+// groupSatInfo — данные одного спутника внутри события satellite_group_update.
+type groupSatInfo struct {
+	NoradID   int     `json:"norad_id"`
+	SatName   string  `json:"sat_name"`
+	AOS       int64   `json:"aos"`
+	LOS       int64   `json:"los"`
+	Duration  float64 `json:"duration"`
+	IsVisible bool    `json:"is_visible"`
+}
+
+// groupTimeWin — временное окно группы для SSE-события.
+type groupTimeWin struct {
+	Start int64 `json:"start"`
+	End   int64 `json:"end"`
 }
 
 // positionData — данные позиции одного спутника внутри группового события.
@@ -99,15 +125,15 @@ type trackedSatellite struct {
 // SatelliteTrackingService отслеживает спутники в реальном времени:
 // рассчитывает позиции, AER, зону видимости и наземные трассы,
 // рассылает данные через SSE Hub.
-// Три тикера: positions (1/сек), tracks (1/30 сек), autoTrack (1/10 сек).
+// Три тикера: positions (1/сек), tracks (1/30 сек), group update (5/сек).
 type SatelliteTrackingService struct {
 	hub      *handlers.SSEHub
 	store    *tracker.TLEStore
 	observer *tracker.Observer
 
-	positionInterval  time.Duration // Интервал обновления позиций.
-	trackInterval     time.Duration // Интервал обновления наземных трасс.
-	autoTrackInterval time.Duration // Интервал авто-трекинга.
+	positionInterval    time.Duration // Интервал обновления позиций.
+	trackInterval       time.Duration // Интервал обновления наземных трасс.
+	groupUpdateInterval time.Duration // Интервал обновления группы (скользящее окно).
 
 	mu      sync.RWMutex
 	tracked map[int]*trackedSatellite // noradID → trackedSatellite.
@@ -117,10 +143,24 @@ type SatelliteTrackingService struct {
 	// Доступ только из горутины Run (потокобезопасен без дополнительной синхронизации).
 	lastTracks []*tracker.GroundTrack
 
-	// Авто-трекинг: автоматическое переключение на ближайший спутник.
-	passProvider    PassProvider // Сервис пролётов (устанавливается через SetPassProvider).
-	currentNoradID  int          // NORAD ID текущего отслеживаемого спутника.
-	autoTrackActive bool         // Флаг активности авто-трекинга.
+	// Сервис пролётов и параметры группы.
+	passProvider    PassProvider  // Сервис пролётов (устанавливается через SetPassProvider).
+	windowForward   time.Duration // Окно вперёд для скользящего окна.
+	currentNoradID  int           // NORAD ID текущего primary спутника.
+	autoTrackActive bool          // Флаг активности авто-трекинга (скользящее окно).
+	manualSelection *int          // Ручной выбор пользователя (nil = авто).
+
+	// Состояние текущей группы для change detection.
+	currentGroupIDs []int // Отсортированные NORAD ID текущей группы.
+
+	// pendingManualBroadcast — флаг форсированной рассылки group_update при следующем updateGroup.
+	// Устанавливается в SetManualSelection / ResetManualSelection, чтобы tracking_id всегда
+	// доходил до клиентов, даже если состав группы и primary не изменились.
+	pendingManualBroadcast bool
+
+	// notifyOnConnect — при получении сигнала выполняем немедленный updateGroup + broadcast.
+	// Канал создаётся в конструкторе (буфер 1), чтобы select в Run() не блокировался на nil.
+	notifyOnConnect chan struct{}
 }
 
 // NewSatelliteTrackingService создаёт новый сервис отслеживания спутников.
@@ -130,13 +170,14 @@ func NewSatelliteTrackingService(
 	observer *tracker.Observer,
 ) *SatelliteTrackingService {
 	return &SatelliteTrackingService{
-		hub:               hub,
-		store:             store,
-		observer:          observer,
-		positionInterval:  DefaultTrackingInterval,
-		trackInterval:     DefaultTrackInterval,
-		autoTrackInterval: DefaultAutoTrackInterval,
-		tracked:           make(map[int]*trackedSatellite),
+		hub:                 hub,
+		store:               store,
+		observer:            observer,
+		positionInterval:    DefaultTrackingInterval,
+		trackInterval:       DefaultTrackInterval,
+		groupUpdateInterval: DefaultGroupUpdateInterval,
+		windowForward:       DefaultWindowForward,
+		tracked:             make(map[int]*trackedSatellite),
 	}
 }
 
@@ -160,17 +201,33 @@ func (s *SatelliteTrackingService) WithTrackInterval(
 	return s
 }
 
-// WithAutoTrackInterval устанавливает интервал авто-трекинга.
-func (s *SatelliteTrackingService) WithAutoTrackInterval(
+// WithGroupUpdateInterval устанавливает интервал обновления группы (скользящее окно).
+func (s *SatelliteTrackingService) WithGroupUpdateInterval(
 	d time.Duration,
 ) *SatelliteTrackingService {
 	if d > 0 {
-		s.autoTrackInterval = d
+		s.groupUpdateInterval = d
 	}
 	return s
 }
 
-// SetPassProvider устанавливает провайдер пролётов и активирует авто-трекинг.
+// WithWindowForward устанавливает размер окна вперёд для скользящего окна.
+func (s *SatelliteTrackingService) WithWindowForward(
+	d time.Duration,
+) *SatelliteTrackingService {
+	if d > 0 {
+		s.windowForward = d
+	}
+	return s
+}
+
+// NotifyOnConnectChannel возвращает канал, в который Hub отправляет сигнал при регистрации нового клиента.
+// Передать в SSEHub.SetNotifyOnConnect(), чтобы данные рассылались сразу после подключения (без ожидания тикера).
+func (s *SatelliteTrackingService) NotifyOnConnectChannel() chan struct{} {
+	return s.notifyOnConnect
+}
+
+// SetPassProvider устанавливает провайдер пролётов и активирует скользящее окно.
 // Вызывается после создания PassService (избегаем циклической зависимости).
 func (s *SatelliteTrackingService) SetPassProvider(provider PassProvider) {
 	s.mu.Lock()
@@ -178,14 +235,14 @@ func (s *SatelliteTrackingService) SetPassProvider(provider PassProvider) {
 	s.autoTrackActive = true
 	s.mu.Unlock()
 
-	slog.Info("auto-track enabled")
+	slog.Info("group tracking enabled", "window_forward", s.windowForward)
 }
 
 // Run запускает основной цикл отслеживания спутников.
 // Три тикера:
 //   - positionTicker (1/сек) — текущие позиции спутников, AER, зона видимости
 //   - trackTicker (1/30 сек) — наземные трассы орбит
-//   - autoTrackTicker (1/10 сек) — авто-переключение на ближайший спутник
+//   - groupTicker (5 сек) — обновление группы скользящего окна, смена primary
 //
 // Трассы отправляются немедленно при старте, затем по тикеру.
 // Завершается при отмене ctx.
@@ -193,7 +250,8 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 	slog.InfoContext(ctx, "satellite tracking service started",
 		"position_interval", s.positionInterval,
 		"track_interval", s.trackInterval,
-		"auto_track_interval", s.autoTrackInterval,
+		"group_update_interval", s.groupUpdateInterval,
+		"window_forward", s.windowForward,
 	)
 
 	posTicker := time.NewTicker(s.positionInterval)
@@ -202,12 +260,11 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 	trackTicker := time.NewTicker(s.trackInterval)
 	defer trackTicker.Stop()
 
-	autoTrackTicker := time.NewTicker(s.autoTrackInterval)
-	defer autoTrackTicker.Stop()
+	groupTicker := time.NewTicker(s.groupUpdateInterval)
+	defer groupTicker.Stop()
 
-	// Немедленный выбор начального спутника и отправка данных (не ждём 10 сек до первого тика авто-трекинга).
-	s.updateAutoTrack()
-	// Первые позиции + трассы — сразу после выбора спутника.
+	// Немедленная инициализация группы и отправка данных при старте.
+	s.updateGroup()
 	s.computeAndBroadcastState(true)
 
 	for {
@@ -219,8 +276,13 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 			s.computeAndBroadcastState(false)
 		case <-trackTicker.C:
 			s.computeAndBroadcastState(true)
-		case <-autoTrackTicker.C:
-			s.updateAutoTrack()
+		case <-groupTicker.C:
+			s.updateGroup()
+		case <-s.notifyOnConnect:
+			// Новый клиент подключился — рассылаем свежие позиции и треки немедленно.
+			// Группа (satellite_group_update) уже доставлена Hub из кеша через sendCachedEvents,
+			// повторный updateGroup() здесь создавал бы второй group_update и путал фронтенд.
+			s.computeAndBroadcastState(true)
 		}
 	}
 }
@@ -286,124 +348,225 @@ func (s *SatelliteTrackingService) CurrentNoradID() int {
 	return s.currentNoradID
 }
 
-// updateAutoTrack проверяет и переключает отслеживание на ближайший спутник.
-// Логика:
-//  1. Получаем список пролётов (отсортированы по AOS)
-//  2. Находим первый активный (AOS <= now <= LOS) или первый предстоящий (now < AOS)
-//  3. Если текущий спутник изменился — переключаем отслеживание
-func (s *SatelliteTrackingService) updateAutoTrack() {
-	s.mu.RLock()
+// updateGroup обновляет группу спутников скользящего окна.
+//
+// Алгоритм:
+//  1. Получить пролёты из passProvider (кешированные).
+//  2. Применить скользящее окно [now, now + windowForward] → список PassInfo.
+//  3. Выбрать primary (с учётом ручного выбора или авто-логики).
+//  4. Если состав группы изменился → обновить tracked, отправить satellite_group_update.
+//  5. Если primary изменился → отправить satellite_change.
+func (s *SatelliteTrackingService) updateGroup() {
+	s.mu.Lock()
 	provider := s.passProvider
 	active := s.autoTrackActive
 	currentID := s.currentNoradID
-	s.mu.RUnlock()
+	oldGroupIDs := s.currentGroupIDs
+	windowFwd := s.windowForward
+	manualSel := s.manualSelection
+	forceBroadcast := s.pendingManualBroadcast
+	s.pendingManualBroadcast = false // сбрасываем флаг
+	s.mu.Unlock()
 
 	if !active || provider == nil {
 		return
 	}
 
-	// Получаем пролёты на ближайшие 24 часа.
-	passes, err := provider.GetAllGroupsPasses(24, tracker.DefaultMinElevation)
+	// Горизонт расчёта: окно вперёд + запас 10% (но не менее 2ч).
+	horizonHours := int(DefaultGroupPassHorizon.Hours())
+	passes, err := provider.GetAllGroupsPasses(horizonHours, tracker.DefaultMinElevation)
 	if err != nil {
-		slog.Debug("auto-track: failed to get passes", "error", err)
+		slog.Debug("group-update: failed to get passes", "error", err)
 		return
 	}
 
-	if len(passes) == 0 {
-		slog.Debug("auto-track: no passes available")
-		return
+	now := time.Now().UTC()
+
+	// Фильтрация по скользящему окну — без вызова SGP4/PassPredictor.
+	satellites := FindConcurrentPasses(passes, now, windowFwd)
+
+	if len(satellites) == 0 {
+		// Окно пустое — fallback на ближайший будущий пролёт (pre-pass режим).
+		// Ищем ближайший пролёт с AOS > now во всём горизонте расчёта.
+		nearest := findNearestFuturePass(passes, now)
+		if nearest == nil {
+			slog.Debug("group-update: no passes available at all")
+			return
+		}
+		satellites = []PassInfo{{
+			NoradID:   nearest.NoradID,
+			SatName:   nearest.SatName,
+			Pass:      *nearest,
+			IsVisible: false,
+		}}
+		slog.Debug("group-update: window empty, using nearest future pass",
+			"norad_id", nearest.NoradID,
+			"sat_name", nearest.SatName,
+			"aos_in", time.Until(time.UnixMilli(nearest.AOS)).Round(time.Second),
+		)
 	}
 
-	// Находим ближайший спутник для отслеживания.
-	now := time.Now().UTC().UnixMilli()
-
-	// Если уже отслеживаем спутник, проверяем: его пролёт ещё активен?
-	if currentID != 0 {
-		for _, p := range passes {
-			if p.NoradID == currentID && p.AOS <= now && now <= p.LOS {
-				// Текущий пролёт ещё идёт — не переключаемся.
-				return
+	// Проверяем, нужно ли сбросить ручной выбор (спутник вышел из окна).
+	trackingExpired := false
+	if manualSel != nil {
+		inGroup := false
+		for _, s2 := range satellites {
+			if s2.NoradID == *manualSel {
+				inGroup = true
+				break
 			}
 		}
+		if !inGroup {
+			trackingExpired = true
+			s.mu.Lock()
+			s.manualSelection = nil
+			s.mu.Unlock()
+			manualSel = nil
+			slog.Info("group-update: tracking ended, satellite left group")
+		}
 	}
 
-	targetPass := s.findNearestPass(passes, now)
+	// Проверяем, нужно ли сменить primary после LOS.
+	if shouldSwitch, newID := ShouldSwitchPrimary(currentID, satellites, now); shouldSwitch {
+		currentID = newID
+	}
 
-	if targetPass == nil {
-		slog.Debug("auto-track: no suitable pass found")
+	// Выбор primary с учётом ручного выбора.
+	newPrimaryID := SelectPrimarySatellite(satellites, manualSel)
+
+	// Новые NORAD ID для change detection.
+	newGroupIDs := GroupIDs(satellites)
+
+	groupChanged := GroupChanged(oldGroupIDs, newGroupIDs)
+	primaryChanged := newPrimaryID != currentID
+
+	// Если ничего не изменилось И не было ручного выбора — рассылка не нужна.
+	if !groupChanged && !primaryChanged && !forceBroadcast {
 		return
 	}
 
-	// Проверяем, нужно ли переключаться.
-	if targetPass.NoradID == currentID {
-		return // Уже отслеживаем этот спутник.
-	}
-
-	// Определяем причину переключения.
-	reason := "pass_ended"
-	if currentID == 0 {
-		reason = "initial"
-	}
-
-	// Переключаем отслеживание.
-	s.switchToSatellite(targetPass.NoradID, targetPass.SatName, reason)
-}
-
-// findNearestPass находит ближайший подходящий пролёт.
-// Приоритет: активный (сейчас виден) > ближайший предстоящий.
-func (s *SatelliteTrackingService) findNearestPass(
-	passes []*tracker.Pass,
-	nowMs int64,
-) *tracker.Pass {
-	// Сначала ищем активный пролёт (сейчас виден).
-	for _, p := range passes {
-		if p.AOS <= nowMs && nowMs <= p.LOS {
-			return p
-		}
-	}
-
-	// Если нет активных — берём первый предстоящий.
-	for _, p := range passes {
-		if nowMs < p.AOS {
-			return p
-		}
-	}
-
-	return nil
-}
-
-// switchToSatellite переключает отслеживание на указанный спутник.
-func (s *SatelliteTrackingService) switchToSatellite(noradID int, name, reason string) {
-	// Очищаем предыдущее отслеживание и кеш трасс.
+	// Обновляем состояние: tracked и currentNoradID.
 	s.mu.Lock()
-	oldID := s.currentNoradID
-	s.tracked = make(map[int]*trackedSatellite)
-	s.currentNoradID = noradID
+	s.currentGroupIDs = newGroupIDs
+	s.currentNoradID = newPrimaryID
+	s.tracked = make(map[int]*trackedSatellite, len(satellites))
 	s.lastTracks = nil
 	s.mu.Unlock()
 
-	// Добавляем новый спутник.
-	if err := s.TrackSatellite(noradID); err != nil {
-		slog.Error("auto-track: failed to track satellite",
-			"norad_id", noradID,
-			"name", name,
-			"error", err,
-		)
+	// Добавляем все спутники группы в отслеживание.
+	for _, sat := range satellites {
+		if err2 := s.TrackSatellite(sat.NoradID); err2 != nil {
+			slog.Debug("group-update: failed to add satellite",
+				"norad_id", sat.NoradID,
+				"name", sat.SatName,
+				"error", err2,
+			)
+		}
+	}
+
+	slog.Info("group-update: group changed",
+		"satellites", len(satellites),
+		"primary", newPrimaryID,
+		"primary_changed", primaryChanged,
+	)
+
+	// Текущий tracking_id для SSE (0 = нет сопровождения).
+	trackingID := 0
+	if manualSel != nil {
+		trackingID = *manualSel
+	}
+
+	// Отправляем SSE-событие обновления группы.
+	group := BuildConcurrentPassGroup(satellites, newPrimaryID)
+	s.broadcastGroupUpdate(group, now, trackingID)
+
+	// satellite_change: уведомление фронтенда о смене состояния.
+	if trackingExpired {
+		s.broadcastSatelliteChange(newPrimaryID, s.getSatName(newPrimaryID, satellites), "tracking_ended")
+	} else if primaryChanged || currentID == 0 {
+		reason := "auto"
+		if manualSel != nil {
+			reason = "manual"
+		}
+		if currentID == 0 {
+			reason = "initial"
+		}
+		s.broadcastSatelliteChange(newPrimaryID, s.getSatName(newPrimaryID, satellites), reason)
+	}
+
+	// Немедленно отправляем позиции + трассы новой группы.
+	s.computeAndBroadcastState(true)
+}
+
+// getSatName возвращает название спутника из группы по NORAD ID.
+func (s *SatelliteTrackingService) getSatName(noradID int, satellites []PassInfo) string {
+	for _, sat := range satellites {
+		if sat.NoradID == noradID {
+			return sat.SatName
+		}
+	}
+	return ""
+}
+
+// SetManualSelection устанавливает ручной выбор спутника пользователем.
+// Флаг pendingManualBroadcast гарантирует рассылку group_update с новым tracking_id,
+// даже если состав группы и primary не изменились.
+func (s *SatelliteTrackingService) SetManualSelection(noradID int) {
+	s.mu.Lock()
+	s.manualSelection = &noradID
+	s.pendingManualBroadcast = true
+	s.mu.Unlock()
+
+	slog.Info("manual selection set", "norad_id", noradID)
+
+	// Немедленное применение (не ждём следующего тика).
+	s.updateGroup()
+}
+
+// ResetManualSelection сбрасывает ручной выбор (возврат к авто-режиму).
+// Флаг pendingManualBroadcast гарантирует рассылку group_update с tracking_id=0.
+func (s *SatelliteTrackingService) ResetManualSelection() {
+	s.mu.Lock()
+	s.manualSelection = nil
+	s.pendingManualBroadcast = true
+	s.mu.Unlock()
+
+	slog.Info("manual selection reset to auto")
+	s.updateGroup()
+}
+
+// broadcastGroupUpdate отправляет SSE-событие satellite_group_update.
+func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGroup, now time.Time, trackingID int) {
+	sats := make([]groupSatInfo, len(group.Satellites))
+	for i, sat := range group.Satellites {
+		sats[i] = groupSatInfo{
+			NoradID:   sat.NoradID,
+			SatName:   sat.SatName,
+			AOS:       sat.Pass.AOS,
+			LOS:       sat.Pass.LOS,
+			Duration:  sat.Pass.Duration,
+			IsVisible: sat.IsVisible,
+		}
+	}
+
+	event := satelliteGroupUpdate{
+		Satellites: sats,
+		PrimaryID:  group.PrimarySatID,
+		TrackingID: trackingID,
+		TimeWindow: groupTimeWin{
+			Start: group.TimeWindow.Start,
+			End:   group.TimeWindow.End,
+		},
+		TS: now.UnixMilli(),
+	}
+
+	data, err := json.Marshal(event)
+	if err != nil {
+		slog.Error("failed to marshal satellite_group_update", "error", err)
 		return
 	}
 
-	slog.Info("auto-track: switched satellite",
-		"from", oldID,
-		"to", noradID,
-		"name", name,
-		"reason", reason,
-	)
-
-	// Отправляем событие смены спутника.
-	s.broadcastSatelliteChange(noradID, name, reason)
-
-	// Немедленно отправляем позиции + трассу нового спутника.
-	s.computeAndBroadcastState(true)
+	s.hub.Broadcast("satellite_group_update", data)
 }
 
 // broadcastSatelliteChange отправляет SSE-событие о смене спутника.

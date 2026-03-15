@@ -36,59 +36,118 @@
     white-space: nowrap;
 }
 
-.passes-compact__table th:nth-child(1) { width: 38%; }
-.passes-compact__table th:nth-child(2) { width: 22%; }
-.passes-compact__table th:nth-child(3) { width: 18%; }
-.passes-compact__table th:nth-child(4) { width: 22%; }
+/* Колонки: КА (38%) | Время (38%) | T−/Ост. (24%) */
+.pc-th-sat   { width: 38%; }
+.pc-th-time  { width: 38%; }
+.pc-th-countdown { width: 24%; }
 
 .passes-compact__table td {
-    padding: 3px 6px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    padding: 4px 6px;
     color: var(--text-secondary);
     border-bottom: 1px solid rgba(42, 52, 68, 0.4);
+    vertical-align: middle;
 }
 
-/* Строка таблицы */
+/* Строка таблицы — высота под 2-строчные ячейки */
 .pc-row {
     cursor: pointer;
     transition: background 0.1s ease;
-    height: 26px;
+    height: auto;
+    min-height: 38px;
 }
 
 .pc-row:hover {
     background: var(--bg-tertiary);
 }
 
-/* Выделенная строка */
+/* Выбранный (selected) — циан фон */
 .pc-row--selected {
-    background: rgba(0, 168, 255, 0.1);
+    background: rgba(0, 212, 212, 0.12);
+    border-left: 3px solid #00d4d4;
 }
 
-/* Текущий КА — бирюзовый левый бордер */
-.pc-row--active {
-    border-left: 3px solid var(--accent-primary);
-}
-
-.pc-row--active td:first-child {
+.pc-row--selected td:first-child {
     padding-left: 3px;
 }
 
-/* Длительность пролёта */
-.pc-duration {
-    font-variant-numeric: tabular-nums;
-    color: var(--text-secondary);
+/* На сопровождении (tracking) — красный левый бордер + ярче */
+.pc-row--tracking {
+    background: rgba(255, 68, 68, 0.1);
+    border-left: 3px solid #ff4444;
 }
 
-/* Имя КА */
-.pc-name {
+.pc-row--tracking td:first-child {
+    padding-left: 3px;
+}
+
+/* Если selected === tracking — показываем tracking стиль */
+.pc-row--selected.pc-row--tracking {
+    background: rgba(255, 68, 68, 0.15);
+    border-left: 3px solid #ff4444;
+}
+
+/* ===== Двухстрочные ячейки ===== */
+
+/* Колонка 1: имя КА + NORAD ID (2 строки) */
+.pc-name-cell {
+    overflow: hidden;
+}
+
+.pc-sat-name {
+    font-size: 11px;
+    font-weight: 600;
     color: var(--text-primary);
-    font-weight: 500;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.4;
+    max-width: 100%;
 }
 
-.pc-row--active .pc-name {
+.pc-sat-norad {
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    line-height: 1.3;
+}
+
+.pc-row--active .pc-sat-name {
     color: var(--accent-primary);
+}
+
+.pc-row--active .pc-sat-norad {
+    color: var(--accent-primary);
+    opacity: 0.7;
+}
+
+/* Колонка 2: AOS + LOS (2 строки) */
+.pc-time-cell {
+    font-variant-numeric: tabular-nums;
+}
+
+.pc-time-aos {
+    font-size: 11px;
+    color: #00cc00;
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.pc-time-los {
+    font-size: 10px;
+    color: #ff6666;
+    line-height: 1.3;
+    white-space: nowrap;
+}
+
+/* Колонка 3: обратный отсчёт / оставшееся время */
+.pc-col3-cell {
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.pc-countdown--done {
+    color: var(--text-muted);
 }
 
 /* Обратный отсчёт */

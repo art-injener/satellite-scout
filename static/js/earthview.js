@@ -54,8 +54,12 @@
             satLabel: '#ffeb3b', // подпись спутника — яркий жёлтый
             satLabelStroke: 'rgba(0,0,0,0.85)', // обводка подписи спутника
             satLabelBg: 'rgba(220, 220, 228, 0.92)', // фон под подпись спутника — светло-серый
-            russiaBorder: '#aabbcc', // Границы РФ альтернатива: #8899aa, #66bb6a
-            russiaLabel: '#ffcc00' // Подпись «Россия»
+            russiaBorder: '#aabbcc',
+            russiaLabel: '#ffcc00',
+            selectedTrack: '#ffff00', // Жёлтый — пунктирная траектория текущего (выбранного) спутника
+            selectedMarker: '#2ecc71', // Зелёный — маркер текущего спутника
+            selectedFootprint: 'rgba(93, 173, 226, 0.6)', // Голубой — контур зоны радиовидимости выбранного (отличается от пурпурной зоны при сопровождении)
+            selectedFootprintFill: 'rgba(93, 173, 226, 0.12)' // Голубой — заливка зоны
         };
 
         // Данные береговых линий (GeoJSON)
@@ -71,14 +75,26 @@
         this.center = { lon: 0, lat: 0 }; // Центр карты
         this.zoom = 1.0; // Масштаб (1.0 = вся карта)
 
-        // Данные спутника
+        // Спутник на сопровождении (tracking): red/green + dots + footprint.
         this.satellite = {
-            position: null, // {lon, lat, alt}
-            groundTrack: [], // Массив точек или {past: [[...]], future: [[...]]} с сервера
-            visibilityZone: null, // Точки контура зоны видимости с сервера [{lon, lat}, ...]
+            position: null,
+            groundTrack: [],
+            visibilityZone: null,
             name: '',
             noradId: null
         };
+
+        // Текущий (выбранный) спутник: пунктирная жёлтая трасса, зелёный маркер, голубая зона видимости.
+        this._selectedSatellite = {
+            position: null,
+            groundTrack: null,
+            visibilityZone: null,
+            name: '',
+            noradId: null
+        };
+
+        // Вторичные спутники группы: noradId → {noradId, name, position, track}
+        this._secondarySatellites = {};
 
         // Наблюдатель
         this.observer = null; // {lon, lat, name}
@@ -287,14 +303,24 @@
         // Столицы мира
         this._drawCities();
 
-        // Наземная трасса спутника
-        if (this._hasGroundTrack()) {
-            this._drawGroundTrack();
+        // Слой 1: вторичные спутники (серые пунктиры).
+        this._drawSecondaryLayer();
+
+        // Слой 2: выбранный спутник (оранжевый, без точек).
+        // Рисуется только если отличается от tracking (иначе tracking перекроет).
+        if (this._selectedSatellite.noradId &&
+            this._selectedSatellite.noradId !== this.satellite.noradId) {
+            this._drawSelectedLayer();
         }
 
-        // Зона видимости спутника (с сервера; если нет — не рисуем)
-        if (this.options.showFootprint && this.satellite.visibilityZone && this.satellite.visibilityZone.length > 0) {
-            this._drawVisibilityZone();
+        // Слой 3: спутник на сопровождении (red/green + dots + footprint).
+        if (this.satellite.noradId) {
+            if (this._hasGroundTrack()) {
+                this._drawGroundTrack();
+            }
+            if (this.options.showFootprint && this.satellite.visibilityZone && this.satellite.visibilityZone.length > 0) {
+                this._drawVisibilityZone();
+            }
         }
 
         // Наблюдатель
@@ -302,9 +328,20 @@
             this._drawObserver();
         }
 
-        // Спутник
-        if (this.satellite.position) {
+        // Маркер спутника на сопровождении (tracking).
+        if (this.satellite.noradId && this.satellite.position) {
             this._drawSatellite();
+        }
+
+        // Зона видимости и полноценная иконка выбранного спутника (если не на сопровождении).
+        if (this._selectedSatellite.noradId &&
+            this._selectedSatellite.noradId !== this.satellite.noradId) {
+            if (this.options.showFootprint && this._selectedSatellite.visibilityZone && this._selectedSatellite.visibilityZone.length > 0) {
+                this._drawSelectedVisibilityZone();
+            }
+            if (this._selectedSatellite.position) {
+                this._drawSelectedSatelliteIcon();
+            }
         }
     };
 
@@ -632,11 +669,12 @@
     };
 
     /**
-     * Отрисовка наземной трассы спутника.
-     * Поддерживает формат с сервера {past: [[...]], future: [[...]]} и плоский массив.
+     * Отрисовка наземной трассы сопровождаемого спутника.
+     * Сплошные линии: красная — прошлая орбита, зелёная — будущая; плюс точки (минутные метки).
      */
     EarthView.prototype._drawGroundTrack = function() {
         const track = this.satellite.groundTrack;
+        this.ctx.setLineDash([]); // сплошная линия
 
         if (Array.isArray(track)) {
             if (track.length >= 2) {
@@ -649,9 +687,7 @@
             for (let i = 0; i < track.past.length; i++) {
                 const seg = track.past[i];
                 if (seg && seg.length >= 2) {
-                    this.ctx.setLineDash([4, 4]);
                     this._drawTrackSegment(seg, this.colors.orbitPast);
-                    this.ctx.setLineDash([]);
                 }
             }
         }
@@ -914,8 +950,17 @@
      * @param {number} noradId - NORAD ID
      */
     EarthView.prototype.setSatelliteInfo = function(name, noradId) {
-        this.satellite.name = name;
+        this.satellite.name = name || '';
         this.satellite.noradId = noradId;
+    };
+
+    /** Полная очистка слоя «на сопровождении» (когда сопровождения нет). */
+    EarthView.prototype.clearTrackingLayer = function() {
+        this.satellite.position = null;
+        this.satellite.name = '';
+        this.satellite.noradId = null;
+        this.satellite.groundTrack = [];
+        this.satellite.visibilityZone = null;
     };
 
     /**
@@ -984,6 +1029,333 @@
     EarthView.prototype._onResize = function() {
         this._setupCanvasSize();
         this.draw();
+    };
+
+    // ========== Выбранный спутник (selected, оранжевый) ==========
+
+    EarthView.prototype.setSelectedSatellitePosition = function(lon, lat, alt) {
+        this._selectedSatellite.position = { lon: lon, lat: lat, alt: alt || 0 };
+    };
+
+    EarthView.prototype.setSelectedSatelliteInfo = function(name, noradId) {
+        this._selectedSatellite.name = name;
+        this._selectedSatellite.noradId = noradId;
+    };
+
+    EarthView.prototype.setSelectedGroundTrack = function(data) {
+        if (!data) {
+            this._selectedSatellite.groundTrack = null;
+            return;
+        }
+        if (Array.isArray(data)) {
+            this._selectedSatellite.groundTrack = data;
+            return;
+        }
+        this._selectedSatellite.groundTrack = {
+            past: data.past || [],
+            future: data.future || []
+        };
+    };
+
+    EarthView.prototype.setSelectedVisibilityZone = function(segments) {
+        this._selectedSatellite.visibilityZone = Array.isArray(segments) ? segments : null;
+    };
+
+    EarthView.prototype.clearSelectedSatellite = function() {
+        this._selectedSatellite = { position: null, groundTrack: null, visibilityZone: null, name: '', noradId: null };
+    };
+
+    /**
+     * Отрисовка слоя текущего (выбранного) спутника: пунктирная жёлтая линия, без точек.
+     * @private
+     */
+    EarthView.prototype._drawSelectedLayer = function() {
+        var sel = this._selectedSatellite;
+        var track = sel.groundTrack;
+        if (!track) { return; }
+
+        var ctx = this.ctx;
+        var color = this.colors.selectedTrack;
+        var dpr = window.devicePixelRatio || 1;
+        var dash = [6 * dpr, 4 * dpr];
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2 * dpr;
+        ctx.setLineDash(dash);
+
+        var segments = [];
+        if (track && typeof track === 'object' && !Array.isArray(track)) {
+            if (Array.isArray(track.past)) { segments = segments.concat(track.past); }
+            if (Array.isArray(track.future)) { segments = segments.concat(track.future); }
+        } else if (Array.isArray(track)) {
+            segments = [track];
+        }
+
+        for (var s = 0; s < segments.length; s++) {
+            var seg = segments[s];
+            if (!seg || seg.length < 2) { continue; }
+            ctx.beginPath();
+            var prevP = null;
+            var moved = false;
+            for (var k = 0; k < seg.length; k++) {
+                var pt = this.project(seg[k].lon, seg[k].lat);
+                if (prevP && Math.abs(pt.x - prevP.x) > this.width / 2) {
+                    ctx.stroke();
+                    ctx.beginPath();
+                    moved = false;
+                }
+                if (!moved) { ctx.moveTo(pt.x, pt.y); moved = true; }
+                else { ctx.lineTo(pt.x, pt.y); }
+                prevP = pt;
+            }
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+    };
+
+    /**
+     * Зона радиовидимости выбранного спутника (голубая заливка).
+     * @private
+     */
+    EarthView.prototype._drawSelectedVisibilityZone = function() {
+        var segments = this._selectedSatellite.visibilityZone;
+        if (!segments || segments.length === 0) { return; }
+
+        var ctx = this.ctx;
+        var dpr = window.devicePixelRatio || 1;
+        var fillColor = this.colors.selectedFootprintFill || 'rgba(93, 173, 226, 0.12)';
+        var strokeColor = this.colors.selectedFootprint || 'rgba(93, 173, 226, 0.6)';
+
+        for (var k = 0; k < segments.length; k++) {
+            var seg = segments[k];
+            if (!seg || seg.length < 3) { continue; }
+            var projected = [];
+            for (var i = 0; i < seg.length; i++) {
+                projected.push(this.project(seg[i].lon, seg[i].lat));
+            }
+            ctx.beginPath();
+            ctx.moveTo(projected[0].x, projected[0].y);
+            for (var j = 1; j < projected.length; j++) {
+                ctx.lineTo(projected[j].x, projected[j].y);
+            }
+            ctx.closePath();
+            ctx.fillStyle = fillColor;
+            ctx.fill();
+            ctx.strokeStyle = strokeColor;
+            ctx.lineWidth = 1.5 * dpr;
+            ctx.stroke();
+        }
+    };
+
+    /**
+     * Полноценная иконка выбранного спутника (аналогично сопровождению, цвет — оранжевый).
+     * @private
+     */
+    EarthView.prototype._drawSelectedSatelliteIcon = function() {
+        var sel = this._selectedSatellite;
+        var pos = sel.position;
+        if (!pos) { return; }
+
+        var ctx = this.ctx;
+        var p = this.project(pos.lon, pos.lat);
+        var dpr = window.devicePixelRatio || 1;
+        var s = dpr * 1.2;
+        var color = this.colors.selectedMarker || '#2ecc71';
+
+        ctx.strokeStyle = color;
+        ctx.fillStyle = color;
+        ctx.lineWidth = 2 * s;
+        ctx.shadowColor = color;
+        ctx.shadowBlur = 4 * s;
+
+        // Иконка в стиле МКС (как у спутника на сопровождении)
+        ctx.fillRect(p.x - 3 * s, p.y - 8 * s, 6 * s, 16 * s);
+        ctx.fillRect(p.x - 16 * s, p.y - 3 * s, 10 * s, 6 * s);
+        ctx.fillRect(p.x + 6 * s, p.y - 3 * s, 10 * s, 6 * s);
+        ctx.lineWidth = 1.5 * s;
+        ctx.beginPath();
+        ctx.moveTo(p.x - 16 * s, p.y);
+        ctx.lineTo(p.x - 19 * s, p.y - 4 * s);
+        ctx.moveTo(p.x - 16 * s, p.y);
+        ctx.lineTo(p.x - 19 * s, p.y + 4 * s);
+        ctx.moveTo(p.x + 16 * s, p.y);
+        ctx.lineTo(p.x + 19 * s, p.y - 4 * s);
+        ctx.moveTo(p.x + 16 * s, p.y);
+        ctx.lineTo(p.x + 19 * s, p.y + 4 * s);
+        ctx.stroke();
+
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
+
+        if (sel.name) {
+            var fontSize = Math.round(12 * s);
+            ctx.font = 'bold ' + fontSize + 'px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            var labelY = p.y + 12 * s;
+            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
+            ctx.lineWidth = 2.5;
+            ctx.strokeText(sel.name, p.x, labelY);
+            ctx.fillStyle = color;
+            ctx.fillText(sel.name, p.x, labelY);
+        }
+    };
+
+    // ========== Вторичные спутники ==========
+
+    // Палитра цветов для вторичных спутников (серые оттенки, чтобы не мешать primary).
+    var SECONDARY_SAT_COLORS = [
+        '#aaaaaa', '#888888', '#cccccc', '#999999',
+        '#bbbbbb', '#777777', '#dddddd', '#ffffff'
+    ];
+
+    /**
+     * Обновление позиций вторичных спутников группы.
+     * Вызывается из app.js при каждом position-апдейте.
+     *
+     * @param {Array} satArray — массив {noradId, name, lon, lat, alt}.
+     */
+    EarthView.prototype.setSecondaryPositions = function(satArray) {
+        if (!satArray) { return; }
+        for (var i = 0; i < satArray.length; i++) {
+            var s = satArray[i];
+            if (!s || !s.noradId) { continue; }
+            if (!this._secondarySatellites[s.noradId]) {
+                this._secondarySatellites[s.noradId] = { noradId: s.noradId, name: s.name || '', track: null };
+            }
+            this._secondarySatellites[s.noradId].position = { lon: s.lon, lat: s.lat, alt: s.alt || 0 };
+            if (s.name) { this._secondarySatellites[s.noradId].name = s.name; }
+        }
+        // Удаляем спутники, которые больше не в группе.
+        var activeIds = {};
+        for (var j = 0; j < satArray.length; j++) {
+            if (satArray[j] && satArray[j].noradId) { activeIds[satArray[j].noradId] = true; }
+        }
+        for (var id in this._secondarySatellites) {
+            if (!activeIds[id]) { delete this._secondarySatellites[id]; }
+        }
+    };
+
+    /**
+     * Обновление трека вторичного спутника.
+     * @param {number} noradId — NORAD ID.
+     * @param {Object} track — {past, future}.
+     */
+    EarthView.prototype.setSecondaryTrack = function(noradId, track) {
+        if (!noradId) { return; }
+        // Обновляем трек ТОЛЬКО если спутник уже в карте (не воскрешаем удалённые).
+        if (this._secondarySatellites[noradId]) {
+            this._secondarySatellites[noradId].track = track;
+        }
+    };
+
+    /**
+     * Очистка всех вторичных спутников (при смене группы).
+     */
+    EarthView.prototype.clearSecondarySatellites = function() {
+        this._secondarySatellites = {};
+    };
+
+    /**
+     * Отрисовка слоя вторичных спутников (траектории и маркеры).
+     * @private
+     */
+    EarthView.prototype._drawSecondaryLayer = function() {
+        var ids = Object.keys(this._secondarySatellites);
+        for (var i = 0; i < ids.length; i++) {
+            var sat = this._secondarySatellites[ids[i]];
+            if (sat.track) { this._drawSecondaryGroundTrack(sat, i); }
+            if (sat.position) { this._drawSecondaryMarker(sat, i); }
+        }
+    };
+
+    /**
+     * Отрисовка пунктирной трассы вторичного спутника.
+     * @private
+     */
+    EarthView.prototype._drawSecondaryGroundTrack = function(sat, colorIdx) {
+        var ctx = this.ctx;
+        var track = sat.track;
+        if (!track) { return; }
+
+        var color = 'rgba(200, 200, 200, 0.5)';
+        var dpr = window.devicePixelRatio || 1;
+
+        ctx.setLineDash([5, 5]);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5 * dpr;
+
+        var segments = [];
+        if (Array.isArray(track.future)) { segments = segments.concat(track.future); }
+        if (Array.isArray(track.past))   { segments = segments.concat(track.past); }
+
+        for (var s = 0; s < segments.length; s++) {
+            var seg = segments[s];
+            if (!seg || seg.length < 2) { continue; }
+            ctx.beginPath();
+            var first = this.project(seg[0].lon, seg[0].lat);
+            ctx.moveTo(first.x, first.y);
+            for (var k = 1; k < seg.length; k++) {
+                var pt = this.project(seg[k].lon, seg[k].lat);
+                ctx.lineTo(pt.x, pt.y);
+            }
+            ctx.stroke();
+        }
+        ctx.setLineDash([]);
+    };
+
+    /**
+     * Отрисовка геометрического маркера вторичного спутника.
+     * Форма: circle, square, triangle или diamond — по хешу noradId.
+     * @private
+     */
+    EarthView.prototype._drawSecondaryMarker = function(sat, colorIdx) {
+        var ctx = this.ctx;
+        var pos = sat.position;
+        if (!pos) { return; }
+
+        var p = this.project(pos.lon, pos.lat);
+        var dpr = window.devicePixelRatio || 1;
+        var r = 5 * dpr;
+        var color = SECONDARY_SAT_COLORS[colorIdx % SECONDARY_SAT_COLORS.length];
+        var shape = sat.noradId % 4; // 0=circle, 1=square, 2=triangle, 3=diamond
+
+        ctx.fillStyle = color;
+        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
+        ctx.lineWidth = 1 * dpr;
+
+        ctx.beginPath();
+        if (shape === 0) {
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        } else if (shape === 1) {
+            ctx.rect(p.x - r, p.y - r, r * 2, r * 2);
+        } else if (shape === 2) {
+            ctx.moveTo(p.x, p.y - r);
+            ctx.lineTo(p.x + r, p.y + r);
+            ctx.lineTo(p.x - r, p.y + r);
+            ctx.closePath();
+        } else {
+            ctx.moveTo(p.x, p.y - r);
+            ctx.lineTo(p.x + r, p.y);
+            ctx.lineTo(p.x, p.y + r);
+            ctx.lineTo(p.x - r, p.y);
+            ctx.closePath();
+        }
+        ctx.fill();
+        ctx.stroke();
+
+        // Подпись (мелко, без фона, чтобы не перекрывать карту)
+        if (sat.name) {
+            var fs = Math.round(9 * dpr);
+            ctx.font = fs + 'px monospace';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.strokeStyle = 'rgba(0,0,0,0.7)';
+            ctx.lineWidth = 1.5;
+            ctx.strokeText(sat.name, p.x, p.y + r + 2 * dpr);
+            ctx.fillStyle = color;
+            ctx.fillText(sat.name, p.x, p.y + r + 2 * dpr);
+        }
     };
 
     // Экспорт

@@ -65,7 +65,7 @@ func main() {
 
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, sseHub, passService)
+	setupRoutes(mux, cfg, sseHub, passService, trackingService)
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.

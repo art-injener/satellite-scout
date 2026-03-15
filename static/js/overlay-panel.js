@@ -59,15 +59,19 @@
         }
     };
 
-    // Подписка на смену спутника — показывать панель при смене КА
+    // Подписка: overlay показывается ТОЛЬКО при сопровождении (tracking).
     OverlayPanel.prototype._subscribeToState = function(sm) {
         var self = this;
         var SE = window.StateEventType;
         if (!SE) { return; }
 
-        sm.subscribe(SE.SATELLITE_CHANGE, function() {
-            self._manuallyHidden = false;
-            self.show();
+        sm.subscribe(SE.TRACKING_CHANGE, function(state) {
+            if (state && state.noradId) {
+                self._manuallyHidden = false;
+                self.show();
+            } else {
+                self.hide();
+            }
         });
     };
 

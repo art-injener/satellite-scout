@@ -165,6 +165,10 @@ class SSEClient {
             this._handleEvent('satellite_change', e);
         });
 
+        this._eventSource.addEventListener('satellite_group_update', (e) => {
+            this._handleEvent('satellite_group_update', e);
+        });
+
         // Обработка ошибок (потеря соединения и т.д.).
         this._eventSource.onerror = () => {
             this._onError();
@@ -224,16 +228,10 @@ class SSEClient {
                 this._handleStateUpdate(data);
                 break;
             case 'satellite_change':
-                if (typeof data.norad_id === 'number') {
-                    let orbitalParams = null;
-                    if (typeof data.inclination === 'number' || typeof data.period === 'number') {
-                        orbitalParams = {
-                            inclination: data.inclination,
-                            period: data.period
-                        };
-                    }
-                    this._stateManager.setActiveSatellite(data.norad_id, data.name || '', orbitalParams);
-                }
+                this._handleSatelliteChange(data);
+                break;
+            case 'satellite_group_update':
+                this._stateManager.setSatelliteGroup(data);
                 break;
             default:
                 console.warn(`[SSEClient] unhandled event type: ${eventType}`);
@@ -241,13 +239,38 @@ class SSEClient {
     }
 
     /**
+     * Обработка satellite_change: маршрутизация по reason.
+     *   - "manual"          → setTrackingSatellite (подтверждение бэкенда)
+     *   - "tracking_ended"  → clearTrackingSatellite
+     *   - "auto"/"initial"  → setSelectedSatellite (если нет ручного выбора в таблице)
+     * @param {Object} data
+     * @private
+     */
+    _handleSatelliteChange(data) {
+        if (typeof data.norad_id !== 'number') { return; }
+
+        const reason = data.reason || '';
+        let orbitalParams = null;
+        if (typeof data.inclination === 'number' || typeof data.period === 'number') {
+            orbitalParams = { inclination: data.inclination, period: data.period };
+        }
+
+        // satellite_change(manual) намеренно не обрабатываем здесь.
+        // Tracking устанавливается через satellite_group_update.tracking_id (живые события, не кеш).
+        // Это исключает мелькание сопровождения при обновлении страницы.
+        if (reason === 'tracking_ended') {
+            this._stateManager.clearTrackingSatellite();
+            // Авто-выбор нового selected (primary из того же события).
+            this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false);
+        } else {
+            // "auto", "initial" — обновляем selected (не tracking).
+            this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false);
+        }
+    }
+
+    /**
      * Обработка группового события satellite_state_update.
-     * Содержит positions[] и опционально tracks[].
-     * @param {Object} data — данные группового события.
-     * @param {Array} data.positions — массив позиций спутников.
-     * @param {Array} [data.tracks] — массив треков (если tracks_included=true).
-     * @param {boolean} data.tracks_included — флаг наличия треков.
-     * @param {number} data.ts — общий timestamp.
+     * @param {Object} data
      * @private
      */
     _handleStateUpdate(data) {
@@ -264,8 +287,19 @@ class SSEClient {
         }
 
         if (data.tracks_included && Array.isArray(data.tracks)) {
+            // Сначала сохраняем ВСЕ треки в кеш (в т.ч. вторичных спутников).
+            // updateTrack() внутри тоже стреляет TRACK для primary если изменился,
+            // но порядок треков в Go map случайный — primary может прийти раньше вторичных.
+            let anyChanged = false;
             for (const track of data.tracks) {
-                this._stateManager.updateTrack(track);
+                if (this._stateManager.updateTrack(track)) {
+                    anyChanged = true;
+                }
+            }
+            // После обработки ВСЕХ треков принудительно обновляем вторичные спутники —
+            // к этому моменту их треки гарантированно в кеше.
+            if (anyChanged) {
+                this._stateManager.forceTrackRefresh();
             }
         }
     }

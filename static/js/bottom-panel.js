@@ -228,6 +228,19 @@
         }
     };
 
+    /** Остановка отрисовки, очистка буфера и canvas — чёрный экран. Вызывать при сбросе сопровождения. */
+    WaterfallCompact.prototype.clear = function() {
+        this.stop();
+        this._resize();
+        var w = this._canvas.width;
+        var h = this._canvas.height;
+        if (w < 2 || h < 2) { return; }
+        this._imageData = this._ctx.createImageData(w, h);
+        var d = this._imageData.data;
+        for (var i = 3; i < d.length; i += 4) { d[i] = 255; }
+        this._ctx.putImageData(this._imageData, 0, 0);
+    };
+
     // ────────────────────────────────────────────────────────────────────────────
     // BottomPanel — переключение вкладок + инициализация содержимого
     // ────────────────────────────────────────────────────────────────────────────
@@ -314,14 +327,29 @@
         }
     };
 
-    // Запуск водопада (вкладка Антенна) + шкала частот.
+    /** Запуск отрисовки водопада. Вызывается при включении сопровождения (кнопка «Сопровождение»). */
+    BottomPanel.prototype.startWaterfall = function() {
+        if (this._waterfall) {
+            this._waterfall.start();
+        }
+    };
+
+    /** Остановка отрисовки и очистка окна водопада. Вызывается при сбросе сопровождения (кнопка «Сброс»). */
+    BottomPanel.prototype.stopWaterfallAndClear = function() {
+        if (this._waterfall) {
+            this._waterfall.stop();
+            this._waterfall.clear();
+        }
+    };
+
+    // Создание виджета водопада (без авто-старта). Запуск — по кнопке «Сопровождение», остановка и очистка — по «Сброс».
     // ResizeObserver вызывает refresh при появлении у контейнера ненулевого размера (после layout).
     BottomPanel.prototype._startWaterfall = function() {
         var canvas = document.getElementById('waterfall-compact');
         var scaleCanvas = document.getElementById('waterfall-freq-scale');
         if (!canvas) { return; }
         this._waterfall = new WaterfallCompact(canvas, scaleCanvas);
-        this._waterfall.start();
+        this._waterfall.clear(); // начальное состояние — чёрный экран до начала сопровождения
         var container = canvas.parentElement;
         if (container && typeof ResizeObserver !== 'undefined') {
             var self = this;

@@ -93,10 +93,9 @@
             <table class="passes-compact__table">
                 <thead>
                     <tr>
-                        <th>КА</th>
-                        <th>AOS</th>
-                        <th>Длит.</th>
-                        <th>T−</th>
+                        <th class="pc-th-sat">КА</th>
+                        <th class="pc-th-time">Время</th>
+                        <th class="pc-th-countdown">T−/Ост.</th>
                     </tr>
                 </thead>
                 <tbody id="passes-compact-body"></tbody>
@@ -104,7 +103,7 @@
         </div>
         <div class="right-panel__controls">
             <label class="rp-ctrl rp-ctrl--auto" title="Автосопровождение ближайшего КА">
-                <input type="checkbox" id="rp-auto" checked>
+                <input type="checkbox" id="rp-auto" checked disabled>
                 <span>Авто</span>
             </label>
             <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Взять на сопровождение">⊕ Сопров.</button>
