@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"net/http"
@@ -53,14 +54,34 @@ func main() {
 	// Сервис отслеживания спутников — позиции (1/сек), трассы (1/30 сек), авто-трекинг (1/10 сек).
 	trackingService := services.NewSatelliteTrackingService(sseHub, tleStore, observer)
 
+	// Per-client state: при подключении SSE-клиента отправляем его tracking_id (TRACK-STATE-003).
+	clientStore := trackingService.GetClientStateStore()
+	sseHub.SetOnClientConnect(func(clientID string) []handlers.SSEEvent {
+		if clientID == "" {
+			return nil
+		}
+		clientStore.Touch(clientID)
+		trackingID := clientStore.GetTracking(clientID)
+		data, err := json.Marshal(struct {
+			TrackingID int   `json:"tracking_id"`
+			TS         int64 `json:"ts"`
+		}{
+			TrackingID: trackingID,
+			TS:         time.Now().UTC().UnixMilli(),
+		})
+		if err != nil {
+			return nil
+		}
+		return []handlers.SSEEvent{{Type: "client_state_restore", Data: data}}
+	})
+
 	// Сервис пролётов — расчёт и кеширование пролётов спутников.
 	passService := services.NewPassService(tleStore, observer)
 
 	// Связываем trackingService с passService для авто-трекинга.
-	// При старте автоматически выбирается ближайший по расписанию спутник.
 	trackingService.SetPassProvider(passService)
 
-	// Запускаем сервис отслеживания (авто-трекинг включится автоматически).
+	// Запускаем сервис отслеживания.
 	go trackingService.Run(svcCtx)
 
 	// Маршруты.

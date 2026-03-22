@@ -24,7 +24,14 @@ type SSEEvent struct {
 
 // sseClient — подключённый SSE-клиент.
 type sseClient struct {
-	events chan SSEEvent // Канал событий для этого клиента.
+	events   chan SSEEvent // Канал событий для этого клиента.
+	clientID string       // Идентификатор клиента (из query ?client_id=).
+}
+
+// clientMessage — направленное сообщение конкретному клиенту.
+type clientMessage struct {
+	clientID string
+	event    SSEEvent
 }
 
 // SSEHub управляет подключениями SSE-клиентов и рассылкой событий.
@@ -35,9 +42,14 @@ type SSEHub struct {
 	register   chan *sseClient // Канал регистрации новых клиентов.
 	unregister chan *sseClient // Канал отписки клиентов.
 	broadcast  chan SSEEvent   // Канал для рассылки событий всем клиентам.
+	directed   chan clientMessage // Канал для отправки события конкретному клиенту.
 
 	// notifyOnConnect — при регистрации клиента сюда отправляется сигнал, об отправки состояния спутников
 	notifyOnConnect chan struct{}
+
+	// onClientConnect — колбэк при подключении нового клиента.
+	// Вызывается в горутине Run с clientID. Возвращает events для per-client отправки.
+	onClientConnect func(clientID string) []SSEEvent
 
 	clientCount atomic.Int64 // Атомарный счётчик подключённых клиентов.
 
@@ -51,6 +63,7 @@ func NewSSEHub() *SSEHub {
 		register:   make(chan *sseClient, 16),
 		unregister: make(chan *sseClient, 16),
 		broadcast:  make(chan SSEEvent, hubBroadcastBufferSize),
+		directed:   make(chan clientMessage, 64),
 		done:       make(chan struct{}),
 	}
 }
@@ -61,16 +74,14 @@ func NewSSEHub() *SSEHub {
 // Кеширует последние position и track события для мгновенной отправки новым клиентам.
 func (h *SSEHub) Run(ctx context.Context) {
 	clients := make(map[*sseClient]bool)
+	clientIDMap := make(map[string]*sseClient) // clientID → client (per-client messaging).
 
 	// Кеш последних событий по типу для отправки новым клиентам.
 	lastEvents := make(map[string]SSEEvent)
 
 	defer func() {
-		// Сигнализируем о завершении Hub (до закрытия каналов клиентов,
-		// чтобы ServeHTTP не пытался писать в закрытый канал unregister).
 		h.once.Do(func() { close(h.done) })
 
-		// Закрываем каналы всех оставшихся клиентов.
 		for client := range clients {
 			close(client.events)
 		}
@@ -85,12 +96,27 @@ func (h *SSEHub) Run(ctx context.Context) {
 		select {
 		case client := <-h.register:
 			clients[client] = true
+			if client.clientID != "" {
+				clientIDMap[client.clientID] = client
+			}
 			h.clientCount.Add(1)
-			slog.DebugContext(ctx, "SSE client registered", "total_clients", h.clientCount.Load())
+			slog.DebugContext(ctx, "SSE client registered",
+				"client_id", client.clientID,
+				"total_clients", h.clientCount.Load(),
+			)
 
 			sendCachedEvents(client, lastEvents)
 
-			// Запрос немедленной рассылки состояния (чтобы новый клиент получил данные без ожидания тикера).
+			// Per-client события при подключении (восстановление tracking_id).
+			if h.onClientConnect != nil && client.clientID != "" {
+				for _, evt := range h.onClientConnect(client.clientID) {
+					select {
+					case client.events <- evt:
+					default:
+					}
+				}
+			}
+
 			if h.notifyOnConnect != nil {
 				select {
 				case h.notifyOnConnect <- struct{}{}:
@@ -102,13 +128,29 @@ func (h *SSEHub) Run(ctx context.Context) {
 			if _, exists := clients[client]; exists {
 				close(client.events)
 				delete(clients, client)
+				if client.clientID != "" {
+					delete(clientIDMap, client.clientID)
+				}
 				h.clientCount.Add(-1)
-				slog.DebugContext(ctx, "SSE client unregistered", "total_clients", h.clientCount.Load())
+				slog.DebugContext(ctx, "SSE client unregistered",
+					"client_id", client.clientID,
+					"total_clients", h.clientCount.Load(),
+				)
 			}
 
 		case event := <-h.broadcast:
 			lastEvents[event.Type] = event
 			broadcastToClients(ctx, event, clients)
+
+		case msg := <-h.directed:
+			if client, ok := clientIDMap[msg.clientID]; ok {
+				select {
+				case client.events <- msg.event:
+				default:
+					slog.WarnContext(ctx, "SSE directed: client buffer full",
+						"client_id", msg.clientID, "event_type", msg.event.Type)
+				}
+			}
 
 		case <-ctx.Done():
 			return
@@ -161,6 +203,24 @@ func (h *SSEHub) Broadcast(eventType string, data []byte) {
 	}
 }
 
+// SendToClient отправляет событие конкретному клиенту по clientID.
+func (h *SSEHub) SendToClient(clientID string, eventType string, data []byte) {
+	msg := clientMessage{
+		clientID: clientID,
+		event:    SSEEvent{Type: eventType, Data: data},
+	}
+	select {
+	case h.directed <- msg:
+	case <-h.done:
+	}
+}
+
+// SetOnClientConnect задаёт колбэк для per-client событий при подключении.
+// Колбэк вызывается в горутине Run. Вызывать до Run().
+func (h *SSEHub) SetOnClientConnect(fn func(clientID string) []SSEEvent) {
+	h.onClientConnect = fn
+}
+
 // SetNotifyOnConnect задаёт канал, в который отправляется сигнал при регистрации нового клиента.
 // Буфер 1, чтобы не блокировать Hub. Вызывать до Run().
 func (h *SSEHub) SetNotifyOnConnect(ch chan struct{}) {
@@ -194,9 +254,11 @@ func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no") // Отключаем буферизацию nginx.
 
-	// Создаём клиента.
+	clientID := r.URL.Query().Get("client_id")
+
 	client := &sseClient{
-		events: make(chan SSEEvent, clientEventBufferSize),
+		events:   make(chan SSEEvent, clientEventBufferSize),
+		clientID: clientID,
 	}
 
 	// Регистрация (неблокирующая — Hub может быть уже остановлен).

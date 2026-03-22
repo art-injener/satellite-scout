@@ -148,6 +148,11 @@ make run
 
 **Легенда:** ✅ Реализовано | 🔄 В работе | ⏳ Запланировано
 
+## Документация
+
+- [README](README.md)
+- [История изменений UI](docs/ui-changelog.md)
+
 ## Ссылки
 
 - **[STSPLUS](https://celestrak.org/software/dransom/stsplus.html)** — культовый DOS-трекер спутников (1990–2002) от David H. Ransom, Jr. Использовался NASA, ВВС США и тысячами энтузиастов по всему миру

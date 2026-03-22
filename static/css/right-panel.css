@@ -1,20 +1,33 @@
 /* ===== Правая панель: таблица пролётов + кнопки ===== */
 
-/* Компактная таблица пролётов — занимает всю доступную высоту правой панели */
+/* Блок таблицы: внешний контейнер — подложка для overlay-тоста; прокрутка только внутри __scroll */
 .passes-compact {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+    overflow: hidden;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.passes-compact__scroll {
     flex: 1;
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
-    border-bottom: 1px solid var(--border-color);
 }
 
 .passes-compact__table {
     width: 100%;
     border-collapse: collapse;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     table-layout: fixed;
+    /* Не показывать текстовую каретку и не давать выделять текст как в поле ввода */
+    user-select: none;
+    -webkit-user-select: none;
+    caret-color: transparent;
 }
 
 .passes-compact__table thead {
@@ -24,8 +37,8 @@
 }
 
 .passes-compact__table th {
-    padding: 3px 6px;
-    font-size: 9px;
+    padding: 5px 6px;
+    font-size: 11px;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
@@ -36,10 +49,92 @@
     white-space: nowrap;
 }
 
-/* Колонки: КА (38%) | Время (38%) | T−/Ост. (24%) */
-.pc-th-sat   { width: 38%; }
-.pc-th-time  { width: 38%; }
-.pc-th-countdown { width: 24%; }
+/* Колонки: глаз (~32px) | КА (36%) | Время (36%) | длит./до сеанса */
+.pc-th-track {
+    width: 32px;
+    text-align: center;
+    cursor: pointer;
+    user-select: none;
+    vertical-align: middle;
+}
+
+.pc-th-track-toggle-inner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 22px;
+}
+.pc-th-sat      { width: 36%; }
+.pc-th-time     { width: 36%; }
+.pc-th-countdown {
+    width: auto;
+    min-width: 5.5rem;
+    white-space: normal;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.2;
+}
+
+/* Две строки: «длит.» / «до сеанса» */
+.pc-th-countdown__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 1.2;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.pc-th-countdown__line {
+    display: block;
+    white-space: nowrap;
+}
+
+/* Ячейка «глаз» — видимость трассы */
+.pc-track-cell {
+    text-align: center;
+    cursor: pointer;
+    width: 32px;
+    padding: 2px 2px !important;
+    user-select: none;
+    vertical-align: middle;
+}
+
+.pc-track-cell:hover .pc-track-eye-svg-wrap,
+.pc-th-track:hover .pc-track-eye-svg-wrap {
+    filter: brightness(1.12);
+}
+
+/* Обёртка SVG: цвет обводки = currentColor */
+.pc-track-eye-svg-wrap {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    pointer-events: none;
+    line-height: 0;
+}
+
+.pc-track-eye-svg {
+    display: block;
+    vertical-align: middle;
+}
+
+/* Трасса видна на карте/небе — яркий «открытый» глаз (ячейка или заголовок) */
+.pc-track-cell--on .pc-track-eye-svg-wrap,
+.pc-th-track--on .pc-track-eye-svg-wrap {
+    color: #00d4aa;
+}
+
+/* Трасса скрыта — приглушённый глаз с диагональю «выкл.» */
+.pc-track-cell--off .pc-track-eye-svg-wrap,
+.pc-th-track--off .pc-track-eye-svg-wrap {
+    color: rgba(230, 232, 235, 0.42);
+}
 
 .passes-compact__table td {
     padding: 4px 6px;
@@ -48,41 +143,41 @@
     vertical-align: middle;
 }
 
-/* Строка таблицы — высота под 2-строчные ячейки */
-.pc-row {
-    cursor: pointer;
+/* Строка: без указателя-«руки» (кроме ячейки глаза — см. .pc-track-cell) */
+.passes-compact__table tbody tr.pc-row {
+    cursor: default;
     transition: background 0.1s ease;
     height: auto;
     min-height: 38px;
 }
 
-.pc-row:hover {
+.passes-compact__table tbody tr.pc-row:hover {
     background: var(--bg-tertiary);
 }
 
-/* Выбранный (selected) — циан фон */
-.pc-row--selected {
-    background: rgba(0, 212, 212, 0.12);
-    border-left: 3px solid #00d4d4;
+/* Выбранный (selected) — жёлтая подсветка */
+.passes-compact__table tbody tr.pc-row--selected {
+    background: rgba(255, 215, 0, 0.2) !important;
+    border-left: 3px solid #d4a800;
 }
 
-.pc-row--selected td:first-child {
+.passes-compact__table tbody tr.pc-row--selected td:first-child {
     padding-left: 3px;
 }
 
-/* На сопровождении (tracking) — красный левый бордер + ярче */
-.pc-row--tracking {
-    background: rgba(255, 68, 68, 0.1);
+/* На сопровождении (tracking) */
+.passes-compact__table tbody tr.pc-row--tracking {
+    background: rgba(255, 68, 68, 0.1) !important;
     border-left: 3px solid #ff4444;
 }
 
-.pc-row--tracking td:first-child {
+.passes-compact__table tbody tr.pc-row--tracking td:first-child {
     padding-left: 3px;
 }
 
-/* Если selected === tracking — показываем tracking стиль */
-.pc-row--selected.pc-row--tracking {
-    background: rgba(255, 68, 68, 0.15);
+/* selected + tracking — приоритет стиля сопровождения */
+.passes-compact__table tbody tr.pc-row--selected.pc-row--tracking {
+    background: rgba(255, 68, 68, 0.16) !important;
     border-left: 3px solid #ff4444;
 }
 
@@ -94,7 +189,7 @@
 }
 
 .pc-sat-name {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
@@ -105,7 +200,7 @@
 }
 
 .pc-sat-norad {
-    font-size: 10px;
+    font-size: 11px;
     color: var(--text-muted);
     white-space: nowrap;
     line-height: 1.3;
@@ -126,43 +221,44 @@
 }
 
 .pc-time-aos {
-    font-size: 11px;
+    font-size: 12px;
     color: #00cc00;
     line-height: 1.4;
     white-space: nowrap;
 }
 
 .pc-time-los {
-    font-size: 10px;
+    font-size: 11px;
     color: #ff6666;
     line-height: 1.3;
     white-space: nowrap;
 }
 
-/* Колонка 3: обратный отсчёт / оставшееся время */
+/* Колонка 3: длит. (верх) + до сеанса (низ) */
 .pc-col3-cell {
     font-variant-numeric: tabular-nums;
     text-align: center;
+    padding: 3px 4px !important;
+    line-height: 1.25;
+}
+
+.pc-col3-dur,
+.pc-col3-until {
+    font-size: 11px;
     white-space: nowrap;
 }
 
-.pc-countdown--done {
-    color: var(--text-muted);
+.pc-col3-dur {
+    color: var(--text-secondary);
 }
 
-/* Обратный отсчёт */
-.pc-countdown {
-    font-variant-numeric: tabular-nums;
-}
-
-.pc-countdown--soon {
-    color: var(--accent-warning);
-}
-
-.pc-countdown--now {
+.pc-col3-until {
     color: var(--accent-primary);
-    font-weight: 700;
+    font-weight: 600;
 }
+
+/* «сейчас» в нижней строке */
+.pc-col3-until:empty { min-height: 1em; }
 
 /* Пустое состояние */
 .pc-empty {
@@ -175,8 +271,8 @@
 /* ===== Кнопки управления (привязаны к ширине панели/таблицы) ===== */
 .right-panel__controls {
     display: flex;
-    gap: 6px;
-    padding: 6px;
+    gap: 8px;
+    padding: 8px;
     flex-shrink: 0;
     width: 100%;
     box-sizing: border-box;
@@ -189,11 +285,12 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
-    padding: 6px 8px;
+    gap: 8px;
+    padding: 10px 12px;
+    min-height: 42px;
     font-family: var(--font-mono);
-    font-size: 12px;
-    font-weight: 500;
+    font-size: 14px;
+    font-weight: 600;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
@@ -201,7 +298,18 @@
     cursor: pointer;
     white-space: nowrap;
     transition: all 0.12s ease;
+    line-height: 1.15;
+}
+
+/* Крупнее знак ⊕ / ✕ относительно подписи */
+.rp-ctrl__glyph {
+    font-size: 1.35em;
+    font-weight: 700;
     line-height: 1;
+}
+
+.rp-ctrl__label {
+    letter-spacing: 0.02em;
 }
 
 .rp-ctrl:hover:not(:disabled) {
@@ -209,21 +317,10 @@
     border-color: var(--text-muted);
 }
 
+/* Не «терять» подпись: раньше 0.35 — почти сливалось с фоном */
 .rp-ctrl:disabled {
-    opacity: 0.35;
+    opacity: 0.52;
     cursor: not-allowed;
-}
-
-/* Checkbox Авто */
-.rp-ctrl--auto {
-    cursor: pointer;
-}
-
-.rp-ctrl--auto input[type="checkbox"] {
-    accent-color: var(--accent-primary);
-    margin: 0;
-    width: 16px;
-    height: 16px;
 }
 
 /* Кнопка Сопровождение */
@@ -323,4 +420,40 @@
 .skyview-info__value {
     font-variant-numeric: tabular-nums;
     color: #00a8ff; /* синий — значения */
+}
+
+/* ── Тост: лимит трасс — overlay внизу области таблицы (не в потоке, без прокрутки страницы) ── */
+.pc-limit-toast {
+    position: absolute;
+    bottom: 0.4rem;
+    left: 0.35rem;
+    right: 0.35rem;
+    z-index: 10;
+    box-sizing: border-box;
+    padding: 0.65rem 0.5rem;
+    background: rgba(18, 28, 42, 0.96);
+    border: 1px solid #006666;
+    border-radius: 6px;
+    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+    font-family: var(--font-sans, system-ui, sans-serif);
+    font-size: 11px;
+    line-height: 1.45;
+    color: #e6e8eb;
+    pointer-events: none;
+    animation: pc-limit-toast-in 0.22s ease-out;
+}
+
+@keyframes pc-limit-toast-in {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.pc-limit-toast__text {
+    margin: 0;
 }

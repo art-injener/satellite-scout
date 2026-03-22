@@ -136,6 +136,31 @@ func TestFindConcurrentPasses_StableSortByNoradID(t *testing.T) {
 	}
 }
 
+func TestNoradInPostLosGap(t *testing.T) {
+	now := time.Now().UTC()
+	t.Run("future_only", func(t *testing.T) {
+		passes := []*tracker.Pass{makePass(1, "A", 10*time.Minute, 15*time.Minute)}
+		if NoradInPostLosGap(passes, 1, now) {
+			t.Error("expected false when only future passes in data (pre-AOS wait)")
+		}
+	})
+	t.Run("after_los_before_next_aos", func(t *testing.T) {
+		passes := []*tracker.Pass{
+			makePass(1, "A", -20*time.Minute, -5*time.Minute),
+			makePass(1, "A", 30*time.Minute, 40*time.Minute),
+		}
+		if !NoradInPostLosGap(passes, 1, now) {
+			t.Error("expected true in gap after LOS")
+		}
+	})
+	t.Run("active_pass", func(t *testing.T) {
+		passes := []*tracker.Pass{makePass(1, "A", -2*time.Minute, 8*time.Minute)}
+		if NoradInPostLosGap(passes, 1, now) {
+			t.Error("expected false during active pass")
+		}
+	})
+}
+
 // ── SelectPrimarySatellite ────────────────────────────────────────────────────
 
 func TestSelectPrimary_EmptyGroup(t *testing.T) {
@@ -179,15 +204,15 @@ func TestSelectPrimary_TieBreakerNoradID(t *testing.T) {
 	}
 }
 
-func TestSelectPrimary_FallbackToFirstByAOS(t *testing.T) {
-	// Нет видимых → первый по AOS (список отсортирован).
+func TestSelectPrimary_FallbackLongestAmongGroupWhenNoneVisible(t *testing.T) {
+	// Нет видимых → наибольшая длительность среди группы (не «первый по AOS»).
 	sats := []PassInfo{
-		{NoradID: 5, IsVisible: false, Pass: tracker.Pass{AOS: 100, Duration: 600}},
-		{NoradID: 6, IsVisible: false, Pass: tracker.Pass{AOS: 200, Duration: 300}},
+		{NoradID: 5, IsVisible: false, Pass: tracker.Pass{AOS: 100, Duration: 100}},
+		{NoradID: 6, IsVisible: false, Pass: tracker.Pass{AOS: 200, Duration: 900}},
 	}
 	id := SelectPrimarySatellite(sats, nil)
-	if id != 5 {
-		t.Errorf("expected 5 (first by AOS), got %d", id)
+	if id != 6 {
+		t.Errorf("expected 6 (longest duration in group), got %d", id)
 	}
 }
 
@@ -340,5 +365,214 @@ func TestBuildGroup_TimeWindow(t *testing.T) {
 	}
 	if group.TimeWindow.End != 3000 {
 		t.Errorf("expected window.End=3000, got %d", group.TimeWindow.End)
+	}
+}
+
+// ── [BUG-A] Преждевременная смена primary ─────────────────────────────────────
+// SelectPrimarySatellite не должен перебивать текущий primary,
+// пока ShouldSwitchPrimary говорит «не переключай».
+
+func TestShouldSwitch_NoPrematureSwitchWhenLongerDurationExists(t *testing.T) {
+	now := time.Now().UTC()
+	// Спутник A — primary, пролёт ещё активен (Duration=480с).
+	// Спутник B — в группе, Duration=900с (длиннее), тоже видим.
+	// ShouldSwitchPrimary(A) должен вернуть false — пролёт A ещё не кончился.
+	sats := []PassInfo{
+		{
+			NoradID:   10,
+			IsVisible: true,
+			Pass:      tracker.Pass{AOS: msFromNow(-5 * time.Minute), LOS: msFromNow(3 * time.Minute), Duration: 480},
+		},
+		{
+			NoradID:   20,
+			IsVisible: true,
+			Pass:      tracker.Pass{AOS: msFromNow(-2 * time.Minute), LOS: msFromNow(13 * time.Minute), Duration: 900},
+		},
+	}
+	sw, _ := ShouldSwitchPrimary(10, sats, now)
+	if sw {
+		t.Error("should NOT switch: pass of primary 10 is still active (LOS in future), even though 20 has longer duration")
+	}
+}
+
+func TestShouldSwitch_SwitchAfterLOSEvenToSameNorad(t *testing.T) {
+	now := time.Now().UTC()
+	// Спутник 10 — primary, но это подстановка следующего витка (AOS далеко в будущем).
+	// IsSubstitute=true: пролёт закончился, запись взята из следующего витка.
+	sats := []PassInfo{
+		{
+			NoradID:      10,
+			IsVisible:    false,
+			IsSubstitute: true,
+			Pass:         tracker.Pass{AOS: msFromNow(80 * time.Minute), LOS: msFromNow(90 * time.Minute), Duration: 600},
+		},
+	}
+	sw, newID := ShouldSwitchPrimary(10, sats, now)
+	if !sw {
+		t.Error("should switch: satellite 10 is a substitute (future orbit), previous pass already ended")
+	}
+	if newID != 10 {
+		t.Errorf("expected newID=10 (re-selected), got %d", newID)
+	}
+}
+
+func TestShouldSwitch_KeepPrimaryWaitingForAOS(t *testing.T) {
+	now := time.Now().UTC()
+	// Спутник 10 — primary, ещё не виден, AOS через 30 секунд. Не переключать.
+	sats := []PassInfo{
+		{
+			NoradID:   10,
+			IsVisible: false,
+			Pass:      tracker.Pass{AOS: msFromNow(30 * time.Second), LOS: msFromNow(6 * time.Minute), Duration: 330},
+		},
+	}
+	sw, _ := ShouldSwitchPrimary(10, sats, now)
+	if sw {
+		t.Error("should NOT switch: satellite is waiting for AOS (in window, not visible yet)")
+	}
+}
+
+// ── [BUG-B] GroupEntries change detection ─────────────────────────────────────
+
+func TestGroupEntries_IdenticalGroups(t *testing.T) {
+	sats := []PassInfo{
+		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{AOS: 1000, LOS: 2000}},
+		{NoradID: 20, IsVisible: false, Pass: tracker.Pass{AOS: 3000, LOS: 4000}},
+	}
+	a := GroupEntries(sats)
+	b := GroupEntries(sats)
+	if GroupEntriesChanged(a, b) {
+		t.Error("identical groups should not be detected as changed")
+	}
+}
+
+func TestGroupEntries_VisibilityTransition(t *testing.T) {
+	// Тот же NORAD ID, но IsVisible изменился (visible→invisible при LOS).
+	old := []GroupEntry{
+		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
+	}
+	new := []GroupEntry{
+		{NoradID: 10, IsVisible: false, AOS: 1000, LOS: 2000},
+	}
+	if !GroupEntriesChanged(old, new) {
+		t.Error("visibility transition (true→false) must be detected as change")
+	}
+}
+
+func TestGroupEntries_SameNoradDifferentPass(t *testing.T) {
+	// Тот же NORAD, но другой пролёт (следующий виток — другие AOS/LOS).
+	old := []GroupEntry{
+		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
+	}
+	new := []GroupEntry{
+		{NoradID: 10, IsVisible: false, AOS: 100000, LOS: 200000},
+	}
+	if !GroupEntriesChanged(old, new) {
+		t.Error("same NORAD with different pass (AOS/LOS) must be detected as change")
+	}
+}
+
+func TestGroupEntries_DifferentSize(t *testing.T) {
+	old := []GroupEntry{
+		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
+	}
+	new := []GroupEntry{
+		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
+		{NoradID: 20, IsVisible: false, AOS: 3000, LOS: 4000},
+	}
+	if !GroupEntriesChanged(old, new) {
+		t.Error("different group size must be detected as change")
+	}
+}
+
+func TestGroupEntries_NilVsNil(t *testing.T) {
+	if GroupEntriesChanged(nil, nil) {
+		t.Error("nil vs nil should not be changed")
+	}
+}
+
+func TestGroupEntries_SortedByNoradID(t *testing.T) {
+	sats := []PassInfo{
+		{NoradID: 30, IsVisible: true, Pass: tracker.Pass{AOS: 3000, LOS: 4000}},
+		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{AOS: 1000, LOS: 2000}},
+	}
+	entries := GroupEntries(sats)
+	if entries[0].NoradID != 10 || entries[1].NoradID != 30 {
+		t.Errorf("entries should be sorted by NoradID, got [%d, %d]", entries[0].NoradID, entries[1].NoradID)
+	}
+}
+
+// ── [BUG-C] ShouldSwitchPrimary vs подстановка следующего витка ───────────────
+
+func TestShouldSwitch_SubstituteFuturePassSameNorad(t *testing.T) {
+	now := time.Now().UTC()
+	// Окно пусто → подставлен следующий виток спутника 10 (AOS через 80 мин).
+	// IsSubstitute=true: пролёт НЕ из скользящего окна.
+	sats := []PassInfo{
+		{
+			NoradID:      10,
+			IsVisible:    false,
+			IsSubstitute: true,
+			Pass:         tracker.Pass{AOS: msFromNow(80 * time.Minute), LOS: msFromNow(90 * time.Minute), Duration: 600},
+		},
+	}
+	sw, _ := ShouldSwitchPrimary(10, sats, now)
+	if !sw {
+		t.Error("should switch: substitute pass (next orbit) is not the same as the ended pass")
+	}
+}
+
+func TestShouldSwitch_ActivePassVisibleDoNotSwitch(t *testing.T) {
+	now := time.Now().UTC()
+	sats := []PassInfo{
+		{
+			NoradID:   10,
+			IsVisible: true,
+			Pass:      tracker.Pass{AOS: msFromNow(-3 * time.Minute), LOS: msFromNow(5 * time.Minute), Duration: 480},
+		},
+		{
+			NoradID:   20,
+			IsVisible: true,
+			Pass:      tracker.Pass{AOS: msFromNow(-1 * time.Minute), LOS: msFromNow(12 * time.Minute), Duration: 780},
+		},
+		{
+			NoradID:   30,
+			IsVisible: false,
+			Pass:      tracker.Pass{AOS: msFromNow(30 * time.Second), LOS: msFromNow(8 * time.Minute), Duration: 450},
+		},
+	}
+	// Primary=10 виден и пролёт идёт — не переключать, даже если 20 длиннее.
+	sw, _ := ShouldSwitchPrimary(10, sats, now)
+	if sw {
+		t.Error("should NOT switch: primary 10 pass is active and visible")
+	}
+}
+
+// ── Интеграционный тест: полный цикл пролёта ─────────────────────────────────
+
+func TestFullPassLifecycle_GroupEntriesDetectAllTransitions(t *testing.T) {
+	// Симуляция жизненного цикла:
+	// 1. Ожидание AOS (IsVisible=false, AOS в будущем)
+	// 2. Активный пролёт (IsVisible=true)
+	// 3. Пролёт завершён (выпадает из окна, подстановка следующего витка)
+
+	phase1 := []GroupEntry{
+		{NoradID: 10, IsVisible: false, AOS: 1000, LOS: 2000},
+	}
+	phase2 := []GroupEntry{
+		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
+	}
+	phase3 := []GroupEntry{
+		{NoradID: 10, IsVisible: false, AOS: 100000, LOS: 200000},
+	}
+
+	if !GroupEntriesChanged(phase1, phase2) {
+		t.Error("phase1→phase2: visibility transition must be detected")
+	}
+	if !GroupEntriesChanged(phase2, phase3) {
+		t.Error("phase2→phase3: pass change (AOS/LOS + visibility) must be detected")
+	}
+	if !GroupEntriesChanged(phase1, phase3) {
+		t.Error("phase1→phase3: different pass data must be detected")
 	}
 }

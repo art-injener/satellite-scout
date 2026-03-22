@@ -330,6 +330,10 @@
                 if (window._bottomPanel && typeof window._bottomPanel.startWaterfall === 'function') {
                     window._bottomPanel.startWaterfall();
                 }
+                // Вкладка «Антенна» (азимут/угол места/водопад) при сопровождении
+                if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
+                    window._bottomPanel.showTab('antenna', false);
+                }
 
                 // Трек tracking на EarthView.
                 if (window.earthView) {
@@ -353,6 +357,9 @@
                 // Остановка водопада и очистка окна при сбросе сопровождения
                 if (window._bottomPanel && typeof window._bottomPanel.stopWaterfallAndClear === 'function') {
                     window._bottomPanel.stopWaterfallAndClear();
+                }
+                if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
+                    window._bottomPanel.showTab('spectrum', false);
                 }
                 if (window.earthView) {
                     window.earthView.clearTrackingLayer();
@@ -385,11 +392,22 @@
             _updateSecondaryTracks();
         });
 
+        // ── TRACK_VISIBILITY_CHANGE: toggle видимости трасс в таблице ──
+        sm.subscribe(StateEventType.TRACK_VISIBILITY_CHANGE, function() {
+            _updateSecondaryPositions();
+            _updateSecondaryTracks();
+            // Перезагружаем sky_path для вторичных, чтобы трассы с включённой видимостью появились на SkyView.
+            _refreshSecondarySkyTracks();
+            if (window.earthView) { window.earthView.draw(); }
+            if (window.skyView) { window.skyView.draw(); }
+        });
+
         // ── Backward compat: SATELLITE_CHANGE (legacy) — ничего не делаем ──
         // Логика перенесена в SELECTED_CHANGE / TRACKING_CHANGE.
     }
 
     // Вспомогательная: обновить позиции вторичных спутников (исключая selected и tracking).
+    // EarthView: маркеры ВСЕХ спутников группы. SkyView: только с включённой трассой (isTrackVisible).
     function _updateSecondaryPositions() {
         const sm = window._stateManager;
         const group = sm && sm.getSatelliteGroup();
@@ -402,7 +420,6 @@
 
         for (var i = 0; i < group.satellites.length; i++) {
             const sat = group.satellites[i];
-            // Исключаем selected и tracking — они на отдельных слоях.
             if (sat.norad_id === selectedId || sat.norad_id === trackingId) { continue; }
             const satState = sm.getState(sat.norad_id);
             if (satState && satState.position) {
@@ -413,12 +430,14 @@
                     lat: satState.position.lat,
                     alt: satState.position.alt
                 });
-                skyPositions.push({
-                    noradId: sat.norad_id,
-                    name: sat.sat_name,
-                    az: satState.position.az,
-                    el: satState.position.el
-                });
+                if (sm.isTrackVisible(sat.norad_id)) {
+                    skyPositions.push({
+                        noradId: sat.norad_id,
+                        name: sat.sat_name,
+                        az: satState.position.az,
+                        el: satState.position.el
+                    });
+                }
             }
         }
 
@@ -426,7 +445,8 @@
         if (window.skyView) { window.skyView.setSecondaryPositions(skyPositions); }
     }
 
-    // Вспомогательная: обновить треки вторичных спутников (EarthView — ground track).
+    // Вспомогательная: обновить треки вторичных спутников.
+    // Трассы передаются в EarthView только для спутников с isTrackVisible (PASS-MAP-001).
     function _updateSecondaryTracks() {
         const sm = window._stateManager;
         const group = sm && sm.getSatelliteGroup();
@@ -459,6 +479,8 @@
         for (var i = 0; i < group.satellites.length; i++) {
             const sat = group.satellites[i];
             if (sat.norad_id === selectedId || sat.norad_id === trackingId) { continue; }
+            // SkyView: трассы только для спутников с isTrackVisible (PASS-MAP-001).
+            if (!sm.isTrackVisible(sat.norad_id)) { continue; }
             var pass = null;
             for (var j = 0; j < passes.length; j++) {
                 var p = passes[j];
@@ -474,6 +496,19 @@
                 window.skyView.setSecondaryTrack(sat.norad_id, track);
             }
         }
+    }
+
+    /** Загрузить пролёты и применить трассы вторичных спутников на SkyView (при смене видимости трасс). */
+    function _refreshSecondarySkyTracks() {
+        fetch('/api/passes?hours=24')
+            .then(function(resp) { return resp.json(); })
+            .then(function(data) {
+                if (data.passes && data.passes.length > 0) {
+                    applySecondarySkyTracks(data.passes);
+                    if (window.skyView) { window.skyView.draw(); }
+                }
+            })
+            .catch(function() {});
     }
 
     // Загрузка sky path для SkyView (selected или tracking).

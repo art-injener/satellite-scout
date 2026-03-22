@@ -1,4 +1,4 @@
-// Нижняя панель: переключение вкладок (Антенна / Спектр / ТМИ)
+// Нижняя панель: переключение вкладок (Спектр / Антенна / ТМИ)
 // + компактный водопад-дисплей на вкладке «Антенна».
 
 (function() {
@@ -248,7 +248,8 @@
     function BottomPanel() {
         this._panes = {};
         this._waterfall = null;
-        this._currentTab = localStorage.getItem('ux.bottomTab') || 'antenna';
+        // По умолчанию «Спектр»; сохранённый выбор — только после явного клика по сайдбару.
+        this._currentTab = localStorage.getItem('ux.bottomTab') || 'spectrum';
         this._resizeBound = null;
 
         this._collectPanes();
@@ -269,7 +270,7 @@
         }
     };
 
-    // Привязываем клики по кнопкам аккордеона в sidebar (иконки Антенна / Спектр / ТМИ)
+    // Привязываем клики по кнопкам аккордеона в sidebar (Спектр / Антенна / ТМИ)
     BottomPanel.prototype._initTabs = function() {
         var self = this;
         var tabs = document.querySelectorAll('.sidebar-accordion__btn');
@@ -325,6 +326,16 @@
         if (this._waterfall) {
             this._waterfall.refresh();
         }
+    };
+
+    /**
+     * Переключить вкладку нижней панели (programmatic).
+     * @param {string} name — 'spectrum' | 'antenna' | 'tmi'
+     * @param {boolean} [persist=false] — true только при клике пользователя (localStorage); сопровождение — false.
+     */
+    BottomPanel.prototype.showTab = function(name, persist) {
+        if (!this._panes[name]) { return; }
+        this._switchTab(name, persist === true);
     };
 
     /** Запуск отрисовки водопада. Вызывается при включении сопровождения (кнопка «Сопровождение»). */

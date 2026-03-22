@@ -8,15 +8,16 @@ import (
 
 // TrackingServiceInterface — интерфейс сервиса отслеживания для HTTP-обработчика.
 type TrackingServiceInterface interface {
-	// SetManualSelection устанавливает ручной выбор primary спутника.
-	SetManualSelection(noradID int)
-	// ResetManualSelection сбрасывает ручной выбор (возврат к авто-режиму).
-	ResetManualSelection()
+	// SetManualSelection устанавливает ручной выбор primary спутника для клиента.
+	SetManualSelection(noradID int, clientID string)
+	// ResetManualSelection сбрасывает ручной выбор (возврат к авто-режиму) для клиента.
+	ResetManualSelection(clientID string)
 }
 
 // TrackingRequest — тело запроса POST /api/tracking/current.
 type TrackingRequest struct {
-	NoradID int `json:"norad_id"`
+	NoradID  int    `json:"norad_id"`
+	ClientID string `json:"client_id,omitempty"`
 }
 
 // TrackingHandler обрабатывает запросы управления сопровождением спутника.
@@ -46,9 +47,14 @@ func (h *TrackingHandler) SetCurrent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	h.trackingService.SetManualSelection(req.NoradID)
+	clientID := req.ClientID
+	if clientID == "" {
+		clientID = r.Header.Get("X-Client-Id")
+	}
 
-	slog.Info("manual tracking set", "norad_id", req.NoradID)
+	h.trackingService.SetManualSelection(req.NoradID, clientID)
+
+	slog.Info("manual tracking set", "norad_id", req.NoradID, "client_id", clientID)
 	writeJSON(w, http.StatusOK, TrackingResponse{
 		Status:  "ok",
 		NoradID: req.NoradID,
@@ -57,9 +63,20 @@ func (h *TrackingHandler) SetCurrent(w http.ResponseWriter, r *http.Request) {
 
 // ResetCurrent обрабатывает POST /api/tracking/reset — сброс в авто-режим.
 func (h *TrackingHandler) ResetCurrent(w http.ResponseWriter, r *http.Request) {
-	h.trackingService.ResetManualSelection()
+	clientID := r.Header.Get("X-Client-Id")
+	// Также пробуем из тела (для JSON-запросов).
+	if clientID == "" {
+		var body struct {
+			ClientID string `json:"client_id"`
+		}
+		// body может быть пустым — это ОК.
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		clientID = body.ClientID
+	}
 
-	slog.Info("tracking reset to auto")
+	h.trackingService.ResetManualSelection(clientID)
+
+	slog.Info("tracking reset to auto", "client_id", clientID)
 	writeJSON(w, http.StatusOK, TrackingResponse{
 		Status:  "ok",
 		NoradID: 0,

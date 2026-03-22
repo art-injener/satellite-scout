@@ -144,7 +144,8 @@ test('connect creates EventSource', () => {
     const client = new SSEClient(sm);
     client.connect();
     assert.ok(MockEventSource._lastInstance);
-    assert.strictEqual(MockEventSource._lastInstance.url, '/api/sse');
+    // URL может содержать client_id для per-client state (TRACK-STATE-003).
+    assert.ok(MockEventSource._lastInstance.url.startsWith('/api/sse'), 'url should start with /api/sse');
     assert.strictEqual(client.getStatus(), SSEConnectionStatus.CONNECTING);
     client.disconnect();
 });
@@ -637,6 +638,154 @@ test('multiple satellites in one satellite_state_update', () => {
     assert.strictEqual(sm.getActiveSatelliteId(), 25544, 'first satellite is active');
     assert.strictEqual(sm.getState(40069).name, 'METEOR-M2');
 
+    client.disconnect();
+});
+
+// ── satellite_change: forceNotify ─────────────────────────
+
+console.log('\nSSEClient — satellite_change forceNotify [BUG-D]');
+
+test('satellite_change reason=auto calls setSelectedSatellite with forceNotify=true', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    // Устанавливаем первый selected.
+    sm.setSelectedSatellite(25544, 'ISS');
+
+    // Перехватываем вызов setSelectedSatellite.
+    const calls = [];
+    const orig = sm.setSelectedSatellite.bind(sm);
+    sm.setSelectedSatellite = function(noradId, name, isManual, forceNotify) {
+        calls.push({ noradId, name, isManual, forceNotify });
+        return orig(noradId, name, isManual, forceNotify);
+    };
+
+    // satellite_change с reason=auto, тот же NORAD (данные пролёта изменились).
+    MockEventSource._lastInstance._emit('satellite_change', {
+        norad_id: 25544,
+        name: 'ISS',
+        reason: 'auto',
+    });
+
+    assert.ok(calls.length > 0, 'setSelectedSatellite should be called');
+    assert.strictEqual(calls[0].forceNotify, true,
+        'reason=auto must pass forceNotify=true to trigger SELECTED_CHANGE even for same NORAD');
+    client.disconnect();
+});
+
+test('satellite_change reason=initial also uses forceNotify=true', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    const calls = [];
+    const orig = sm.setSelectedSatellite.bind(sm);
+    sm.setSelectedSatellite = function(noradId, name, isManual, forceNotify) {
+        calls.push({ noradId, name, isManual, forceNotify });
+        return orig(noradId, name, isManual, forceNotify);
+    };
+
+    MockEventSource._lastInstance._emit('satellite_change', {
+        norad_id: 40069,
+        name: 'METEOR-M2',
+        reason: 'initial',
+    });
+
+    assert.ok(calls.length > 0);
+    assert.strictEqual(calls[0].forceNotify, true,
+        'reason=initial must also pass forceNotify=true');
+    client.disconnect();
+});
+
+test('satellite_change reason=tracking_ended clears tracking and selects new', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    // Устанавливаем tracking.
+    sm.setTrackingSatellite(25544, 'ISS');
+    assert.strictEqual(sm.getTrackingSatelliteId(), 25544);
+
+    // Перехватываем clearTrackingSatellite.
+    let clearCalled = false;
+    const origClear = sm.clearTrackingSatellite.bind(sm);
+    sm.clearTrackingSatellite = function() {
+        clearCalled = true;
+        return origClear();
+    };
+
+    MockEventSource._lastInstance._emit('satellite_change', {
+        norad_id: 40069,
+        name: 'METEOR-M2',
+        reason: 'tracking_ended',
+    });
+
+    assert.strictEqual(clearCalled, true, 'tracking should be cleared');
+    assert.strictEqual(sm.getSelectedSatelliteId(), 40069, 'new satellite should be selected');
+    client.disconnect();
+});
+
+test('satellite_change reason=manual is ignored (per-client state via client_state_restore)', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    sm.setSelectedSatellite(25544, 'ISS');
+
+    const calls = [];
+    const orig = sm.setSelectedSatellite.bind(sm);
+    sm.setSelectedSatellite = function(noradId, name, isManual, forceNotify) {
+        calls.push({ noradId, name, isManual, forceNotify });
+        return orig(noradId, name, isManual, forceNotify);
+    };
+
+    MockEventSource._lastInstance._emit('satellite_change', {
+        norad_id: 40069,
+        name: 'METEOR-M2',
+        reason: 'manual',
+    });
+
+    assert.strictEqual(calls.length, 0, 'manual reason should not call setSelectedSatellite');
+    assert.strictEqual(sm.getSelectedSatelliteId(), 25544, 'selected should remain unchanged');
+    client.disconnect();
+});
+
+// ── satellite_group_update ────────────────────────────────
+
+console.log('\nSSEClient — satellite_group_update');
+
+test('satellite_group_update routes group data to stateManager', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    const calls = [];
+    const orig = sm.setSatelliteGroup.bind(sm);
+    sm.setSatelliteGroup = function(data) {
+        calls.push(data);
+        return orig(data);
+    };
+
+    const groupData = {
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: true },
+            { norad_id: 40069, sat_name: 'METEOR', aos: 1100, los: 2100, is_visible: false, is_active: false },
+        ],
+        time_window: { start: 1000, end: 2100 },
+    };
+
+    MockEventSource._lastInstance._emit('satellite_group_update', groupData);
+
+    assert.strictEqual(calls.length, 1, 'setSatelliteGroup should be called once');
+    assert.strictEqual(calls[0].primary_id, 25544);
+    assert.strictEqual(calls[0].satellites.length, 2);
     client.disconnect();
 });
 

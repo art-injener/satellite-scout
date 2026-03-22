@@ -56,9 +56,35 @@ const StateEventType = Object.freeze({
     TRACKING_CHANGE: 'tracking_change',
     /** Обновление группы скользящего окна. */
     SATELLITE_GROUP_UPDATE: 'satellite_group_update',
+    /** Изменение набора спутников с видимыми трассами (UX-TABLE-TRACK-COL-001). */
+    TRACK_VISIBILITY_CHANGE: 'track_visibility_change',
     /** @deprecated Использовать SELECTED_CHANGE / TRACKING_CHANGE. */
     SATELLITE_CHANGE: 'satellite_change',
 });
+
+/**
+ * Палитра цветов для дополнительных трасс (UX-TABLE-TRACK-COL-001).
+ * Не используется для tracking (красно-зелёный) и selected (циан/жёлтый).
+ * Индекс назначается по порядку в visibleTrackIds.
+ */
+const TRACK_COLOR_PALETTE = Object.freeze([
+    '#e6194b', // красный
+    '#3cb44b', // зелёный
+    '#4363d8', // синий
+    '#f58231', // оранжевый
+    '#911eb4', // фиолетовый
+    '#42d4f4', // циан
+    '#f032e6', // пурпурный
+    '#008080', // бирюзово-зелёный (без жёлтого в палитре доп. трасс)
+    '#a5673f', // коричневый
+    '#fabed4', // розовый
+]);
+
+/** Максимум дополнительных трасс (не считая tracking и selected). */
+const MAX_VISIBLE_TRACKS = 5;
+
+/** Ключ localStorage для сохранения visibleTrackIds (TRACK-STATE-004). */
+const VISIBLE_TRACKS_STORAGE_KEY = 'satellite-scout-visible-tracks';
 
 /**
  * SatelliteStateManager — центральное хранилище данных спутников.
@@ -99,12 +125,27 @@ class SatelliteStateManager {
         this._satelliteGroup = null;
 
         /**
+         * Набор NORAD ID с включённой видимостью трассы (UX-TABLE-TRACK-COL-001).
+         * Tracking и selected рисуют трассу всегда, здесь хранятся дополнительные.
+         * @type {Set<number>}
+         */
+        this._visibleTrackIds = new Set();
+
+        /** Флаг: были ли восстановлены visibleTrackIds из localStorage. */
+        this._visibleTracksRestored = false;
+
+        /**
          * Флаг: получен ли уже хотя бы один group_update.
-         * Первый (кешированный) group_update при подключении может содержать
-         * устаревший tracking_id от предыдущей сессии → не применяем tracking_id,
-         * чтобы не было мелькания «сопровождения» при обновлении страницы.
+         * Используется для корректной инициализации при подключении.
          */
         this._firstGroupUpdateReceived = false;
+
+        /**
+         * Ключ (primary_id:aos:los:is_visible) последнего group_update для обнаружения
+         * смены данных пролёта при том же primary_id (переход видимости, новый виток).
+         * @type {?string}
+         */
+        this._lastPrimaryPassKey = null;
 
         /** Подписчики: eventType → Set<callback>. */
         this._subscribers = new Map();
@@ -280,10 +321,11 @@ class SatelliteStateManager {
             future: newFuture,
         };
 
-        // Уведомление НЕ отправляем здесь — только через forceTrackRefresh()
-        // после того, как batch из satellite_state_update полностью обработан.
-        // Это гарантирует, что треки вторичных спутников уже в кеше к моменту
-        // вызова _updateSecondaryTracks() в app.js.
+        // Уведомление TRACK для выбранного спутника (подписчики обновляют карту).
+        // forceTrackRefresh() в app.js дополнительно вызывается после batch-обработки.
+        if (noradId === this._selectedSatelliteId) {
+            this._notify(StateEventType.TRACK, state);
+        }
 
         return changed;
     }
@@ -309,9 +351,11 @@ class SatelliteStateManager {
      * @param {number} noradId — NORAD ID.
      * @param {string} [name] — имя.
      * @param {boolean} [manual=false] — ручной выбор в таблице.
+     * @param {boolean} [forceNotify=false] — если true, снова шлём SELECTED_CHANGE/TRACK при том же NORAD
+     *   (нужно после tracking_ended: сняли сопровождение, тот же primary — перерисовать таблицу и трассы).
      * @returns {boolean}
      */
-    setSelectedSatellite(noradId, name, manual = false) {
+    setSelectedSatellite(noradId, name, manual = false, forceNotify = false) {
         if (typeof noradId !== 'number' || noradId <= 0) { return false; }
 
         const prevId = this._selectedSatelliteId;
@@ -322,7 +366,7 @@ class SatelliteStateManager {
         const state = this._getOrCreateState(noradId);
         if (name) { state.name = name; }
 
-        if (noradId !== prevId) {
+        if (noradId !== prevId || forceNotify) {
             this._notify(StateEventType.SELECTED_CHANGE, state);
             // Немедленно пушим кешированные данные для нового selected.
             if (state.position) {
@@ -454,7 +498,11 @@ class SatelliteStateManager {
             const prevSel = this._selectedSatelliteId;
             this._selectedSatelliteId = data.primary_id;
             this._activeSatelliteId = data.primary_id;
-            if (data.primary_id !== prevSel) {
+
+            // Уведомляем при смене primary_id, а также при изменении данных пролёта
+            // для того же primary (переход visible→invisible, смена AOS/LOS при новом витке).
+            const primaryPassChanged = this._hasPrimaryPassChanged(data);
+            if (data.primary_id !== prevSel || primaryPassChanged) {
                 const satInfo = data.satellites.find(s => s.norad_id === data.primary_id);
                 const state = this._getOrCreateState(data.primary_id, satInfo ? satInfo.sat_name : '');
                 this._notify(StateEventType.SELECTED_CHANGE, state);
@@ -463,23 +511,18 @@ class SatelliteStateManager {
             }
         }
 
-        // Синхронизация tracking_id из бэкенда.
-        // Первый group_update — из кеша Hub (snapshot при подключении, satellite_change НЕ кешируется).
-        // Игнорируем tracking_id из него: пользователь должен явно нажать «Сопровождение» в этой сессии.
-        // Последующие group_update (от живого бэкенда) — применяем tracking_id.
-        const rawTrackingId = (typeof data.tracking_id === 'number' && data.tracking_id > 0) ? data.tracking_id : null;
-        const newTrackingId = this._firstGroupUpdateReceived ? rawTrackingId : null;
+        // tracking_id в broadcast всегда 0 (per-client модель, TRACK-STATE-003).
+        // Per-client tracking доставляется через client_state_restore.
         this._firstGroupUpdateReceived = true;
 
-        if (newTrackingId !== this._trackingSatelliteId) {
-            this._trackingSatelliteId = newTrackingId;
-            if (newTrackingId) {
-                const st = this._getOrCreateState(newTrackingId);
-                this._notify(StateEventType.TRACKING_CHANGE, st);
-            } else {
-                this._notify(StateEventType.TRACKING_CHANGE, null);
-            }
+        // При первом group_update восстанавливаем visibleTrackIds из localStorage.
+        if (!this._visibleTracksRestored) {
+            this._visibleTracksRestored = true;
+            this.restoreVisibleTracks();
         }
+
+        // Валидация: удаляем visibleTrackIds, которых нет в текущей группе.
+        this.validateVisibleTracks();
 
         this._notify(StateEventType.SATELLITE_GROUP_UPDATE, data);
     }
@@ -512,6 +555,157 @@ class SatelliteStateManager {
         return this._satelliteGroup.satellites.filter(s => s.norad_id !== id);
     }
 
+    // ── Видимость трасс (UX-TABLE-TRACK-COL-001) ──────────────
+
+    /**
+     * Toggle видимости трассы для спутника.
+     * Не влияет на tracking/selected — они рисуют трассу всегда.
+     * @param {number} noradId
+     * @returns {boolean} true если трасса теперь видима.
+     */
+    toggleTrackVisibility(noradId) {
+        if (typeof noradId !== 'number' || noradId <= 0) { return false; }
+        if (this._visibleTrackIds.has(noradId)) {
+            this._visibleTrackIds.delete(noradId);
+            this._persistVisibleTracks();
+            this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+            return false;
+        }
+        if (this._visibleTrackIds.size >= MAX_VISIBLE_TRACKS) {
+            console.warn(`[StateManager] лимит трасс (${MAX_VISIBLE_TRACKS}) достигнут`);
+            if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+                try {
+                    window.dispatchEvent(new CustomEvent('satellite-scout-track-limit', {
+                        detail: { max: MAX_VISIBLE_TRACKS },
+                    }));
+                } catch (_e) { /* ignore */ }
+            }
+            return false;
+        }
+        this._visibleTrackIds.add(noradId);
+        this._persistVisibleTracks();
+        this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+        return true;
+    }
+
+    /**
+     * Включить трассы для списка спутников (toggle all).
+     * Не добавляет больше MAX_VISIBLE_TRACKS.
+     * @param {number[]} ids
+     */
+    setAllTracksVisible(ids) {
+        this._visibleTrackIds.clear();
+        const limit = Math.min(ids.length, MAX_VISIBLE_TRACKS);
+        for (let i = 0; i < limit; i++) {
+            this._visibleTrackIds.add(ids[i]);
+        }
+        this._persistVisibleTracks();
+        this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+    }
+
+    /** Очистить все дополнительные трассы. */
+    clearAllTracks() {
+        if (this._visibleTrackIds.size === 0) { return; }
+        this._visibleTrackIds.clear();
+        this._persistVisibleTracks();
+        this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+    }
+
+    /**
+     * Набор NORAD ID с включённой трассой (без tracking/selected).
+     * @returns {number[]}
+     */
+    getVisibleTrackIds() {
+        return Array.from(this._visibleTrackIds);
+    }
+
+    /**
+     * Проверка: нужно ли рисовать трассу для данного спутника.
+     * true если noradId в visibleTrackIds ИЛИ tracking ИЛИ selected.
+     * @param {number} noradId
+     * @returns {boolean}
+     */
+    isTrackVisible(noradId) {
+        return noradId === this._trackingSatelliteId ||
+               noradId === this._selectedSatelliteId ||
+               this._visibleTrackIds.has(noradId);
+    }
+
+    /**
+     * Цвет трассы для спутника из палитры.
+     * Для tracking и selected возвращает null (у них свои фиксированные цвета).
+     * @param {number} noradId
+     * @returns {?string} hex-цвет или null.
+     */
+    getTrackColor(noradId) {
+        if (noradId === this._trackingSatelliteId || noradId === this._selectedSatelliteId) {
+            return null;
+        }
+        const ids = this.getVisibleTrackIds();
+        const idx = ids.indexOf(noradId);
+        if (idx < 0) { return null; }
+        return TRACK_COLOR_PALETTE[idx % TRACK_COLOR_PALETTE.length];
+    }
+
+    // ── Persist visibleTrackIds (TRACK-STATE-004) ──────────────
+
+    /** Сохранение visibleTrackIds в localStorage. @private */
+    _persistVisibleTracks() {
+        try {
+            if (typeof localStorage !== 'undefined') {
+                localStorage.setItem(VISIBLE_TRACKS_STORAGE_KEY, JSON.stringify(this.getVisibleTrackIds()));
+            }
+        } catch (e) { /* quota exceeded — игнорируем */ }
+    }
+
+    /**
+     * Восстановление visibleTrackIds из localStorage.
+     * Вызывать после первого satellite_group_update для валидации.
+     */
+    restoreVisibleTracks() {
+        try {
+            if (typeof localStorage === 'undefined') { return; }
+            const raw = localStorage.getItem(VISIBLE_TRACKS_STORAGE_KEY);
+            if (!raw) { return; }
+            const ids = JSON.parse(raw);
+            if (!Array.isArray(ids)) { return; }
+            const limit = Math.min(ids.length, MAX_VISIBLE_TRACKS);
+            for (let i = 0; i < limit; i++) {
+                if (typeof ids[i] === 'number' && ids[i] > 0) {
+                    this._visibleTrackIds.add(ids[i]);
+                }
+            }
+            if (this._visibleTrackIds.size > 0) {
+                this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+            }
+        } catch (e) { /* JSON parse error — игнорируем */ }
+    }
+
+    /**
+     * Валидация visibleTrackIds: удаляем ID, которых нет в текущей группе.
+     * Вызывать после обновления группы.
+     */
+    validateVisibleTracks() {
+        if (this._visibleTrackIds.size === 0 || !this._satelliteGroup) { return; }
+        const groupIds = new Set();
+        if (this._satelliteGroup.satellites) {
+            for (const sat of this._satelliteGroup.satellites) {
+                groupIds.add(sat.norad_id);
+            }
+        }
+        let changed = false;
+        for (const id of this._visibleTrackIds) {
+            if (!groupIds.has(id)) {
+                this._visibleTrackIds.delete(id);
+                changed = true;
+            }
+        }
+        if (changed) {
+            this._persistVisibleTracks();
+            this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+        }
+    }
+
     // ── Очистка ───────────────────────────────────────────────
 
     /**
@@ -536,9 +730,27 @@ class SatelliteStateManager {
         this._trackingSatelliteId = null;
         this._activeSatelliteId = null;
         this._manualTableSelection = false;
+        this._visibleTrackIds.clear();
     }
 
     // ── Внутренние методы ─────────────────────────────────────
+
+    /**
+     * Проверка: изменились ли данные пролёта primary спутника в satellite_group_update.
+     * Сравнивает (primary_id, aos, los, is_visible) с предыдущим group_update.
+     * @param {Object} data — данные satellite_group_update.
+     * @returns {boolean} true если данные изменились.
+     * @private
+     */
+    _hasPrimaryPassChanged(data) {
+        const satInfo = data.satellites.find(s => s.norad_id === data.primary_id);
+        const key = satInfo
+            ? `${data.primary_id}:${satInfo.aos}:${satInfo.los}:${satInfo.is_visible}`
+            : `${data.primary_id}`;
+        const changed = (this._lastPrimaryPassKey !== null && this._lastPrimaryPassKey !== key);
+        this._lastPrimaryPassKey = key;
+        return changed;
+    }
 
     /**
      * Получить или создать состояние спутника.
@@ -559,7 +771,7 @@ class SatelliteStateManager {
 
 // Экспорт для использования в других модулях и тестах.
 if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-    module.exports = { SatelliteStateManager, SatelliteState, StateEventType }; // eslint-disable-line no-undef
+    module.exports = { SatelliteStateManager, SatelliteState, StateEventType, TRACK_COLOR_PALETTE, MAX_VISIBLE_TRACKS }; // eslint-disable-line no-undef
 }
 
 // Экспорт для использования в браузере.
@@ -567,4 +779,6 @@ if (typeof window !== 'undefined') {
     window.SatelliteStateManager = SatelliteStateManager;
     window.SatelliteState = SatelliteState;
     window.StateEventType = StateEventType;
+    window.TRACK_COLOR_PALETTE = TRACK_COLOR_PALETTE;
+    window.MAX_VISIBLE_TRACKS = MAX_VISIBLE_TRACKS;
 }

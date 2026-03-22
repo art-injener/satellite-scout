@@ -318,7 +318,7 @@ test('sets active satellite and notifies', () => {
     const m = new SatelliteStateManager();
     m.updatePosition(makePositionData());
     let notified = null;
-    m.subscribe('satellite_change', (state) => { notified = state; });
+    m.subscribe(StateEventType.SELECTED_CHANGE, (state) => { notified = state; });
     m.setActiveSatellite(METEOR_NORAD_ID);
     assert.strictEqual(m.getActiveSatelliteId(), METEOR_NORAD_ID);
     assert.ok(notified);
@@ -329,7 +329,7 @@ test('does not notify when setting same satellite', () => {
     const m = new SatelliteStateManager();
     m.updatePosition(makePositionData());
     let count = 0;
-    m.subscribe('satellite_change', () => { count++; });
+    m.subscribe(StateEventType.SELECTED_CHANGE, () => { count++; });
     m.setActiveSatellite(ISS_NORAD_ID);
     assert.strictEqual(count, 0, 'should not notify for same satellite');
 });
@@ -457,15 +457,283 @@ test('switching active satellite redirects notifications', () => {
     m.updatePosition(makePositionData({ norad_id: METEOR_NORAD_ID, name: 'METEOR' }));
     assert.deepStrictEqual(received, [ISS_NORAD_ID]);
 
-    // Переключаемся на Meteor.
+    // Переключаемся на Meteor — сразу нотифицируем POSITION для нового selected.
     m.setActiveSatellite(METEOR_NORAD_ID);
 
-    // Теперь Meteor нотифицирует, ISS — нет.
+    // Ещё один position для Meteor — вторая нотификация по position.
     m.updatePosition(makePositionData({ norad_id: METEOR_NORAD_ID, name: 'METEOR', lat: 55.0 }));
-    assert.deepStrictEqual(received, [ISS_NORAD_ID, METEOR_NORAD_ID]);
+    assert.deepStrictEqual(received, [ISS_NORAD_ID, METEOR_NORAD_ID, METEOR_NORAD_ID]);
 
+    // ISS не selected — не нотифицирует.
     m.updatePosition(makePositionData({ lat: 50.0 }));
-    assert.deepStrictEqual(received, [ISS_NORAD_ID, METEOR_NORAD_ID]);
+    assert.deepStrictEqual(received, [ISS_NORAD_ID, METEOR_NORAD_ID, METEOR_NORAD_ID]);
+});
+
+// ── setSelectedSatellite ──────────────────────────────────
+
+console.log('\nSatelliteStateManager — setSelectedSatellite');
+
+test('setSelectedSatellite sets selected and notifies SELECTED_CHANGE', () => {
+    const m = new SatelliteStateManager();
+    let notified = null;
+    m.subscribe(StateEventType.SELECTED_CHANGE, (state) => { notified = state; });
+    m.setSelectedSatellite(25544, 'ISS');
+    assert.strictEqual(m.getSelectedSatelliteId(), 25544);
+    assert.ok(notified);
+    assert.strictEqual(notified.noradId, 25544);
+});
+
+test('setSelectedSatellite does not notify when same ID without forceNotify', () => {
+    const m = new SatelliteStateManager();
+    m.setSelectedSatellite(25544, 'ISS');
+    let count = 0;
+    m.subscribe(StateEventType.SELECTED_CHANGE, () => { count++; });
+    m.setSelectedSatellite(25544, 'ISS', false, false);
+    assert.strictEqual(count, 0, 'should not notify for same NORAD without forceNotify');
+});
+
+test('setSelectedSatellite notifies when same ID with forceNotify=true', () => {
+    const m = new SatelliteStateManager();
+    m.setSelectedSatellite(25544, 'ISS');
+    let count = 0;
+    m.subscribe(StateEventType.SELECTED_CHANGE, () => { count++; });
+    m.setSelectedSatellite(25544, 'ISS', false, true);
+    assert.strictEqual(count, 1, 'must notify with forceNotify=true even for same NORAD');
+});
+
+// ── setSatelliteGroup [BUG-E] ─────────────────────────────
+
+console.log('\nSatelliteStateManager — setSatelliteGroup [BUG-E]');
+
+test('setSatelliteGroup sets selected from primary_id', () => {
+    const m = new SatelliteStateManager();
+    let notified = null;
+    m.subscribe(StateEventType.SELECTED_CHANGE, (state) => { notified = state; });
+
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: true },
+        ],
+    });
+
+    assert.strictEqual(m.getSelectedSatelliteId(), 25544);
+    assert.ok(notified, 'should notify SELECTED_CHANGE on first group update');
+});
+
+test('setSatelliteGroup notifies SELECTED_CHANGE when primary_id changes', () => {
+    const m = new SatelliteStateManager();
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: true },
+        ],
+    });
+
+    let notified = null;
+    m.subscribe(StateEventType.SELECTED_CHANGE, (state) => { notified = state; });
+
+    m.setSatelliteGroup({
+        primary_id: 40069,
+        satellites: [
+            { norad_id: 40069, sat_name: 'METEOR', aos: 3000, los: 4000, is_visible: true, is_active: true },
+        ],
+    });
+
+    assert.ok(notified, 'should notify when primary_id changes');
+    assert.strictEqual(notified.noradId, 40069);
+});
+
+test('setSatelliteGroup notifies when pass data changes for same primary_id', () => {
+    const m = new SatelliteStateManager();
+
+    // Первый group_update: primary 25544, AOS=1000, LOS=2000, visible.
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: true },
+        ],
+    });
+
+    let notifiedCount = 0;
+    m.subscribe(StateEventType.SELECTED_CHANGE, () => { notifiedCount++; });
+
+    // Второй group_update: тот же primary, но LOS другой (видимость изменилась).
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: false, is_active: true },
+        ],
+    });
+
+    assert.strictEqual(notifiedCount, 1,
+        'must notify SELECTED_CHANGE when pass data (is_visible) changes for same primary_id');
+});
+
+test('setSatelliteGroup notifies when AOS/LOS changes (new orbit)', () => {
+    const m = new SatelliteStateManager();
+
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: true },
+        ],
+    });
+
+    let notifiedCount = 0;
+    m.subscribe(StateEventType.SELECTED_CHANGE, () => { notifiedCount++; });
+
+    // Новый виток: другие AOS/LOS.
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 100000, los: 200000, is_visible: false, is_active: true },
+        ],
+    });
+
+    assert.strictEqual(notifiedCount, 1,
+        'must notify when AOS/LOS changes (next orbit pass)');
+});
+
+test('setSatelliteGroup does NOT notify when same primary and same pass data', () => {
+    const m = new SatelliteStateManager();
+
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: true },
+        ],
+    });
+
+    let notifiedCount = 0;
+    m.subscribe(StateEventType.SELECTED_CHANGE, () => { notifiedCount++; });
+
+    // Полностью идентичный group_update.
+    m.setSatelliteGroup({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: true },
+        ],
+    });
+
+    assert.strictEqual(notifiedCount, 0,
+        'should NOT notify when primary and pass data are identical');
+});
+
+test('setSatelliteGroup does not override manual table selection', () => {
+    const m = new SatelliteStateManager();
+    m.setSelectedSatellite(25544, 'ISS', true);  // manual selection
+
+    let notified = false;
+    m.subscribe(StateEventType.SELECTED_CHANGE, () => { notified = true; });
+
+    m.setSatelliteGroup({
+        primary_id: 40069,
+        satellites: [
+            { norad_id: 40069, sat_name: 'METEOR', aos: 3000, los: 4000, is_visible: true, is_active: true },
+        ],
+    });
+
+    assert.strictEqual(m.getSelectedSatelliteId(), 25544,
+        'manual selection should not be overridden by group_update');
+    assert.strictEqual(notified, false, 'should not notify');
+});
+
+// ── _hasPrimaryPassChanged ────────────────────────────────
+
+console.log('\nSatelliteStateManager — _hasPrimaryPassChanged');
+
+test('_hasPrimaryPassChanged returns false on first call (no previous data)', () => {
+    const m = new SatelliteStateManager();
+    const result = m._hasPrimaryPassChanged({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+    assert.strictEqual(result, false, 'first call should return false (no baseline)');
+});
+
+test('_hasPrimaryPassChanged returns true when visibility changes', () => {
+    const m = new SatelliteStateManager();
+    m._hasPrimaryPassChanged({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+    const result = m._hasPrimaryPassChanged({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: false },
+        ],
+    });
+    assert.strictEqual(result, true, 'visibility change must be detected');
+});
+
+test('_hasPrimaryPassChanged returns true when AOS/LOS changes', () => {
+    const m = new SatelliteStateManager();
+    m._hasPrimaryPassChanged({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+    const result = m._hasPrimaryPassChanged({
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 100000, los: 200000, is_visible: false },
+        ],
+    });
+    assert.strictEqual(result, true, 'AOS/LOS change must be detected');
+});
+
+test('_hasPrimaryPassChanged returns false when nothing changes', () => {
+    const m = new SatelliteStateManager();
+    const data = {
+        primary_id: 25544,
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true },
+        ],
+    };
+    m._hasPrimaryPassChanged(data);
+    const result = m._hasPrimaryPassChanged(data);
+    assert.strictEqual(result, false, 'identical data should return false');
+});
+
+// ── setTrackingSatellite / clearTrackingSatellite ──────────
+
+console.log('\nSatelliteStateManager — tracking satellite');
+
+test('setTrackingSatellite and getTrackingSatelliteId', () => {
+    const m = new SatelliteStateManager();
+    m.setTrackingSatellite(25544, 'ISS');
+    assert.strictEqual(m.getTrackingSatelliteId(), 25544);
+});
+
+test('clearTrackingSatellite resets tracking', () => {
+    const m = new SatelliteStateManager();
+    m.setTrackingSatellite(25544, 'ISS');
+    m.clearTrackingSatellite();
+    assert.strictEqual(m.getTrackingSatelliteId(), null);
+});
+
+test('setTrackingSatellite notifies TRACKING_CHANGE', () => {
+    const m = new SatelliteStateManager();
+    let notified = null;
+    m.subscribe(StateEventType.TRACKING_CHANGE, (state) => { notified = state; });
+    m.setTrackingSatellite(25544, 'ISS');
+    assert.ok(notified, 'should notify TRACKING_CHANGE');
+    assert.strictEqual(notified.noradId, 25544);
+});
+
+test('clearTrackingSatellite notifies TRACKING_CHANGE with null', () => {
+    const m = new SatelliteStateManager();
+    m.setTrackingSatellite(25544, 'ISS');
+    let notifiedState = 'not_called';
+    m.subscribe(StateEventType.TRACKING_CHANGE, (state) => { notifiedState = state; });
+    m.clearTrackingSatellite();
+    assert.strictEqual(notifiedState, null, 'should notify with null state when tracking cleared');
 });
 
 // ── Итоги ─────────────────────────────────────────────────

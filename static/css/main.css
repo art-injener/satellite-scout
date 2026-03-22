@@ -440,11 +440,14 @@ body {
 }
 
 .main-wrapper.tracking-page.right-collapsed .right-panel .panel-header {
-    justify-content: center;
+    grid-template-columns: 1fr;
+    justify-items: center;
     padding: 0 4px;
 }
 
-.main-wrapper.tracking-page.right-collapsed .right-panel .panel-collapse-btn {
+.main-wrapper.tracking-page.right-collapsed .right-panel .panel-header .panel-collapse-btn {
+    grid-column: 1;
+    justify-self: center;
     margin: 0;
 }
 
@@ -561,19 +564,22 @@ body {
 }
 
 /* ─── Общий заголовок панелей ─── */
+/* Сетка: пустая 1fr | заголовок по центру панели | кнопка справа (1fr = зеркало для визуального центра) */
 .panel-header {
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
     align-items: center;
-    justify-content: space-between;
+    column-gap: 8px;
     height: 30px;
     padding: 0 8px;
     background: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
-    gap: 8px;
 }
 
 .panel-header__title {
+    grid-column: 2;
+    justify-self: center;
     font-family: var(--font-mono);
     font-size: 0.7rem;
     font-weight: 600;
@@ -581,6 +587,7 @@ body {
     text-transform: uppercase;
     letter-spacing: 0.5px;
     white-space: nowrap;
+    text-align: center;
 }
 
 .panel-collapse-btn {
@@ -594,6 +601,11 @@ body {
     line-height: 1;
     flex-shrink: 0;
     transition: all 0.15s ease;
+}
+
+.panel-header .panel-collapse-btn {
+    grid-column: 3;
+    justify-self: end;
 }
 
 .panel-collapse-btn:hover {

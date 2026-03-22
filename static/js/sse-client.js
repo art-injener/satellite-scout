@@ -143,20 +143,26 @@ class SSEClient {
     _createEventSource() {
         this._setStatus(SSEConnectionStatus.CONNECTING);
 
+        // Добавляем client_id в URL для per-client state (TRACK-STATE-003).
+        var url = this._url;
+        var clientId = getClientId();
+        if (clientId) {
+            var sep = url.indexOf('?') >= 0 ? '&' : '?';
+            url = url + sep + 'client_id=' + encodeURIComponent(clientId);
+        }
+
         try {
-            this._eventSource = new EventSource(this._url);
+            this._eventSource = new EventSource(url);
         } catch (err) {
             console.error('[SSEClient] failed to create EventSource:', err);
             this._scheduleReconnect();
             return;
         }
 
-        // Приветственное событие от SSE Hub — соединение установлено.
         this._eventSource.addEventListener('connected', (e) => {
             this._onConnected(e);
         });
 
-        // Бизнес-события: маршрутизация в StateManager.
         this._eventSource.addEventListener('satellite_state_update', (e) => {
             this._handleEvent('satellite_state_update', e);
         });
@@ -167,6 +173,11 @@ class SSEClient {
 
         this._eventSource.addEventListener('satellite_group_update', (e) => {
             this._handleEvent('satellite_group_update', e);
+        });
+
+        // Per-client восстановление сопровождения при подключении (TRACK-STATE-003).
+        this._eventSource.addEventListener('client_state_restore', (e) => {
+            this._handleEvent('client_state_restore', e);
         });
 
         // Обработка ошибок (потеря соединения и т.д.).
@@ -233,6 +244,9 @@ class SSEClient {
             case 'satellite_group_update':
                 this._stateManager.setSatelliteGroup(data);
                 break;
+            case 'client_state_restore':
+                this._handleClientStateRestore(data);
+                break;
             default:
                 console.warn(`[SSEClient] unhandled event type: ${eventType}`);
         }
@@ -255,16 +269,41 @@ class SSEClient {
             orbitalParams = { inclination: data.inclination, period: data.period };
         }
 
-        // satellite_change(manual) намеренно не обрабатываем здесь.
-        // Tracking устанавливается через satellite_group_update.tracking_id (живые события, не кеш).
-        // Это исключает мелькание сопровождения при обновлении страницы.
+        // satellite_change(manual) не обрабатываем — tracking устанавливается
+        // через client_state_restore (TRACK-STATE-003: per-client).
+        if (reason === 'manual') {
+            return;
+        }
+
         if (reason === 'tracking_ended') {
             this._stateManager.clearTrackingSatellite();
-            // Авто-выбор нового selected (primary из того же события).
-            this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false);
+            // forceNotify: даже при совпадении NORAD обновить таблицу и сбросить слой selected/трек.
+            this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false, true);
         } else {
             // "auto", "initial" — обновляем selected (не tracking).
-            this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false);
+            // forceNotify=true: бэкенд шлёт "auto" при смене данных пролёта (LOS/AOS/IsVisible),
+            // даже если NORAD ID primary не изменился — фронтенд должен перезагрузить sky path.
+            this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false, true);
+        }
+    }
+
+    /**
+     * Обработка per-client события client_state_restore (TRACK-STATE-003).
+     * Восстанавливает tracking_id конкретного клиента при подключении или смене.
+     * @param {Object} data — {tracking_id, ts}.
+     * @private
+     */
+    _handleClientStateRestore(data) {
+        const trackingId = (typeof data.tracking_id === 'number' && data.tracking_id > 0) ? data.tracking_id : null;
+        const currentTracking = this._stateManager.getTrackingSatelliteId();
+
+        if (trackingId !== currentTracking) {
+            if (trackingId) {
+                const state = this._stateManager.getState(trackingId);
+                this._stateManager.setTrackingSatellite(trackingId, state ? state.name : '');
+            } else {
+                this._stateManager.clearTrackingSatellite();
+            }
         }
     }
 
@@ -377,13 +416,41 @@ class SSEClient {
     }
 }
 
+/**
+ * Генерация/получение уникального client_id для per-client state (TRACK-STATE-003).
+ * Используется sessionStorage (per-tab): каждая вкладка — отдельный клиент.
+ * @returns {string}
+ */
+function getClientId() {
+    var key = 'satellite-scout-client-id';
+    if (typeof sessionStorage !== 'undefined') {
+        var existing = sessionStorage.getItem(key);
+        if (existing) { return existing; }
+        var id = _generateUUID();
+        sessionStorage.setItem(key, id);
+        return id;
+    }
+    return _generateUUID();
+}
+
+function _generateUUID() {
+    if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+        return crypto.randomUUID();
+    }
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
+    });
+}
+
 // Экспорт для использования в других модулях и тестах.
 if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-    module.exports = { SSEClient, SSEConnectionStatus }; // eslint-disable-line no-undef
+    module.exports = { SSEClient, SSEConnectionStatus, getClientId }; // eslint-disable-line no-undef
 }
 
 // Экспорт для использования в браузере.
 if (typeof window !== 'undefined') {
     window.SSEClient = SSEClient;
     window.SSEConnectionStatus = SSEConnectionStatus;
+    window.getClientId = getClientId;
 }

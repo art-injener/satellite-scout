@@ -28,6 +28,9 @@ type PassInfo struct {
 	IsActive bool
 	// IsVisible — спутник находится над горизонтом (El > 0°) в данный момент.
 	IsVisible bool
+	// IsSubstitute — запись подставлена как ближайший будущий пролёт (окно было пустым).
+	// Такой спутник НЕ находится в скользящем окне, AOS далеко в будущем.
+	IsSubstitute bool
 }
 
 // TimeWindow — временное окно группы.
@@ -84,13 +87,33 @@ func FindConcurrentPasses(passes []*tracker.Pass, now time.Time, windowForward t
 	return result
 }
 
+// NoradInPostLosGap — нет активного пролёта (AOS≤now≤LOS), но в данных есть пролёт с LOS < now.
+// Отличает зазор «после окончания сеанса» от сценария «до первого AOS» (все пролёты ещё в будущем).
+func NoradInPostLosGap(passes []*tracker.Pass, norad int, now time.Time) bool {
+	t := now.UnixMilli()
+	var lastPastLOS int64
+	for _, p := range passes {
+		if p.NoradID != norad {
+			continue
+		}
+		if p.AOS <= t && t <= p.LOS {
+			return false
+		}
+		if p.LOS < t && p.LOS > lastPastLOS {
+			lastPastLOS = p.LOS
+		}
+	}
+	return lastPastLOS > 0
+}
+
 // SelectPrimarySatellite выбирает активный (primary) спутник из группы.
 //
 // Логика:
 //  1. Если userSelection != nil и спутник есть в группе → вернуть его (ручной выбор).
 //  2. Среди видимых (IsVisible = true) → спутник с наибольшей длительностью пролёта.
-//  3. Если видимых нет → спутник с минимальным AOS (ближайший к наблюдению).
-//  4. При равной длительности/AOS — меньший NoradID (детерминированный tie-breaker).
+//  3. Если видимых нет → среди всей группы наибольшая длительность пролёта (сеанс «текущего» мог закончиться,
+//     а первый по AOS — не тот КА, на который нужно переключиться).
+//  4. При равной длительности — меньший NoradID (детерминированный tie-breaker).
 //
 // Возвращает 0, если группа пустая.
 func SelectPrimarySatellite(satellites []PassInfo, userSelection *int) int {
@@ -125,46 +148,105 @@ func SelectPrimarySatellite(satellites []PassInfo, userSelection *int) int {
 		return best.NoradID
 	}
 
-	// Нет видимых — ближайший по AOS (список уже отсортирован).
-	return satellites[0].NoradID
+	// Нет видимых — максимальная длительность пролёта среди всей группы.
+	best = nil
+	for i := range satellites {
+		s := &satellites[i]
+		if best == nil ||
+			s.Pass.Duration > best.Pass.Duration ||
+			(s.Pass.Duration == best.Pass.Duration && s.NoradID < best.NoradID) {
+			best = s
+		}
+	}
+	if best != nil {
+		return best.NoradID
+	}
+	return 0
 }
 
 // ShouldSwitchPrimary проверяет, нужно ли переключить primary спутник.
 //
-// Возвращает (true, newID) если нужно переключение:
+// Возвращает (shouldSwitch=true, newID) если нужно переключение:
 //   - текущий primary больше не в группе, или
 //   - его пролёт завершился (now > LOS).
 //
-// Возвращает (false, 0) если переключение не нужно.
+// Возвращает (shouldSwitch=false, 0) если текущий primary активен и переключение не нужно.
+//
+// ВАЖНО: когда пролёт завершился, возвращает shouldSwitch=true даже если
+// новый primary — тот же NORAD ID (следующий виток). Это нужно, чтобы
+// caller обнаружил переход и обновил данные пролёта (AOS/LOS/SkyPath).
 func ShouldSwitchPrimary(currentPrimaryID int, satellites []PassInfo, now time.Time) (shouldSwitch bool, newPrimaryID int) {
 	if len(satellites) == 0 {
 		return false, 0
 	}
 
 	nowMs := now.UnixMilli()
-
 	// Ищем текущий primary в группе.
 	for _, s := range satellites {
 		if s.NoradID == currentPrimaryID {
-			if nowMs <= s.Pass.LOS {
-				// Пролёт ещё идёт или ещё не начался — не переключаемся.
+			if s.IsVisible && nowMs <= s.Pass.LOS {
+				// Пролёт активен (IsVisible=true, до LOS) — не переключаемся.
 				return false, 0
 			}
-			// Пролёт завершился — переключаемся.
+			if !s.IsVisible && !s.IsSubstitute && nowMs < s.Pass.AOS {
+				// Пролёт в скользящем окне, AOS ещё впереди — ожидание начала сеанса.
+				// Подстановки (IsSubstitute=true) сюда НЕ попадают — для них пролёт
+				// уже завершился, а запись взята из следующего витка.
+				return false, 0
+			}
+			// Пролёт завершился, спутник подставлен из будущего витка, или вышел из видимости → переключаемся.
 			break
 		}
 	}
 
 	// Primary не найден в группе или его пролёт завершился → выбираем нового.
 	newID := SelectPrimarySatellite(satellites, nil)
-	if newID == currentPrimaryID {
-		return false, 0
-	}
 	return true, newID
 }
 
+// GroupEntry — элемент для change detection: NORAD ID + видимость + границы пролёта.
+// Сравнение по (NoradID, IsVisible, AOS, LOS) позволяет обнаружить:
+//   - смену состава группы (добавление/удаление спутника)
+//   - переход видимости (visible→invisible при LOS, invisible→visible при AOS)
+//   - замену пролёта (тот же спутник, но другой виток с новыми AOS/LOS)
+type GroupEntry struct {
+	NoradID   int
+	IsVisible bool
+	AOS       int64
+	LOS       int64
+}
+
+// GroupEntries строит отсортированный по NoradID слайс GroupEntry из группы.
+func GroupEntries(satellites []PassInfo) []GroupEntry {
+	entries := make([]GroupEntry, len(satellites))
+	for i, s := range satellites {
+		entries[i] = GroupEntry{
+			NoradID:   s.NoradID,
+			IsVisible: s.IsVisible,
+			AOS:       s.Pass.AOS,
+			LOS:       s.Pass.LOS,
+		}
+	}
+	sort.Slice(entries, func(i, j int) bool {
+		return entries[i].NoradID < entries[j].NoradID
+	})
+	return entries
+}
+
+// GroupEntriesChanged возвращает true, если данные группы изменились.
+func GroupEntriesChanged(oldEntries, newEntries []GroupEntry) bool {
+	if len(oldEntries) != len(newEntries) {
+		return true
+	}
+	for i := range oldEntries {
+		if oldEntries[i] != newEntries[i] {
+			return true
+		}
+	}
+	return false
+}
+
 // GroupIDs возвращает отсортированный список NORAD ID из группы.
-// Используется для сравнения групп на изменение (change detection).
 func GroupIDs(satellites []PassInfo) []int {
 	ids := make([]int, len(satellites))
 	for i, s := range satellites {

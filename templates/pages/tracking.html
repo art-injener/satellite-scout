@@ -85,29 +85,35 @@
 <!-- Боковая панель: таблица пролётов + SkyView, на всю высоту окна -->
 <section class="right-panel" id="right-panel">
     <div class="panel-header">
-        <span class="panel-header__title">ПЛАН СЕАНСОВ</span>
+        <span class="panel-header__title">ТАБЛИЦА ПРОЛЁТОВ</span>
         <button class="panel-collapse-btn" id="right-panel-toggle" title="Свернуть">◀</button>
     </div>
     <div class="right-panel__body">
         <div class="passes-compact" id="passes-compact">
-            <table class="passes-compact__table">
-                <thead>
-                    <tr>
-                        <th class="pc-th-sat">КА</th>
-                        <th class="pc-th-time">Время</th>
-                        <th class="pc-th-countdown">T−/Ост.</th>
-                    </tr>
-                </thead>
-                <tbody id="passes-compact-body"></tbody>
-            </table>
+            <div class="passes-compact__scroll">
+                <table class="passes-compact__table">
+                    <thead>
+                        <tr>
+                            <th class="pc-th-track pc-th-track--off" id="pc-th-track-toggle" title="">
+                                <span id="pc-th-track-toggle-inner" class="pc-th-track-toggle-inner"></span>
+                            </th>
+                            <th class="pc-th-sat">КА</th>
+                            <th class="pc-th-time">Время</th>
+                            <th class="pc-th-countdown">
+                                <div class="pc-th-countdown__stack">
+                                    <span class="pc-th-countdown__line">длит.</span>
+                                    <span class="pc-th-countdown__line">до сеанса</span>
+                                </div>
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody id="passes-compact-body"></tbody>
+                </table>
+            </div>
         </div>
         <div class="right-panel__controls">
-            <label class="rp-ctrl rp-ctrl--auto" title="Автосопровождение ближайшего КА">
-                <input type="checkbox" id="rp-auto" checked disabled>
-                <span>Авто</span>
-            </label>
-            <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Взять на сопровождение">⊕ Сопров.</button>
-            <button class="rp-ctrl rp-ctrl--reset" id="rp-reset" disabled title="Снять с сопровождения">✕ Сброс</button>
+            <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Взять на сопровождение"><span class="rp-ctrl__glyph" aria-hidden="true">⊕</span><span class="rp-ctrl__label">Сопров.</span></button>
+            <button class="rp-ctrl rp-ctrl--reset" id="rp-reset" disabled title="Снять с сопровождения"><span class="rp-ctrl__glyph" aria-hidden="true">✕</span><span class="rp-ctrl__label">Сброс</span></button>
         </div>
         <!-- SkyView: окружность 300×300 px + отдельная панель информации (не влияет на размер окна отрисовки) -->
         <div class="right-panel__skyview" id="right-panel-skyview">
@@ -143,13 +149,13 @@
 <!-- Нижняя панель: вынесена в main-wrapper (вторая строка grid), от края до края по ширине -->
 <section class="bottom-panel" id="bottom-panel">
     <div class="bottom-panel__side">
-        <span class="bottom-panel__mode" id="bottom-panel-mode">Антенна</span>
+        <span class="bottom-panel__mode" id="bottom-panel-mode">Спектр</span>
         <button class="panel-collapse-btn" id="bottom-panel-toggle" title="Свернуть">▼</button>
     </div>
     <div class="bottom-panel__body" id="bottom-panel-body">
 
-        <!-- Вкладка: Антенна (Az | Водопад | El) -->
-        <div class="bp-pane" id="bp-pane-antenna">
+        <!-- Вкладка: Антенна (Az | Водопад | El); по умолчанию открыт Спектр -->
+        <div class="bp-pane bp-pane--hidden" id="bp-pane-antenna">
             <div class="bp-az-container">
                 <div class="bp-indicator-canvas-wrap">
                     <canvas id="azimuth-view" width="200" height="200"></canvas>
@@ -197,8 +203,8 @@
             </div>
         </div>
 
-        <!-- Вкладка: Спектр (заглушка SDR) -->
-        <div class="bp-pane bp-pane--hidden" id="bp-pane-spectrum">
+        <!-- Вкладка: Спектр (заглушка SDR) — вкладка по умолчанию -->
+        <div class="bp-pane" id="bp-pane-spectrum">
             <div class="bp-spectrum-charts">
                 <div class="bp-fft-container">
                     <div class="bp-chart-label">FFT Спектр</div>

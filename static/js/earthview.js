@@ -1066,7 +1066,7 @@
     };
 
     /**
-     * Отрисовка слоя текущего (выбранного) спутника: пунктирная жёлтая линия, без точек.
+     * Отрисовка слоя текущего (выбранного) спутника: сплошная жёлтая линия трассы (без пунктира).
      * @private
      */
     EarthView.prototype._drawSelectedLayer = function() {
@@ -1077,11 +1077,10 @@
         var ctx = this.ctx;
         var color = this.colors.selectedTrack;
         var dpr = window.devicePixelRatio || 1;
-        var dash = [6 * dpr, 4 * dpr];
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 2 * dpr;
-        ctx.setLineDash(dash);
+        ctx.setLineDash([]);
 
         var segments = [];
         if (track && typeof track === 'object' && !Array.isArray(track)) {
@@ -1262,10 +1261,20 @@
      */
     EarthView.prototype._drawSecondaryLayer = function() {
         var ids = Object.keys(this._secondarySatellites);
+        var sm = window._stateManager;
         for (var i = 0; i < ids.length; i++) {
             var sat = this._secondarySatellites[ids[i]];
-            if (sat.track) { this._drawSecondaryGroundTrack(sat, i); }
-            if (sat.position) { this._drawSecondaryMarker(sat, i); }
+            var nid = parseInt(ids[i], 10);
+            var trackVisible = sm && sm.isTrackVisible(nid);
+            // Трасса — только если включена видимость в таблице (или tracking/selected).
+            if (sat.track && trackVisible) {
+                var paletteColor = sm ? sm.getTrackColor(nid) : null;
+                this._drawSecondaryGroundTrack(sat, i, paletteColor);
+            }
+            // Маркеры — ВСЕГДА для всех спутников группы.
+            if (sat.position) {
+                this._drawSecondaryMarker(sat, i, trackVisible);
+            }
         }
     };
 
@@ -1273,12 +1282,12 @@
      * Отрисовка пунктирной трассы вторичного спутника.
      * @private
      */
-    EarthView.prototype._drawSecondaryGroundTrack = function(sat, colorIdx) {
+    EarthView.prototype._drawSecondaryGroundTrack = function(sat, colorIdx, paletteColor) {
         var ctx = this.ctx;
         var track = sat.track;
         if (!track) { return; }
 
-        var color = 'rgba(200, 200, 200, 0.5)';
+        var color = paletteColor || 'rgba(200, 200, 200, 0.5)';
         var dpr = window.devicePixelRatio || 1;
 
         ctx.setLineDash([5, 5]);
@@ -1309,15 +1318,18 @@
      * Форма: circle, square, triangle или diamond — по хешу noradId.
      * @private
      */
-    EarthView.prototype._drawSecondaryMarker = function(sat, colorIdx) {
+    EarthView.prototype._drawSecondaryMarker = function(sat, colorIdx, trackVisible) {
         var ctx = this.ctx;
         var pos = sat.position;
         if (!pos) { return; }
 
         var p = this.project(pos.lon, pos.lat);
         var dpr = window.devicePixelRatio || 1;
-        var r = 5 * dpr;
-        var color = SECONDARY_SAT_COLORS[colorIdx % SECONDARY_SAT_COLORS.length];
+        var r = trackVisible ? (5 * dpr) : (4 * dpr);
+        // Цветной маркер для спутников с видимой трассой, серый — для остальных.
+        var sm = window._stateManager;
+        var paletteColor = (trackVisible && sm) ? sm.getTrackColor(sat.noradId) : null;
+        var color = paletteColor || SECONDARY_SAT_COLORS[colorIdx % SECONDARY_SAT_COLORS.length];
         var shape = sat.noradId % 4; // 0=circle, 1=square, 2=triangle, 3=diamond
 
         ctx.fillStyle = color;
