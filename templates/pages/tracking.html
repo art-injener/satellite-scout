@@ -149,13 +149,13 @@
 <!-- Нижняя панель: вынесена в main-wrapper (вторая строка grid), от края до края по ширине -->
 <section class="bottom-panel" id="bottom-panel">
     <div class="bottom-panel__side">
-        <span class="bottom-panel__mode" id="bottom-panel-mode">Спектр</span>
+        <span class="bottom-panel__mode" id="bottom-panel-mode">Обзор</span>
         <button class="panel-collapse-btn" id="bottom-panel-toggle" title="Свернуть">▼</button>
     </div>
     <div class="bottom-panel__body" id="bottom-panel-body">
 
-        <!-- Вкладка: Антенна (Az | Водопад | El); по умолчанию открыт Спектр -->
-        <div class="bp-pane bp-pane--hidden" id="bp-pane-antenna">
+        <!-- Вкладка: Сопровождение (Az | Водопад | El); по умолчанию открыт Обзор -->
+        <div class="bp-pane bp-pane--hidden" id="bp-pane-follow">
             <div class="bp-az-container">
                 <div class="bp-indicator-canvas-wrap">
                     <canvas id="azimuth-view" width="200" height="200"></canvas>
@@ -203,18 +203,9 @@
             </div>
         </div>
 
-        <!-- Вкладка: Спектр (заглушка SDR) — вкладка по умолчанию -->
-        <div class="bp-pane" id="bp-pane-spectrum">
-            <div class="bp-spectrum-charts">
-                <div class="bp-fft-container">
-                    <div class="bp-chart-label">FFT Спектр</div>
-                    <canvas id="fft-spectrum" class="bp-stub-canvas"></canvas>
-                </div>
-                <div class="bp-specwf-container">
-                    <canvas id="spectrum-waterfall" class="bp-stub-canvas"></canvas>
-                </div>
-            </div>
-            <div class="bp-sdr-panel">
+        <!-- Вкладка: Обзор — три колонки: [Настройки SDR | Спектр+Водопад | Демодулятор] -->
+        <div class="bp-pane" id="bp-pane-overview">
+            <div class="bp-overview-col bp-overview-col--sdr">
                 <div class="bp-sdr-section">
                     <div class="bp-sdr-title">Настройки SDR</div>
                     <div class="bp-sdr-field">
@@ -245,13 +236,35 @@
                     </div>
                     <button class="bp-sdr-btn" id="sdr-start">Установить</button>
                 </div>
-                <div class="bp-sdr-section">
+            </div>
+            <div class="bp-overview-charts">
+                <div class="bp-fft-container">
+                    <canvas id="fft-spectrum" class="bp-stub-canvas"></canvas>
+                </div>
+                <div class="bp-overview-freq-scale-wrap">
+                    <canvas id="overview-freq-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
+                </div>
+                <div class="bp-specwf-container">
+                    <canvas id="spectrum-waterfall" class="bp-stub-canvas"></canvas>
+                </div>
+            </div>
+            <div class="bp-overview-col bp-overview-col--demod">
+                <div class="bp-sdr-section bp-sdr-section--demod-dense">
                     <div class="bp-sdr-title">Демодулятор</div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Синхро</span><span class="bp-stat-val bp-stat-val--no" id="stat-sync">НЕТ</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Протокол</span><span class="bp-stat-val" id="stat-proto">---</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">RSSI</span><span class="bp-stat-val" id="stat-rssi">--- dBm</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">SNR</span><span class="bp-stat-val" id="stat-snr">--- dB</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Доплер</span><span class="bp-stat-val" id="stat-doppler">--- Hz</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Fприёма</span><span class="bp-stat-val" id="stat-rxfreq">--- MHz</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">AFC</span><span class="bp-stat-val" id="stat-afc">--- Hz</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Битрейт</span><span class="bp-stat-val" id="stat-bitrate">--- bps</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">BER</span><span class="bp-stat-val" id="stat-ber">---</span></div>
                     <div class="bp-stat-row"><span class="bp-stat-label">Пакетов</span><span class="bp-stat-val" id="stat-pkts">---</span></div>
                     <div class="bp-stat-row"><span class="bp-stat-label">Потеряно</span><span class="bp-stat-val" id="stat-lost">---</span></div>
-                    <div class="bp-stat-row"><span class="bp-stat-label">BER</span><span class="bp-stat-val" id="stat-ber">---</span></div>
-                    <div class="bp-stat-row"><span class="bp-stat-label">SNR</span><span class="bp-stat-val" id="stat-snr">---</span></div>
-                    <div class="bp-stat-row"><span class="bp-stat-label">Синхро</span><span class="bp-stat-val bp-stat-val--no" id="stat-sync">НЕТ</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Фреймов</span><span class="bp-stat-val" id="stat-frames">---</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">CRC ok/fail</span><span class="bp-stat-val" id="stat-crc">--- / ---</span></div>
+                    <div class="bp-stat-row"><span class="bp-stat-label">Посл. пакет</span><span class="bp-stat-val" id="stat-last-pkt">--:--:--</span></div>
                 </div>
             </div>
         </div>

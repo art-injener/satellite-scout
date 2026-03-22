@@ -446,13 +446,13 @@
 
     // ── Форматирование ──
 
-    // Время в UTC: ЧЧ:ММ:СС
+    // Время в локальном часовом поясе браузера: ЧЧ:ММ:СС
     RightPanelTable.prototype._fmtTime = function(ms) {
         if (!ms) { return '--:--:--'; }
         var d = new Date(ms);
-        var hh = d.getUTCHours();
-        var mm = d.getUTCMinutes();
-        var ss = d.getUTCSeconds();
+        var hh = d.getHours();
+        var mm = d.getMinutes();
+        var ss = d.getSeconds();
         return (hh < 10 ? '0' : '') + hh + ':' +
                (mm < 10 ? '0' : '') + mm + ':' +
                (ss < 10 ? '0' : '') + ss;

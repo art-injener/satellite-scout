@@ -86,6 +86,9 @@ const MAX_VISIBLE_TRACKS = 5;
 /** Ключ localStorage для сохранения visibleTrackIds (TRACK-STATE-004). */
 const VISIBLE_TRACKS_STORAGE_KEY = 'satellite-scout-visible-tracks';
 
+/** Ключ sessionStorage для сохранения selected КА (per-tab, восстановление при reload). */
+const SELECTED_SAT_STORAGE_KEY = 'satellite-scout-selected-id';
+
 /**
  * SatelliteStateManager — центральное хранилище данных спутников.
  *
@@ -363,12 +366,14 @@ class SatelliteStateManager {
         this._activeSatelliteId = noradId; // backward compat
         this._manualTableSelection = manual;
 
+        // Сохраняем в sessionStorage для восстановления при reload (per-tab).
+        this._persistSelectedId(noradId);
+
         const state = this._getOrCreateState(noradId);
         if (name) { state.name = name; }
 
         if (noradId !== prevId || forceNotify) {
             this._notify(StateEventType.SELECTED_CHANGE, state);
-            // Немедленно пушим кешированные данные для нового selected.
             if (state.position) {
                 this._notify(StateEventType.POSITION, state);
             }
@@ -380,6 +385,11 @@ class SatelliteStateManager {
     /** NORAD ID выбранного спутника. */
     getSelectedSatelliteId() {
         return this._selectedSatelliteId;
+    }
+
+    /** true если оператор вручную выбрал строку в таблице (клик). */
+    isManualTableSelection() {
+        return this._manualTableSelection;
     }
 
     // ── Спутник на сопровождении (tracking) ──────────────────
@@ -493,14 +503,28 @@ class SatelliteStateManager {
         }
         this._satelliteGroup = data;
 
+        // При первом group_update пытаемся восстановить selected из sessionStorage
+        // (оператор обновил страницу — ручной выбор сохранён per-tab).
+        if (!this._firstGroupUpdateReceived) {
+            const restoredId = this._restoreSelectedId(data);
+            if (restoredId > 0) {
+                const satInfo = data.satellites.find(s => s.norad_id === restoredId);
+                this._selectedSatelliteId = restoredId;
+                this._activeSatelliteId = restoredId;
+                this._manualTableSelection = true;
+                const state = this._getOrCreateState(restoredId, satInfo ? satInfo.sat_name : '');
+                this._notify(StateEventType.SELECTED_CHANGE, state);
+                if (state.position) { this._notify(StateEventType.POSITION, state); }
+                this._notify(StateEventType.TRACK, state);
+            }
+        }
+
         // Авто-выбор selected из primary_id (если нет ручного выбора в таблице).
         if (!this._manualTableSelection && typeof data.primary_id === 'number' && data.primary_id > 0) {
             const prevSel = this._selectedSatelliteId;
             this._selectedSatelliteId = data.primary_id;
             this._activeSatelliteId = data.primary_id;
 
-            // Уведомляем при смене primary_id, а также при изменении данных пролёта
-            // для того же primary (переход visible→invisible, смена AOS/LOS при новом витке).
             const primaryPassChanged = this._hasPrimaryPassChanged(data);
             if (data.primary_id !== prevSel || primaryPassChanged) {
                 const satInfo = data.satellites.find(s => s.norad_id === data.primary_id);
@@ -511,8 +535,6 @@ class SatelliteStateManager {
             }
         }
 
-        // tracking_id в broadcast всегда 0 (per-client модель, TRACK-STATE-003).
-        // Per-client tracking доставляется через client_state_restore.
         this._firstGroupUpdateReceived = true;
 
         // При первом group_update восстанавливаем visibleTrackIds из localStorage.
@@ -645,6 +667,36 @@ class SatelliteStateManager {
         const idx = ids.indexOf(noradId);
         if (idx < 0) { return null; }
         return TRACK_COLOR_PALETTE[idx % TRACK_COLOR_PALETTE.length];
+    }
+
+    // ── Persist selected (sessionStorage, per-tab) ──────────────
+
+    /** @private */
+    _persistSelectedId(noradId) {
+        try {
+            if (typeof sessionStorage !== 'undefined') {
+                sessionStorage.setItem(SELECTED_SAT_STORAGE_KEY, String(noradId));
+            }
+        } catch (_e) { /* ignore */ }
+    }
+
+    /**
+     * Восстановление selected из sessionStorage.
+     * Возвращает NORAD ID если КА есть в текущей группе, иначе 0.
+     * @param {Object} groupData — данные satellite_group_update.
+     * @returns {number}
+     */
+    _restoreSelectedId(groupData) {
+        try {
+            if (typeof sessionStorage === 'undefined') { return 0; }
+            const raw = sessionStorage.getItem(SELECTED_SAT_STORAGE_KEY);
+            if (!raw) { return 0; }
+            const id = parseInt(raw, 10);
+            if (!id || id <= 0) { return 0; }
+            if (!groupData || !Array.isArray(groupData.satellites)) { return 0; }
+            const inGroup = groupData.satellites.some(function(s) { return s.norad_id === id; });
+            return inGroup ? id : 0;
+        } catch (_e) { return 0; }
     }
 
     // ── Persist visibleTrackIds (TRACK-STATE-004) ──────────────

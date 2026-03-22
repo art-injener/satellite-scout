@@ -330,9 +330,9 @@
                 if (window._bottomPanel && typeof window._bottomPanel.startWaterfall === 'function') {
                     window._bottomPanel.startWaterfall();
                 }
-                // Вкладка «Антенна» (азимут/угол места/водопад) при сопровождении
+                // Вкладка «Сопровождение» (Az/El/водопад) при сопровождении
                 if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
-                    window._bottomPanel.showTab('antenna', false);
+                    window._bottomPanel.showTab('follow', false);
                 }
 
                 // Трек tracking на EarthView.
@@ -359,7 +359,7 @@
                     window._bottomPanel.stopWaterfallAndClear();
                 }
                 if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
-                    window._bottomPanel.showTab('spectrum', false);
+                    window._bottomPanel.showTab('overview', false);
                 }
                 if (window.earthView) {
                     window.earthView.clearTrackingLayer();
@@ -385,9 +385,12 @@
             }
         });
 
-        // ── SATELLITE_GROUP_UPDATE: обновление вторичных ──
+        // ── SATELLITE_GROUP_UPDATE: обновление вторичных, синхронизация часов ──
         sm.subscribe(StateEventType.SATELLITE_GROUP_UPDATE, function(group) {
             if (!group || !group.satellites) { return; }
+            if (group.ts && window.skyView) {
+                window.skyView.setServerSkew(group.ts - Date.now());
+            }
             _updateSecondaryPositions();
             _updateSecondaryTracks();
         });

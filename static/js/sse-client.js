@@ -278,11 +278,16 @@ class SSEClient {
         if (reason === 'tracking_ended') {
             this._stateManager.clearTrackingSatellite();
             // forceNotify: даже при совпадении NORAD обновить таблицу и сбросить слой selected/трек.
+            // tracking_ended всегда сбрасывает ручной выбор — сеанс закончился, контекст неактуален.
             this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false, true);
         } else {
             // "auto", "initial" — обновляем selected (не tracking).
-            // forceNotify=true: бэкенд шлёт "auto" при смене данных пролёта (LOS/AOS/IsVisible),
-            // даже если NORAD ID primary не изменился — фронтенд должен перезагрузить sky path.
+            // Если оператор сделал ручной выбор в таблице — не перезатираем его.
+            // satellite_group_update уже корректно проверяет _manualTableSelection;
+            // satellite_change не должен обходить эту защиту.
+            if (this._stateManager.isManualTableSelection()) {
+                return;
+            }
             this._stateManager.setSelectedSatellite(data.norad_id, data.name || '', false, true);
         }
     }

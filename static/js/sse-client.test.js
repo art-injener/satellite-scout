@@ -729,6 +729,74 @@ test('satellite_change reason=tracking_ended clears tracking and selects new', (
     client.disconnect();
 });
 
+test('satellite_change reason=auto does NOT override manual table selection', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    // Оператор вручную выбрал КА-A (клик по строке таблицы).
+    sm.setSelectedSatellite(25544, 'ISS', true);
+    assert.strictEqual(sm.getSelectedSatelliteId(), 25544);
+    assert.strictEqual(sm.isManualTableSelection(), true);
+
+    // Бэкенд шлёт satellite_change с reason=auto на другой КА (новый primary).
+    MockEventSource._lastInstance._emit('satellite_change', {
+        norad_id: 40069,
+        name: 'METEOR-M2',
+        reason: 'auto',
+    });
+
+    assert.strictEqual(sm.getSelectedSatelliteId(), 25544,
+        'manual selection must NOT be overridden by satellite_change(auto)');
+    assert.strictEqual(sm.isManualTableSelection(), true,
+        '_manualTableSelection must remain true');
+    client.disconnect();
+});
+
+test('satellite_change reason=auto DOES update selected when no manual selection', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    // Авто-выбор (не ручной).
+    sm.setSelectedSatellite(25544, 'ISS', false);
+
+    MockEventSource._lastInstance._emit('satellite_change', {
+        norad_id: 40069,
+        name: 'METEOR-M2',
+        reason: 'auto',
+    });
+
+    assert.strictEqual(sm.getSelectedSatelliteId(), 40069,
+        'without manual selection, auto should update selected');
+    client.disconnect();
+});
+
+test('satellite_change reason=tracking_ended overrides manual selection (session ended)', () => {
+    const sm = new SatelliteStateManager();
+    const client = new SSEClient(sm);
+    client.connect();
+    MockEventSource._lastInstance._simulateOpen();
+
+    // Ручной выбор.
+    sm.setSelectedSatellite(25544, 'ISS', true);
+    sm.setTrackingSatellite(25544, 'ISS');
+
+    MockEventSource._lastInstance._emit('satellite_change', {
+        norad_id: 40069,
+        name: 'METEOR-M2',
+        reason: 'tracking_ended',
+    });
+
+    assert.strictEqual(sm.getSelectedSatelliteId(), 40069,
+        'tracking_ended must override manual selection (session context is gone)');
+    assert.strictEqual(sm.getTrackingSatelliteId(), null,
+        'tracking must be cleared');
+    client.disconnect();
+});
+
 test('satellite_change reason=manual is ignored (per-client state via client_state_restore)', () => {
     const sm = new SatelliteStateManager();
     const client = new SSEClient(sm);

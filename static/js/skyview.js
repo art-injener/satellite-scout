@@ -140,6 +140,9 @@
 
         // Опциональные DOM-элементы для текстового блока под графиком (обновляются при setSatelliteInfo/setPassTimes и раз в секунду для «Осталось»)
         this._infoEls = { norad: null, aos: null, los: null, dur: null, remaining: null };
+
+        /** Смещение клиентских часов относительно серверных (мс), для корректного «Осталось». */
+        this._serverSkewMs = 0;
     }
 
     /**
@@ -440,8 +443,8 @@
             return;
         }
 
-        this.passInfo.aosTime = visibleTrack[0].time;
-        this.passInfo.losTime = visibleTrack[visibleTrack.length - 1].time;
+        // AOS/LOS берутся из setPassTimes() — точные значения с бэкенда;
+        // здесь НЕ перезаписываем, чтобы «Осталось» совпадало с таблицей.
 
         // Азимуты пересечения с горизонтом (el=0) для AOS и LOS
         const startAz = this._findHorizonCrossing(visibleTrack[0], visibleTrack[1]);
@@ -950,12 +953,11 @@
         var info = showSelected ? this._selectedPassInfo : this.passInfo;
         var noradId = showSelected ? this._selectedSatellite.noradId : this.satellite.noradId;
 
-        var now = Date.now();
+        var now = Date.now() + (this._serverSkewMs || 0);
         var aosStr = this._formatTime(info.aosTime);
         var losStr = this._formatTime(info.losTime);
         var durMs = (info.aosTime && info.losTime) ? (info.losTime - info.aosTime) : 0;
         var durStr = this._formatDuration(durMs);
-        // Ост.: оставшееся время сеанса — только когда сеанс идёт (между AOS и LOS).
         var remainingStr = '—';
         if (info.aosTime && info.losTime && now >= info.aosTime && now <= info.losTime) {
             var remainingMs = info.losTime - now;
@@ -1010,6 +1012,11 @@
     SkyView.prototype.setSelectedTrack = function(track) {
         this._selectedSatellite.track = track || [];
         this._updateInfoPanelDOM();
+    };
+
+    /** Синхронизация часов: разница между серверным и клиентским временем (мс). */
+    SkyView.prototype.setServerSkew = function(skewMs) {
+        this._serverSkewMs = skewMs || 0;
     };
 
     /** Установка времён AOS/LOS для выбранного спутника (для инфопанели под графиком). */

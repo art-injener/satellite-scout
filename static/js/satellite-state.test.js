@@ -501,6 +501,28 @@ test('setSelectedSatellite notifies when same ID with forceNotify=true', () => {
     assert.strictEqual(count, 1, 'must notify with forceNotify=true even for same NORAD');
 });
 
+// ── isManualTableSelection ────────────────────────────────
+
+console.log('\nSatelliteStateManager — isManualTableSelection');
+
+test('isManualTableSelection returns false by default', () => {
+    const m = new SatelliteStateManager();
+    assert.strictEqual(m.isManualTableSelection(), false);
+});
+
+test('isManualTableSelection returns true after manual setSelectedSatellite', () => {
+    const m = new SatelliteStateManager();
+    m.setSelectedSatellite(25544, 'ISS', true);
+    assert.strictEqual(m.isManualTableSelection(), true);
+});
+
+test('isManualTableSelection reset to false by auto setSelectedSatellite', () => {
+    const m = new SatelliteStateManager();
+    m.setSelectedSatellite(25544, 'ISS', true);
+    m.setSelectedSatellite(40069, 'METEOR', false);
+    assert.strictEqual(m.isManualTableSelection(), false);
+});
+
 // ── setSatelliteGroup [BUG-E] ─────────────────────────────
 
 console.log('\nSatelliteStateManager — setSatelliteGroup [BUG-E]');

@@ -1202,10 +1202,11 @@
 
     // ========== Вторичные спутники ==========
 
-    // Палитра цветов для вторичных спутников (серые оттенки, чтобы не мешать primary).
+    // Палитра вторичных спутников без включённой трассы: крупные маркеры + высокая яркость
+    // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте (UX-MAP-VIS-001).
     var SECONDARY_SAT_COLORS = [
-        '#aaaaaa', '#888888', '#cccccc', '#999999',
-        '#bbbbbb', '#777777', '#dddddd', '#ffffff'
+        '#ffffff', '#f0fcff', '#e8ffff', '#fffef0',
+        '#f5fff8', '#ffe8f5', '#e8f4ff', '#fffff0'
     ];
 
     /**
@@ -1280,6 +1281,8 @@
 
     /**
      * Отрисовка пунктирной трассы вторичного спутника.
+     * Вызывается только из _drawSecondaryLayer при sat.track && isTrackVisible(noradId) —
+     * пока трасса в таблице не включена (⊙), линия на карте не рисуется.
      * @private
      */
     EarthView.prototype._drawSecondaryGroundTrack = function(sat, colorIdx, paletteColor) {
@@ -1287,7 +1290,8 @@
         var track = sat.track;
         if (!track) { return; }
 
-        var color = paletteColor || 'rgba(200, 200, 200, 0.5)';
+        // Цвет как в таблице (полная насыщенность); линия чуть тоньше, чем у selected/tracking.
+        var color = paletteColor || 'rgba(200, 220, 235, 0.9)';
         var dpr = window.devicePixelRatio || 1;
 
         ctx.setLineDash([5, 5]);
@@ -1325,7 +1329,8 @@
 
         var p = this.project(pos.lon, pos.lat);
         var dpr = window.devicePixelRatio || 1;
-        var r = trackVisible ? (5 * dpr) : (4 * dpr);
+        // Крупнее прежнего (4–5px): лучше видно на карте
+        var r = trackVisible ? (7.5 * dpr) : (6 * dpr);
         // Цветной маркер для спутников с видимой трассой, серый — для остальных.
         var sm = window._stateManager;
         var paletteColor = (trackVisible && sm) ? sm.getTrackColor(sat.noradId) : null;
@@ -1333,8 +1338,9 @@
         var shape = sat.noradId % 4; // 0=circle, 1=square, 2=triangle, 3=diamond
 
         ctx.fillStyle = color;
-        ctx.strokeStyle = 'rgba(0,0,0,0.6)';
-        ctx.lineWidth = 1 * dpr;
+        // Тёмная обводка фигуры — контраст со светлой заливкой на карте
+        ctx.strokeStyle = 'rgba(0,0,0,0.82)';
+        ctx.lineWidth = Math.max(1.25, 1.5 * dpr);
 
         ctx.beginPath();
         if (shape === 0) {
@@ -1356,17 +1362,18 @@
         ctx.fill();
         ctx.stroke();
 
-        // Подпись (мелко, без фона, чтобы не перекрывать карту)
+        // Подпись крупнее и жирнее — читаемость на суше/океане
         if (sat.name) {
-            var fs = Math.round(9 * dpr);
-            ctx.font = fs + 'px monospace';
+            var fs = Math.round(12 * dpr);
+            ctx.font = '700 ' + fs + 'px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            ctx.strokeStyle = 'rgba(0,0,0,0.7)';
-            ctx.lineWidth = 1.5;
-            ctx.strokeText(sat.name, p.x, p.y + r + 2 * dpr);
+            var labelY = p.y + r + 3 * dpr;
+            ctx.strokeStyle = 'rgba(0,0,0,0.92)';
+            ctx.lineWidth = 2.75;
+            ctx.strokeText(sat.name, p.x, labelY);
             ctx.fillStyle = color;
-            ctx.fillText(sat.name, p.x, p.y + r + 2 * dpr);
+            ctx.fillText(sat.name, p.x, labelY);
         }
     };
 
