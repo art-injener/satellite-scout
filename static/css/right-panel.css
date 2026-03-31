@@ -23,7 +23,7 @@
     border-collapse: collapse;
     font-family: var(--font-mono);
     font-size: 12px;
-    table-layout: auto;
+    table-layout: fixed;
     /* Не показывать текстовую каретку и не давать выделять текст как в поле ввода */
     user-select: none;
     -webkit-user-select: none;
@@ -54,9 +54,9 @@
     border-right: none;
 }
 
-/* Колонки: глаз (30px) | NORAD/имя (auto, заполняет) | Азим./Угол | До AOS/LOS | Частота/Мод. */
+/* Колонки: глаз (28px) | NORAD/имя (auto) | Азим./Угол (62px) | До AOS/LOS (62px) | Частота/Мод. (54px) */
 .pc-th-track {
-    width: 30px;
+    width: 28px;
     text-align: center;
     cursor: pointer;
     user-select: none;
@@ -95,8 +95,9 @@
     white-space: nowrap;
 }
 
-/* Колонка Азим. / Угол м. — по содержимому */
+/* Колонка Азим. / Угол м. — фиксированная ширина */
 .pc-th-azel {
+    width: 68px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
@@ -121,16 +122,18 @@
     white-space: nowrap;
 }
 
-/* Колонка До AOS / До LOS — по содержимому */
+/* Колонка До AOS / До LOS — фиксированная ширина */
 .pc-th-countdown {
+    width: 68px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
     line-height: 1.2;
 }
 
-/* Колонка Частота / Мод. — по содержимому */
+/* Колонка Частота / Мод. — фиксированная ширина */
 .pc-th-freq {
+    width: 64px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
@@ -290,9 +293,9 @@
     font-size: 13px;
     font-weight: 600;
     color: var(--text-primary);
-    white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
     line-height: 1.4;
     max-width: 100%;
 }
@@ -308,13 +311,13 @@
     opacity: 0.92;
 }
 
-/* Первая строка ячейки — NORAD */
+/* Третья строка ячейки — NORAD (мелкий, приглушённый) */
 .pc-sat-norad {
-    font-size: 13px;
-    font-weight: 600;
-    color: var(--text-primary);
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
     white-space: nowrap;
-    line-height: 1.4;
+    line-height: 1.3;
     font-variant-numeric: tabular-nums;
 }
 

@@ -215,10 +215,11 @@
                 '<td class="' + trackCls + '" data-track-toggle="' + sat.norad_id + '"' +
                 (trackVisible ? ' title="Трасса на карте и в небе: видна"' : ' title="Трасса скрыта"') +
                 '>' + trackIcon + '</td>' +
-                '<td class="pc-name-cell' + (alias ? ' pc-name-cell--alias' : '') + '">' +
-                    '<div class="pc-sat-norad">' + norad + '</div>' +
+                '<td class="pc-name-cell' + (alias ? ' pc-name-cell--alias' : '') + '"' +
+                    ' title="' + norad + ' — ' + name + (alias ? ' (' + alias + ')' : '') + '">' +
                     '<div class="pc-sat-name">' + name + '</div>' +
                     (alias ? '<div class="pc-sat-alias">(' + alias + ')</div>' : '') +
+                    '<div class="pc-sat-norad">' + norad + '</div>' +
                 '</td>' +
                 '<td class="pc-azel-cell">' +
                     '<div class="pc-azel-az">' + azel.az + '</div>' +

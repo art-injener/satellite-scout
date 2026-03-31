@@ -11,7 +11,7 @@ func TestParseSatName(t *testing.T) {
 		{"ISS (ZARYA)", "ISS", "ZARYA"},
 		{"YUBILEINY (RS30)", "YUBILEINY", "RS30"},
 		{"OOV-CUBE (TUBSAT-30)", "OOV-CUBE", "TUBSAT-30"},
-		{"RS-44 & BREEZE-KM R/B", "RS-44 & BREEZE-KM R/B", ""},
+		{"RS-44 & BREEZE-KM R/B", "RS-44", "BREEZE-KM R/B"},
 		{"METEOR-M 2-3", "METEOR-M 2-3", ""},
 		{"NOAA 18", "NOAA 18", ""},
 		{"", "", ""},
