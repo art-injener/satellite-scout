@@ -159,8 +159,11 @@ func TestPredictPasses_PassStructure(t *testing.T) {
 			t.Errorf("pass %d: expected NORAD 25544, got %d", i, p.NoradID)
 		}
 
-		if p.SatName != "ISS (ZARYA)" {
-			t.Errorf("pass %d: expected name 'ISS (ZARYA)', got '%s'", i, p.SatName)
+		if p.SatName != "ISS" {
+			t.Errorf("pass %d: expected name 'ISS', got '%s'", i, p.SatName)
+		}
+		if p.SatAlias != "ZARYA" {
+			t.Errorf("pass %d: expected alias 'ZARYA', got '%s'", i, p.SatAlias)
 		}
 	}
 }

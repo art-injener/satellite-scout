@@ -110,13 +110,13 @@ func NoradInPostLosGap(passes []*tracker.Pass, norad int, now time.Time) bool {
 //
 // Логика:
 //  1. Если userSelection != nil и спутник есть в группе → вернуть его (ручной выбор).
-//  2. Среди видимых (IsVisible = true) → спутник с наибольшей длительностью пролёта.
-//  3. Если видимых нет → среди всей группы наибольшая длительность пролёта (сеанс «текущего» мог закончиться,
-//     а первый по AOS — не тот КА, на который нужно переключиться).
-//  4. При равной длительности — меньший NoradID (детерминированный tie-breaker).
+//  2. Среди видимых (IsVisible = true) → спутник с максимальным оставшимся временем (LOS − now).
+//     Это гарантирует, что primary — спутник с самым длинным окном связи от текущего момента.
+//  3. Если видимых нет → среди всей группы наибольшее оставшееся время до LOS.
+//  4. При равном остатке — меньший NoradID (детерминированный tie-breaker).
 //
 // Возвращает 0, если группа пустая.
-func SelectPrimarySatellite(satellites []PassInfo, userSelection *int) int {
+func SelectPrimarySatellite(satellites []PassInfo, userSelection *int, now time.Time) int {
 	if len(satellites) == 0 {
 		return 0
 	}
@@ -131,31 +131,35 @@ func SelectPrimarySatellite(satellites []PassInfo, userSelection *int) int {
 		// Спутник вышел из окна — сбрасываем ручной выбор (caller должен обнулить userSelection).
 	}
 
-	// Среди видимых — выбираем с максимальной длительностью.
+	nowMs := now.UnixMilli()
+
+	// Среди видимых — выбираем с максимальным оставшимся временем (LOS − now).
 	var best *PassInfo
+	var bestRemaining int64
 	for i := range satellites {
 		s := &satellites[i]
 		if !s.IsVisible {
 			continue
 		}
-		if best == nil ||
-			s.Pass.Duration > best.Pass.Duration ||
-			(s.Pass.Duration == best.Pass.Duration && s.NoradID < best.NoradID) {
+		rem := s.Pass.LOS - nowMs
+		if best == nil || rem > bestRemaining || (rem == bestRemaining && s.NoradID < best.NoradID) {
 			best = s
+			bestRemaining = rem
 		}
 	}
 	if best != nil {
 		return best.NoradID
 	}
 
-	// Нет видимых — максимальная длительность пролёта среди всей группы.
+	// Нет видимых — максимальное оставшееся время до LOS среди всей группы.
 	best = nil
+	bestRemaining = 0
 	for i := range satellites {
 		s := &satellites[i]
-		if best == nil ||
-			s.Pass.Duration > best.Pass.Duration ||
-			(s.Pass.Duration == best.Pass.Duration && s.NoradID < best.NoradID) {
+		rem := s.Pass.LOS - nowMs
+		if best == nil || rem > bestRemaining || (rem == bestRemaining && s.NoradID < best.NoradID) {
 			best = s
+			bestRemaining = rem
 		}
 	}
 	if best != nil {
@@ -168,9 +172,10 @@ func SelectPrimarySatellite(satellites []PassInfo, userSelection *int) int {
 //
 // Возвращает (shouldSwitch=true, newID) если нужно переключение:
 //   - текущий primary больше не в группе, или
-//   - его пролёт завершился (now > LOS).
+//   - его пролёт завершился (now > LOS), или
+//   - появился видимый спутник с большим оставшимся временем (LOS − now).
 //
-// Возвращает (shouldSwitch=false, 0) если текущий primary активен и переключение не нужно.
+// Возвращает (shouldSwitch=false, 0) если текущий primary — лучший кандидат.
 //
 // ВАЖНО: когда пролёт завершился, возвращает shouldSwitch=true даже если
 // новый primary — тот же NORAD ID (следующий виток). Это нужно, чтобы
@@ -185,7 +190,11 @@ func ShouldSwitchPrimary(currentPrimaryID int, satellites []PassInfo, now time.T
 	for _, s := range satellites {
 		if s.NoradID == currentPrimaryID {
 			if s.IsVisible && nowMs <= s.Pass.LOS {
-				// Пролёт активен (IsVisible=true, до LOS) — не переключаемся.
+				// Пролёт активен — проверяем, нет ли лучшего кандидата по оставшемуся времени.
+				bestID := SelectPrimarySatellite(satellites, nil, now)
+				if bestID != 0 && bestID != currentPrimaryID {
+					return true, bestID
+				}
 				return false, 0
 			}
 			if !s.IsVisible && !s.IsSubstitute && nowMs < s.Pass.AOS {
@@ -200,7 +209,7 @@ func ShouldSwitchPrimary(currentPrimaryID int, satellites []PassInfo, now time.T
 	}
 
 	// Primary не найден в группе или его пролёт завершился → выбираем нового.
-	newID := SelectPrimarySatellite(satellites, nil)
+	newID := SelectPrimarySatellite(satellites, nil, now)
 	return true, newID
 }
 

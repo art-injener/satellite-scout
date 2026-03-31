@@ -51,6 +51,7 @@ type satelliteGroupUpdate struct {
 type groupSatInfo struct {
 	NoradID   int     `json:"norad_id"`
 	SatName   string  `json:"sat_name"`
+	SatAlias  string  `json:"sat_alias,omitempty"`
 	AOS       int64   `json:"aos"`
 	LOS       int64   `json:"los"`
 	Duration  float64 `json:"duration"`
@@ -310,9 +311,10 @@ func (s *SatelliteTrackingService) TrackSatellite(noradID int) error {
 	}
 
 	s.mu.Lock()
+	primary, _ := tracker.ParseSatName(tle.Name)
 	s.tracked[noradID] = &trackedSatellite{
 		noradID:    noradID,
-		name:       tle.Name,
+		name:       primary,
 		propagator: prop,
 		tleEpoch:   tle.Epoch,
 	}
@@ -455,7 +457,7 @@ func (s *SatelliteTrackingService) updateGroup() {
 			newPrimaryID = currentID
 		}
 	} else {
-		newPrimaryID = SelectPrimarySatellite(satellites, manualSel)
+		newPrimaryID = SelectPrimarySatellite(satellites, manualSel, now)
 	}
 
 	// Change detection по полным данным (NoradID + IsVisible + AOS + LOS).
@@ -582,6 +584,7 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 		sats[i] = groupSatInfo{
 			NoradID:       sat.NoradID,
 			SatName:       sat.SatName,
+			SatAlias:      sat.Pass.SatAlias,
 			AOS:           sat.Pass.AOS,
 			LOS:           sat.Pass.LOS,
 			Duration:      sat.Pass.Duration,

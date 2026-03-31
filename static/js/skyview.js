@@ -4,6 +4,13 @@
 (function() {
     'use strict';
 
+    /** Обрезка имени спутника для canvas-подписей (макс. 16 символов). */
+    function _shortName(name, maxLen) {
+        if (!name) { return ''; }
+        maxLen = maxLen || 16;
+        return name.length > maxLen ? name.slice(0, maxLen - 1) + '\u2026' : name;
+    }
+
     /**
      * Класс Sky View - азимутальная проекция неба
      *
@@ -723,17 +730,24 @@
         ctx.lineWidth = 1;
         ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
 
-        // Подпись спутника
+        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+        ctx.shadowBlur = 3;
+
         if (this.satellite.name) {
             ctx.font = 'bold 10px sans-serif';
             ctx.fillStyle = this.colors.satLabel;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-            ctx.shadowBlur = 3;
-            ctx.fillText(this.satellite.name, p.x + size + 5, p.y - 10);
-            ctx.shadowBlur = 0;
+            ctx.fillText(_shortName(this.satellite.name), p.x, p.y - 12);
         }
+
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = this.colors.satLabel;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'top';
+        ctx.fillText('[' + pos.az.toFixed(1) + '\u00b0/' + pos.el.toFixed(1) + '\u00b0]', p.x, p.y + 10);
+
+        ctx.shadowBlur = 0;
     };
 
     /**
@@ -1149,6 +1163,31 @@
         if (sel.currentPos && sel.currentPos.el > 0) {
             var mp = this.azElToXY(sel.currentPos.az, sel.currentPos.el);
             this._drawSatelliteIconStatic(ctx, mp.x, mp.y, this.colors.selectedMarker);
+
+            ctx.lineJoin = 'round';
+            ctx.miterLimit = 2;
+
+            if (sel.name) {
+                var nameLabel = _shortName(sel.name);
+                ctx.font = 'bold 11px sans-serif';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+                ctx.lineWidth = 3;
+                ctx.strokeText(nameLabel, mp.x, mp.y - 12);
+                ctx.fillStyle = '#ffff00';
+                ctx.fillText(nameLabel, mp.x, mp.y - 12);
+            }
+
+            var azelLabel = '[' + sel.currentPos.az.toFixed(1) + '\u00b0/' + sel.currentPos.el.toFixed(1) + '\u00b0]';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'top';
+            ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.lineWidth = 3;
+            ctx.strokeText(azelLabel, mp.x, mp.y + 10);
+            ctx.fillStyle = '#ffff00';
+            ctx.fillText(azelLabel, mp.x, mp.y + 10);
         }
     };
 
@@ -1205,12 +1244,13 @@
         for (var i = 0; i < ids.length; i++) {
             var sat = this._secondarySatellites[ids[i]];
             var nid = parseInt(ids[i], 10);
-            var paletteColor = (sm) ? sm.getTrackColor(nid) : null;
+            var markerColor = sm ? sm.getMarkerColor(nid) : null;
+            var trackColor = sm ? sm.getTrackColor(nid) : null;
             if (sat.track && sat.track.length > 0) {
-                this._drawSecondaryTrack(sat, paletteColor);
+                this._drawSecondaryTrack(sat, trackColor);
             }
             if (sat.currentPos && sat.currentPos.el > 0) {
-                this._drawSecondaryMarker(sat, paletteColor);
+                this._drawSecondaryMarker(sat, markerColor);
             }
         }
     };

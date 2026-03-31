@@ -164,77 +164,84 @@ func TestNoradInPostLosGap(t *testing.T) {
 // ── SelectPrimarySatellite ────────────────────────────────────────────────────
 
 func TestSelectPrimary_EmptyGroup(t *testing.T) {
-	id := SelectPrimarySatellite(nil, nil)
+	id := SelectPrimarySatellite(nil, nil, time.Now().UTC())
 	if id != 0 {
 		t.Errorf("expected 0 for empty group, got %d", id)
 	}
 }
 
 func TestSelectPrimary_SingleVisible(t *testing.T) {
+	now := time.Now().UTC()
 	sats := []PassInfo{
-		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{Duration: 300}},
+		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{LOS: msFromNow(5 * time.Minute), Duration: 300}},
 	}
-	id := SelectPrimarySatellite(sats, nil)
+	id := SelectPrimarySatellite(sats, nil, now)
 	if id != 10 {
 		t.Errorf("expected 10, got %d", id)
 	}
 }
 
-func TestSelectPrimary_LongestDuration(t *testing.T) {
+func TestSelectPrimary_MaxRemainingTime(t *testing.T) {
+	now := time.Now().UTC()
 	sats := []PassInfo{
-		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{Duration: 180}},
-		{NoradID: 20, IsVisible: true, Pass: tracker.Pass{Duration: 600}},
-		{NoradID: 30, IsVisible: true, Pass: tracker.Pass{Duration: 300}},
+		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{LOS: msFromNow(3 * time.Minute)}},
+		{NoradID: 20, IsVisible: true, Pass: tracker.Pass{LOS: msFromNow(10 * time.Minute)}},
+		{NoradID: 30, IsVisible: true, Pass: tracker.Pass{LOS: msFromNow(5 * time.Minute)}},
 	}
-	id := SelectPrimarySatellite(sats, nil)
+	id := SelectPrimarySatellite(sats, nil, now)
 	if id != 20 {
-		t.Errorf("expected 20 (longest), got %d", id)
+		t.Errorf("expected 20 (max remaining), got %d", id)
 	}
 }
 
 func TestSelectPrimary_TieBreakerNoradID(t *testing.T) {
+	now := time.Now().UTC()
+	sameLOS := msFromNow(10 * time.Minute)
 	sats := []PassInfo{
-		{NoradID: 30, IsVisible: true, Pass: tracker.Pass{Duration: 600}},
-		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{Duration: 600}},
-		{NoradID: 20, IsVisible: true, Pass: tracker.Pass{Duration: 600}},
+		{NoradID: 30, IsVisible: true, Pass: tracker.Pass{LOS: sameLOS}},
+		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{LOS: sameLOS}},
+		{NoradID: 20, IsVisible: true, Pass: tracker.Pass{LOS: sameLOS}},
 	}
-	id := SelectPrimarySatellite(sats, nil)
+	id := SelectPrimarySatellite(sats, nil, now)
 	if id != 10 {
 		t.Errorf("expected 10 (smallest NoradID), got %d", id)
 	}
 }
 
-func TestSelectPrimary_FallbackLongestAmongGroupWhenNoneVisible(t *testing.T) {
-	// Нет видимых → наибольшая длительность среди группы (не «первый по AOS»).
+func TestSelectPrimary_FallbackMaxRemainingWhenNoneVisible(t *testing.T) {
+	now := time.Now().UTC()
+	// Нет видимых → максимальное оставшееся время до LOS.
 	sats := []PassInfo{
-		{NoradID: 5, IsVisible: false, Pass: tracker.Pass{AOS: 100, Duration: 100}},
-		{NoradID: 6, IsVisible: false, Pass: tracker.Pass{AOS: 200, Duration: 900}},
+		{NoradID: 5, IsVisible: false, Pass: tracker.Pass{AOS: msFromNow(1 * time.Minute), LOS: msFromNow(3 * time.Minute)}},
+		{NoradID: 6, IsVisible: false, Pass: tracker.Pass{AOS: msFromNow(2 * time.Minute), LOS: msFromNow(12 * time.Minute)}},
 	}
-	id := SelectPrimarySatellite(sats, nil)
+	id := SelectPrimarySatellite(sats, nil, now)
 	if id != 6 {
-		t.Errorf("expected 6 (longest duration in group), got %d", id)
+		t.Errorf("expected 6 (max remaining in group), got %d", id)
 	}
 }
 
 func TestSelectPrimary_ManualSelection(t *testing.T) {
+	now := time.Now().UTC()
 	sats := []PassInfo{
-		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{Duration: 600}},
-		{NoradID: 20, IsVisible: true, Pass: tracker.Pass{Duration: 100}},
+		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{LOS: msFromNow(10 * time.Minute)}},
+		{NoradID: 20, IsVisible: true, Pass: tracker.Pass{LOS: msFromNow(2 * time.Minute)}},
 	}
 	manual := 20
-	id := SelectPrimarySatellite(sats, &manual)
+	id := SelectPrimarySatellite(sats, &manual, now)
 	if id != 20 {
 		t.Errorf("expected manual selection 20, got %d", id)
 	}
 }
 
 func TestSelectPrimary_ManualSelectionExpired(t *testing.T) {
+	now := time.Now().UTC()
 	// Ручной выбор 99 отсутствует в группе → fallback.
 	sats := []PassInfo{
-		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{Duration: 600}},
+		{NoradID: 10, IsVisible: true, Pass: tracker.Pass{LOS: msFromNow(5 * time.Minute)}},
 	}
 	manual := 99
-	id := SelectPrimarySatellite(sats, &manual)
+	id := SelectPrimarySatellite(sats, &manual, now)
 	if id != 10 {
 		t.Errorf("expected fallback to 10, got %d", id)
 	}
@@ -372,11 +379,11 @@ func TestBuildGroup_TimeWindow(t *testing.T) {
 // SelectPrimarySatellite не должен перебивать текущий primary,
 // пока ShouldSwitchPrimary говорит «не переключай».
 
-func TestShouldSwitch_NoPrematureSwitchWhenLongerDurationExists(t *testing.T) {
+func TestShouldSwitch_SwitchToLongerRemainingTime(t *testing.T) {
 	now := time.Now().UTC()
-	// Спутник A — primary, пролёт ещё активен (Duration=480с).
-	// Спутник B — в группе, Duration=900с (длиннее), тоже видим.
-	// ShouldSwitchPrimary(A) должен вернуть false — пролёт A ещё не кончился.
+	// Спутник A — primary, пролёт ещё активен, LOS через 3 мин.
+	// Спутник B — в группе, тоже видим, LOS через 13 мин (больше оставшегося времени).
+	// ShouldSwitchPrimary(A) должен переключить на B — у него больше оставшегося времени.
 	sats := []PassInfo{
 		{
 			NoradID:   10,
@@ -389,9 +396,34 @@ func TestShouldSwitch_NoPrematureSwitchWhenLongerDurationExists(t *testing.T) {
 			Pass:      tracker.Pass{AOS: msFromNow(-2 * time.Minute), LOS: msFromNow(13 * time.Minute), Duration: 900},
 		},
 	}
+	sw, newID := ShouldSwitchPrimary(10, sats, now)
+	if !sw {
+		t.Error("should switch: satellite 20 has more remaining time than primary 10")
+	}
+	if newID != 20 {
+		t.Errorf("expected switch to 20 (max remaining), got %d", newID)
+	}
+}
+
+func TestShouldSwitch_NoSwitchWhenCurrentIsBest(t *testing.T) {
+	now := time.Now().UTC()
+	// Спутник A — primary, LOS через 10 мин. Спутник B — LOS через 3 мин.
+	// Текущий primary — лучший, не переключаемся.
+	sats := []PassInfo{
+		{
+			NoradID:   10,
+			IsVisible: true,
+			Pass:      tracker.Pass{AOS: msFromNow(-2 * time.Minute), LOS: msFromNow(10 * time.Minute)},
+		},
+		{
+			NoradID:   20,
+			IsVisible: true,
+			Pass:      tracker.Pass{AOS: msFromNow(-1 * time.Minute), LOS: msFromNow(3 * time.Minute)},
+		},
+	}
 	sw, _ := ShouldSwitchPrimary(10, sats, now)
 	if sw {
-		t.Error("should NOT switch: pass of primary 10 is still active (LOS in future), even though 20 has longer duration")
+		t.Error("should NOT switch: primary 10 has the most remaining time")
 	}
 }
 
@@ -522,29 +554,32 @@ func TestShouldSwitch_SubstituteFuturePassSameNorad(t *testing.T) {
 	}
 }
 
-func TestShouldSwitch_ActivePassVisibleDoNotSwitch(t *testing.T) {
+func TestShouldSwitch_SwitchToBetterCandidateAmongMultiple(t *testing.T) {
 	now := time.Now().UTC()
 	sats := []PassInfo{
 		{
 			NoradID:   10,
 			IsVisible: true,
-			Pass:      tracker.Pass{AOS: msFromNow(-3 * time.Minute), LOS: msFromNow(5 * time.Minute), Duration: 480},
+			Pass:      tracker.Pass{AOS: msFromNow(-3 * time.Minute), LOS: msFromNow(5 * time.Minute)},
 		},
 		{
 			NoradID:   20,
 			IsVisible: true,
-			Pass:      tracker.Pass{AOS: msFromNow(-1 * time.Minute), LOS: msFromNow(12 * time.Minute), Duration: 780},
+			Pass:      tracker.Pass{AOS: msFromNow(-1 * time.Minute), LOS: msFromNow(12 * time.Minute)},
 		},
 		{
 			NoradID:   30,
 			IsVisible: false,
-			Pass:      tracker.Pass{AOS: msFromNow(30 * time.Second), LOS: msFromNow(8 * time.Minute), Duration: 450},
+			Pass:      tracker.Pass{AOS: msFromNow(30 * time.Second), LOS: msFromNow(8 * time.Minute)},
 		},
 	}
-	// Primary=10 виден и пролёт идёт — не переключать, даже если 20 длиннее.
-	sw, _ := ShouldSwitchPrimary(10, sats, now)
-	if sw {
-		t.Error("should NOT switch: primary 10 pass is active and visible")
+	// Primary=10 виден, но у 20 больше оставшегося времени → переключиться на 20.
+	sw, newID := ShouldSwitchPrimary(10, sats, now)
+	if !sw {
+		t.Error("should switch: satellite 20 has more remaining time than primary 10")
+	}
+	if newID != 20 {
+		t.Errorf("expected switch to 20, got %d", newID)
 	}
 }
 

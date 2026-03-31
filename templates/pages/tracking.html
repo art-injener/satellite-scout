@@ -82,10 +82,10 @@
 {{end}}
 
 {{define "tracking-right-panel"}}
-<!-- Боковая панель: таблица пролётов + SkyView, на всю высоту окна -->
+<!-- Боковая панель: план сеанса наблюдения + SkyView, на всю высоту окна -->
 <section class="right-panel" id="right-panel">
     <div class="panel-header">
-        <span class="panel-header__title">ТАБЛИЦА ПРОЛЁТОВ</span>
+        <span class="panel-header__title">ПЛАН СЕАНСА НАБЛЮДЕНИЯ</span>
         <button class="panel-collapse-btn" id="right-panel-toggle" title="Свернуть">◀</button>
     </div>
     <div class="right-panel__body">
@@ -97,12 +97,28 @@
                             <th class="pc-th-track pc-th-track--off" id="pc-th-track-toggle" title="">
                                 <span id="pc-th-track-toggle-inner" class="pc-th-track-toggle-inner"></span>
                             </th>
-                            <th class="pc-th-sat">КА</th>
-                            <th class="pc-th-time">Время</th>
+                            <th class="pc-th-sat">
+                                <div class="pc-th-sat__stack">
+                                    <span class="pc-th-sat__line">NORAD ID</span>
+                                    <span class="pc-th-sat__line">ИМЯ КА</span>
+                                </div>
+                            </th>
+                            <th class="pc-th-azel">
+                                <div class="pc-th-azel__stack">
+                                    <span class="pc-th-azel__line">Азим.</span>
+                                    <span class="pc-th-azel__line">Уг.мест</span>
+                                </div>
+                            </th>
                             <th class="pc-th-countdown">
                                 <div class="pc-th-countdown__stack">
-                                    <span class="pc-th-countdown__line">длит.</span>
-                                    <span class="pc-th-countdown__line">до сеанса</span>
+                                    <span class="pc-th-countdown__line">До AOS</span>
+                                    <span class="pc-th-countdown__line">До LOS</span>
+                                </div>
+                            </th>
+                            <th class="pc-th-freq">
+                                <div class="pc-th-freq__stack">
+                                    <span class="pc-th-freq__line">Част.</span>
+                                    <span class="pc-th-freq__line">Модул.</span>
                                 </div>
                             </th>
                         </tr>

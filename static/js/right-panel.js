@@ -1,29 +1,38 @@
-// Компактная таблица пролётов в правой панели + кнопки управления.
+// План сеанса наблюдения в правой панели (компактная таблица) + кнопки управления.
 // Данные приходят из SSE-события satellite_group_update,
 // не из polling GET /api/passes.
-// Колонки: [глаз — видимость трассы] | КА | Время | длит. / до сеанса.
-// Логика «длит.» / «до сеанса» совпадает с internal/services/session_table_ui.go (FormatSessionTableColumns).
+// Колонки: [глаз — видимость трассы] | NORAD/имя | AOS/LOS | До AOS / До LOS (подписи в шапке).
+// Логика значений колонки 3 совпадает с internal/services/session_table_ui.go (FormatSessionTableColumns).
 
 (function() {
     'use strict';
 
-    // SVG «глаз»: цвет задаётся через currentColor в CSS (тёмная тема — светлая обводка).
-    var EYE_VISIBLE_SVG =
-        '<span class="pc-track-eye-svg-wrap" aria-hidden="true">' +
-        '<svg class="pc-track-eye-svg" viewBox="0 0 24 24" width="22" height="22" focusable="false">' +
-        '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" ' +
-        'd="M1 12s4.5-7 11-7 11 7 11 7-4.5 7-11 7-11-7-11-7z"/>' +
-        '<circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="2"/>' +
-        '</svg></span>';
+    /**
+     * SVG «глаз»: stroke/fill задаются inline-цветом из палитры трассы.
+     * Функции возвращают HTML-строку с нужным цветом.
+     */
+    function eyeVisibleSvg(color) {
+        var c = color || 'currentColor';
+        return '<span class="pc-track-eye-svg-wrap" aria-hidden="true">' +
+            '<svg class="pc-track-eye-svg" viewBox="0 0 24 24" width="22" height="22" focusable="false">' +
+            '<path fill="none" stroke="' + c + '" stroke-width="2" stroke-linejoin="round" ' +
+            'd="M1 12s4.5-7 11-7 11 7 11 7-4.5 7-11 7-11-7-11-7z"/>' +
+            '<circle cx="12" cy="12" r="3.25" fill="' + c + '" fill-opacity="0.25" stroke="' + c + '" stroke-width="2"/>' +
+            '</svg></span>';
+    }
 
-    var EYE_HIDDEN_SVG =
-        '<span class="pc-track-eye-svg-wrap" aria-hidden="true">' +
-        '<svg class="pc-track-eye-svg" viewBox="0 0 24 24" width="22" height="22" focusable="false">' +
-        '<path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" ' +
-        'd="M1 12s4.5-7 11-7 11 7 11 7-4.5 7-11 7-11-7-11-7z"/>' +
-        '<circle cx="12" cy="12" r="3.25" fill="none" stroke="currentColor" stroke-width="2"/>' +
-        '<path fill="none" stroke="currentColor" stroke-width="2.25" stroke-linecap="round" d="M3.5 3.5l17 17"/>' +
-        '</svg></span>';
+    function eyeHiddenSvg(color) {
+        var c = color || 'currentColor';
+        var opacity = color ? '0.45' : '1';
+        return '<span class="pc-track-eye-svg-wrap" aria-hidden="true">' +
+            '<svg class="pc-track-eye-svg" viewBox="0 0 24 24" width="22" height="22" focusable="false"' +
+            (color ? ' style="opacity:' + opacity + '"' : '') + '>' +
+            '<path fill="none" stroke="' + c + '" stroke-width="2" stroke-linejoin="round" ' +
+            'd="M1 12s4.5-7 11-7 11 7 11 7-4.5 7-11 7-11-7-11-7z"/>' +
+            '<circle cx="12" cy="12" r="3.25" fill="none" stroke="' + c + '" stroke-width="2"/>' +
+            '<path fill="none" stroke="' + c + '" stroke-width="2.25" stroke-linecap="round" d="M3.5 3.5l17 17"/>' +
+            '</svg></span>';
+    }
 
     var _trackLimitToastListenerAdded = false;
 
@@ -116,6 +125,9 @@
                 sm.subscribe(window.StateEventType.TRACK_VISIBILITY_CHANGE, function() {
                     self._render();
                 });
+                sm.subscribe(window.StateEventType.SHOW_ALL_MODE_CHANGE, function() {
+                    self._render();
+                });
             }
         } else {
             this._syncThTrackEye();
@@ -124,18 +136,18 @@
         this._updateControls();
     };
 
-    /** Иконка глаза в заголовке: яркая, если есть хотя бы одна видимая доп. трасса; иначе «выкл.». */
+    /** Master-toggle в заголовке: отражает состояние showAllMode. */
     RightPanelTable.prototype._syncThTrackEye = function() {
         var th = document.getElementById('pc-th-track-toggle');
         if (!th) { return; }
         var inner = document.getElementById('pc-th-track-toggle-inner');
-        var on = !!(window._stateManager && window._stateManager.getVisibleTrackIds().length > 0);
+        var on = !!(window._stateManager && window._stateManager.isShowAllMode());
         th.classList.remove('pc-th-track--on', 'pc-th-track--off');
         th.classList.add(on ? 'pc-th-track--on' : 'pc-th-track--off');
         th.title = on
-            ? 'Скрыть все дополнительные трассы на карте и в небе'
-            : 'Показать трассы для всех КА в группе (кроме выбранного и сопровождаемого, в пределах лимита)';
-        var html = on ? EYE_VISIBLE_SVG : EYE_HIDDEN_SVG;
+            ? 'Показаны все трассы группы — нажмите, чтобы скрыть'
+            : 'Скрыты все трассы — нажмите, чтобы показать все';
+        var html = on ? eyeVisibleSvg(null) : eyeHiddenSvg();
         if (inner) {
             inner.innerHTML = html;
         } else {
@@ -167,7 +179,7 @@
         var satellites = (this._group && this._group.satellites) ? this._group.satellites : [];
 
         if (satellites.length === 0) {
-            this._tbody.innerHTML = '<tr><td colspan="4" class="pc-empty">Нет пролётов</td></tr>';
+            this._tbody.innerHTML = '<tr><td colspan="5" class="pc-empty">Нет пролётов</td></tr>';
             return;
         }
 
@@ -186,40 +198,37 @@
             if (trackVisible) { cls += ' pc-row--track-visible'; }
 
             var name = this._escapeHtml(sat.sat_name || String(sat.norad_id));
+            var alias = sat.sat_alias ? this._escapeHtml(sat.sat_alias) : '';
             var norad = String(sat.norad_id);
-
-            var aosStr = this._fmtTime(sat.aos);
-            var losStr = this._fmtTime(sat.los);
 
             var col3 = this._renderCol3Html(sat.aos, sat.los);
 
+            var azel = this._getAzEl(sat.norad_id);
+
+            var markerColor = window._stateManager
+                ? window._stateManager.getMarkerColor(sat.norad_id) : null;
             var trackCls = 'pc-track-cell' + (trackVisible ? ' pc-track-cell--on' : ' pc-track-cell--off');
-            var trackIcon = trackVisible ? EYE_VISIBLE_SVG : EYE_HIDDEN_SVG;
+            var trackIcon = trackVisible ? eyeVisibleSvg(markerColor) : eyeHiddenSvg(markerColor);
 
-            var rowBg = '';
-            if (trackVisible && window._stateManager && !isSelected && !isTracking) {
-                var tc = window._stateManager.getTrackColor(sat.norad_id);
-                if (tc) { rowBg = ' style="background-color:' + this._hexToRgba(tc, 0.14) + '"'; }
-            }
-
-            html += '<tr class="' + cls + '"' + rowBg + ' data-norad="' + sat.norad_id + '"' +
+            html += '<tr class="' + cls + '" data-norad="' + sat.norad_id + '"' +
                 ' data-aos="' + sat.aos + '" data-los="' + sat.los + '" data-dur="' + sat.duration + '">' +
-                // Колонка 0: «глаз» — видимость трассы (SVG: яркий / зачёркнутый)
                 '<td class="' + trackCls + '" data-track-toggle="' + sat.norad_id + '"' +
                 (trackVisible ? ' title="Трасса на карте и в небе: видна"' : ' title="Трасса скрыта"') +
                 '>' + trackIcon + '</td>' +
-                // Колонка 1: имя + NORAD (2 строки)
-                '<td class="pc-name-cell">' +
-                    '<div class="pc-sat-name">' + name + '</div>' +
+                '<td class="pc-name-cell' + (alias ? ' pc-name-cell--alias' : '') + '">' +
                     '<div class="pc-sat-norad">' + norad + '</div>' +
+                    '<div class="pc-sat-name">' + name + '</div>' +
+                    (alias ? '<div class="pc-sat-alias">(' + alias + ')</div>' : '') +
                 '</td>' +
-                // Колонка 2: AOS + LOS (2 строки)
-                '<td class="pc-time-cell">' +
-                    '<div class="pc-time-aos">' + aosStr + '</div>' +
-                    '<div class="pc-time-los">' + losStr + '</div>' +
+                '<td class="pc-azel-cell">' +
+                    '<div class="pc-azel-az">' + azel.az + '</div>' +
+                    '<div class="pc-azel-el">' + azel.el + '</div>' +
                 '</td>' +
-                // Колонка 3: длительность или обратный отсчёт
                 '<td class="pc-col3-cell">' + col3 + '</td>' +
+                '<td class="pc-freq-cell">' +
+                    '<div class="pc-freq-val">\u2014</div>' +
+                    '<div class="pc-freq-mod">\u2014</div>' +
+                '</td>' +
                 '</tr>';
         }
 
@@ -238,6 +247,18 @@
         return Date.now() + (this._serverSkewMs || 0);
     };
 
+    /** Текущие Az/El из StateManager (или «—»). */
+    RightPanelTable.prototype._getAzEl = function(noradId) {
+        var sm = window._stateManager;
+        if (!sm) { return { az: '\u2014', el: '\u2014' }; }
+        var state = sm.getState(noradId);
+        if (!state || !state.position) { return { az: '\u2014', el: '\u2014' }; }
+        return {
+            az: state.position.az.toFixed(1) + '\u00b0',
+            el: state.position.el.toFixed(1) + '\u00b0'
+        };
+    };
+
     RightPanelTable.prototype._tickCountdowns = function() {
         if (!this._tbody) { return; }
         var rows = this._tbody.querySelectorAll('.pc-row');
@@ -245,11 +266,19 @@
             var row = rows[i];
             var aos = parseInt(row.getAttribute('data-aos'), 10);
             var los = parseInt(row.getAttribute('data-los'), 10);
+            var noradId = parseInt(row.getAttribute('data-norad'), 10);
+
             var durEl = row.querySelector('.pc-col3-dur');
             var untilEl = row.querySelector('.pc-col3-until');
             var c = this._fmtSessionCols(aos, los, this._serverNowMs());
             if (durEl) { durEl.textContent = c.dur; }
             if (untilEl) { untilEl.textContent = c.until; }
+
+            var azel = this._getAzEl(noradId);
+            var azEl2 = row.querySelector('.pc-azel-az');
+            var elEl2 = row.querySelector('.pc-azel-el');
+            if (azEl2) { azEl2.textContent = azel.az; }
+            if (elEl2) { elEl2.textContent = azel.el; }
         }
     };
 
@@ -268,7 +297,7 @@
         return 'rgba(' + r + ',' + g + ',' + b + ',' + alpha + ')';
     };
 
-    // ── Столбцы «длит.» / «до сеанса» (зеркало FormatSessionTableColumns на Go) ──
+    // ── Колонка 3: верх = до AOS / «сейчас», низ = длит. пролёта или до LOS (FormatSessionTableColumns) ──
 
     RightPanelTable.prototype._fmtRuDuration = function(ms) {
         if (ms < 0) { ms = 0; }
@@ -297,8 +326,9 @@
 
     RightPanelTable.prototype._renderCol3Html = function(aos, los) {
         var c = this._fmtSessionCols(aos, los, this._serverNowMs());
-        return '<div class="pc-col3-dur">' + this._escapeHtml(c.dur) + '</div>' +
-            '<div class="pc-col3-until">' + this._escapeHtml(c.until) + '</div>';
+        // Сверху until (До AOS / «сейчас»), снизу dur (длит. пролёта или до LOS)
+        return '<div class="pc-col3-until">' + this._escapeHtml(c.until) + '</div>' +
+            '<div class="pc-col3-dur">' + this._escapeHtml(c.dur) + '</div>';
     };
 
     // ── Привязка кликов по строкам ──
@@ -422,26 +452,12 @@
         }
     };
 
-    // ── Toggle all трасс ──
+    // ── Master-toggle «все трассы группы» ──
 
     RightPanelTable.prototype._toggleAllTracks = function() {
-        if (!window._stateManager || !this._group || !this._group.satellites) { return; }
+        if (!window._stateManager) { return; }
         var sm = window._stateManager;
-        var extraVisible = sm.getVisibleTrackIds();
-        if (extraVisible.length > 0) {
-            sm.clearAllTracks();
-        } else {
-            var ids = [];
-            var trackingId = sm.getTrackingSatelliteId();
-            var selectedId = sm.getSelectedSatelliteId();
-            for (var i = 0; i < this._group.satellites.length; i++) {
-                var nid = this._group.satellites[i].norad_id;
-                if (nid !== trackingId && nid !== selectedId) {
-                    ids.push(nid);
-                }
-            }
-            sm.setAllTracksVisible(ids);
-        }
+        sm.setShowAllMode(!sm.isShowAllMode());
     };
 
     // ── Форматирование ──

@@ -86,7 +86,7 @@
             setInterval(updateFooterClocks, 1000);
         }
 
-        // Инициализация таблицы пролётов, если мы на вкладке /passes
+        // Инициализация расписания сеансов наблюдения, если мы на вкладке /passes
         if (typeof window.initPassesTable === 'function') {
             const passesContainer = document.getElementById('passes-table-container');
             if (passesContainer) {
@@ -94,7 +94,7 @@
             }
         }
 
-        // Компактная таблица пролётов в правой панели (/tracking)
+        // Расписание сеансов наблюдения в правой панели (/tracking)
         initRightPanel();
 
         // Нижняя панель: переключение вкладок + водопад
@@ -616,7 +616,7 @@
         }
     }
 
-    // Инициализация компактной таблицы пролётов в правой панели
+    // Инициализация расписания сеансов наблюдения в правой панели
     function initRightPanel() {
         if (window._rightPanelTable) {
             window._rightPanelTable.destroy();
@@ -848,7 +848,7 @@
         // Reinitialize canvas after HTMX swap
         initCanvasPlaceholders();
 
-        // Инициализация таблицы пролётов, если мы на вкладке /passes
+        // Инициализация расписания сеансов наблюдения, если мы на вкладке /passes
         if (typeof window.initPassesTable === 'function') {
             const passesContainer = document.getElementById('passes-table-container');
             if (passesContainer) {

@@ -1,4 +1,4 @@
-/* ===== Правая панель: таблица пролётов + кнопки ===== */
+/* ===== Правая панель: план сеанса наблюдения + кнопки ===== */
 
 /* Блок таблицы: внешний контейнер — подложка для overlay-тоста; прокрутка только внутри __scroll */
 .passes-compact {
@@ -23,7 +23,7 @@
     border-collapse: collapse;
     font-family: var(--font-mono);
     font-size: 12px;
-    table-layout: fixed;
+    table-layout: auto;
     /* Не показывать текстовую каретку и не давать выделять текст как в поле ввода */
     user-select: none;
     -webkit-user-select: none;
@@ -38,20 +38,25 @@
 
 .passes-compact__table th {
     padding: 5px 6px;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 600;
     color: var(--text-muted);
     text-transform: uppercase;
     letter-spacing: 0.3px;
     background: var(--bg-tertiary);
-    border-bottom: 1px solid var(--border-color);
-    text-align: left;
+    border-bottom: 1px solid rgba(80, 95, 120, 0.7);
+    border-right: 1px solid rgba(80, 95, 120, 0.45);
+    text-align: center;
     white-space: nowrap;
 }
 
-/* Колонки: глаз (~32px) | КА (36%) | Время (36%) | длит./до сеанса */
+.passes-compact__table th:last-child {
+    border-right: none;
+}
+
+/* Колонки: глаз (30px) | NORAD/имя (auto, заполняет) | Азим./Угол | До AOS/LOS | Частота/Мод. */
 .pc-th-track {
-    width: 32px;
+    width: 30px;
     text-align: center;
     cursor: pointer;
     user-select: none;
@@ -64,18 +69,93 @@
     justify-content: center;
     min-height: 22px;
 }
-.pc-th-sat      { width: 36%; }
-.pc-th-time     { width: 36%; }
-.pc-th-countdown {
-    width: auto;
-    min-width: 5.5rem;
+.pc-th-sat {
     white-space: normal;
     text-align: center;
     vertical-align: middle;
     line-height: 1.2;
 }
 
-/* Две строки: «длит.» / «до сеанса» */
+/* Две строки: NORAD ID сверху, имя КА снизу (в ячейке: NORAD → имя → при alias строка в скобках) */
+.pc-th-sat__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 1.2;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.pc-th-sat__line {
+    display: block;
+    white-space: nowrap;
+}
+
+/* Колонка Азим. / Угол м. — по содержимому */
+.pc-th-azel {
+    white-space: normal;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.2;
+}
+
+.pc-th-azel__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 1.2;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.pc-th-azel__line {
+    display: block;
+    white-space: nowrap;
+}
+
+/* Колонка До AOS / До LOS — по содержимому */
+.pc-th-countdown {
+    white-space: normal;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.2;
+}
+
+/* Колонка Частота / Мод. — по содержимому */
+.pc-th-freq {
+    white-space: normal;
+    text-align: center;
+    vertical-align: middle;
+    line-height: 1.2;
+}
+
+.pc-th-freq__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 3px;
+    font-size: 11px;
+    line-height: 1.2;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.pc-th-freq__line {
+    display: block;
+    white-space: nowrap;
+}
+
+/* Две строки заголовка: «До AOS» сверху, «До LOS» снизу */
 .pc-th-countdown__stack {
     display: flex;
     flex-direction: column;
@@ -98,7 +178,7 @@
 .pc-track-cell {
     text-align: center;
     cursor: pointer;
-    width: 32px;
+    width: 30px;
     padding: 2px 2px !important;
     user-select: none;
     vertical-align: middle;
@@ -124,8 +204,7 @@
     vertical-align: middle;
 }
 
-/* Трасса видна на карте/небе — яркий «открытый» глаз (ячейка или заголовок) */
-.pc-track-cell--on .pc-track-eye-svg-wrap,
+/* Трасса видна — цвет задаётся inline из палитры (svg stroke/fill). Заголовок — акцентный. */
 .pc-th-track--on .pc-track-eye-svg-wrap {
     color: #00d4aa;
 }
@@ -139,7 +218,18 @@
 .passes-compact__table td {
     padding: 4px 6px;
     color: var(--text-secondary);
-    border-bottom: 1px solid rgba(42, 52, 68, 0.4);
+    text-align: center;
+    vertical-align: middle;
+    border-bottom: 1px solid rgba(80, 95, 120, 0.45);
+    border-right: 1px solid rgba(80, 95, 120, 0.3);
+}
+
+.passes-compact__table td:last-child {
+    border-right: none;
+}
+
+.passes-compact__table td:first-child {
+    border-right: 1px solid rgba(80, 95, 120, 0.45);
     vertical-align: middle;
 }
 
@@ -183,13 +273,21 @@
 
 /* ===== Двухстрочные ячейки ===== */
 
-/* Колонка 1: имя КА + NORAD ID (2 строки) */
-.pc-name-cell {
+/* NORAD / Имя КА: шапка по центру; ячейки — влево (специфичность выше, чем у .passes-compact__table td) */
+.passes-compact__table td.pc-name-cell {
     overflow: hidden;
+    vertical-align: middle;
+    text-align: left;
+}
+
+.pc-name-cell--alias .pc-sat-name,
+.pc-name-cell--alias .pc-sat-alias,
+.pc-name-cell--alias .pc-sat-norad {
+    line-height: 1.35;
 }
 
 .pc-sat-name {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 600;
     color: var(--text-primary);
     white-space: nowrap;
@@ -199,52 +297,86 @@
     max-width: 100%;
 }
 
-.pc-sat-norad {
-    font-size: 11px;
+/* Третья строка только если есть sat_alias */
+.pc-sat-alias {
+    font-size: 12px;
     color: var(--text-muted);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
     line-height: 1.3;
+    opacity: 0.92;
+}
+
+/* Первая строка ячейки — NORAD */
+.pc-sat-norad {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    line-height: 1.4;
+    font-variant-numeric: tabular-nums;
 }
 
 .pc-row--active .pc-sat-name {
     color: var(--accent-primary);
 }
 
+.pc-row--active .pc-sat-alias,
 .pc-row--active .pc-sat-norad {
     color: var(--accent-primary);
     opacity: 0.7;
 }
 
-/* Колонка 2: AOS + LOS (2 строки) */
-.pc-time-cell {
+/* Колонка 2: Азим. / Угол м. (живые данные, тикают каждую секунду) */
+.pc-azel-cell {
     font-variant-numeric: tabular-nums;
 }
 
-.pc-time-aos {
-    font-size: 12px;
-    color: #00cc00;
+.pc-azel-az {
+    font-size: 13px;
+    color: var(--text-secondary);
     line-height: 1.4;
     white-space: nowrap;
 }
 
-.pc-time-los {
-    font-size: 11px;
-    color: #ff6666;
-    line-height: 1.3;
+.pc-azel-el {
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.4;
     white-space: nowrap;
 }
 
-/* Колонка 3: длит. (верх) + до сеанса (низ) */
+/* Колонка 4: Частота / Мод. (заглушка, данные из SatNOGS DB — будущее) */
+.pc-freq-cell {
+    font-variant-numeric: tabular-nums;
+}
+
+.pc-freq-val {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+.pc-freq-mod {
+    font-size: 12px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    white-space: nowrap;
+}
+
+/* Колонка 3: верх — до AOS / «сейчас»; низ — длит. пролёта до AOS или остаток до LOS (см. right-panel.js) */
 .pc-col3-cell {
     font-variant-numeric: tabular-nums;
     text-align: center;
-    padding: 3px 4px !important;
-    line-height: 1.25;
+    padding: 4px 6px !important;
+    line-height: 1.3;
 }
 
 .pc-col3-dur,
 .pc-col3-until {
-    font-size: 11px;
+    font-size: 12px;
     white-space: nowrap;
 }
 
@@ -257,8 +389,7 @@
     font-weight: 600;
 }
 
-/* «сейчас» в нижней строке */
-.pc-col3-until:empty { min-height: 1em; }
+.pc-col3-dur:empty { min-height: 1em; }
 
 /* Пустое состояние */
 .pc-empty {

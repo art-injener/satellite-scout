@@ -5,7 +5,7 @@
     --bottom-panel-height: calc(var(--indicator-block-height) + 10px);
     --footer-height: 44px;
 
-    /* Правая панель: под SkyView 300×300 px, таблица пролётов и отступы */
+    /* Правая панель: под SkyView 300×300 px, расписание сеансов наблюдения и отступы */
     --right-panel-width: 340px;
 
     /* Панели информации (SkyView, Az/El): фиксированные размеры, текст вписывается с выравниванием */

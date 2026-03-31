@@ -642,7 +642,7 @@ test('setSatelliteGroup does NOT notify when same primary and same pass data', (
         'should NOT notify when primary and pass data are identical');
 });
 
-test('setSatelliteGroup does not override manual table selection', () => {
+test('setSatelliteGroup does not override manual table selection when satellite still in group', () => {
     const m = new SatelliteStateManager();
     m.setSelectedSatellite(25544, 'ISS', true);  // manual selection
 
@@ -652,13 +652,29 @@ test('setSatelliteGroup does not override manual table selection', () => {
     m.setSatelliteGroup({
         primary_id: 40069,
         satellites: [
+            { norad_id: 25544, sat_name: 'ISS', aos: 1000, los: 2000, is_visible: true, is_active: false },
             { norad_id: 40069, sat_name: 'METEOR', aos: 3000, los: 4000, is_visible: true, is_active: true },
         ],
     });
 
     assert.strictEqual(m.getSelectedSatelliteId(), 25544,
-        'manual selection should not be overridden by group_update');
+        'manual selection should not be overridden by group_update when satellite is in group');
     assert.strictEqual(notified, false, 'should not notify');
+});
+
+test('setSatelliteGroup resets manual selection when satellite leaves group', () => {
+    const m = new SatelliteStateManager();
+    m.setSelectedSatellite(25544, 'ISS', true);
+
+    m.setSatelliteGroup({
+        primary_id: 40069,
+        satellites: [
+            { norad_id: 40069, sat_name: 'METEOR', aos: 3000, los: 4000, is_visible: true, is_active: true },
+        ],
+    });
+
+    assert.strictEqual(m.getSelectedSatelliteId(), 40069,
+        'should auto-select primary when manually selected satellite leaves group');
 });
 
 // ── _hasPrimaryPassChanged ────────────────────────────────

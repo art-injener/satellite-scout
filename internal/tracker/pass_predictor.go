@@ -283,16 +283,17 @@ func buildPass(
 	noradID := 0
 	orbitNumber := 0
 
+	satAlias := ""
 	if tle != nil {
-		satName = tle.Name
+		satName, satAlias = ParseSatName(tle.Name)
 		noradID = tle.NoradID
-		// Номер орбиты на момент TCA
 		orbitNumber = ComputeOrbitNumber(tle, tcaTime)
 	}
 
 	return &Pass{
 		NoradID:     noradID,
 		SatName:     satName,
+		SatAlias:    satAlias,
 		OrbitNumber: orbitNumber,
 		AOS:         aosExact.UnixMilli(),
 		AOSAz:       math.Round(aosAz*10) / 10,

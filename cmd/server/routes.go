@@ -56,7 +56,7 @@ func setupRoutes(
 
 	// Частичные шаблоны (HTMX).
 	mux.HandleFunc("GET /partials/passes", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: реализовать частичный шаблон таблицы пролётов
+		// TODO: реализовать частичный шаблон расписания сеансов наблюдения
 		w.Header().Set("Content-Type", "text/html")
 		if _, writeErr := w.Write([]byte(`<p class="empty-state">Нет запланированных пролётов</p>`)); writeErr != nil {
 			slog.Error("failed to write response", "error", writeErr)

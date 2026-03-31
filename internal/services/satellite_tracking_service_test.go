@@ -179,8 +179,8 @@ func TestComputePosition(t *testing.T) {
 		t.Errorf("expected norad_id %d, got %d", issNoradID, pos.NoradID)
 	}
 
-	if pos.Name != "ISS (ZARYA)" {
-		t.Errorf("expected name 'ISS (ZARYA)', got '%s'", pos.Name)
+	if pos.Name != "ISS" {
+		t.Errorf("expected name 'ISS', got '%s'", pos.Name)
 	}
 
 	// Широта ISS должна быть в пределах ±52° (наклонение 51.6°).
