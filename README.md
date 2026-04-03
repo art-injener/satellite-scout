@@ -58,7 +58,7 @@ Satellite Scout — это кроссплатформенное веб-прил�
 
 | Слой | Технологии |
 |------|-----------|
-| **Backend** | Go 1.24+, REST API, SSE (Server-Sent Events), Go templates |
+| **Backend** | Go 1.25+, REST API, SSE (Server-Sent Events), Go templates, embed.FS |
 | **Frontend** | HTMX, Vanilla JS, Canvas 2D (карта, графики), CSS Grid |
 | **Данные** | TLE с Celestrak, SGP4 пропагация, WGS84 |
 | **Протокол** | SSE для real-time (позиции 1/сек, треки 30/сек) |
@@ -104,6 +104,8 @@ Satellite Scout — это кроссплатформенное веб-прил�
 
 ## Запуск
 
+### Локально (Go)
+
 ```bash
 # Клонировать репозиторий
 git clone https://github.com/your-username/satellite-scout.git
@@ -112,14 +114,41 @@ cd satellite-scout
 # Сборка
 make build
 
-# Запуск
+# Запуск (DEV_MODE=true по умолчанию — шаблоны и статика читаются с диска)
 make run
 
 # Открыть в браузере
 # http://localhost:8080
 ```
 
-При первом запуске приложение автоматически загрузит TLE-данные с Celestrak.
+### Docker Compose
+
+```bash
+# Собрать образ и запустить
+make docker-up
+
+# Или по шагам
+make docker-build   # собрать образ
+make docker-up      # запустить контейнер
+make docker-logs    # посмотреть логи
+make docker-down    # остановить
+```
+
+Координаты наблюдателя задаются через `.env` (см. `.env.example`):
+
+```bash
+cp .env.example .env
+# Отредактировать .env — указать свои координаты
+```
+
+| Переменная | По умолчанию | Описание |
+|------------|-------------|----------|
+| `PORT` | `8080` | Порт HTTP-сервера |
+| `OBSERVER_LAT` | `47.315813` | Широта наблюдателя |
+| `OBSERVER_LON` | `39.788243` | Долгота наблюдателя |
+| `OBSERVER_ALT` | `70` | Высота над уровнем моря (м) |
+
+При первом запуске приложение автоматически загрузит TLE-данные с Celestrak. Кеш TLE сохраняется в `data/tle_cache/` и не теряется при перезапуске контейнера.
 
 ## Статус разработки
 

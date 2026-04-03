@@ -1,4 +1,4 @@
-.PHONY: build test lint lint-js lint-fix fmt run stop clean
+.PHONY: build test lint lint-js lint-fix fmt run stop clean docker-build docker-up docker-down docker-logs
 
 APP_NAME=satellite-scout
 BUILD_DIR=./build
@@ -56,3 +56,22 @@ clean:
 	@rm -rf $(BUILD_DIR)
 	@rm -f coverage.out coverage.html
 	@echo "✓ Очистка завершена"
+
+## docker-build: Собрать Docker-образ
+docker-build:
+	@docker compose build
+	@echo "✓ Docker-образ собран"
+
+## docker-up: Запустить через Docker Compose
+docker-up:
+	@docker compose up -d
+	@echo "✓ Контейнер запущен"
+
+## docker-down: Остановить контейнер
+docker-down:
+	@docker compose down
+	@echo "✓ Контейнер остановлен"
+
+## docker-logs: Показать логи контейнера
+docker-logs:
+	@docker compose logs -f

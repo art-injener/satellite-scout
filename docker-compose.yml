@@ -1,0 +1,15 @@
+services:
+  satellite-scout:
+    build: .
+    container_name: satellite-scout
+    ports:
+      - "${PORT:-8080}:8080"
+    environment:
+      - PORT=8080
+      - DEV_MODE=false
+      - OBSERVER_LAT=${OBSERVER_LAT:-47.315813}
+      - OBSERVER_LON=${OBSERVER_LON:-39.788243}
+      - OBSERVER_ALT=${OBSERVER_ALT:-70}
+    volumes:
+      - ./data/tle_cache:/var/cache/satellite-scout/tle_cache
+    restart: unless-stopped

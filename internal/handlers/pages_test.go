@@ -3,36 +3,14 @@ package handlers
 import (
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"testing"
+	"testing/fstest"
 )
 
 func TestNewPageHandler(t *testing.T) {
-	// Создаём временную директорию для тестов
-	tmpDir := t.TempDir()
-	layoutsDir := filepath.Join(tmpDir, "layouts")
-	pagesDir := filepath.Join(tmpDir, "pages")
+	fsys := setupTestFS()
 
-	if err := os.MkdirAll(layoutsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.MkdirAll(pagesDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	// Создаём тестовые шаблоны
-	baseTemplate := `<!DOCTYPE html><html><body>{{template "content" .}}</body></html>`
-	if err := os.WriteFile(filepath.Join(layoutsDir, "base.html"), []byte(baseTemplate), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	pageTemplate := `{{define "content"}}<h1>Test Page</h1>{{end}}`
-	if err := os.WriteFile(filepath.Join(pagesDir, "test.html"), []byte(pageTemplate), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	handler, err := NewPageHandler(tmpDir, false)
+	handler, err := NewPageHandler(fsys, false)
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -41,36 +19,25 @@ func TestNewPageHandler(t *testing.T) {
 		t.Fatal("NewPageHandler returned nil")
 	}
 
-	if handler.tmplDir != tmpDir {
-		t.Errorf("Expected tmplDir %s, got %s", tmpDir, handler.tmplDir)
-	}
-
 	if handler.devMode {
 		t.Error("Expected devMode to be false")
 	}
 }
 
-func TestNewPageHandler_InvalidDirectory(t *testing.T) {
-	_, err := NewPageHandler("/nonexistent/directory", false)
+func TestNewPageHandler_InvalidFS(t *testing.T) {
+	// Пустая FS без шаблонов — должна вернуть ошибку.
+	fsys := fstest.MapFS{}
+
+	_, err := NewPageHandler(fsys, false)
 	if err == nil {
-		t.Error("Expected error for nonexistent directory, got nil")
+		t.Error("Expected error for empty FS, got nil")
 	}
 }
 
 func TestPageHandler_Index(t *testing.T) {
-	// Создаём минимальный handler для теста редиректа
-	tmpDir := t.TempDir()
-	layoutsDir := filepath.Join(tmpDir, "layouts")
-	if err := os.MkdirAll(layoutsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
+	fsys := setupTestFS()
 
-	baseTemplate := `<!DOCTYPE html><html><body>Test</body></html>`
-	if err := os.WriteFile(filepath.Join(layoutsDir, "base.html"), []byte(baseTemplate), 0o644); err != nil {
-		t.Fatal(err)
-	}
-
-	handler, err := NewPageHandler(tmpDir, false)
+	handler, err := NewPageHandler(fsys, false)
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -94,8 +61,8 @@ func TestPageHandler_Index(t *testing.T) {
 }
 
 func TestPageHandler_Tracking(t *testing.T) {
-	tmpDir := setupTestTemplates(t)
-	handler, err := NewPageHandler(tmpDir, false)
+	fsys := setupTestFS()
+	handler, err := NewPageHandler(fsys, false)
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -119,8 +86,8 @@ func TestPageHandler_Tracking(t *testing.T) {
 }
 
 func TestPageHandler_Receiver(t *testing.T) {
-	tmpDir := setupTestTemplates(t)
-	handler, err := NewPageHandler(tmpDir, false)
+	fsys := setupTestFS()
+	handler, err := NewPageHandler(fsys, false)
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -138,9 +105,29 @@ func TestPageHandler_Receiver(t *testing.T) {
 	}
 }
 
+func TestPageHandler_Passes(t *testing.T) {
+	fsys := setupTestFS()
+	handler, err := NewPageHandler(fsys, false)
+	if err != nil {
+		t.Fatalf("NewPageHandler failed: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/passes", nil)
+	w := httptest.NewRecorder()
+
+	handler.Passes(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("Expected status 200, got %d", resp.StatusCode)
+	}
+}
+
 func TestPageHandler_Simulation(t *testing.T) {
-	tmpDir := setupTestTemplates(t)
-	handler, err := NewPageHandler(tmpDir, false)
+	fsys := setupTestFS()
+	handler, err := NewPageHandler(fsys, false)
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -159,8 +146,8 @@ func TestPageHandler_Simulation(t *testing.T) {
 }
 
 func TestPageHandler_DevMode(t *testing.T) {
-	tmpDir := setupTestTemplates(t)
-	handler, err := NewPageHandler(tmpDir, true)
+	fsys := setupTestFS()
+	handler, err := NewPageHandler(fsys, true)
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -169,7 +156,6 @@ func TestPageHandler_DevMode(t *testing.T) {
 		t.Error("Expected devMode to be true")
 	}
 
-	// В dev режиме шаблоны должны перезагружаться при каждом запросе
 	req := httptest.NewRequest(http.MethodGet, "/tracking", nil)
 	w := httptest.NewRecorder()
 
@@ -198,29 +184,22 @@ func TestPageData(t *testing.T) {
 	}
 }
 
-// setupTestTemplates создаёт минимальную структуру шаблонов для тестов.
-func setupTestTemplates(t *testing.T) string {
-	t.Helper()
-
-	tmpDir := t.TempDir()
-	layoutsDir := filepath.Join(tmpDir, "layouts")
-
-	if err := os.MkdirAll(layoutsDir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-
-	baseTemplate := `<!DOCTYPE html>
+// setupTestFS создаёт in-memory файловую систему с минимальными шаблонами.
+func setupTestFS() fstest.MapFS {
+	return fstest.MapFS{
+		"layouts/base.html": &fstest.MapFile{
+			Data: []byte(`<!DOCTYPE html>
 <html>
 <head><title>{{.Title}}</title></head>
 <body>
 	<div class="active-tab">{{.ActiveTab}}</div>
 	<div class="content">Test Content</div>
 </body>
-</html>`
-
-	if err := os.WriteFile(filepath.Join(layoutsDir, "base.html"), []byte(baseTemplate), 0o644); err != nil {
-		t.Fatal(err)
+</html>`),
+		},
+		"pages/tracking.html":   &fstest.MapFile{Data: []byte(`{{define "tracking"}}tracking{{end}}`)},
+		"pages/receiver.html":   &fstest.MapFile{Data: []byte(`{{define "receiver"}}receiver{{end}}`)},
+		"pages/passes.html":     &fstest.MapFile{Data: []byte(`{{define "passes"}}passes{{end}}`)},
+		"pages/simulation.html": &fstest.MapFile{Data: []byte(`{{define "simulation"}}simulation{{end}}`)},
 	}
-
-	return tmpDir
 }

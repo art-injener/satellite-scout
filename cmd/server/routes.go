@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
 
@@ -16,9 +17,11 @@ func setupRoutes(
 	sseHub *handlers.SSEHub,
 	passService *services.PassService,
 	trackingService handlers.TrackingServiceInterface,
+	templatesFS fs.FS,
+	staticFS fs.FS,
 ) {
 	// Инициализация обработчиков.
-	pageHandler, err := handlers.NewPageHandler("templates", true)
+	pageHandler, err := handlers.NewPageHandler(templatesFS, cfg.DevMode)
 	if err != nil {
 		slog.Error("failed to initialize page handler", "error", err)
 		panic("page handler init failed: " + err.Error())
@@ -29,8 +32,7 @@ func setupRoutes(
 	trackingHandler := handlers.NewTrackingHandler(trackingService)
 
 	// Статические файлы.
-	staticFS := http.FileServer(http.Dir("static"))
-	mux.Handle("GET /static/", http.StripPrefix("/static/", staticFS))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
 	// Маршруты страниц.
 	mux.HandleFunc("GET /", pageHandler.Index)

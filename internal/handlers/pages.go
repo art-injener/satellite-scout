@@ -2,21 +2,20 @@ package handlers
 
 import (
 	"html/template"
+	"io/fs"
 	"log/slog"
 	"net/http"
-	"path/filepath"
 	"sync"
 )
 
 const (
 	// Константы для шаблонов.
-	templateGlob     = "*.html"
 	templateBaseName = "base.html"
 
-	// Директории шаблонов.
-	layoutsDir  = "layouts"
-	pagesDir    = "pages"
-	partialsDir = "partials"
+	// Glob-паттерны для загрузки шаблонов из fs.FS.
+	layoutsGlob  = "layouts/*.html"
+	pagesGlob    = "pages/*.html"
+	partialsGlob = "partials/*.html"
 
 	// Маршруты.
 	trackingPath = "/tracking"
@@ -29,15 +28,16 @@ type PageHandler struct {
 	templates *template.Template
 	mu        sync.RWMutex
 	devMode   bool
-	tmplDir   string
+	fsys      fs.FS
 }
 
 // NewPageHandler создаёт новый обработчик страниц.
+// fsys — файловая система с шаблонами (embed.FS или os.DirFS).
 // Если devMode равен true, шаблоны перезагружаются при каждом запросе.
-func NewPageHandler(tmplDir string, devMode bool) (*PageHandler, error) {
+func NewPageHandler(fsys fs.FS, devMode bool) (*PageHandler, error) {
 	h := &PageHandler{
 		devMode: devMode,
-		tmplDir: tmplDir,
+		fsys:    fsys,
 	}
 
 	if err := h.loadTemplates(); err != nil {
@@ -95,32 +95,17 @@ func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *PageHandler) loadTemplates() error {
-	pattern := filepath.Join(h.tmplDir, "**", templateGlob)
-	tmpl, err := template.ParseGlob(pattern)
+	tmpl, err := template.New("").ParseFS(h.fsys,
+		layoutsGlob,
+		pagesGlob,
+	)
 	if err != nil {
-		// Попытка загрузки из подкаталогов
-		tmpl = template.New("")
+		return err
+	}
 
-		// Сначала загружаем layouts
-		layoutPattern := filepath.Join(h.tmplDir, layoutsDir, templateGlob)
-		tmpl, err = tmpl.ParseGlob(layoutPattern)
-		if err != nil {
-			return err
-		}
-
-		// Загружаем страницы
-		pagesPattern := filepath.Join(h.tmplDir, pagesDir, templateGlob)
-		tmpl, err = tmpl.ParseGlob(pagesPattern)
-		if err != nil {
-			return err
-		}
-
-		// Загружаем частичные шаблоны
-		partialsPattern := filepath.Join(h.tmplDir, partialsDir, templateGlob)
-		tmpl, err = tmpl.ParseGlob(partialsPattern)
-		if err != nil {
-			return err
-		}
+	// partials могут отсутствовать — не критично.
+	if _, parseErr := tmpl.ParseFS(h.fsys, partialsGlob); parseErr == nil {
+		// partials загружены
 	}
 
 	h.mu.Lock()

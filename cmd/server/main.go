@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"log/slog"
 	"net/http"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	assets "github.com/art-injener/satellite-scout"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/services"
@@ -30,9 +32,13 @@ func main() {
 	cfg := config.Load()
 	slog.Info("configuration loaded",
 		"port", cfg.Port,
+		"dev_mode", cfg.DevMode,
 		"observer_lat", cfg.ObserverLat,
 		"observer_lon", cfg.ObserverLon,
 	)
+
+	// Выбор источника шаблонов и статики.
+	templatesFS, staticFS := resolveAssets(cfg.DevMode)
 
 	// Контекст для фоновых сервисов (SSE Hub, TLEStore, Position/Track сервисы).
 	svcCtx, svcCancel := context.WithCancel(context.Background())
@@ -86,7 +92,7 @@ func main() {
 
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, sseHub, passService, trackingService)
+	setupRoutes(mux, cfg, sseHub, passService, trackingService, templatesFS, staticFS)
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.
@@ -95,11 +101,35 @@ func main() {
 		Addr:        cfg.Addr(),
 		Handler:     loggingMiddleware(mux),
 		ReadTimeout: 15 * time.Second,
-		IdleTimeout: 120 * time.Second, // Увеличен для SSE
+		IdleTimeout: 120 * time.Second,
 	}
 
 	// Запуск и graceful shutdown.
 	run(server, sseHub, tleStore, svcCancel)
+}
+
+// resolveAssets возвращает файловые системы для шаблонов и статики.
+// DevMode: чтение с диска (горячая перезагрузка). Production: встроенные embed.FS.
+func resolveAssets(devMode bool) (templatesFS, staticFS fs.FS) {
+	if devMode {
+		slog.Info("assets: filesystem (dev mode)")
+		return os.DirFS("templates"), os.DirFS("static")
+	}
+
+	slog.Info("assets: embedded (production)")
+
+	var err error
+	templatesFS, err = fs.Sub(assets.TemplatesFS, "templates")
+	if err != nil {
+		slog.Error("failed to create templates sub-FS", "error", err)
+		os.Exit(1)
+	}
+	staticFS, err = fs.Sub(assets.StaticFS, "static")
+	if err != nil {
+		slog.Error("failed to create static sub-FS", "error", err)
+		os.Exit(1)
+	}
+	return templatesFS, staticFS
 }
 
 // run запускает HTTP-сервер и обрабатывает graceful shutdown.
