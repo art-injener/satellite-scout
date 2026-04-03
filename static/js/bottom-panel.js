@@ -534,6 +534,9 @@
         this._spectrumTimer = null;
         this._followRunning = false;
 
+        // Флаг свёрнутости панели — при true спектр/водопад не рисуются.
+        this._collapsed = false;
+
         // Компоненты визуализации (создаются в _initSpectrum)
         this._dataSource = null;
         this._followWF = null;
@@ -705,7 +708,7 @@
 
     // Один такт: генерация данных + отрисовка для видимой вкладки
     BottomPanel.prototype._spectrumTick = function() {
-        if (!this._dataSource) { return; }
+        if (!this._dataSource || this._collapsed) { return; }
         this._dataSource.generateLine();
 
         if (this._currentTab === 'overview') {
@@ -751,6 +754,20 @@
     // Принудительное обновление видимых водопадов (после resize / разворота)
     BottomPanel.prototype.refreshWaterfall = function() {
         this._refreshCurrentTab();
+    };
+
+    /**
+     * Установить состояние свёрнутости панели.
+     * При collapsed=true генерация данных и отрисовка спектра/водопада приостанавливается.
+     * @param {boolean} collapsed
+     */
+    BottomPanel.prototype.setCollapsed = function(collapsed) {
+        this._collapsed = !!collapsed;
+    };
+
+    /** @returns {boolean} true если панель свёрнута. */
+    BottomPanel.prototype.isCollapsed = function() {
+        return this._collapsed;
     };
 
     // ── Заглушки формы SDR ──

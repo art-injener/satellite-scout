@@ -332,16 +332,17 @@ class SatelliteStateManager {
         const newPast = data.past || [];
         const newFuture = data.future || [];
 
-        // Пропускаем, если трек не изменился (тот же размер сегментов).
+        // Пропускаем, если трек не изменился.
         // Треки пересчитываются на бэкенде каждые 30 секунд, между обновлениями
         // приходят кешированные данные — дублировать перерисовку не нужно.
+        // Сравниваем fingerprint: количество сегментов + timestamps крайних точек.
         const oldTrack = state.track;
-        const changed = !oldTrack ||
-            oldTrack.past.length !== newPast.length ||
-            oldTrack.future.length !== newFuture.length;
-
-        if (!changed) {
-            return;
+        if (oldTrack) {
+            const oldFp = SatelliteStateManager._trackFingerprint(oldTrack.past, oldTrack.future);
+            const newFp = SatelliteStateManager._trackFingerprint(newPast, newFuture);
+            if (oldFp === newFp) {
+                return false;
+            }
         }
 
         state.track = {
@@ -355,7 +356,44 @@ class SatelliteStateManager {
             this._notify(StateEventType.TRACK, state);
         }
 
-        return changed;
+        return true;
+    }
+
+    /**
+     * Fingerprint трека: количество сегментов + timestamps крайних точек.
+     * При пересчёте на бэкенде (каждые 30с) сдвигается окно `now`,
+     * поэтому timestamps первых/последних точек гарантированно меняются.
+     * Между пересчётами (кешированные данные) fingerprint идентичен.
+     * @param {Array} past — массив past-сегментов.
+     * @param {Array} future — массив future-сегментов.
+     * @returns {string} строковый fingerprint.
+     * @static
+     */
+    static _trackFingerprint(past, future) {
+        let fp = '';
+        fp += (past ? past.length : 0) + ':';
+        fp += (future ? future.length : 0);
+        if (past && past.length > 0) {
+            const first = past[0];
+            if (first && first.length > 0) {
+                fp += ':p0=' + (first[0].ts || first[0].time || 0);
+            }
+            const last = past[past.length - 1];
+            if (last && last.length > 0) {
+                fp += ':pN=' + (last[last.length - 1].ts || last[last.length - 1].time || 0);
+            }
+        }
+        if (future && future.length > 0) {
+            const first = future[0];
+            if (first && first.length > 0) {
+                fp += ':f0=' + (first[0].ts || first[0].time || 0);
+            }
+            const last = future[future.length - 1];
+            if (last && last.length > 0) {
+                fp += ':fN=' + (last[last.length - 1].ts || last[last.length - 1].time || 0);
+            }
+        }
+        return fp;
     }
 
     /**
@@ -364,8 +402,8 @@ class SatelliteStateManager {
      * гарантируя что треки вторичных спутников уже сохранены в кеше.
      */
     forceTrackRefresh() {
-        if (this._activeSatelliteId === null) { return; }
-        const state = this._satellites.get(this._activeSatelliteId);
+        if (this._selectedSatelliteId === null) { return; }
+        const state = this._satellites.get(this._selectedSatelliteId);
         if (!state) { return; }
         this._notify(StateEventType.TRACK, state);
     }
@@ -574,6 +612,10 @@ class SatelliteStateManager {
         // Назначить цвета и автовключить трассы для новых КА группы.
         this._syncGroupTracks(data);
 
+        // Очистка stale-записей из _satellites: удаляем КА, ушедших из группы
+        // (кроме selected и tracking — их данные ещё актуальны).
+        this._cleanupStaleStates(data);
+
         this._notify(StateEventType.SATELLITE_GROUP_UPDATE, data);
     }
 
@@ -756,6 +798,30 @@ class SatelliteStateManager {
         }
 
         this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+    }
+
+    /**
+     * Удаление из _satellites записей КА, которых нет в текущей группе.
+     * Selected и tracking сохраняются — их данные могут понадобиться до следующего обновления.
+     * Предотвращает бесконечный рост Map при длительной работе приложения.
+     * @param {Object} data — данные satellite_group_update.
+     * @private
+     */
+    _cleanupStaleStates(data) {
+        if (!data || !Array.isArray(data.satellites)) { return; }
+        const groupIds = new Set();
+        for (const sat of data.satellites) {
+            groupIds.add(sat.norad_id);
+        }
+        // Не удаляем selected и tracking — их данные актуальны.
+        if (this._selectedSatelliteId) { groupIds.add(this._selectedSatelliteId); }
+        if (this._trackingSatelliteId) { groupIds.add(this._trackingSatelliteId); }
+
+        for (const id of this._satellites.keys()) {
+            if (!groupIds.has(id)) {
+                this._satellites.delete(id);
+            }
+        }
     }
 
     /**

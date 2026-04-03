@@ -774,6 +774,232 @@ test('clearTrackingSatellite notifies TRACKING_CHANGE with null', () => {
     assert.strictEqual(notifiedState, null, 'should notify with null state when tracking cleared');
 });
 
+// ── updateTrack: дедупликация по fingerprint (FIX-TRACK-DEDUP) ──
+
+console.log('\nSatelliteStateManager — updateTrack deduplication (FIX-TRACK-DEDUP)');
+
+test('updateTrack returns true on first track for satellite', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData());
+    const result = m.updateTrack(makeTrackData());
+    assert.strictEqual(result, true, 'first track should be accepted');
+});
+
+test('updateTrack returns false for identical track data (cached)', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData());
+    m.updateTrack(makeTrackData());
+    const result = m.updateTrack(makeTrackData());
+    assert.strictEqual(result, false, 'identical track should be skipped');
+});
+
+test('updateTrack returns true when timestamps change (track recalculated)', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData());
+    // Первый трек.
+    m.updateTrack(makeTrackData());
+    // Через 30 секунд сервер пересчитал — timestamps сдвинулись.
+    const shifted = makeTrackData({
+        past: [[{ lon: 38.5, lat: 46.5, ts: 1738900020000 }, { lon: 39.5, lat: 47.5, ts: 1738900025000 }]],
+        future: [[{ lon: 40.5, lat: 48.5, ts: 1738900035000 }, { lon: 41.5, lat: 49.5, ts: 1738900040000 }]],
+    });
+    const result = m.updateTrack(shifted);
+    assert.strictEqual(result, true, 'track with shifted timestamps must be accepted');
+});
+
+test('updateTrack detects change when segment count stays same but data differs', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData());
+    // Исходный трек: 1 past-сегмент, 1 future-сегмент.
+    m.updateTrack(makeTrackData());
+    // Новый трек: тот же кол-во сегментов, другие timestamps — имитация пересчёта.
+    const newTrack = {
+        norad_id: ISS_NORAD_ID,
+        past: [[{ lon: 38, lat: 46, ts: 1738900050000 }, { lon: 39, lat: 47, ts: 1738900055000 }]],
+        future: [[{ lon: 40, lat: 48, ts: 1738900065000 }, { lon: 41, lat: 49, ts: 1738900070000 }]],
+    };
+    const result = m.updateTrack(newTrack);
+    assert.strictEqual(result, true, 'same segment count but different timestamps must trigger update');
+});
+
+test('updateTrack notifies TRACK subscriber when data changes', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData());
+    m.updateTrack(makeTrackData());
+    let notifyCount = 0;
+    m.subscribe('track', () => { notifyCount++; });
+    // Кешированный трек — не должен уведомлять.
+    m.updateTrack(makeTrackData());
+    assert.strictEqual(notifyCount, 0, 'cached track should not notify');
+    // Новый трек — должен уведомить.
+    m.updateTrack(makeTrackData({
+        past: [[{ lon: 38, lat: 46, ts: 9999990000 }, { lon: 39, lat: 47, ts: 9999995000 }]],
+    }));
+    assert.strictEqual(notifyCount, 1, 'changed track should notify');
+});
+
+test('updateTrack accepts track when segment count changes', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData());
+    m.updateTrack(makeTrackData());
+    const twoSegments = makeTrackData({
+        future: [
+            [{ lon: 40, lat: 48, ts: 1738900005000 }],
+            [{ lon: 170, lat: 50, ts: 1738900015000 }],
+        ],
+    });
+    const result = m.updateTrack(twoSegments);
+    assert.strictEqual(result, true, 'different segment count must be accepted');
+});
+
+// ── _trackFingerprint ─────────────────────────────────────
+
+console.log('\nSatelliteStateManager — _trackFingerprint');
+
+test('fingerprint for empty segments', () => {
+    const fp = SatelliteStateManager._trackFingerprint([], []);
+    assert.strictEqual(fp, '0:0');
+});
+
+test('fingerprint includes segment count and timestamps', () => {
+    const past = [[{ lon: 0, lat: 0, ts: 100 }, { lon: 1, lat: 1, ts: 200 }]];
+    const future = [[{ lon: 2, lat: 2, ts: 300 }, { lon: 3, lat: 3, ts: 400 }]];
+    const fp = SatelliteStateManager._trackFingerprint(past, future);
+    assert.ok(fp.includes('1:1'), 'should include segment counts');
+    assert.ok(fp.includes('100'), 'should include first past ts');
+    assert.ok(fp.includes('200'), 'should include last past ts');
+    assert.ok(fp.includes('300'), 'should include first future ts');
+    assert.ok(fp.includes('400'), 'should include last future ts');
+});
+
+test('fingerprint differs when timestamps shift', () => {
+    const past1 = [[{ lon: 0, lat: 0, ts: 100 }, { lon: 1, lat: 1, ts: 200 }]];
+    const future1 = [[{ lon: 2, lat: 2, ts: 300 }]];
+    const past2 = [[{ lon: 0, lat: 0, ts: 130 }, { lon: 1, lat: 1, ts: 230 }]];
+    const future2 = [[{ lon: 2, lat: 2, ts: 330 }]];
+    const fp1 = SatelliteStateManager._trackFingerprint(past1, future1);
+    const fp2 = SatelliteStateManager._trackFingerprint(past2, future2);
+    assert.notStrictEqual(fp1, fp2, 'shifted timestamps must produce different fingerprints');
+});
+
+test('fingerprint same for identical data', () => {
+    const past = [[{ lon: 0, lat: 0, ts: 100 }]];
+    const future = [[{ lon: 2, lat: 2, ts: 300 }]];
+    const fp1 = SatelliteStateManager._trackFingerprint(past, future);
+    const fp2 = SatelliteStateManager._trackFingerprint(past, future);
+    assert.strictEqual(fp1, fp2, 'same data must produce same fingerprint');
+});
+
+test('fingerprint handles null/undefined segments', () => {
+    const fp = SatelliteStateManager._trackFingerprint(null, undefined);
+    assert.strictEqual(fp, '0:0');
+});
+
+// ── _cleanupStaleStates ───────────────────────────────────
+
+console.log('\nSatelliteStateManager — _cleanupStaleStates (memory leak fix)');
+
+test('removes satellites not in current group', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData({ norad_id: 11111, name: 'OLD-SAT' }));
+    m.updatePosition(makePositionData({ norad_id: 22222, name: 'OLD-SAT-2' }));
+    m.updatePosition(makePositionData({ norad_id: 33333, name: 'NEW-SAT' }));
+    assert.strictEqual(m.satelliteCount, 3);
+
+    m.setSatelliteGroup({
+        primary_id: 33333,
+        satellites: [
+            { norad_id: 33333, sat_name: 'NEW-SAT', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+
+    assert.strictEqual(m.getState(11111), null, 'OLD-SAT should be cleaned up');
+    assert.strictEqual(m.getState(22222), null, 'OLD-SAT-2 should be cleaned up');
+    assert.ok(m.getState(33333), 'NEW-SAT should remain');
+});
+
+test('preserves selected satellite that IS in group', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData({ norad_id: 11111, name: 'SELECTED' }));
+    m.updatePosition(makePositionData({ norad_id: 22222, name: 'IN-GROUP' }));
+    m.updatePosition(makePositionData({ norad_id: 33333, name: 'EXTRA' }));
+    m.setSelectedSatellite(11111, 'SELECTED', true);
+
+    m.setSatelliteGroup({
+        primary_id: 22222,
+        satellites: [
+            { norad_id: 11111, sat_name: 'SELECTED', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 22222, sat_name: 'IN-GROUP', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+
+    assert.ok(m.getState(11111), 'selected satellite in group should be preserved');
+    assert.strictEqual(m.getState(33333), null, 'EXTRA not in group should be cleaned');
+});
+
+test('cleans selected satellite that left the group (selection resets to primary)', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData({ norad_id: 11111, name: 'LEFT' }));
+    m.updatePosition(makePositionData({ norad_id: 22222, name: 'IN-GROUP' }));
+    m.setSelectedSatellite(11111, 'LEFT', true);
+
+    m.setSatelliteGroup({
+        primary_id: 22222,
+        satellites: [
+            { norad_id: 22222, sat_name: 'IN-GROUP', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+
+    // 11111 ушёл из группы → manual selection сброшен → selected = primary (22222).
+    // Запись 11111 больше не нужна и должна быть удалена.
+    assert.strictEqual(m.getSelectedSatelliteId(), 22222, 'selected should reset to primary');
+    assert.strictEqual(m.getState(11111), null, 'left satellite should be cleaned up');
+});
+
+test('preserves tracking satellite even if not in group', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData({ norad_id: 11111, name: 'TRACKING' }));
+    m.updatePosition(makePositionData({ norad_id: 22222, name: 'IN-GROUP' }));
+    m.setTrackingSatellite(11111, 'TRACKING');
+
+    m.setSatelliteGroup({
+        primary_id: 22222,
+        satellites: [
+            { norad_id: 22222, sat_name: 'IN-GROUP', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+
+    assert.ok(m.getState(11111), 'tracking satellite state should be preserved');
+});
+
+test('cleanup happens on every group update', () => {
+    const m = new SatelliteStateManager();
+    // Группа 1: три КА.
+    m.setSatelliteGroup({
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+    m.updatePosition(makePositionData({ norad_id: 100, name: 'A' }));
+    m.updatePosition(makePositionData({ norad_id: 200, name: 'B' }));
+    m.updatePosition(makePositionData({ norad_id: 300, name: 'C' }));
+    assert.strictEqual(m.satelliteCount, 3);
+
+    // Группа 2: только один КА. Два ушли.
+    m.setSatelliteGroup({
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 3000, los: 4000, is_visible: true },
+        ],
+    });
+    assert.strictEqual(m.getState(200), null, 'B should be cleaned');
+    assert.strictEqual(m.getState(300), null, 'C should be cleaned');
+    assert.ok(m.getState(100), 'A should remain');
+});
+
 // ── Итоги ─────────────────────────────────────────────────
 
 console.log(`\n${'═'.repeat(50)}`);

@@ -106,7 +106,8 @@
         const bottomToggle = document.getElementById('bottom-panel-toggle');
         if (mainWrapper && bottomPanel && bottomToggle) {
             const LS_BOTTOM = 'ux.bottomCollapsed';
-            if (localStorage.getItem(LS_BOTTOM) === '1') {
+            const initiallyCollapsed = localStorage.getItem(LS_BOTTOM) === '1';
+            if (initiallyCollapsed) {
                 bottomPanel.classList.add('bottom-panel--collapsed');
                 mainWrapper.classList.add('bottom-panel-collapsed');
                 bottomToggle.textContent = '▲';
@@ -114,13 +115,24 @@
             } else {
                 bottomToggle.setAttribute('title', 'Свернуть');
             }
+            // Синхронизируем начальное состояние с BottomPanel (создаётся позже в initCanvasPlaceholders).
+            // Используем setTimeout(0), чтобы _bottomPanel уже был инициализирован.
+            if (initiallyCollapsed) {
+                setTimeout(function() {
+                    if (window._bottomPanel && typeof window._bottomPanel.setCollapsed === 'function') {
+                        window._bottomPanel.setCollapsed(true);
+                    }
+                }, 0);
+            }
             bottomToggle.addEventListener('click', function() {
                 const collapsed = bottomPanel.classList.toggle('bottom-panel--collapsed');
                 mainWrapper.classList.toggle('bottom-panel-collapsed', collapsed);
                 bottomToggle.textContent = collapsed ? '▲' : '▼';
                 bottomToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
                 localStorage.setItem(LS_BOTTOM, collapsed ? '1' : '0');
-                // После разворота панели — принудительное обновление водопада и шкалы
+                if (window._bottomPanel && typeof window._bottomPanel.setCollapsed === 'function') {
+                    window._bottomPanel.setCollapsed(collapsed);
+                }
                 if (!collapsed && window._bottomPanel && typeof window._bottomPanel.refreshWaterfall === 'function') {
                     requestAnimationFrame(function() {
                         requestAnimationFrame(function() {
