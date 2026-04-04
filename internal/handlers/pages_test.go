@@ -10,7 +10,7 @@ import (
 func TestNewPageHandler(t *testing.T) {
 	fsys := setupTestFS()
 
-	handler, err := NewPageHandler(fsys, false)
+	handler, err := NewPageHandler(fsys, false, "default")
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -28,7 +28,7 @@ func TestNewPageHandler_InvalidFS(t *testing.T) {
 	// Пустая FS без шаблонов — должна вернуть ошибку.
 	fsys := fstest.MapFS{}
 
-	_, err := NewPageHandler(fsys, false)
+	_, err := NewPageHandler(fsys, false, "default")
 	if err == nil {
 		t.Error("Expected error for empty FS, got nil")
 	}
@@ -37,7 +37,7 @@ func TestNewPageHandler_InvalidFS(t *testing.T) {
 func TestPageHandler_Index(t *testing.T) {
 	fsys := setupTestFS()
 
-	handler, err := NewPageHandler(fsys, false)
+	handler, err := NewPageHandler(fsys, false, "default")
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -62,7 +62,7 @@ func TestPageHandler_Index(t *testing.T) {
 
 func TestPageHandler_Tracking(t *testing.T) {
 	fsys := setupTestFS()
-	handler, err := NewPageHandler(fsys, false)
+	handler, err := NewPageHandler(fsys, false, "default")
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestPageHandler_Tracking(t *testing.T) {
 
 func TestPageHandler_Receiver(t *testing.T) {
 	fsys := setupTestFS()
-	handler, err := NewPageHandler(fsys, false)
+	handler, err := NewPageHandler(fsys, false, "default")
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -107,7 +107,7 @@ func TestPageHandler_Receiver(t *testing.T) {
 
 func TestPageHandler_Passes(t *testing.T) {
 	fsys := setupTestFS()
-	handler, err := NewPageHandler(fsys, false)
+	handler, err := NewPageHandler(fsys, false, "default")
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -127,7 +127,7 @@ func TestPageHandler_Passes(t *testing.T) {
 
 func TestPageHandler_Simulation(t *testing.T) {
 	fsys := setupTestFS()
-	handler, err := NewPageHandler(fsys, false)
+	handler, err := NewPageHandler(fsys, false, "default")
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}
@@ -147,7 +147,7 @@ func TestPageHandler_Simulation(t *testing.T) {
 
 func TestPageHandler_DevMode(t *testing.T) {
 	fsys := setupTestFS()
-	handler, err := NewPageHandler(fsys, true)
+	handler, err := NewPageHandler(fsys, true, "default")
 	if err != nil {
 		t.Fatalf("NewPageHandler failed: %v", err)
 	}

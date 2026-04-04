@@ -29,15 +29,18 @@ type PageHandler struct {
 	mu        sync.RWMutex
 	devMode   bool
 	fsys      fs.FS
+	theme     string
 }
 
 // NewPageHandler создаёт новый обработчик страниц.
 // fsys — файловая система с шаблонами (embed.FS или os.DirFS).
 // Если devMode равен true, шаблоны перезагружаются при каждом запросе.
-func NewPageHandler(fsys fs.FS, devMode bool) (*PageHandler, error) {
+// theme — имя цветовой темы (файл colors-{theme}.css).
+func NewPageHandler(fsys fs.FS, devMode bool, theme string) (*PageHandler, error) {
 	h := &PageHandler{
 		devMode: devMode,
 		fsys:    fsys,
+		theme:   theme,
 	}
 
 	if err := h.loadTemplates(); err != nil {
@@ -51,6 +54,12 @@ func NewPageHandler(fsys fs.FS, devMode bool) (*PageHandler, error) {
 type PageData struct {
 	Title     string
 	ActiveTab string
+	Theme     string
+}
+
+// pageData создаёт PageData с общими полями (тема).
+func (h *PageHandler) pageData(title, tab string) PageData {
+	return PageData{Title: title, ActiveTab: tab, Theme: h.theme}
 }
 
 // Index перенаправляет на страницу отслеживания.
@@ -60,38 +69,22 @@ func (h *PageHandler) Index(w http.ResponseWriter, r *http.Request) {
 
 // Tracking рендерит страницу отслеживания (вкладка 1).
 func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
-		Title:     "Сеанс - Satellite Scout",
-		ActiveTab: "tracking",
-	}
-	h.render(w, data)
+	h.render(w, h.pageData("Сеанс - Satellite Scout", "tracking"))
 }
 
 // Receiver рендерит страницу приёмника (вкладка 3).
 func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
-		Title:     "Приёмник - Satellite Scout",
-		ActiveTab: "receiver",
-	}
-	h.render(w, data)
+	h.render(w, h.pageData("Приёмник - Satellite Scout", "receiver"))
 }
 
 // Passes рендерит страницу пролётов (вкладка 2).
 func (h *PageHandler) Passes(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
-		Title:     "План сеансов - Satellite Scout",
-		ActiveTab: "passes",
-	}
-	h.render(w, data)
+	h.render(w, h.pageData("План сеансов - Satellite Scout", "passes"))
 }
 
 // Simulation рендерит страницу имитации (вкладка 4).
 func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
-	data := PageData{
-		Title:     "Имитация - Satellite Scout",
-		ActiveTab: "simulation",
-	}
-	h.render(w, data)
+	h.render(w, h.pageData("Имитация - Satellite Scout", "simulation"))
 }
 
 func (h *PageHandler) loadTemplates() error {

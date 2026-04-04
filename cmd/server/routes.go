@@ -21,7 +21,7 @@ func setupRoutes(
 	staticFS fs.FS,
 ) {
 	// Инициализация обработчиков.
-	pageHandler, err := handlers.NewPageHandler(templatesFS, cfg.DevMode)
+	pageHandler, err := handlers.NewPageHandler(templatesFS, cfg.DevMode, cfg.Theme)
 	if err != nil {
 		slog.Error("failed to initialize page handler", "error", err)
 		panic("page handler init failed: " + err.Error())

@@ -20,6 +20,10 @@ const (
 	envObserverAlt = "OBSERVER_ALT"
 	envDevMode     = "DEV_MODE"
 	envTLECacheDir = "TLE_CACHE_DIR"
+	envTheme       = "THEME"
+
+	// Тема по умолчанию — Classic (оригинальная).
+	defaultTheme = "classic"
 )
 
 // Config содержит конфигурацию приложения.
@@ -38,6 +42,10 @@ type Config struct {
 
 	// Настройки TLE (загрузка, кеширование, обновление)
 	TLE *tracker.TLEStoreConfig
+
+	// Цветовая тема UI: "default" (Operations Center), "classic" и т.д.
+	// Определяет файл static/css/colors-{Theme}.css.
+	Theme string
 }
 
 // Load возвращает конфигурацию из переменных окружения с значениями по умолчанию.
@@ -54,6 +62,7 @@ func Load() *Config {
 		ObserverLon: getEnvFloat(envObserverLon, defaultObserverLon),
 		ObserverAlt: getEnvFloat(envObserverAlt, defaultObserverAlt),
 		TLE:         tleCfg,
+		Theme:       getEnv(envTheme, defaultTheme),
 	}
 	return cfg
 }

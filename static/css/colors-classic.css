@@ -1,0 +1,152 @@
+/*
+ * Satellite Scout — тема «Classic»
+ * Оригинальная цветовая палитра проекта.
+ * Активируется через THEME=classic (env).
+ */
+
+:root {
+    /* ══════════════════════════════════════════════════════════════
+       Фоны
+       ══════════════════════════════════════════════════════════════ */
+    --bg-primary:   #0a0e14;
+    --bg-panel:     #12171f;
+    --bg-tertiary:  #1a2030;
+    --bg-elevated:  #222938;
+    --bg-hover:     #2a3444;
+
+    /* ══════════════════════════════════════════════════════════════
+       Границы
+       ══════════════════════════════════════════════════════════════ */
+    --border-default: #2a3444;
+    --border-focus:   #00d4aa;
+
+    /* ══════════════════════════════════════════════════════════════
+       Текст
+       ══════════════════════════════════════════════════════════════ */
+    --text-primary:  #e6e8eb;
+    --text-heading:  #a0a8b4;
+    --text-label:    #8b919a;
+    --text-muted:    #e6e8eb;
+    --text-accent:   #00d4aa;
+
+    /* ══════════════════════════════════════════════════════════════
+       Сигнальные / акцентные
+       ══════════════════════════════════════════════════════════════ */
+    --color-accent:  #00d4aa;
+    --color-accent2: #00a8ff;
+    --color-success: #4ade80;
+    --color-danger:  #ff6b6b;
+    --color-warning: #ffb347;
+
+    /* ══════════════════════════════════════════════════════════════
+       Карта (EarthView)
+       ══════════════════════════════════════════════════════════════ */
+    --map-ocean:       #000010;
+    --map-land:        #0d1a22;
+    --map-coast:       #4d9999;
+    --map-grid:        #3a4a4a;
+    --map-grid-major:  #4a5e5e;
+    --map-grid-text:   #ffffff;
+    --map-footprint:        rgba(200, 100, 255, 0.55);
+    --map-footprint-fill:   rgba(200, 100, 255, 0.09);
+
+    /* ══════════════════════════════════════════════════════════════
+       Орбита / трек спутника (EarthView)
+       ══════════════════════════════════════════════════════════════ */
+    --orbit-future:  #00ff00;
+    --orbit-past:    #ff4444;
+    --orbit-dots:    #ffff00;
+
+    /* ══════════════════════════════════════════════════════════════
+       Маркер спутника (EarthView)
+       ══════════════════════════════════════════════════════════════ */
+    --sat-marker:        #ffffff;
+    --sat-glow:          #00ffff;
+    --sat-label:         #ffeb3b;
+    --sat-label-stroke:  rgba(0, 0, 0, 0.85);
+
+    /* ══════════════════════════════════════════════════════════════
+       Выбранный спутник (selected, EarthView)
+       ══════════════════════════════════════════════════════════════ */
+    --selected-track:          #ffff00;
+    --selected-marker:         #2ecc71;
+    --selected-footprint:      rgba(93, 173, 226, 0.6);
+    --selected-footprint-fill: rgba(93, 173, 226, 0.12);
+
+    /* ══════════════════════════════════════════════════════════════
+       Наблюдатель (EarthView)
+       ══════════════════════════════════════════════════════════════ */
+    --observer-marker:        #ff9500;
+    --observer-marker-stroke: rgba(0, 0, 0, 0.9);
+    --observer-label:         #ffffff;
+
+    /* ══════════════════════════════════════════════════════════════
+       Прочие элементы карты
+       ══════════════════════════════════════════════════════════════ */
+    --map-russia-border:  #aabbcc;
+    --map-russia-label:   #ffcc00;
+    --map-city-label:     #ffffff;
+    --map-city-marker:    #cc6666;
+    --map-text-secondary: #00d4d4;
+
+    /* ══════════════════════════════════════════════════════════════
+       SkyView
+       ══════════════════════════════════════════════════════════════ */
+    --sky-bg:            #0a0e14;
+    --sky-fill:          #1a2a3a;
+    --sky-grid:          #006666;
+    --sky-grid-text:     #008080;
+    --sky-elevation-label: #ffffff;
+    --sky-azimuth-label: #00cccc;
+    --sky-track:         #00cc00;
+    --sky-track-arrow:   #88ff88;
+    --sky-aos:           #00ff00;
+    --sky-los:           #ff4444;
+    --sky-marker-border: #ffffff;
+    --sky-satellite:     #00ffff;
+    --sky-satellite-glow: rgba(0, 255, 255, 0.3);
+    --sky-satellite-signal: rgba(0, 255, 200, 0.5);
+    --sky-satellite-label: #ffffff;
+    --sky-satellite-aura: rgba(197, 88, 88, 1);
+    --sky-satellite-aura-border: #ff8888;
+    --sky-observer:      #ffaa00;
+    --sky-observer-secondary: #ff6600;
+    --sky-info-text:     #00d4aa;
+    --sky-info-label:    #ffffff;
+    --sky-time-text:     #00a8ff;
+    --sky-selected-track:  #ffff00;
+    --sky-selected-marker: #2ecc71;
+
+    /* ══════════════════════════════════════════════════════════════
+       Индикаторы Az/El
+       ══════════════════════════════════════════════════════════════ */
+    --ind-bg:             #0a0e14;
+    --ind-bg-secondary:   #12171f;
+    --ind-border:         #2a3444;
+    --ind-accent:         #00d4aa;
+    --ind-accent-blue:    #00a8ff;
+    --ind-accent-red:     #ff6b6b;
+    --ind-text:           #e6e8eb;
+    --ind-text-secondary: #8b919a;
+    --ind-text-muted:     #5c6370;
+    --ind-satellite-line:   rgba(255, 255, 255, 0.5);
+    --ind-satellite-marker: #ffffff;
+    --ind-out-of-view:    rgba(255, 107, 107, 0.7);
+
+    /* ══════════════════════════════════════════════════════════════
+       Спектр / водопад (нижняя панель)
+       ══════════════════════════════════════════════════════════════ */
+    --spectrum-bg:       #0d1117;
+    --spectrum-grid:     #2a3444;
+    --spectrum-text:     #8a9199;
+    --spectrum-signal:   #00ff80;
+    --spectrum-peak:     #ffd700;
+    --spectrum-peak-dot: #ff3333;
+    --waterfall-bg:      #1a1e24;
+
+    /* ══════════════════════════════════════════════════════════════
+       Типографика
+       ══════════════════════════════════════════════════════════════ */
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}

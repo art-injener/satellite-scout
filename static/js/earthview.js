@@ -289,12 +289,12 @@
         ctx.fillStyle = this.colors.background;
         ctx.fillRect(0, 0, this.width, this.height);
 
-        // Слои отрисовки (порядок важен!)
+        // Слои отрисовки (порядок важен: сетка → суша → берега → подписи координат)
+        // Сетка под сушей — материки дают чистый фон для спутников
         if (this.options.showGrid) {
             this._drawGrid();
         }
 
-        // Заливка материков (полигоны суши) — перед береговыми линиями
         if (this.options.showLandFill && this.landData && this.landData.features) {
             this._drawLand();
         }
@@ -309,6 +309,11 @@
 
         // Столицы мира
         this._drawCities();
+
+        // Подписи координат — поверх всех географических слоёв
+        if (this.options.showGrid) {
+            this._drawGridLabels();
+        }
 
         // Слой 1: вторичные спутники (серые пунктиры).
         this._drawSecondaryLayer();
@@ -389,8 +394,6 @@
             ctx.stroke();
         }
 
-        // Подписи координат
-        this._drawGridLabels();
     };
 
     /**
