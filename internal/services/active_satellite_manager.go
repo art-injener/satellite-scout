@@ -128,38 +128,32 @@ func SelectPrimarySatellite(satellites []PassInfo, userSelection *int, now time.
 				return *userSelection
 			}
 		}
-		// Спутник вышел из окна — сбрасываем ручной выбор (caller должен обнулить userSelection).
 	}
 
 	nowMs := now.UnixMilli()
 
-	// Среди видимых — выбираем с максимальным оставшимся временем (LOS − now).
+	// Среди видимых — с максимальным оставшимся временем (LOS − now).
+	if id := bestByRemaining(satellites, nowMs, true); id != 0 {
+		return id
+	}
+	// Нет видимых — среди всей группы.
+	return bestByRemaining(satellites, nowMs, false)
+}
+
+// bestByRemaining выбирает спутник с максимальным оставшимся временем до LOS.
+// onlyVisible=true фильтрует по IsVisible. При равном остатке — меньший NoradID.
+func bestByRemaining(satellites []PassInfo, nowMs int64, onlyVisible bool) int {
 	var best *PassInfo
-	var bestRemaining int64
+	var bestRem int64
 	for i := range satellites {
 		s := &satellites[i]
-		if !s.IsVisible {
+		if onlyVisible && !s.IsVisible {
 			continue
 		}
 		rem := s.Pass.LOS - nowMs
-		if best == nil || rem > bestRemaining || (rem == bestRemaining && s.NoradID < best.NoradID) {
+		if best == nil || rem > bestRem || (rem == bestRem && s.NoradID < best.NoradID) {
 			best = s
-			bestRemaining = rem
-		}
-	}
-	if best != nil {
-		return best.NoradID
-	}
-
-	// Нет видимых — максимальное оставшееся время до LOS среди всей группы.
-	best = nil
-	bestRemaining = 0
-	for i := range satellites {
-		s := &satellites[i]
-		rem := s.Pass.LOS - nowMs
-		if best == nil || rem > bestRemaining || (rem == bestRemaining && s.NoradID < best.NoradID) {
-			best = s
-			bestRemaining = rem
+			bestRem = rem
 		}
 	}
 	if best != nil {
@@ -180,37 +174,51 @@ func SelectPrimarySatellite(satellites []PassInfo, userSelection *int, now time.
 // ВАЖНО: когда пролёт завершился, возвращает shouldSwitch=true даже если
 // новый primary — тот же NORAD ID (следующий виток). Это нужно, чтобы
 // caller обнаружил переход и обновил данные пролёта (AOS/LOS/SkyPath).
-func ShouldSwitchPrimary(currentPrimaryID int, satellites []PassInfo, now time.Time) (shouldSwitch bool, newPrimaryID int) {
+func ShouldSwitchPrimary(
+	currentPrimaryID int,
+	satellites []PassInfo,
+	now time.Time,
+) (bool, int) {
 	if len(satellites) == 0 {
 		return false, 0
 	}
 
-	nowMs := now.UnixMilli()
-	// Ищем текущий primary в группе.
-	for _, s := range satellites {
-		if s.NoradID == currentPrimaryID {
-			if s.IsVisible && nowMs <= s.Pass.LOS {
-				// Пролёт активен — проверяем, нет ли лучшего кандидата по оставшемуся времени.
-				bestID := SelectPrimarySatellite(satellites, nil, now)
-				if bestID != 0 && bestID != currentPrimaryID {
-					return true, bestID
-				}
-				return false, 0
-			}
-			if !s.IsVisible && !s.IsSubstitute && nowMs < s.Pass.AOS {
-				// Пролёт в скользящем окне, AOS ещё впереди — ожидание начала сеанса.
-				// Подстановки (IsSubstitute=true) сюда НЕ попадают — для них пролёт
-				// уже завершился, а запись взята из следующего витка.
-				return false, 0
-			}
-			// Пролёт завершился, спутник подставлен из будущего витка, или вышел из видимости → переключаемся.
-			break
-		}
+	current := findSatellite(satellites, currentPrimaryID)
+	if current == nil {
+		// Primary не найден в группе → выбираем нового.
+		return true, SelectPrimarySatellite(satellites, nil, now)
 	}
 
-	// Primary не найден в группе или его пролёт завершился → выбираем нового.
-	newID := SelectPrimarySatellite(satellites, nil, now)
-	return true, newID
+	nowMs := now.UnixMilli()
+
+	// Пролёт активен — проверяем, нет ли лучшего кандидата.
+	if current.IsVisible && nowMs <= current.Pass.LOS {
+		bestID := SelectPrimarySatellite(satellites, nil, now)
+		if bestID != 0 && bestID != currentPrimaryID {
+			return true, bestID
+		}
+		return false, 0
+	}
+
+	// AOS ещё впереди — ожидание начала сеанса.
+	// Подстановки (IsSubstitute=true) сюда НЕ попадают — для них пролёт
+	// уже завершился, а запись взята из следующего витка.
+	if !current.IsVisible && !current.IsSubstitute && nowMs < current.Pass.AOS {
+		return false, 0
+	}
+
+	// Пролёт завершился или спутник подставлен → переключаемся.
+	return true, SelectPrimarySatellite(satellites, nil, now)
+}
+
+// findSatellite ищет спутник по NORAD ID в списке.
+func findSatellite(satellites []PassInfo, noradID int) *PassInfo {
+	for i := range satellites {
+		if satellites[i].NoradID == noradID {
+			return &satellites[i]
+		}
+	}
+	return nil
 }
 
 // GroupEntry — элемент для change detection: NORAD ID + видимость + границы пролёта.

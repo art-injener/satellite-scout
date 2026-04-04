@@ -8,20 +8,14 @@ import "strings"
 //	"YUBILEINY (RS30)"       → "YUBILEINY", "RS30"
 //	"RS-44 & BREEZE-KM R/B"  → "RS-44",     "BREEZE-KM R/B"
 //	"METEOR-M 2-3"           → "METEOR-M 2-3", ""
-func ParseSatName(fullName string) (primary, alias string) {
-	idx := strings.Index(fullName, "(")
-	if idx >= 0 {
-		primary = strings.TrimSpace(fullName[:idx])
-		rest := fullName[idx+1:]
-		end := strings.Index(rest, ")")
-		if end >= 0 {
-			alias = strings.TrimSpace(rest[:end])
-			return primary, alias
+func ParseSatName(fullName string) (string, string) {
+	if left, right, ok := strings.Cut(fullName, "("); ok {
+		if alias, _, found := strings.Cut(right, ")"); found {
+			return strings.TrimSpace(left), strings.TrimSpace(alias)
 		}
 	}
-	// Разделитель " & " — первая часть primary, вторая alias
-	if amp := strings.Index(fullName, " & "); amp >= 0 {
-		return strings.TrimSpace(fullName[:amp]), strings.TrimSpace(fullName[amp+3:])
+	if left, right, ok := strings.Cut(fullName, " & "); ok {
+		return strings.TrimSpace(left), strings.TrimSpace(right)
 	}
 	return strings.TrimSpace(fullName), ""
 }

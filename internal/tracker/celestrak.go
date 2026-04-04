@@ -239,7 +239,7 @@ func (c *CelestrakClient) fetch(ctx context.Context, url string) (string, error)
 			// Ограничиваем 31 для защиты от переполнения при сдвиге
 			attemptVal := min(attempt-1, 31)
 
-			backoff := time.Duration(1<<uint(attemptVal)) * time.Second //nolint:gosec // attemptVal проверен выше
+			backoff := time.Duration(1<<uint(attemptVal)) * time.Second
 			select {
 			case <-ctx.Done():
 				return "", ctx.Err()

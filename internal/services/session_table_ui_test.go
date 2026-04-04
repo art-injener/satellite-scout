@@ -25,8 +25,8 @@ func TestFormatSessionTableColumns(t *testing.T) {
 	t.Run("during_pass", func(t *testing.T) {
 		now := aos.Add(2 * time.Minute)
 		dur, until := FormatSessionTableColumns(aosMs, losMs, now)
-		if until != "сейчас" {
-			t.Errorf("until column: want %q, got %q", "сейчас", until)
+		if until != "ЗРВ" {
+			t.Errorf("until column: want %q, got %q", "ЗРВ", until)
 		}
 		if dur != "3м 00с" {
 			t.Errorf("duration column (remaining): want %q, got %q", "3м 00с", dur)

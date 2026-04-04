@@ -232,8 +232,8 @@
      * Привязка DOM-элементов панели информации (Az ант., Az КА)
      */
     AzimuthIndicator.prototype.setInfoElements = function(els) {
-        var getEl = function(v) {
-            if (!v) return null;
+        const getEl = function(v) {
+            if (!v) {return null;}
             return typeof v === 'string' ? document.getElementById(v) : v;
         };
         this._infoEls = { ant: getEl(els.ant), sat: getEl(els.sat) };
@@ -241,12 +241,12 @@
     };
 
     AzimuthIndicator.prototype._updateInfoPanelDOM = function() {
-        var e = this._infoEls;
-        if (!e.ant && !e.sat) return;
-        var antStr = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---°';
-        var satStr = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---°';
-        if (e.ant) e.ant.textContent = antStr;
-        if (e.sat) e.sat.textContent = satStr;
+        const e = this._infoEls;
+        if (!e.ant && !e.sat) {return;}
+        const antStr = this.currentAzimuth !== null ? this.currentAzimuth.toFixed(1) + '°' : '---°';
+        const satStr = this.satelliteAzimuth !== null ? this.satelliteAzimuth.toFixed(1) + '°' : '---°';
+        if (e.ant) {e.ant.textContent = antStr;}
+        if (e.sat) {e.sat.textContent = satStr;}
     };
 
     /**

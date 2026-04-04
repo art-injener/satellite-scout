@@ -54,7 +54,7 @@ func (h *TrackingHandler) SetCurrent(w http.ResponseWriter, r *http.Request) {
 
 	h.trackingService.SetManualSelection(req.NoradID, clientID)
 
-	slog.Info("manual tracking set", "norad_id", req.NoradID, "client_id", clientID)
+	slog.Info("manual tracking set", slog.Int("norad_id", req.NoradID), slog.String("client_id", clientID))
 	writeJSON(w, http.StatusOK, TrackingResponse{
 		Status:  "ok",
 		NoradID: req.NoradID,
@@ -69,14 +69,15 @@ func (h *TrackingHandler) ResetCurrent(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			ClientID string `json:"client_id"`
 		}
-		// body может быть пустым — это ОК.
-		_ = json.NewDecoder(r.Body).Decode(&body)
-		clientID = body.ClientID
+		// body может быть пустым — это ОК, ошибку декодирования игнорируем.
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			clientID = body.ClientID
+		}
 	}
 
 	h.trackingService.ResetManualSelection(clientID)
 
-	slog.Info("tracking reset to auto", "client_id", clientID)
+	slog.Info("tracking reset to auto", slog.String("client_id", clientID))
 	writeJSON(w, http.StatusOK, TrackingResponse{
 		Status:  "ok",
 		NoradID: 0,

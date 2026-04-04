@@ -69,6 +69,13 @@ const (
 	TLELineLength = 69 // Длина строки TLE (включая checksum)
 )
 
+// isTLEDataLine проверяет, что строка выглядит как настоящая TLE-строка данных:
+// начинается с '1' или '2' и имеет длину >= 69 символов.
+// Это отличает TLE-строку от имени спутника вроде "239ALFEROV (RS61S)".
+func isTLEDataLine(line string) bool {
+	return len(line) >= TLELineLength && (line[0] == '1' || line[0] == '2')
+}
+
 // ParseTLE парсит TLE из массива строк.
 // Поддерживает 2-line формат (только Line1, Line2) и 3-line формат (Name, Line1, Line2).
 func ParseTLE(lines []string) (*TLE, error) {
@@ -78,30 +85,31 @@ func ParseTLE(lines []string) (*TLE, error) {
 
 	var name, line1, line2 string
 
-	// Определяем формат по первому символу первой строки
 	firstLine := strings.TrimSpace(lines[idxLine0])
 	if len(firstLine) == 0 {
 		return nil, fmt.Errorf("%w: first line is empty", ErrInvalidTLEFormat)
 	}
 
-	switch firstLine[0] {
-	case '1':
-		// 2-line формат: Line1, Line2
-		line1 = firstLine
-		line2 = strings.TrimSpace(lines[idxLine1])
+	if isTLEDataLine(firstLine) {
+		switch firstLine[0] {
+		case '1':
+			// 2-line формат: Line1, Line2
+			line1 = firstLine
+			line2 = strings.TrimSpace(lines[idxLine1])
 
-	case '2':
-		// Допускаем переставленный 2-line формат (Line2, Line1) — исправляем порядок
-		secondLine := strings.TrimSpace(lines[idxLine1])
-		if len(lines) == 2 && len(secondLine) > 0 && secondLine[0] == '1' {
-			line1 = secondLine
-			line2 = firstLine
-			break
+		case '2':
+			// Переставленный 2-line формат (Line2, Line1)
+			secondLine := strings.TrimSpace(lines[idxLine1])
+			if len(lines) == 2 && isTLEDataLine(secondLine) && secondLine[0] == '1' {
+				line1 = secondLine
+				line2 = firstLine
+				break
+			}
+			return nil, fmt.Errorf("%w: expected Line1, got Line2", ErrInvalidTLEFormat)
 		}
-		return nil, fmt.Errorf("%w: expected Line1, got Line2", ErrInvalidTLEFormat)
-
-	default:
+	} else {
 		// 3-line формат: Name, Line1, Line2
+		// (имя спутника может начинаться с любого символа, включая цифры)
 		if len(lines) < 3 {
 			return nil, fmt.Errorf("%w: 3-line format requires 3 lines, got %d", ErrInvalidTLEFormat, len(lines))
 		}
@@ -169,6 +177,8 @@ func parseTLEBlock(lines []string) *TLE {
 
 // tryParseTLE проверяет, можно ли распарсить накопленные строки как TLE.
 // Возвращает не-nil если строки образуют валидный TLE.
+// Использует isTLEDataLine для отличия настоящих TLE-строк от имён спутников
+// (например "239ALFEROV" начинается с '2', но длина << 69).
 func tryParseTLE(lines []string) []string {
 	n := len(lines)
 	if n < 2 {
@@ -178,15 +188,15 @@ func tryParseTLE(lines []string) []string {
 	switch n {
 	case 2:
 		// 2-line формат: Line1+Line2 или переставленный Line2+Line1
-		if lines[0][0] == '1' && lines[1][0] == '2' {
-			return lines
-		}
-		if lines[0][0] == '2' && lines[1][0] == '1' {
-			return lines
+		if isTLEDataLine(lines[0]) && isTLEDataLine(lines[1]) {
+			if (lines[0][0] == '1' && lines[1][0] == '2') ||
+				(lines[0][0] == '2' && lines[1][0] == '1') {
+				return lines
+			}
 		}
 	case 3:
 		// 3-line формат: Name + Line1 + Line2
-		if lines[0][0] != '1' && lines[0][0] != '2' {
+		if !isTLEDataLine(lines[0]) && isTLEDataLine(lines[1]) && isTLEDataLine(lines[2]) {
 			return lines
 		}
 	}

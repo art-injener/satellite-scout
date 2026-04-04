@@ -157,7 +157,7 @@
             }
             rightToggle.addEventListener('click', function() {
                 const collapsed = rightPanelWrapper.classList.toggle('right-collapsed');
-                rightToggle.textContent = collapsed ? '▶' : '◀';
+                rightToggle.textContent = collapsed ? '◀' : '▶';
                 rightToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
                 localStorage.setItem(LS_RIGHT, collapsed ? '1' : '0');
             });
@@ -208,7 +208,6 @@
 
         // Загруженные sky path по noradId (чтобы не перезапрашивать).
         let loadedSkyPathSelected = null;
-        let loadedSkyPathTracking = null;
 
         // ── POSITION: обновление позиций selected + tracking + secondary ──
         sm.subscribe(StateEventType.POSITION, function(state) {
@@ -272,7 +271,7 @@
             if (trackingId) {
                 const trkState = sm.getState(trackingId);
                 if (trkState && trkState.position) {
-                    var tp = trkState.position;
+                    const tp = trkState.position;
                     if (window.azimuthIndicator) {
                         window.azimuthIndicator.setSatellitePosition(tp.az);
                         window.azimuthIndicator.setAzimuth(tp.az);
@@ -313,6 +312,10 @@
         sm.subscribe(StateEventType.SELECTED_CHANGE, function(state) {
             if (!state) { return; }
             console.log('[app.js] Selected:', state.noradId, state.name);
+
+            if (window._bottomPanel && typeof window._bottomPanel.resetSimulation === 'function') {
+                window._bottomPanel.resetSimulation();
+            }
 
             if (window.earthView) {
                 window.earthView.setSelectedSatelliteInfo(state.name || '', state.noradId);
@@ -361,7 +364,6 @@
                 // Sky path для tracking на SkyView.
                 if (window.skyView) {
                     window.skyView.setSatelliteInfo(state.name || '', state.noradId);
-                    loadedSkyPathTracking = state.noradId;
                     _loadSkyPath(state.noradId, 'tracking');
                 }
             } else {
@@ -393,7 +395,6 @@
                     window.elevationIndicator.setNoradId(null);
                     window.elevationIndicator.draw();
                 }
-                loadedSkyPathTracking = null;
             }
         });
 
@@ -433,7 +434,7 @@
         const earthPositions = [];
         const skyPositions = [];
 
-        for (var i = 0; i < group.satellites.length; i++) {
+        for (let i = 0; i < group.satellites.length; i++) {
             const sat = group.satellites[i];
             if (sat.norad_id === selectedId || sat.norad_id === trackingId) { continue; }
             const satState = sm.getState(sat.norad_id);
@@ -470,7 +471,7 @@
         const selectedId = sm.getSelectedSatelliteId();
         const trackingId = sm.getTrackingSatelliteId();
 
-        for (var i = 0; i < group.satellites.length; i++) {
+        for (let i = 0; i < group.satellites.length; i++) {
             const sat = group.satellites[i];
             if (sat.norad_id === selectedId || sat.norad_id === trackingId) { continue; }
             const satState = sm.getState(sat.norad_id);
@@ -491,21 +492,21 @@
         const selectedId = sm.getSelectedSatelliteId();
         const trackingId = sm.getTrackingSatelliteId();
 
-        for (var i = 0; i < group.satellites.length; i++) {
+        for (let i = 0; i < group.satellites.length; i++) {
             const sat = group.satellites[i];
             if (sat.norad_id === selectedId || sat.norad_id === trackingId) { continue; }
             // SkyView: трассы только для спутников с isTrackVisible (PASS-MAP-001).
             if (!sm.isTrackVisible(sat.norad_id)) { continue; }
-            var pass = null;
-            for (var j = 0; j < passes.length; j++) {
-                var p = passes[j];
+            let pass = null;
+            for (let j = 0; j < passes.length; j++) {
+                const p = passes[j];
                 if (p.norad_id === sat.norad_id && ((p.aos <= now && now <= p.los) || now < p.aos)) {
                     pass = p;
                     break;
                 }
             }
             if (pass && pass.sky_path && pass.sky_path.length > 0) {
-                var track = pass.sky_path.map(function(pt) {
+                const track = pass.sky_path.map(function(pt) {
                     return { az: pt.az, el: pt.el, time: pt.time };
                 });
                 window.skyView.setSecondaryTrack(sat.norad_id, track);
@@ -634,7 +635,7 @@
             window._rightPanelTable.destroy();
             window._rightPanelTable = null;
         }
-        var tbody = document.getElementById('passes-compact-body');
+        const tbody = document.getElementById('passes-compact-body');
         if (tbody && typeof window.RightPanelTable === 'function') {
             window._rightPanelTable = new window.RightPanelTable();
             window._rightPanelTable.init();
@@ -680,8 +681,8 @@
                     if (trackingId) {
                         const trkState = sm.getState(trackingId);
                         if (trkState) {
-                            if (trkState.track)     { window.earthView.setGroundTrack(trkState.track); }
-                            if (trkState.position)  {
+                            if (trkState.track) { window.earthView.setGroundTrack(trkState.track); }
+                            if (trkState.position) {
                                 window.earthView.setSatellitePosition(trkState.position.lon, trkState.position.lat, trkState.position.alt);
                                 window.earthView.setSatelliteInfo(trkState.name || '', trkState.noradId);
                             }
@@ -706,7 +707,7 @@
         if (skyCanvas && window.SkyView) {
             window.skyView = new window.SkyView(skyCanvas);
 
-            // Панель информации под графиком: AOS, LOS, Длит., Осталось 
+            // Панель информации под графиком: AOS, LOS, Длит., Осталось
             window.skyView.setInfoElements({
                 aos: 'skyview-info-aos',
                 los: 'skyview-info-los',
@@ -715,7 +716,7 @@
             });
 
             // Canvas SkyView всегда 300×300 px — квадратный буфер, окружность без искажений
-            var skySize = 300;
+            const skySize = 300;
             if (skyCanvas.width !== skySize || skyCanvas.height !== skySize) {
                 skyCanvas.width = skySize;
                 skyCanvas.height = skySize;
@@ -893,23 +894,23 @@
             cancelAnimationFrame(skyViewAnimationId);
         }
 
-        var frameCount = 0;
+        let frameCount = 0;
         function animate() {
             if (window.skyView && window._stateManager) {
-                var sm = window._stateManager;
-                var trackingId = sm.getTrackingSatelliteId();
-                var selectedId = sm.getSelectedSatelliteId();
+                const sm = window._stateManager;
+                const trackingId = sm.getTrackingSatelliteId();
+                const selectedId = sm.getSelectedSatelliteId();
                 // Позиция сопровождаемого — всегда из состояния сопровождаемого (не из active/selected)
                 if (trackingId) {
-                    var trkState = sm.getState(trackingId);
-                    if (trkState && trkState.position && trkState.position.az != null && trkState.position.el != null) {
+                    const trkState = sm.getState(trackingId);
+                    if (trkState && trkState.position && trkState.position.az !== null && trkState.position.el !== null) {
                         window.skyView.setSatellitePosition(trkState.position.az, trkState.position.el);
                     }
                 }
                 // Позиция текущего (выбранного) — из состояния выбранного спутника
                 if (selectedId) {
-                    var selState = sm.getState(selectedId);
-                    if (selState && selState.position && selState.position.az != null && selState.position.el != null) {
+                    const selState = sm.getState(selectedId);
+                    if (selState && selState.position && selState.position.az !== null && selState.position.el !== null) {
                         window.skyView.setSelectedSatellitePosition(selState.position.az, selState.position.el);
                     }
                 }

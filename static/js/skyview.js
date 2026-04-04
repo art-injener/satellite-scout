@@ -95,7 +95,7 @@
 
             // Текущий (выбранный) спутник: сплошная жёлтая трасса, зелёный маркер
             selectedTrack: '#ffff00',
-            selectedMarker: '#2ecc71'  // зелёный — маркер
+            selectedMarker: '#2ecc71' // зелёный — маркер
         };
 
         // Расчёт геометрии
@@ -127,7 +127,7 @@
             maxElTime: null,
             aosCanvasY: null, // Y маркера AOS на canvas (верхняя/нижняя полусфера)
             losCanvasY: null,
-            aosAz: null,  // азимут AOS (для сортировки при одной полусфере)
+            aosAz: null, // азимут AOS (для сортировки при одной полусфере)
             losAz: null
         };
 
@@ -157,10 +157,10 @@
      * (только под метки сторон света N/S/E/W и цифры азимута)
      */
     SkyView.prototype._updateGeometry = function() {
-        var w = this.canvas.width;
-        var h = this.canvas.height;
+        const w = this.canvas.width;
+        const h = this.canvas.height;
         // Минимальный отступ — только для вывода символов сторон света и меток азимута
-        var padding = 16;
+        const padding = 16;
 
         this.centerX = w / 2;
         this.centerY = h / 2;
@@ -308,7 +308,7 @@
         const cy = this.centerY;
         const r = this.radius;
         const step = this.options.azimuthStep;
-        const tickLen = 5;      // длина засечки от окружности
+        const tickLen = 5; // длина засечки от окружности
         const labelOffset = 14; // отступ подписи от окружности (было 8)
 
         ctx.font = '9px sans-serif';
@@ -522,11 +522,11 @@
             }
         }
 
-        var prev = points[tcaIdx - 1];
-        var curr = points[tcaIdx];
-        var next = points[tcaIdx + 1];
-        var dx = next.x - prev.x;
-        var dy = next.y - prev.y;
+        let prev = points[tcaIdx - 1];
+        let curr = points[tcaIdx];
+        let next = points[tcaIdx + 1];
+        let dx = next.x - prev.x;
+        let dy = next.y - prev.y;
         this._drawArrow(curr.x, curr.y, Math.atan2(dy, dx), arrowColor);
 
         // Дополнительные стрелки по интервалу (для длинных пролётов)
@@ -881,8 +881,8 @@
      * @param {number} el - Угол места в градусах
      */
     SkyView.prototype.setSatellitePosition = function(az, el) {
-        var a = Number(az);
-        var e = Number(el);
+        const a = Number(az);
+        const e = Number(el);
         if (isNaN(a) || isNaN(e)) {
             this.satellite.currentPos = null;
             return;
@@ -943,8 +943,8 @@
      * @param {Object} els - { aos, los, dur, remaining } — id строки или HTMLElement
      */
     SkyView.prototype.setInfoElements = function(els) {
-        var getEl = function(v) {
-            if (!v) return null;
+        const getEl = function(v) {
+            if (!v) {return null;}
             return typeof v === 'string' ? document.getElementById(v) : v;
         };
         this._infoEls = {
@@ -960,31 +960,31 @@
     /** Обновление текстового блока под графиком: AOS, LOS, Длит., время до конца сеанса (Осталось).
      * При отображении выбранного спутника (отличного от сопровождаемого) показываются данные выбранного. */
     SkyView.prototype._updateInfoPanelDOM = function() {
-        var e = this._infoEls;
-        if (!e.aos && !e.los && !e.dur && !e.remaining) return;
+        const e = this._infoEls;
+        if (!e.aos && !e.los && !e.dur && !e.remaining) {return;}
 
-        var showSelected = this._selectedSatellite.noradId && this._selectedSatellite.noradId !== this.satellite.noradId;
-        var info = showSelected ? this._selectedPassInfo : this.passInfo;
-        var noradId = showSelected ? this._selectedSatellite.noradId : this.satellite.noradId;
+        const showSelected = this._selectedSatellite.noradId && this._selectedSatellite.noradId !== this.satellite.noradId;
+        const info = showSelected ? this._selectedPassInfo : this.passInfo;
+        const noradId = showSelected ? this._selectedSatellite.noradId : this.satellite.noradId;
 
-        var now = Date.now() + (this._serverSkewMs || 0);
-        var aosStr = this._formatTime(info.aosTime);
-        var losStr = this._formatTime(info.losTime);
-        var durMs = (info.aosTime && info.losTime) ? (info.losTime - info.aosTime) : 0;
-        var durStr = this._formatDuration(durMs);
-        var remainingStr = '—';
+        const now = Date.now() + (this._serverSkewMs || 0);
+        const aosStr = this._formatTime(info.aosTime);
+        const losStr = this._formatTime(info.losTime);
+        const durMs = (info.aosTime && info.losTime) ? (info.losTime - info.aosTime) : 0;
+        const durStr = this._formatDuration(durMs);
+        let remainingStr = '—';
         if (info.aosTime && info.losTime && now >= info.aosTime && now <= info.losTime) {
-            var remainingMs = info.losTime - now;
+            const remainingMs = info.losTime - now;
             if (remainingMs > 0) {
                 remainingStr = this._formatDuration(remainingMs);
             }
         }
 
-        if (e.norad) e.norad.textContent = noradId ? String(noradId) : '—';
-        if (e.aos) e.aos.textContent = aosStr;
-        if (e.los) e.los.textContent = losStr;
-        if (e.dur) e.dur.textContent = durStr;
-        if (e.remaining) e.remaining.textContent = remainingStr;
+        if (e.norad) {e.norad.textContent = noradId ? String(noradId) : '—';}
+        if (e.aos) {e.aos.textContent = aosStr;}
+        if (e.los) {e.los.textContent = losStr;}
+        if (e.dur) {e.dur.textContent = durStr;}
+        if (e.remaining) {e.remaining.textContent = remainingStr;}
     };
 
     /**
@@ -1055,9 +1055,9 @@
      * @param {string} fillColor - цвет заливки (например selectedMarker)
      */
     SkyView.prototype._drawSatelliteIconStatic = function(ctx, x, y, fillColor) {
-        var size = 8; // как у сопровождаемого
-        var panelWidth = size * 1.2;
-        var panelHeight = size * 0.5;
+        const size = 8; // как у сопровождаемого
+        const panelWidth = size * 1.2;
+        const panelHeight = size * 0.5;
 
         ctx.fillStyle = fillColor;
         // Центральный блок (корпус)
@@ -1068,15 +1068,15 @@
         // Линии на панелях (детализация)
         ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
         ctx.lineWidth = 1;
-        for (var i = 1; i < 3; i++) {
-            var lx = x - size / 2 - panelWidth - 2 + (panelWidth / 3) * i;
+        for (let i = 1; i < 3; i++) {
+            const lx = x - size / 2 - panelWidth - 2 + (panelWidth / 3) * i;
             ctx.beginPath();
             ctx.moveTo(lx, y - panelHeight / 2);
             ctx.lineTo(lx, y + panelHeight / 2);
             ctx.stroke();
         }
-        for (var j = 1; j < 3; j++) {
-            var rx = x + size / 2 + 2 + (panelWidth / 3) * j;
+        for (let j = 1; j < 3; j++) {
+            const rx = x + size / 2 + 2 + (panelWidth / 3) * j;
             ctx.beginPath();
             ctx.moveTo(rx, y - panelHeight / 2);
             ctx.lineTo(rx, y + panelHeight / 2);
@@ -1094,33 +1094,33 @@
      * @private
      */
     SkyView.prototype._drawSelectedLayer = function() {
-        var sel = this._selectedSatellite;
-        var ctx = this.ctx;
+        const sel = this._selectedSatellite;
+        const ctx = this.ctx;
 
         if (sel.track && sel.track.length >= 2) {
-            var visibleTrack = sel.track.filter(function(p) { return p.el >= 0; });
+            const visibleTrack = sel.track.filter(function(p) { return p.el >= 0; });
             if (visibleTrack.length < 2) {
                 // Недостаточно видимых точек — ничего не рисуем.
             } else {
                 // Азимуты пересечения с горизонтом (el=0) для AOS и LOS.
-                var startAz = this._findHorizonCrossing(visibleTrack[0], visibleTrack[1]);
-                var endAz = this._findHorizonCrossing(
+                const startAz = this._findHorizonCrossing(visibleTrack[0], visibleTrack[1]);
+                const endAz = this._findHorizonCrossing(
                     visibleTrack[visibleTrack.length - 1],
                     visibleTrack[visibleTrack.length - 2]
                 );
-                var aosEdge = this.azElToXY(startAz, 0);
-                var losEdge = this.azElToXY(endAz, 0);
+                const aosEdge = this.azElToXY(startAz, 0);
+                const losEdge = this.azElToXY(endAz, 0);
 
                 // Внутренние точки (видимая часть трека).
-                var innerPoints = [];
-                for (var i = 0; i < visibleTrack.length; i++) {
-                    var tp = visibleTrack[i];
-                    var p = this.azElToXY(tp.az, tp.el);
+                const innerPoints = [];
+                for (let i = 0; i < visibleTrack.length; i++) {
+                    const tp = visibleTrack[i];
+                    const p = this.azElToXY(tp.az, tp.el);
                     innerPoints.push({ x: p.x, y: p.y, time: tp.time, el: tp.el, az: tp.az });
                 }
 
                 // Полный путь: от горизонта (AOS) через видимые точки до горизонта (LOS).
-                var allPoints = [
+                const allPoints = [
                     { x: aosEdge.x, y: aosEdge.y, time: visibleTrack[0].time, el: 0, az: startAz }
                 ].concat(innerPoints).concat([
                     { x: losEdge.x, y: losEdge.y, time: visibleTrack[visibleTrack.length - 1].time, el: 0, az: endAz }
@@ -1133,7 +1133,7 @@
                 ctx.lineCap = 'round';
                 ctx.lineJoin = 'round';
                 ctx.beginPath();
-                for (var j = 0; j < allPoints.length; j++) {
+                for (let j = 0; j < allPoints.length; j++) {
                     if (j === 0) { ctx.moveTo(allPoints[j].x, allPoints[j].y); }
                     else { ctx.lineTo(allPoints[j].x, allPoints[j].y); }
                 }
@@ -1143,7 +1143,7 @@
                 this._drawTrackArrows(innerPoints, visibleTrack, this.colors.selectedTrack);
 
                 // Маркеры AOS/LOS на окружности горизонта.
-                var markerRadius = 5;
+                const markerRadius = 5;
                 ctx.beginPath();
                 ctx.arc(aosEdge.x, aosEdge.y, markerRadius, 0, Math.PI * 2);
                 ctx.fillStyle = this.colors.aosMarker;
@@ -1161,14 +1161,14 @@
 
         // Маркер — такой же значок, как у сопровождаемого, другим цветом и без анимации.
         if (sel.currentPos && sel.currentPos.el > 0) {
-            var mp = this.azElToXY(sel.currentPos.az, sel.currentPos.el);
+            const mp = this.azElToXY(sel.currentPos.az, sel.currentPos.el);
             this._drawSatelliteIconStatic(ctx, mp.x, mp.y, this.colors.selectedMarker);
 
             ctx.lineJoin = 'round';
             ctx.miterLimit = 2;
 
             if (sel.name) {
-                var nameLabel = _shortName(sel.name);
+                const nameLabel = _shortName(sel.name);
                 ctx.font = 'bold 11px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'bottom';
@@ -1179,7 +1179,7 @@
                 ctx.fillText(nameLabel, mp.x, mp.y - 12);
             }
 
-            var azelLabel = '[' + sel.currentPos.az.toFixed(1) + '\u00b0/' + sel.currentPos.el.toFixed(1) + '\u00b0]';
+            const azelLabel = '[' + sel.currentPos.az.toFixed(1) + '\u00b0/' + sel.currentPos.el.toFixed(1) + '\u00b0]';
             ctx.font = 'bold 11px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
@@ -1199,15 +1199,15 @@
      */
     SkyView.prototype.setSecondaryPositions = function(satArray) {
         if (!satArray) { return; }
-        var newMap = {};
-        for (var i = 0; i < satArray.length; i++) {
-            var s = satArray[i];
+        const newMap = {};
+        for (let i = 0; i < satArray.length; i++) {
+            const s = satArray[i];
             if (!s || !s.noradId) { continue; }
-            var existing = this._secondarySatellites[s.noradId] || {};
+            const existing = this._secondarySatellites[s.noradId] || {};
             newMap[s.noradId] = {
                 noradId: s.noradId,
                 name: s.name || existing.name || '',
-                currentPos: (s.az != null && s.el != null) ? { az: s.az, el: s.el } : existing.currentPos || null,
+                currentPos: (s.az !== null && s.el !== null) ? { az: s.az, el: s.el } : existing.currentPos || null,
                 track: existing.track || null,
                 isVisible: s.isVisible !== undefined ? s.isVisible : true
             };
@@ -1239,13 +1239,13 @@
      * @private
      */
     SkyView.prototype._drawSecondaryLayer = function() {
-        var ids = Object.keys(this._secondarySatellites);
-        var sm = window._stateManager;
-        for (var i = 0; i < ids.length; i++) {
-            var sat = this._secondarySatellites[ids[i]];
-            var nid = parseInt(ids[i], 10);
-            var markerColor = sm ? sm.getMarkerColor(nid) : null;
-            var trackColor = sm ? sm.getTrackColor(nid) : null;
+        const ids = Object.keys(this._secondarySatellites);
+        const sm = window._stateManager;
+        for (let i = 0; i < ids.length; i++) {
+            const sat = this._secondarySatellites[ids[i]];
+            const nid = parseInt(ids[i], 10);
+            const markerColor = sm ? sm.getMarkerColor(nid) : null;
+            const trackColor = sm ? sm.getTrackColor(nid) : null;
             if (sat.track && sat.track.length > 0) {
                 this._drawSecondaryTrack(sat, trackColor);
             }
@@ -1260,8 +1260,8 @@
      * @private
      */
     SkyView.prototype._drawSecondaryTrack = function(sat, paletteColor) {
-        var ctx = this.ctx;
-        var track = sat.track;
+        const ctx = this.ctx;
+        const track = sat.track;
         if (!track || track.length < 2) { return; }
 
         ctx.strokeStyle = paletteColor || 'rgba(160, 160, 160, 0.85)';
@@ -1269,11 +1269,11 @@
         ctx.setLineDash([4, 3]);
         ctx.beginPath();
 
-        var started = false;
-        for (var i = 0; i < track.length; i++) {
-            var pt = track[i];
+        let started = false;
+        for (let i = 0; i < track.length; i++) {
+            const pt = track[i];
             if (pt.el < 0) { started = false; continue; }
-            var xy = this.azElToXY(pt.az, pt.el);
+            const xy = this.azElToXY(pt.az, pt.el);
             if (!started) {
                 ctx.moveTo(xy.x, xy.y);
                 started = true;
@@ -1290,12 +1290,12 @@
      * @private
      */
     SkyView.prototype._drawSecondaryMarker = function(sat, paletteColor) {
-        var ctx = this.ctx;
-        var pos = sat.currentPos;
+        const ctx = this.ctx;
+        const pos = sat.currentPos;
         if (!pos || pos.el < 0) { return; }
 
-        var xy = this.azElToXY(pos.az, pos.el);
-        var r = 4;
+        const xy = this.azElToXY(pos.az, pos.el);
+        const r = 4;
 
         ctx.beginPath();
         ctx.arc(xy.x, xy.y, r, 0, Math.PI * 2);

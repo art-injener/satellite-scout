@@ -122,7 +122,7 @@ class PassesTable {
                         <th>TCA</th>
                         <th>LOS</th>
                         <th>Длит.</th>
-                        <th>До сеанса</th>
+                        <th>До AOS</th>
                         <th>Траектория</th>
                     </tr>
                 </thead>

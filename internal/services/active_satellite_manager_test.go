@@ -90,8 +90,8 @@ func TestFindConcurrentPasses_ExpiredPass(t *testing.T) {
 func TestFindConcurrentPasses_SortedByAOS(t *testing.T) {
 	now := time.Now().UTC()
 	passes := []*tracker.Pass{
-		makePass(5, "SAT-E", 4*time.Minute, 9*time.Minute),  // AOS позже
-		makePass(6, "SAT-F", 1*time.Minute, 6*time.Minute),  // AOS раньше
+		makePass(5, "SAT-E", 4*time.Minute, 9*time.Minute), // AOS позже
+		makePass(6, "SAT-F", 1*time.Minute, 6*time.Minute), // AOS раньше
 		makePass(7, "SAT-G", 2*time.Minute, 7*time.Minute),
 	}
 	result := FindConcurrentPasses(passes, now, 5*time.Minute)
@@ -109,9 +109,9 @@ func TestFindConcurrentPasses_SortedByAOS(t *testing.T) {
 func TestFindConcurrentPasses_MultipleInWindow(t *testing.T) {
 	now := time.Now().UTC()
 	passes := []*tracker.Pass{
-		makePass(10, "SAT-A", -1*time.Minute, 5*time.Minute),  // активный
-		makePass(11, "SAT-B", 2*time.Minute, 7*time.Minute),   // предстоящий в окне
-		makePass(12, "SAT-C", 6*time.Minute, 11*time.Minute),  // вне окна
+		makePass(10, "SAT-A", -1*time.Minute, 5*time.Minute), // активный
+		makePass(11, "SAT-B", 2*time.Minute, 7*time.Minute),  // предстоящий в окне
+		makePass(12, "SAT-C", 6*time.Minute, 11*time.Minute), // вне окна
 	}
 	result := FindConcurrentPasses(passes, now, 5*time.Minute)
 	if len(result) != 2 {
@@ -212,8 +212,16 @@ func TestSelectPrimary_FallbackMaxRemainingWhenNoneVisible(t *testing.T) {
 	now := time.Now().UTC()
 	// Нет видимых → максимальное оставшееся время до LOS.
 	sats := []PassInfo{
-		{NoradID: 5, IsVisible: false, Pass: tracker.Pass{AOS: msFromNow(1 * time.Minute), LOS: msFromNow(3 * time.Minute)}},
-		{NoradID: 6, IsVisible: false, Pass: tracker.Pass{AOS: msFromNow(2 * time.Minute), LOS: msFromNow(12 * time.Minute)}},
+		{
+			NoradID:   5,
+			IsVisible: false,
+			Pass:      tracker.Pass{AOS: msFromNow(1 * time.Minute), LOS: msFromNow(3 * time.Minute)},
+		},
+		{
+			NoradID:   6,
+			IsVisible: false,
+			Pass:      tracker.Pass{AOS: msFromNow(2 * time.Minute), LOS: msFromNow(12 * time.Minute)},
+		},
 	}
 	id := SelectPrimarySatellite(sats, nil, now)
 	if id != 6 {
@@ -436,7 +444,11 @@ func TestShouldSwitch_SwitchAfterLOSEvenToSameNorad(t *testing.T) {
 			NoradID:      10,
 			IsVisible:    false,
 			IsSubstitute: true,
-			Pass:         tracker.Pass{AOS: msFromNow(80 * time.Minute), LOS: msFromNow(90 * time.Minute), Duration: 600},
+			Pass: tracker.Pass{
+				AOS:      msFromNow(80 * time.Minute),
+				LOS:      msFromNow(90 * time.Minute),
+				Duration: 600,
+			},
 		},
 	}
 	sw, newID := ShouldSwitchPrimary(10, sats, now)
@@ -483,10 +495,10 @@ func TestGroupEntries_VisibilityTransition(t *testing.T) {
 	old := []GroupEntry{
 		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
 	}
-	new := []GroupEntry{
+	updated := []GroupEntry{
 		{NoradID: 10, IsVisible: false, AOS: 1000, LOS: 2000},
 	}
-	if !GroupEntriesChanged(old, new) {
+	if !GroupEntriesChanged(old, updated) {
 		t.Error("visibility transition (true→false) must be detected as change")
 	}
 }
@@ -496,10 +508,10 @@ func TestGroupEntries_SameNoradDifferentPass(t *testing.T) {
 	old := []GroupEntry{
 		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
 	}
-	new := []GroupEntry{
+	updated := []GroupEntry{
 		{NoradID: 10, IsVisible: false, AOS: 100000, LOS: 200000},
 	}
-	if !GroupEntriesChanged(old, new) {
+	if !GroupEntriesChanged(old, updated) {
 		t.Error("same NORAD with different pass (AOS/LOS) must be detected as change")
 	}
 }
@@ -508,11 +520,11 @@ func TestGroupEntries_DifferentSize(t *testing.T) {
 	old := []GroupEntry{
 		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
 	}
-	new := []GroupEntry{
+	updated := []GroupEntry{
 		{NoradID: 10, IsVisible: true, AOS: 1000, LOS: 2000},
 		{NoradID: 20, IsVisible: false, AOS: 3000, LOS: 4000},
 	}
-	if !GroupEntriesChanged(old, new) {
+	if !GroupEntriesChanged(old, updated) {
 		t.Error("different group size must be detected as change")
 	}
 }
@@ -545,7 +557,11 @@ func TestShouldSwitch_SubstituteFuturePassSameNorad(t *testing.T) {
 			NoradID:      10,
 			IsVisible:    false,
 			IsSubstitute: true,
-			Pass:         tracker.Pass{AOS: msFromNow(80 * time.Minute), LOS: msFromNow(90 * time.Minute), Duration: 600},
+			Pass: tracker.Pass{
+				AOS:      msFromNow(80 * time.Minute),
+				LOS:      msFromNow(90 * time.Minute),
+				Duration: 600,
+			},
 		},
 	}
 	sw, _ := ShouldSwitchPrimary(10, sats, now)

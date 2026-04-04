@@ -11,20 +11,20 @@
     // Горячая палитра: 0→чёрный → синий → зелёный → жёлтый → красный → белый
     function hotColor(v) {
         v = Math.max(0, Math.min(1, v));
-        var r, g, b;
+        let r, g, b;
         if (v < 0.2) {
             r = 0; g = 0; b = Math.round(v / 0.2 * 180);
         } else if (v < 0.4) {
-            var t1 = (v - 0.2) / 0.2;
+            const t1 = (v - 0.2) / 0.2;
             r = 0; g = Math.round(t1 * 255); b = Math.round((1 - t1) * 180);
         } else if (v < 0.6) {
-            var t2 = (v - 0.4) / 0.2;
+            const t2 = (v - 0.4) / 0.2;
             r = Math.round(t2 * 255); g = 255; b = 0;
         } else if (v < 0.8) {
-            var t3 = (v - 0.6) / 0.2;
+            const t3 = (v - 0.6) / 0.2;
             r = 255; g = Math.round((1 - t3) * 255); b = 0;
         } else {
-            var t4 = (v - 0.8) / 0.2;
+            const t4 = (v - 0.8) / 0.2;
             r = 255; g = Math.round(t4 * 255); b = Math.round(t4 * 255);
         }
         return [r, g, b];
@@ -39,10 +39,10 @@
      */
     function calcFreqScaleStep(spanMHz, widthPx, minSpacingPx) {
         minSpacingPx = minSpacingPx || 52;
-        var maxTicks = Math.max(2, Math.floor(widthPx / minSpacingPx));
-        var idealStep = spanMHz / maxTicks;
-        var niceSteps = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2];
-        for (var i = 0; i < niceSteps.length; i++) {
+        const maxTicks = Math.max(2, Math.floor(widthPx / minSpacingPx));
+        const idealStep = spanMHz / maxTicks;
+        const niceSteps = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2];
+        for (let i = 0; i < niceSteps.length; i++) {
             if (niceSteps[i] >= idealStep) { return niceSteps[i]; }
         }
         return niceSteps[niceSteps.length - 1];
@@ -51,7 +51,7 @@
     // Чтение CSS-переменной из :root с запасным значением
     function cssVar(name, fallback) {
         try {
-            var v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+            const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
             return v || fallback;
         } catch (e) { return fallback; }
     }
@@ -64,26 +64,74 @@
         opts = opts || {};
         this._bins = opts.bins || 512;
         this._buf = new Float32Array(this._bins);
-        this._phase = 0;
         this.freqCenterMHz = opts.freqCenterMHz || 437.365;
         this.freqSpanMHz = opts.freqSpanMHz || 0.192;
+
+        // Имитация доплеровского сдвига LEO-пролёта
+        this._passDurationTicks = opts.passDurationTicks || 600;
+        this._gapTicks = opts.gapTicks || 150;
+        this._tick = 0;
+        this._inPass = true;
+
+        // Макс. доплеровский сдвиг ±maxShift (в долях полосы, ~±8 кГц при 192 кГц)
+        this._maxShift = opts.maxShift || 0.042;
+        // Крутизна S-кривой: чем больше, тем резче переход у TCA
+        this._slopeK = opts.slopeK || 6.0;
     }
 
-    // Заполняет буфер: шумовой пол (0.04–0.10) + гауссов пик с дрейфом (Допплер)
+    // Доплеровская S-кривая: f(t) = -maxShift * (2/π) * atan(k * (t - 0.5))
+    // t ∈ [0, 1] — прогресс пролёта (0 = AOS, 0.5 = TCA, 1 = LOS)
+    SpectrumDataSource.prototype._dopplerOffset = function(t) {
+        return -this._maxShift * (2 / Math.PI) * Math.atan(this._slopeK * (t - 0.5));
+    };
+
+    // Амплитуда сигнала по колоколу: максимум в TCA, затухание к AOS/LOS
+    SpectrumDataSource.prototype._signalAmplitude = function(t) {
+        var d = (t - 0.5) / 0.35;
+        return 0.75 * Math.exp(-0.5 * d * d);
+    };
+
+    // Заполняет буфер: шумовой пол + гауссов пик с доплеровским сдвигом
     SpectrumDataSource.prototype.generateLine = function() {
-        this._phase += 0.015;
         var bins = this._bins;
         var buf = this._buf;
-        var signalCenter = 0.5 + 0.06 * Math.sin(this._phase);
-        var signalWidth = 0.03;
+
+        if (!this._inPass) {
+            for (var n = 0; n < bins; n++) {
+                buf[n] = 0.04 + Math.random() * 0.06;
+            }
+            this._tick++;
+            if (this._tick >= this._gapTicks) {
+                this._tick = 0;
+                this._inPass = true;
+            }
+            return;
+        }
+
+        var t = this._tick / this._passDurationTicks;
+        var signalCenter = 0.5 + this._dopplerOffset(t);
+        var amplitude = this._signalAmplitude(t);
+        var signalWidth = 0.025 + 0.008 * (1 - amplitude);
 
         for (var i = 0; i < bins; i++) {
             var fx = i / bins;
             var noise = 0.04 + Math.random() * 0.06;
             var dist = (fx - signalCenter) / signalWidth;
-            var signal = 0.75 * Math.exp(-0.5 * dist * dist) * (0.85 + Math.random() * 0.3);
+            var signal = amplitude * Math.exp(-0.5 * dist * dist) * (0.85 + Math.random() * 0.3);
             buf[i] = noise + signal;
         }
+
+        this._tick++;
+        if (this._tick >= this._passDurationTicks) {
+            this._tick = 0;
+            this._inPass = false;
+        }
+    };
+
+    // Сброс имитации пролёта (при переключении спутника)
+    SpectrumDataSource.prototype.reset = function() {
+        this._tick = 0;
+        this._inPass = true;
     };
 
     // Полная строка (все bins)
@@ -93,11 +141,11 @@
 
     // Срез вокруг centerBin шириной widthBins (для узкополосного водопада «Сопровождение»)
     SpectrumDataSource.prototype.getSlice = function(centerBin, widthBins) {
-        var half = Math.floor(widthBins / 2);
-        var start = centerBin - half;
-        var out = new Float32Array(widthBins);
-        for (var i = 0; i < widthBins; i++) {
-            var srcIdx = start + i;
+        const half = Math.floor(widthBins / 2);
+        const start = centerBin - half;
+        const out = new Float32Array(widthBins);
+        for (let i = 0; i < widthBins; i++) {
+            const srcIdx = start + i;
             if (srcIdx >= 0 && srcIdx < this._bins) {
                 out[i] = this._buf[srcIdx];
             } else {
@@ -128,9 +176,9 @@
 
     // Подгонка размеров canvas под контейнер
     WaterfallView.prototype._resize = function() {
-        var rect = this._canvas.getBoundingClientRect();
-        var w = Math.floor(rect.width);
-        var h = Math.floor(rect.height);
+        const rect = this._canvas.getBoundingClientRect();
+        let w = Math.floor(rect.width);
+        let h = Math.floor(rect.height);
         if (w < 10) { w = this._canvas.offsetWidth || 300; }
         if (h < 10) { h = this._canvas.offsetHeight || 150; }
         if (w >= 10) { this._drawFreqScale(w); }
@@ -144,22 +192,22 @@
 
     // Шкала частот на отдельном canvas (над водопадом «Сопровождение»)
     WaterfallView.prototype._drawFreqScale = function(width) {
-        var sc = this._scaleCanvas;
+        const sc = this._scaleCanvas;
         if (!sc || !width) { return; }
-        var ctx = sc.getContext('2d');
-        var ml = this._marginLeft;
-        var mr = this._marginRight;
-        var plotW = width - ml - mr;
+        const ctx = sc.getContext('2d');
+        let ml = this._marginLeft;
+        let mr = this._marginRight;
+        let plotW = width - ml - mr;
         if (plotW < 10) { plotW = width; ml = 0; mr = 0; }
-        var freqMin = this._freqCenterMHz - this._freqSpanMHz / 2;
-        var freqMax = this._freqCenterMHz + this._freqSpanMHz / 2;
-        var stepMHz = calcFreqScaleStep(this._freqSpanMHz, plotW, 52);
+        const freqMin = this._freqCenterMHz - this._freqSpanMHz / 2;
+        const freqMax = this._freqCenterMHz + this._freqSpanMHz / 2;
+        const stepMHz = calcFreqScaleStep(this._freqSpanMHz, plotW, 52);
         if (sc.width !== width || sc.height !== 18) {
             sc.width = width;
             sc.height = 18;
         }
-        var bg = cssVar('--bg-tertiary', '#1a1e24');
-        var fg = cssVar('--text-muted', '#8a9199');
+        const bg = cssVar('--bg-tertiary', '#1a1e24');
+        const fg = cssVar('--text-muted', '#8a9199');
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, width, 18);
         ctx.strokeStyle = fg;
@@ -167,9 +215,9 @@
         ctx.font = '10px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        var decimals = stepMHz >= 1 ? 1 : (stepMHz >= 0.1 ? 2 : 3);
-        for (var f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
-            var x = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
+        const decimals = stepMHz >= 1 ? 1 : (stepMHz >= 0.1 ? 2 : 3);
+        for (let f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
+            const x = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, 6);
@@ -177,13 +225,13 @@
             ctx.fillText(f.toFixed(decimals), x, 8);
         }
         if (this._headerFreqId) {
-            var el = document.getElementById(this._headerFreqId);
+            const el = document.getElementById(this._headerFreqId);
             if (el) { el.textContent = freqMin.toFixed(3) + ' \u2013 ' + freqMax.toFixed(3) + ' MHz'; }
         }
         if (this._headerResId && width > 0) {
-            var resEl = document.getElementById(this._headerResId);
+            const resEl = document.getElementById(this._headerResId);
             if (resEl) {
-                var resHz = Math.round(this._freqSpanMHz * 1e6 / width);
+                const resHz = Math.round(this._freqSpanMHz * 1e6 / width);
                 resEl.textContent = resHz + ' Hz/pix';
             }
         }
@@ -192,35 +240,35 @@
     // Добавить строку спектра (Float32Array) в верх водопада со сдвигом вниз
     WaterfallView.prototype.pushLine = function(buf) {
         this._resize();
-        var w = this._canvas.width;
-        var h = this._canvas.height;
+        const w = this._canvas.width;
+        const h = this._canvas.height;
         if (w < 2 || h < 2) { return; }
 
         if (!this._imageData || this._imageData.width !== w || this._imageData.height !== h) {
             this._imageData = this._ctx.createImageData(w, h);
-            var d = this._imageData.data;
-            for (var j = 3; j < d.length; j += 4) { d[j] = 255; }
+            const d = this._imageData.data;
+            for (let j = 3; j < d.length; j += 4) { d[j] = 255; }
         }
 
-        var data = this._imageData.data;
+        const data = this._imageData.data;
         // Прокрутка вниз на 1 строку
         data.copyWithin(w * 4, 0, (h - 1) * w * 4);
 
-        var ml = this._marginLeft;
-        var mr = this._marginRight;
-        var plotW = w - ml - mr;
+        let ml = this._marginLeft;
+        let mr = this._marginRight;
+        let plotW = w - ml - mr;
         if (plotW < 2) { plotW = w; ml = 0; mr = 0; }
 
         // Область отступов — чёрный фон (rgba 0,0,0,255)
-        var bins = buf.length;
-        for (var x = 0; x < w; x++) {
-            var idx = x * 4;
+        const bins = buf.length;
+        for (let x = 0; x < w; x++) {
+            const idx = x * 4;
             if (x < ml || x >= w - mr) {
                 data[idx] = 0; data[idx + 1] = 0; data[idx + 2] = 0; data[idx + 3] = 255;
             } else {
-                var srcIdx = Math.min(Math.floor(((x - ml) / plotW) * bins), bins - 1);
-                var col = hotColor(buf[srcIdx]);
-                data[idx]     = col[0];
+                const srcIdx = Math.min(Math.floor(((x - ml) / plotW) * bins), bins - 1);
+                const col = hotColor(buf[srcIdx]);
+                data[idx] = col[0];
                 data[idx + 1] = col[1];
                 data[idx + 2] = col[2];
                 data[idx + 3] = 255;
@@ -233,20 +281,19 @@
 
     // Шкала времени слева от водопада: верх = 0s (сейчас), низ = самая старая строка
     WaterfallView.prototype._drawTimeAxis = function() {
-        var ctx = this._ctx;
-        var w = this._canvas.width;
-        var h = this._canvas.height;
-        var ml = this._marginLeft;
-        var tickMs = this._tickMs || 80;
-        var totalSec = (h * tickMs) / 1000;
+        const ctx = this._ctx;
+        const h = this._canvas.height;
+        const ml = this._marginLeft;
+        const tickMs = this._tickMs || 80;
+        const totalSec = (h * tickMs) / 1000;
 
         // Фон шкалы
         ctx.fillStyle = cssVar('--bg-primary', '#0d1117');
         ctx.fillRect(0, 0, ml, h);
 
         // Подбор шага (2, 5 или 10 секунд)
-        var stepSec = totalSec <= 10 ? 2 : (totalSec <= 30 ? 5 : 10);
-        var fg = cssVar('--text-muted', '#8a9199');
+        const stepSec = totalSec <= 10 ? 2 : (totalSec <= 30 ? 5 : 10);
+        const fg = cssVar('--text-muted', '#8a9199');
         ctx.font = '9px monospace';
         ctx.fillStyle = fg;
         ctx.strokeStyle = fg;
@@ -254,8 +301,8 @@
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
 
-        for (var t = 0; t <= totalSec; t += stepSec) {
-            var y = (t / totalSec) * h;
+        for (let t = 0; t <= totalSec; t += stepSec) {
+            let y = (t / totalSec) * h;
             if (y < 6) { y = 6; }
             if (y > h - 4) { y = h - 4; }
             ctx.beginPath();
@@ -267,18 +314,18 @@
     };
 
     WaterfallView.prototype.start = function() { this._running = true; };
-    WaterfallView.prototype.stop  = function() { this._running = false; };
+    WaterfallView.prototype.stop = function() { this._running = false; };
 
     // Очистка: чёрный экран
     WaterfallView.prototype.clear = function() {
         this._running = false;
         this._resize();
-        var w = this._canvas.width;
-        var h = this._canvas.height;
+        const w = this._canvas.width;
+        const h = this._canvas.height;
         if (w < 2 || h < 2) { return; }
         this._imageData = this._ctx.createImageData(w, h);
-        var d = this._imageData.data;
-        for (var i = 3; i < d.length; i += 4) { d[i] = 255; }
+        const d = this._imageData.data;
+        for (let i = 3; i < d.length; i += 4) { d[i] = 255; }
         this._ctx.putImageData(this._imageData, 0, 0);
     };
 
@@ -311,9 +358,9 @@
 
     // Подгонка canvas под контейнер
     FFTSpectrumView.prototype._resize = function() {
-        var rect = this._canvas.getBoundingClientRect();
-        var w = Math.floor(rect.width) || this._canvas.offsetWidth || 300;
-        var h = Math.floor(rect.height) || this._canvas.offsetHeight || 150;
+        const rect = this._canvas.getBoundingClientRect();
+        const w = Math.floor(rect.width) || this._canvas.offsetWidth || 300;
+        const h = Math.floor(rect.height) || this._canvas.offsetHeight || 150;
         if (w < 2 || h < 2) { return; }
         if (this._canvas.width !== w || this._canvas.height !== h) {
             this._canvas.width = w;
@@ -324,23 +371,23 @@
     // Полная перерисовка: сетка dB, ось Y, линия спектра, перекрестье на пике
     FFTSpectrumView.prototype.draw = function(buf) {
         this._resize();
-        var w = this._canvas.width;
-        var h = this._canvas.height;
+        const w = this._canvas.width;
+        const h = this._canvas.height;
         if (w < 20 || h < 20) { return; }
 
-        var ctx = this._ctx;
-        var ml = this._marginLeft;
-        var mr = this._marginRight;
-        var mt = this._marginTop;
-        var mb = this._marginBottom;
-        var plotW = w - ml - mr;
-        var plotH = h - mt - mb;
+        const ctx = this._ctx;
+        const ml = this._marginLeft;
+        const mr = this._marginRight;
+        const mt = this._marginTop;
+        const mb = this._marginBottom;
+        const plotW = w - ml - mr;
+        const plotH = h - mt - mb;
         if (plotW < 4 || plotH < 4) { return; }
 
-        var borderClr = cssVar('--border-color', '#2a3444');
-        var textMuted = cssVar('--text-muted', '#8a9199');
-        var dbRange = this._dbMax - this._dbMin;
-        var dbStep = dbRange <= 60 ? 10 : 20;
+        const borderClr = cssVar('--border-color', '#2a3444');
+        const textMuted = cssVar('--text-muted', '#8a9199');
+        const dbRange = this._dbMax - this._dbMin;
+        const dbStep = dbRange <= 60 ? 10 : 20;
 
         ctx.clearRect(0, 0, w, h);
 
@@ -352,8 +399,8 @@
         ctx.lineWidth = 1;
 
         // Горизонтальные линии (dB) — на всю ширину canvas
-        for (var db = this._dbMin + dbStep; db < this._dbMax; db += dbStep) {
-            var yGrid = mt + plotH * (1 - (db - this._dbMin) / dbRange);
+        for (let db = this._dbMin + dbStep; db < this._dbMax; db += dbStep) {
+            const yGrid = mt + plotH * (1 - (db - this._dbMin) / dbRange);
             ctx.beginPath();
             ctx.moveTo(0, yGrid);
             ctx.lineTo(w, yGrid);
@@ -361,11 +408,11 @@
         }
 
         // Вертикальные линии (частота) — на всю высоту canvas
-        var freqMin = this.freqCenterMHz - this.freqSpanMHz / 2;
-        var freqMax = this.freqCenterMHz + this.freqSpanMHz / 2;
-        var stepMHz = calcFreqScaleStep(this.freqSpanMHz, plotW, 52);
-        for (var f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
-            var xGrid = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
+        const freqMin = this.freqCenterMHz - this.freqSpanMHz / 2;
+        const freqMax = this.freqCenterMHz + this.freqSpanMHz / 2;
+        const stepMHz = calcFreqScaleStep(this.freqSpanMHz, plotW, 52);
+        for (let f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
+            const xGrid = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
             ctx.beginPath();
             ctx.moveTo(xGrid, 0);
             ctx.lineTo(xGrid, h);
@@ -379,26 +426,26 @@
         ctx.fillStyle = textMuted;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
-        for (var dbL = this._dbMin; dbL <= this._dbMax; dbL += dbStep) {
-            var yLabel = mt + plotH * (1 - (dbL - this._dbMin) / dbRange);
-            ctx.fillText(dbL + '', ml - 4, yLabel);
+        for (let dbL = this._dbMin; dbL <= this._dbMax; dbL += dbStep) {
+            const yLabel = mt + plotH * (1 - (dbL - this._dbMin) / dbRange);
+            ctx.fillText(String(dbL), ml - 4, yLabel);
         }
         ctx.restore();
 
         // ── Линия спектра ──
-        var bins = buf.length;
-        var peakIdx = 0;
-        var peakVal = buf[0];
-        for (var bi = 1; bi < bins; bi++) {
+        const bins = buf.length;
+        let peakIdx = 0;
+        let peakVal = buf[0];
+        for (let bi = 1; bi < bins; bi++) {
             if (buf[bi] > peakVal) { peakVal = buf[bi]; peakIdx = bi; }
         }
 
         ctx.save();
         ctx.beginPath();
-        for (var bp = 0; bp < bins; bp++) {
-            var xPt = ml + (bp / (bins - 1)) * plotW;
-            var vv = Math.max(0, Math.min(1, buf[bp]));
-            var yPt = mt + plotH * (1 - vv);
+        for (let bp = 0; bp < bins; bp++) {
+            const xPt = ml + (bp / (bins - 1)) * plotW;
+            const vv = Math.max(0, Math.min(1, buf[bp]));
+            const yPt = mt + plotH * (1 - vv);
             if (bp === 0) { ctx.moveTo(xPt, yPt); } else { ctx.lineTo(xPt, yPt); }
         }
         ctx.strokeStyle = '#00ff80';
@@ -407,11 +454,11 @@
         ctx.restore();
 
         // ── Перекрестье на пике ──
-        var peakX = ml + (peakIdx / (bins - 1)) * plotW;
-        var peakV = Math.max(0, Math.min(1, peakVal));
-        var peakY = mt + plotH * (1 - peakV);
-        var peakDb = this._dbMin + peakV * dbRange;
-        var peakFreq = freqMin + (peakIdx / bins) * (freqMax - freqMin);
+        const peakX = ml + (peakIdx / (bins - 1)) * plotW;
+        const peakV = Math.max(0, Math.min(1, peakVal));
+        const peakY = mt + plotH * (1 - peakV);
+        const peakDb = this._dbMin + peakV * dbRange;
+        const peakFreq = freqMin + (peakIdx / bins) * (freqMax - freqMin);
 
         ctx.save();
         ctx.setLineDash([4, 4]);
@@ -457,29 +504,29 @@
     // Шкала с засечками вверх (к FFT) и вниз (к водопаду), метки по центру
     function drawOverviewFreqScale(canvas, freqCenterMHz, freqSpanMHz, marginLeft) {
         if (!canvas) { return; }
-        var parent = canvas.parentElement;
-        var totalW = parent ? Math.floor(parent.getBoundingClientRect().width) : 0;
+        const parent = canvas.parentElement;
+        let totalW = parent ? Math.floor(parent.getBoundingClientRect().width) : 0;
         if (totalW < 10) { totalW = canvas.offsetWidth || 0; }
         if (totalW < 10) { return; }
         if (canvas.width !== totalW || canvas.height !== 18) {
             canvas.width = totalW;
             canvas.height = 18;
         }
-        var ctx = canvas.getContext('2d');
-        var bg = cssVar('--bg-tertiary', '#1a1e24');
-        var fg = cssVar('--text-muted', '#8a9199');
+        const ctx = canvas.getContext('2d');
+        const bg = cssVar('--bg-tertiary', '#1a1e24');
+        const fg = cssVar('--text-muted', '#8a9199');
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, totalW, 18);
 
-        var ml = marginLeft || 0;
-        var mr = 4;
-        var plotW = totalW - ml - mr;
+        const ml = marginLeft || 0;
+        const mr = 4;
+        const plotW = totalW - ml - mr;
         if (plotW < 10) { return; }
 
-        var freqMin = freqCenterMHz - freqSpanMHz / 2;
-        var freqMax = freqCenterMHz + freqSpanMHz / 2;
-        var stepMHz = calcFreqScaleStep(freqSpanMHz, plotW, 52);
-        var decimals = stepMHz >= 1 ? 1 : (stepMHz >= 0.1 ? 2 : 3);
+        const freqMin = freqCenterMHz - freqSpanMHz / 2;
+        const freqMax = freqCenterMHz + freqSpanMHz / 2;
+        const stepMHz = calcFreqScaleStep(freqSpanMHz, plotW, 52);
+        const decimals = stepMHz >= 1 ? 1 : (stepMHz >= 0.1 ? 2 : 3);
 
         ctx.strokeStyle = fg;
         ctx.fillStyle = fg;
@@ -487,8 +534,8 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
-        for (var f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
-            var x = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
+        for (let f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
+            const x = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
             // Засечка вверх (к FFT)
             ctx.beginPath();
             ctx.moveTo(x, 0);
@@ -509,23 +556,23 @@
     // ════════════════════════════════════════════════════════════════════════
 
     // Миграция старых ключей вкладок (UX-BOTTOM-RENAME-001)
-    var LEGACY_BOTTOM_TAB = { spectrum: 'overview', antenna: 'follow' };
+    const LEGACY_BOTTOM_TAB = { spectrum: 'overview', antenna: 'follow' };
 
     function migrateBottomTabFromStorage() {
-        var raw = localStorage.getItem('ux.bottomTab');
+        const raw = localStorage.getItem('ux.bottomTab');
         if (!raw) { return 'overview'; }
-        var next = LEGACY_BOTTOM_TAB[raw] || raw;
+        const next = LEGACY_BOTTOM_TAB[raw] || raw;
         if (next !== raw) {
             try { localStorage.setItem('ux.bottomTab', next); } catch (e) { /* ignore */ }
         }
         return next;
     }
 
-    var TAB_LABELS = { follow: 'Сопровождение', overview: 'Обзор', tmi: 'ТМИ' };
+    const TAB_LABELS = { follow: 'Сопровождение', overview: 'Обзор', tmi: 'ТМИ' };
 
     // Центральный bin и ширина среза для узкополосного водопада «Сопровождение»
-    var FOLLOW_CENTER_BIN = 256;
-    var FOLLOW_NARROW_BINS = 128;
+    const FOLLOW_CENTER_BIN = 256;
+    const FOLLOW_NARROW_BINS = 128;
 
     function BottomPanel() {
         this._panes = {};
@@ -561,18 +608,18 @@
 
     // Собираем ссылки на pane-контейнеры
     BottomPanel.prototype._collectPanes = function() {
-        var els = document.querySelectorAll('.bp-pane');
-        for (var i = 0; i < els.length; i++) {
-            var id = els[i].id.replace('bp-pane-', '');
+        const els = document.querySelectorAll('.bp-pane');
+        for (let i = 0; i < els.length; i++) {
+            const id = els[i].id.replace('bp-pane-', '');
             this._panes[id] = els[i];
         }
     };
 
     // Привязываем клики по кнопкам аккордеона в sidebar (Обзор / Сопровождение / ТМИ)
     BottomPanel.prototype._initTabs = function() {
-        var self = this;
-        var tabs = document.querySelectorAll('.sidebar-accordion__btn');
-        for (var i = 0; i < tabs.length; i++) {
+        const self = this;
+        const tabs = document.querySelectorAll('.sidebar-accordion__btn');
+        for (let i = 0; i < tabs.length; i++) {
             (function(tab) {
                 tab.addEventListener('click', function() {
                     self._switchTab(tab.getAttribute('data-tab'), true);
@@ -583,17 +630,17 @@
 
     // Переключение активной вкладки
     BottomPanel.prototype._switchTab = function(name, save) {
-        var tabs = document.querySelectorAll('.sidebar-accordion__btn');
-        for (var i = 0; i < tabs.length; i++) {
+        const tabs = document.querySelectorAll('.sidebar-accordion__btn');
+        for (let i = 0; i < tabs.length; i++) {
             tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tab') === name);
         }
-        for (var key in this._panes) {
+        for (const key in this._panes) {
             this._panes[key].classList.toggle('bp-pane--hidden', key !== name);
         }
         // Подпись в заголовке — столбиком (по одной букве)
-        var modeEl = document.getElementById('bottom-panel-mode');
+        const modeEl = document.getElementById('bottom-panel-mode');
         if (modeEl) {
-            var label = TAB_LABELS[name] || name;
+            const label = TAB_LABELS[name] || name;
             modeEl.innerHTML = label.split('').map(function(c) {
                 return '<span>' + (c === ' ' ? '\u00A0' : c) + '</span>';
             }).join('');
@@ -604,7 +651,7 @@
             try { localStorage.setItem('ux.bottomTab', name); } catch (e) { /* ignore */ }
         }
         // Отложенное обновление размеров видимых компонентов
-        var self = this;
+        const self = this;
         requestAnimationFrame(function() {
             requestAnimationFrame(function() {
                 self._refreshCurrentTab();
@@ -631,11 +678,11 @@
             freqSpanMHz: 0.192
         });
 
-        var ds = this._dataSource;
+        const ds = this._dataSource;
 
         // Водопад «Сопровождение»
-        var followCanvas = document.getElementById('waterfall-compact');
-        var followScale = document.getElementById('waterfall-freq-scale');
+        const followCanvas = document.getElementById('waterfall-compact');
+        const followScale = document.getElementById('waterfall-freq-scale');
         if (followCanvas) {
             this._followWF = new WaterfallView(followCanvas, followScale, {
                 freqCenterMHz: ds.freqCenterMHz,
@@ -648,7 +695,7 @@
         }
 
         // FFT спектр «Обзор»
-        var fftCanvas = document.getElementById('fft-spectrum');
+        const fftCanvas = document.getElementById('fft-spectrum');
         if (fftCanvas) {
             this._overviewFFT = new FFTSpectrumView(fftCanvas, {
                 freqCenterMHz: ds.freqCenterMHz,
@@ -657,9 +704,9 @@
         }
 
         // Водопад «Обзор» — marginLeft совпадает с отступом FFT для выравнивания
-        var overviewWFCanvas = document.getElementById('spectrum-waterfall');
-        var fftML = this._overviewFFT ? this._overviewFFT._marginLeft : 40;
-        var fftMR = this._overviewFFT ? this._overviewFFT._marginRight : 4;
+        const overviewWFCanvas = document.getElementById('spectrum-waterfall');
+        const fftML = this._overviewFFT ? this._overviewFFT._marginLeft : 40;
+        const fftMR = this._overviewFFT ? this._overviewFFT._marginRight : 4;
         if (overviewWFCanvas) {
             this._overviewWF = new WaterfallView(overviewWFCanvas, null, {
                 freqCenterMHz: ds.freqCenterMHz,
@@ -674,14 +721,14 @@
 
         // ResizeObserver на контейнеры
         if (typeof ResizeObserver !== 'undefined') {
-            var self = this;
+            const self = this;
             this._resizeObserver = new ResizeObserver(function() {
                 self._refreshCurrentTab();
             });
             if (followCanvas && followCanvas.parentElement) {
                 this._resizeObserver.observe(followCanvas.parentElement);
             }
-            var overviewCharts = document.querySelector('.bp-overview-charts');
+            const overviewCharts = document.querySelector('.bp-overview-charts');
             if (overviewCharts) {
                 this._resizeObserver.observe(overviewCharts);
             }
@@ -691,7 +738,7 @@
     // Отрисовка общей шкалы частот «Обзор»
     BottomPanel.prototype._drawOverviewScale = function() {
         if (!this._overviewScaleCanvas || !this._dataSource) { return; }
-        var ml = this._overviewFFT ? this._overviewFFT._marginLeft : 40;
+        const ml = this._overviewFFT ? this._overviewFFT._marginLeft : 40;
         drawOverviewFreqScale(
             this._overviewScaleCanvas,
             this._dataSource.freqCenterMHz,
@@ -702,7 +749,7 @@
 
     // Запуск единого таймера спектра (80 мс)
     BottomPanel.prototype._startSpectrumTimer = function() {
-        var self = this;
+        const self = this;
         this._spectrumTimer = setInterval(function() { self._spectrumTick(); }, 80);
     };
 
@@ -712,7 +759,7 @@
         this._dataSource.generateLine();
 
         if (this._currentTab === 'overview') {
-            var line = this._dataSource.getLine();
+            const line = this._dataSource.getLine();
             if (this._overviewFFT) { this._overviewFFT.draw(line); }
             if (this._overviewWF) { this._overviewWF.pushLine(line); }
             if (!this._overviewScaleDrawn) {
@@ -722,7 +769,7 @@
         }
 
         if (this._currentTab === 'follow' && this._followRunning && this._followWF) {
-            var slice = this._dataSource.getSlice(FOLLOW_CENTER_BIN, FOLLOW_NARROW_BINS);
+            const slice = this._dataSource.getSlice(FOLLOW_CENTER_BIN, FOLLOW_NARROW_BINS);
             this._followWF.pushLine(slice);
         }
     };
@@ -739,8 +786,16 @@
         this._switchTab(name, persist === true);
     };
 
+    // Сброс имитации Доплера + очистка водопадов (при смене спутника)
+    BottomPanel.prototype.resetSimulation = function() {
+        if (this._dataSource) { this._dataSource.reset(); }
+        if (this._followWF) { this._followWF.clear(); }
+        if (this._overviewWF) { this._overviewWF.clear(); }
+    };
+
     // Запуск водопада «Сопровождение» (при взятии на сопровождение)
     BottomPanel.prototype.startWaterfall = function() {
+        this.resetSimulation();
         this._followRunning = true;
         if (this._followWF) { this._followWF.start(); }
     };
@@ -762,7 +817,7 @@
      * @param {boolean} collapsed
      */
     BottomPanel.prototype.setCollapsed = function(collapsed) {
-        this._collapsed = !!collapsed;
+        this._collapsed = Boolean(collapsed);
     };
 
     /** @returns {boolean} true если панель свёрнута. */
@@ -773,15 +828,15 @@
     // ── Заглушки формы SDR ──
 
     BottomPanel.prototype._initSDRForm = function() {
-        var gainSlider = document.getElementById('sdr-gain');
-        var gainVal = document.getElementById('sdr-gain-val');
+        const gainSlider = document.getElementById('sdr-gain');
+        const gainVal = document.getElementById('sdr-gain-val');
         if (gainSlider && gainVal) {
             gainSlider.addEventListener('input', function() {
                 gainVal.textContent = gainSlider.value;
             });
         }
 
-        var startBtn = document.getElementById('sdr-start');
+        const startBtn = document.getElementById('sdr-start');
         if (startBtn) {
             startBtn.addEventListener('click', function() {
                 console.log('[BottomPanel] TODO: POST /api/sdr/start', {
@@ -798,8 +853,8 @@
     // ── Заглушки экспорта ТМИ ──
 
     BottomPanel.prototype._initTMIExport = function() {
-        var csvBtn = document.getElementById('tmi-export-csv');
-        var jsonBtn = document.getElementById('tmi-export-json');
+        const csvBtn = document.getElementById('tmi-export-csv');
+        const jsonBtn = document.getElementById('tmi-export-json');
         if (csvBtn) {
             csvBtn.addEventListener('click', function() {
                 console.log('[BottomPanel] TODO: export TMI as CSV');
@@ -814,7 +869,7 @@
 
     // Обработка resize окна
     BottomPanel.prototype._bindResize = function() {
-        var self = this;
+        const self = this;
         this._resizeBound = function() { self._refreshCurrentTab(); };
         window.addEventListener('resize', this._resizeBound);
     };

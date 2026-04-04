@@ -414,6 +414,125 @@ func TestParseNoradID_Alpha5(t *testing.T) {
 	}
 }
 
+// TestParseTLE_NameStartsWithDigit проверяет парсинг 3-line TLE,
+// когда имя спутника начинается с цифры (например "239ALFEROV (RS61S)").
+// Регрессия: парсер путал такое имя с Line2, т.к. проверял только первый символ.
+func TestParseTLE_NameStartsWithDigit(t *testing.T) {
+	alferovLine1 := makeTLELine("1 64881U 25155F   26093.62321510  .00026195  00000+0  87764-3 0  999")
+	alferovLine2 := makeTLELine("2 64881  97.4505  62.4262 0009884  84.4621 275.7747 15.30861630 6939")
+
+	tests := []struct {
+		name    string
+		satName string
+		noradID int
+	}{
+		{"имя начинается с '2'", "239ALFEROV (RS61S)", 64881},
+		{"имя начинается с '1'", "1KUNS-PF", 64881},
+		{"имя — чистое число", "2024-155F", 64881},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			lines := []string{tt.satName, alferovLine1, alferovLine2}
+			tle, err := ParseTLE(lines)
+			if err != nil {
+				t.Fatalf("ParseTLE() error = %v", err)
+			}
+			if tle.Name != tt.satName {
+				t.Errorf("Name = %q, want %q", tle.Name, tt.satName)
+			}
+			if tle.NoradID != tt.noradID {
+				t.Errorf("NoradID = %d, want %d", tle.NoradID, tt.noradID)
+			}
+		})
+	}
+}
+
+// TestParseTLEBatch_NameStartsWithDigit проверяет batch-парсинг при именах,
+// начинающихся с цифр. Воспроизводит реальный баг с 239ALFEROV + GEOSCAN.
+func TestParseTLEBatch_NameStartsWithDigit(t *testing.T) {
+	alferovLine1 := makeTLELine("1 64881U 25155F   26093.62321510  .00026195  00000+0  87764-3 0  999")
+	alferovLine2 := makeTLELine("2 64881  97.4505  62.4262 0009884  84.4621 275.7747 15.30861630 6939")
+	geoscanLine1 := makeTLELine("1 64890U 25155Q   26093.63132392  .00020644  00000+0  72393-3 0  999")
+	geoscanLine2 := makeTLELine("2 64890  97.4501  62.2192 0009375  74.4540 285.7734 15.29432755 6938")
+
+	batch := "239ALFEROV (RS61S)\n" + alferovLine1 + "\n" + alferovLine2 + "\n" +
+		"GEOSCAN 2 (RS92S2)\n" + geoscanLine1 + "\n" + geoscanLine2
+
+	tles, err := ParseTLEBatch(batch)
+	if err != nil {
+		t.Fatalf("ParseTLEBatch() error = %v", err)
+	}
+	if len(tles) != 2 {
+		t.Fatalf("ParseTLEBatch() returned %d TLEs, want 2", len(tles))
+	}
+
+	if tles[0].Name != "239ALFEROV (RS61S)" {
+		t.Errorf("tles[0].Name = %q, want %q", tles[0].Name, "239ALFEROV (RS61S)")
+	}
+	if tles[0].NoradID != 64881 {
+		t.Errorf("tles[0].NoradID = %d, want 64881", tles[0].NoradID)
+	}
+	if tles[1].Name != "GEOSCAN 2 (RS92S2)" {
+		t.Errorf("tles[1].Name = %q, want %q", tles[1].Name, "GEOSCAN 2 (RS92S2)")
+	}
+	if tles[1].NoradID != 64890 {
+		t.Errorf("tles[1].NoradID = %d, want 64890", tles[1].NoradID)
+	}
+}
+
+// TestParseTLEBatch_ManyDigitNames проверяет batch с несколькими спутниками,
+// имена которых начинаются с цифр (последовательность без пустых строк).
+func TestParseTLEBatch_ManyDigitNames(t *testing.T) {
+	sat1Line1 := makeTLELine("1 64891U 25155R   26093.62796926  .00026097  00000+0  86580-3 0  999")
+	sat1Line2 := makeTLELine("2 64891  97.4498  62.5393 0008772  89.4093 270.8154 15.31190667 6940")
+	sat2Line1 := makeTLELine("1 64892U 25155S   26093.61859638  .00026821  00000+0  88650-3 0  999")
+	sat2Line2 := makeTLELine("2 64892  97.4501  62.5596 0008792  90.0492 270.1756 15.31305917 6940")
+
+	batch := "2SAT-ALPHA\n" + sat1Line1 + "\n" + sat1Line2 + "\n" +
+		"1SAT-BETA\n" + sat2Line1 + "\n" + sat2Line2
+
+	tles, err := ParseTLEBatch(batch)
+	if err != nil {
+		t.Fatalf("ParseTLEBatch() error = %v", err)
+	}
+	if len(tles) != 2 {
+		t.Fatalf("ParseTLEBatch() returned %d TLEs, want 2", len(tles))
+	}
+	if tles[0].Name != "2SAT-ALPHA" {
+		t.Errorf("tles[0].Name = %q, want %q", tles[0].Name, "2SAT-ALPHA")
+	}
+	if tles[1].Name != "1SAT-BETA" {
+		t.Errorf("tles[1].Name = %q, want %q", tles[1].Name, "1SAT-BETA")
+	}
+}
+
+// TestIsTLEDataLine проверяет вспомогательную функцию различения TLE-строк от имён.
+func TestIsTLEDataLine(t *testing.T) {
+	tests := []struct {
+		name     string
+		line     string
+		expected bool
+	}{
+		{"валидная Line1", issLine1, true},
+		{"валидная Line2", issLine2, true},
+		{"имя 239ALFEROV", "239ALFEROV (RS61S)", false},
+		{"имя 1KUNS-PF", "1KUNS-PF", false},
+		{"короткая строка с '2'", "2 64881", false},
+		{"пустая строка", "", false},
+		{"имя ISS", "ISS (ZARYA)", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := isTLEDataLine(tt.line)
+			if got != tt.expected {
+				t.Errorf("isTLEDataLine(%q) = %v, want %v", tt.line, got, tt.expected)
+			}
+		})
+	}
+}
+
 // TestParseTLE_Alpha5_Starlink проверяет парсинг TLE со Starlink (Alpha-5 NORAD ID).
 func TestParseTLE_Alpha5_Starlink(t *testing.T) {
 	// Симулируем Starlink TLE с Alpha-5 NORAD ID (A0001 = 100001)

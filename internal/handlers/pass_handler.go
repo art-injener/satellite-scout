@@ -63,10 +63,10 @@ func (h *PassHandler) GetPasses(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		slog.Error("failed to get passes",
-			"group", group,
-			"hours", hours,
-			"min_el", minEl,
-			"error", err,
+			slog.String("group", group),
+			slog.Int("hours", hours),
+			slog.Float64("min_el", minEl),
+			slog.Any("error", err),
 		)
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{
 			Error: "failed to compute passes",

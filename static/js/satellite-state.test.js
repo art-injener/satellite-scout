@@ -644,7 +644,7 @@ test('setSatelliteGroup does NOT notify when same primary and same pass data', (
 
 test('setSatelliteGroup does not override manual table selection when satellite still in group', () => {
     const m = new SatelliteStateManager();
-    m.setSelectedSatellite(25544, 'ISS', true);  // manual selection
+    m.setSelectedSatellite(25544, 'ISS', true); // manual selection
 
     let notified = false;
     m.subscribe(StateEventType.SELECTED_CHANGE, () => { notified = true; });
@@ -778,48 +778,55 @@ test('clearTrackingSatellite notifies TRACKING_CHANGE with null', () => {
 
 console.log('\nSatelliteStateManager — updateTrack deduplication (FIX-TRACK-DEDUP)');
 
-test('updateTrack returns true on first track for satellite', () => {
-    const m = new SatelliteStateManager();
-    m.updatePosition(makePositionData());
-    const result = m.updateTrack(makeTrackData());
-    assert.strictEqual(result, true, 'first track should be accepted');
-});
-
-test('updateTrack returns false for identical track data (cached)', () => {
+test('updateTrack stores track on first call', () => {
     const m = new SatelliteStateManager();
     m.updatePosition(makePositionData());
     m.updateTrack(makeTrackData());
-    const result = m.updateTrack(makeTrackData());
-    assert.strictEqual(result, false, 'identical track should be skipped');
+    const state = m.getState(ISS_NORAD_ID);
+    assert.ok(state.track, 'track should be stored');
+    assert.ok(state.track.past.length > 0, 'past segments should exist');
 });
 
-test('updateTrack returns true when timestamps change (track recalculated)', () => {
+test('updateTrack skips identical track data (cached)', () => {
     const m = new SatelliteStateManager();
     m.updatePosition(makePositionData());
-    // Первый трек.
+    m.setSelectedSatellite(ISS_NORAD_ID);
     m.updateTrack(makeTrackData());
-    // Через 30 секунд сервер пересчитал — timestamps сдвинулись.
+    let notified = false;
+    m.subscribe('track', () => { notified = true; });
+    m.updateTrack(makeTrackData());
+    assert.strictEqual(notified, false, 'identical track should not notify');
+});
+
+test('updateTrack applies track when timestamps change (track recalculated)', () => {
+    const m = new SatelliteStateManager();
+    m.updatePosition(makePositionData());
+    m.setSelectedSatellite(ISS_NORAD_ID);
+    m.updateTrack(makeTrackData());
+    let notified = false;
+    m.subscribe('track', () => { notified = true; });
     const shifted = makeTrackData({
         past: [[{ lon: 38.5, lat: 46.5, ts: 1738900020000 }, { lon: 39.5, lat: 47.5, ts: 1738900025000 }]],
         future: [[{ lon: 40.5, lat: 48.5, ts: 1738900035000 }, { lon: 41.5, lat: 49.5, ts: 1738900040000 }]],
     });
-    const result = m.updateTrack(shifted);
-    assert.strictEqual(result, true, 'track with shifted timestamps must be accepted');
+    m.updateTrack(shifted);
+    assert.strictEqual(notified, true, 'track with shifted timestamps must trigger notify');
 });
 
 test('updateTrack detects change when segment count stays same but data differs', () => {
     const m = new SatelliteStateManager();
     m.updatePosition(makePositionData());
-    // Исходный трек: 1 past-сегмент, 1 future-сегмент.
+    m.setSelectedSatellite(ISS_NORAD_ID);
     m.updateTrack(makeTrackData());
-    // Новый трек: тот же кол-во сегментов, другие timestamps — имитация пересчёта.
+    let notified = false;
+    m.subscribe('track', () => { notified = true; });
     const newTrack = {
         norad_id: ISS_NORAD_ID,
         past: [[{ lon: 38, lat: 46, ts: 1738900050000 }, { lon: 39, lat: 47, ts: 1738900055000 }]],
         future: [[{ lon: 40, lat: 48, ts: 1738900065000 }, { lon: 41, lat: 49, ts: 1738900070000 }]],
     };
-    const result = m.updateTrack(newTrack);
-    assert.strictEqual(result, true, 'same segment count but different timestamps must trigger update');
+    m.updateTrack(newTrack);
+    assert.strictEqual(notified, true, 'same segment count but different timestamps must trigger notify');
 });
 
 test('updateTrack notifies TRACK subscriber when data changes', () => {
@@ -841,15 +848,18 @@ test('updateTrack notifies TRACK subscriber when data changes', () => {
 test('updateTrack accepts track when segment count changes', () => {
     const m = new SatelliteStateManager();
     m.updatePosition(makePositionData());
+    m.setSelectedSatellite(ISS_NORAD_ID);
     m.updateTrack(makeTrackData());
+    let notified = false;
+    m.subscribe('track', () => { notified = true; });
     const twoSegments = makeTrackData({
         future: [
             [{ lon: 40, lat: 48, ts: 1738900005000 }],
             [{ lon: 170, lat: 50, ts: 1738900015000 }],
         ],
     });
-    const result = m.updateTrack(twoSegments);
-    assert.strictEqual(result, true, 'different segment count must be accepted');
+    m.updateTrack(twoSegments);
+    assert.strictEqual(notified, true, 'different segment count must trigger notify');
 });
 
 // ── _trackFingerprint ─────────────────────────────────────
@@ -998,6 +1008,152 @@ test('cleanup happens on every group update', () => {
     assert.strictEqual(m.getState(200), null, 'B should be cleaned');
     assert.strictEqual(m.getState(300), null, 'C should be cleaned');
     assert.ok(m.getState(100), 'A should remain');
+});
+
+// ── showAll + ручное отключение трасс (BUG-SHOWALL-RESET) ──
+
+test('setShowAllMode(true) adds all group satellites to visibleTrackIds', () => {
+    const m = new SatelliteStateManager();
+    m.setSatelliteGroup({
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+    m.setShowAllMode(true);
+    const vis = m.getVisibleTrackIds();
+    assert.ok(vis.includes(200), 'B visible');
+    assert.ok(vis.includes(300), 'C visible');
+});
+
+test('toggleTrackVisibility OFF in showAll mode: track stays hidden after group update', () => {
+    const m = new SatelliteStateManager();
+    const group = {
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 1000, los: 2000, is_visible: true },
+        ],
+    };
+    m.setSatelliteGroup(group);
+    m.setShowAllMode(true);
+
+    // Оператор вручную скрывает трассу B.
+    const result = m.toggleTrackVisibility(200);
+    assert.strictEqual(result, false, 'toggle returns false (hidden)');
+    assert.ok(!m.getVisibleTrackIds().includes(200), 'B hidden after toggle');
+
+    // Приходит новый group update (каждые 5-10 сек) — B должна остаться скрытой.
+    m.setSatelliteGroup(group);
+    assert.ok(!m.getVisibleTrackIds().includes(200), 'B still hidden after group update');
+    assert.ok(m.getVisibleTrackIds().includes(300), 'C still visible');
+});
+
+test('toggleTrackVisibility ON in showAll mode: removes from hidden set', () => {
+    const m = new SatelliteStateManager();
+    const group = {
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+        ],
+    };
+    m.setSatelliteGroup(group);
+    m.setShowAllMode(true);
+
+    // Скрываем, потом снова показываем.
+    m.toggleTrackVisibility(200);
+    assert.ok(!m.getVisibleTrackIds().includes(200), 'B hidden');
+    m.toggleTrackVisibility(200);
+    assert.ok(m.getVisibleTrackIds().includes(200), 'B visible again');
+
+    // group update — B должна остаться видимой.
+    m.setSatelliteGroup(group);
+    assert.ok(m.getVisibleTrackIds().includes(200), 'B still visible after group update');
+});
+
+test('setShowAllMode toggles clear hiddenInShowAll', () => {
+    const m = new SatelliteStateManager();
+    const group = {
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 1000, los: 2000, is_visible: true },
+        ],
+    };
+    m.setSatelliteGroup(group);
+    m.setShowAllMode(true);
+    m.toggleTrackVisibility(200); // скрыли B
+
+    // Выключаем и заново включаем showAll — скрытый список должен сброситься.
+    m.setShowAllMode(false);
+    m.setShowAllMode(true);
+    assert.ok(m.getVisibleTrackIds().includes(200), 'B visible after re-enable showAll');
+    assert.ok(m.getVisibleTrackIds().includes(300), 'C visible');
+});
+
+test('hidden satellite that leaves group is cleaned from hiddenInShowAll', () => {
+    const m = new SatelliteStateManager();
+    m.setSatelliteGroup({
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+    m.setShowAllMode(true);
+    m.toggleTrackVisibility(200); // скрыли B
+
+    // B вышел из группы — при возвращении не должен быть скрыт.
+    m.setSatelliteGroup({
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 3000, los: 4000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 3000, los: 4000, is_visible: true },
+        ],
+    });
+
+    // B возвращается обратно.
+    m.setSatelliteGroup({
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 5000, los: 6000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 5000, los: 6000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 5000, los: 6000, is_visible: true },
+        ],
+    });
+    assert.ok(m.getVisibleTrackIds().includes(200), 'B visible after re-entering group');
+});
+
+test('multiple tracks hidden in showAll — all survive group update', () => {
+    const m = new SatelliteStateManager();
+    const group = {
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 300, sat_name: 'C', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 400, sat_name: 'D', aos: 1000, los: 2000, is_visible: true },
+        ],
+    };
+    m.setSatelliteGroup(group);
+    m.setShowAllMode(true);
+
+    // Скрываем B и D.
+    m.toggleTrackVisibility(200);
+    m.toggleTrackVisibility(400);
+
+    // group update.
+    m.setSatelliteGroup(group);
+
+    assert.ok(!m.getVisibleTrackIds().includes(200), 'B still hidden');
+    assert.ok(!m.getVisibleTrackIds().includes(400), 'D still hidden');
+    assert.ok(m.getVisibleTrackIds().includes(300), 'C still visible');
 });
 
 // ── Итоги ─────────────────────────────────────────────────

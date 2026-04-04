@@ -103,9 +103,9 @@ func (h *PageHandler) loadTemplates() error {
 		return err
 	}
 
-	// partials могут отсутствовать — не критично.
-	if _, parseErr := tmpl.ParseFS(h.fsys, partialsGlob); parseErr == nil {
-		// partials загружены
+	// partials могут отсутствовать — не критично, логируем для диагностики.
+	if _, parseErr := tmpl.ParseFS(h.fsys, partialsGlob); parseErr != nil {
+		slog.Debug("partials not loaded (optional)", slog.Any("error", parseErr))
 	}
 
 	h.mu.Lock()

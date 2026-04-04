@@ -110,7 +110,7 @@ func main() {
 
 // resolveAssets возвращает файловые системы для шаблонов и статики.
 // DevMode: чтение с диска (горячая перезагрузка). Production: встроенные embed.FS.
-func resolveAssets(devMode bool) (templatesFS, staticFS fs.FS) {
+func resolveAssets(devMode bool) (fs.FS, fs.FS) {
 	if devMode {
 		slog.Info("assets: filesystem (dev mode)")
 		return os.DirFS("templates"), os.DirFS("static")
@@ -118,13 +118,12 @@ func resolveAssets(devMode bool) (templatesFS, staticFS fs.FS) {
 
 	slog.Info("assets: embedded (production)")
 
-	var err error
-	templatesFS, err = fs.Sub(assets.TemplatesFS, "templates")
+	templatesFS, err := fs.Sub(assets.TemplatesFS, "templates")
 	if err != nil {
 		slog.Error("failed to create templates sub-FS", "error", err)
 		os.Exit(1)
 	}
-	staticFS, err = fs.Sub(assets.StaticFS, "static")
+	staticFS, err := fs.Sub(assets.StaticFS, "static")
 	if err != nil {
 		slog.Error("failed to create static sub-FS", "error", err)
 		os.Exit(1)

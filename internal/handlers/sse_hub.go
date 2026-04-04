@@ -25,7 +25,7 @@ type SSEEvent struct {
 // sseClient — подключённый SSE-клиент.
 type sseClient struct {
 	events   chan SSEEvent // Канал событий для этого клиента.
-	clientID string       // Идентификатор клиента (из query ?client_id=).
+	clientID string        // Идентификатор клиента (из query ?client_id=).
 }
 
 // clientMessage — направленное сообщение конкретному клиенту.
@@ -39,9 +39,9 @@ type clientMessage struct {
 // Владеет картой клиентов — все мутации происходят в горутине Run.
 // Кеширует последние события track и position для мгновенной отправки новым клиентам.
 type SSEHub struct {
-	register   chan *sseClient // Канал регистрации новых клиентов.
-	unregister chan *sseClient // Канал отписки клиентов.
-	broadcast  chan SSEEvent   // Канал для рассылки событий всем клиентам.
+	register   chan *sseClient    // Канал регистрации новых клиентов.
+	unregister chan *sseClient    // Канал отписки клиентов.
+	broadcast  chan SSEEvent      // Канал для рассылки событий всем клиентам.
 	directed   chan clientMessage // Канал для отправки события конкретному клиенту.
 
 	// notifyOnConnect — при регистрации клиента сюда отправляется сигнал, об отправки состояния спутников
@@ -73,89 +73,112 @@ func NewSSEHub() *SSEHub {
 // Владеет картой клиентов — все операции с ней происходят в одной горутине.
 // Кеширует последние position и track события для мгновенной отправки новым клиентам.
 func (h *SSEHub) Run(ctx context.Context) {
-	clients := make(map[*sseClient]bool)
-	clientIDMap := make(map[string]*sseClient) // clientID → client (per-client messaging).
+	st := &hubState{
+		hub:         h,
+		clients:     make(map[*sseClient]bool),
+		clientIDMap: make(map[string]*sseClient),
+		lastEvents:  make(map[string]SSEEvent),
+	}
 
-	// Кеш последних событий по типу для отправки новым клиентам.
-	lastEvents := make(map[string]SSEEvent)
-
-	defer func() {
-		h.once.Do(func() { close(h.done) })
-
-		for client := range clients {
-			close(client.events)
-		}
-
-		h.clientCount.Store(0)
-		slog.InfoContext(ctx, "SSE hub stopped", "cleaned_clients", len(clients))
-	}()
+	defer st.cleanup(ctx)
 
 	slog.InfoContext(ctx, "SSE hub started")
 
 	for {
 		select {
 		case client := <-h.register:
-			clients[client] = true
-			if client.clientID != "" {
-				clientIDMap[client.clientID] = client
-			}
-			h.clientCount.Add(1)
-			slog.DebugContext(ctx, "SSE client registered",
-				"client_id", client.clientID,
-				"total_clients", h.clientCount.Load(),
-			)
-
-			sendCachedEvents(client, lastEvents)
-
-			// Per-client события при подключении (восстановление tracking_id).
-			if h.onClientConnect != nil && client.clientID != "" {
-				for _, evt := range h.onClientConnect(client.clientID) {
-					select {
-					case client.events <- evt:
-					default:
-					}
-				}
-			}
-
-			if h.notifyOnConnect != nil {
-				select {
-				case h.notifyOnConnect <- struct{}{}:
-				default:
-				}
-			}
-
+			st.registerClient(ctx, client)
 		case client := <-h.unregister:
-			if _, exists := clients[client]; exists {
-				close(client.events)
-				delete(clients, client)
-				if client.clientID != "" {
-					delete(clientIDMap, client.clientID)
-				}
-				h.clientCount.Add(-1)
-				slog.DebugContext(ctx, "SSE client unregistered",
-					"client_id", client.clientID,
-					"total_clients", h.clientCount.Load(),
-				)
-			}
-
+			st.unregisterClient(ctx, client)
 		case event := <-h.broadcast:
-			lastEvents[event.Type] = event
-			broadcastToClients(ctx, event, clients)
-
+			st.broadcastEvent(ctx, event)
 		case msg := <-h.directed:
-			if client, ok := clientIDMap[msg.clientID]; ok {
-				select {
-				case client.events <- msg.event:
-				default:
-					slog.WarnContext(ctx, "SSE directed: client buffer full",
-						"client_id", msg.clientID, "event_type", msg.event.Type)
-				}
-			}
-
+			st.sendDirected(ctx, msg)
 		case <-ctx.Done():
 			return
 		}
 	}
+}
+
+// hubState хранит локальное состояние event-loop SSEHub.Run.
+type hubState struct {
+	hub         *SSEHub
+	clients     map[*sseClient]bool
+	clientIDMap map[string]*sseClient
+	lastEvents  map[string]SSEEvent
+}
+
+func (st *hubState) registerClient(ctx context.Context, client *sseClient) {
+	st.clients[client] = true
+	if client.clientID != "" {
+		st.clientIDMap[client.clientID] = client
+	}
+	st.hub.clientCount.Add(1)
+	slog.DebugContext(ctx, "SSE client registered",
+		"client_id", client.clientID,
+		"total_clients", st.hub.clientCount.Load(),
+	)
+
+	sendCachedEvents(client, st.lastEvents)
+
+	if st.hub.onClientConnect != nil && client.clientID != "" {
+		for _, evt := range st.hub.onClientConnect(client.clientID) {
+			select {
+			case client.events <- evt:
+			default:
+			}
+		}
+	}
+
+	if st.hub.notifyOnConnect != nil {
+		select {
+		case st.hub.notifyOnConnect <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func (st *hubState) unregisterClient(ctx context.Context, client *sseClient) {
+	if _, exists := st.clients[client]; !exists {
+		return
+	}
+	close(client.events)
+	delete(st.clients, client)
+	if client.clientID != "" {
+		delete(st.clientIDMap, client.clientID)
+	}
+	st.hub.clientCount.Add(-1)
+	slog.DebugContext(ctx, "SSE client unregistered",
+		"client_id", client.clientID,
+		"total_clients", st.hub.clientCount.Load(),
+	)
+}
+
+func (st *hubState) broadcastEvent(ctx context.Context, event SSEEvent) {
+	st.lastEvents[event.Type] = event
+	broadcastToClients(ctx, event, st.clients)
+}
+
+func (st *hubState) sendDirected(ctx context.Context, msg clientMessage) {
+	client, ok := st.clientIDMap[msg.clientID]
+	if !ok {
+		return
+	}
+	select {
+	case client.events <- msg.event:
+	default:
+		slog.WarnContext(ctx, "SSE directed: client buffer full",
+			"client_id", msg.clientID, "event_type", msg.event.Type)
+	}
+}
+
+func (st *hubState) cleanup(ctx context.Context) {
+	st.hub.once.Do(func() { close(st.hub.done) })
+	for client := range st.clients {
+		close(client.events)
+	}
+	st.hub.clientCount.Store(0)
+	slog.InfoContext(ctx, "SSE hub stopped", "cleaned_clients", len(st.clients))
 }
 
 // sendCachedEvents отправляет кешированные события новому клиенту.

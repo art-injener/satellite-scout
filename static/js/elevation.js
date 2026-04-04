@@ -353,7 +353,7 @@
         // === 3. Фланцевая пластина (переход колонна → основание) ===
         ctx.lineWidth = 1.5;
         ctx.strokeStyle = this.colors.accent;
-        const flangeH =15 * s;
+        const flangeH = 15 * s;
         const flangeW = colBotW + 4 * s;
 
         ctx.beginPath();
@@ -421,8 +421,8 @@
      * Привязка DOM-элементов панели информации (El ант., El КА)
      */
     ElevationIndicator.prototype.setInfoElements = function(els) {
-        var getEl = function(v) {
-            if (!v) return null;
+        const getEl = function(v) {
+            if (!v) {return null;}
             return typeof v === 'string' ? document.getElementById(v) : v;
         };
         this._infoEls = { ant: getEl(els.ant), sat: getEl(els.sat) };
@@ -430,12 +430,12 @@
     };
 
     ElevationIndicator.prototype._updateInfoPanelDOM = function() {
-        var e = this._infoEls;
-        if (!e.ant && !e.sat) return;
-        var antStr = this.currentElevation !== null ? this.currentElevation.toFixed(1) + '°' : '---°';
-        var satStr = this.satelliteElevation !== null ? this.satelliteElevation.toFixed(1) + '°' : '---°';
-        if (e.ant) e.ant.textContent = antStr;
-        if (e.sat) e.sat.textContent = satStr;
+        const e = this._infoEls;
+        if (!e.ant && !e.sat) {return;}
+        const antStr = this.currentElevation !== null ? this.currentElevation.toFixed(1) + '°' : '---°';
+        const satStr = this.satelliteElevation !== null ? this.satelliteElevation.toFixed(1) + '°' : '---°';
+        if (e.ant) {e.ant.textContent = antStr;}
+        if (e.sat) {e.sat.textContent = satStr;}
     };
 
     /**

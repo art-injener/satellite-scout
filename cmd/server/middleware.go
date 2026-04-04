@@ -23,10 +23,10 @@ func loggingMiddleware(next http.Handler) http.Handler {
 		}
 
 		slog.Info("request",
-			"method", r.Method,
-			"path", r.URL.Path,
-			"status", wrapped.status,
-			"duration", time.Since(start),
+			slog.String("method", r.Method),
+			slog.String("path", r.URL.Path),
+			slog.Int("status", wrapped.status),
+			slog.Duration("duration", time.Since(start)),
 		)
 	})
 }

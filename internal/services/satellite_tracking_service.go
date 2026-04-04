@@ -56,9 +56,9 @@ type groupSatInfo struct {
 	LOS       int64   `json:"los"`
 	Duration  float64 `json:"duration"`
 	IsVisible bool    `json:"is_visible"`
-	// Снимок столбцов «длит.» / «до сеанса» на момент рассылки.
-	UiColDuration string `json:"ui_col_duration"`
-	UiColUntil    string `json:"ui_col_until"`
+	// Снимок столбцов «Длит.» / «До AOS» на момент рассылки.
+	UIColDuration string `json:"ui_col_duration"`
+	UIColUntil    string `json:"ui_col_until"`
 }
 
 // groupTimeWin — временное окно группы для SSE-события.
@@ -368,40 +368,99 @@ func (s *SatelliteTrackingService) CurrentNoradID() int {
 //  4. Если состав группы изменился → обновить tracked, отправить satellite_group_update.
 //  5. Если primary изменился → отправить satellite_change.
 func (s *SatelliteTrackingService) updateGroup() {
+	snap := s.snapshotGroupState()
+	if !snap.active || snap.provider == nil {
+		return
+	}
+
+	passes, satellites, rawSatellites, now, ok := s.resolveGroupSatellites(snap)
+	if !ok {
+		return
+	}
+
+	trackingExpired, manualSel := s.checkTrackingExpiry(
+		snap.manualSel, rawSatellites, satellites, passes, now,
+	)
+
+	newPrimaryID := s.choosePrimary(snap.currentID, manualSel, satellites, now)
+
+	newGroupEntries := GroupEntries(satellites)
+	groupChanged := GroupEntriesChanged(snap.oldGroupEntries, newGroupEntries)
+	primaryChanged := newPrimaryID != snap.currentID
+
+	if !groupChanged && !primaryChanged && !snap.forceBroadcast && !trackingExpired {
+		return
+	}
+
+	s.applyGroupState(newGroupEntries, newPrimaryID, satellites)
+
+	slog.Info("group-update: group changed",
+		"satellites", len(satellites),
+		"primary", newPrimaryID,
+		"primary_changed", primaryChanged,
+		"group_data_changed", groupChanged,
+	)
+
+	group := BuildConcurrentPassGroup(satellites, newPrimaryID)
+	s.broadcastGroupUpdate(group, now, 0)
+
+	s.sendPostGroupNotifications(
+		snap, manualSel, trackingExpired, groupChanged, primaryChanged,
+		newPrimaryID, satellites,
+	)
+
+	s.computeAndBroadcastState(true)
+}
+
+// groupSnapshot — снимок состояния, необходимый для одного цикла updateGroup.
+type groupSnapshot struct {
+	provider         PassProvider
+	active           bool
+	currentID        int
+	oldGroupEntries  []GroupEntry
+	windowFwd        time.Duration
+	manualSel        *int
+	forceBroadcast   bool
+	directedClientID string
+}
+
+func (s *SatelliteTrackingService) snapshotGroupState() groupSnapshot {
 	s.mu.Lock()
-	provider := s.passProvider
-	active := s.autoTrackActive
-	currentID := s.currentNoradID
-	oldGroupEntries := s.currentGroupEntries
-	windowFwd := s.windowForward
-	manualSel := s.manualSelection
-	forceBroadcast := s.pendingManualBroadcast
-	directedClientID := s.pendingDirectedClientID
+	snap := groupSnapshot{
+		provider:         s.passProvider,
+		active:           s.autoTrackActive,
+		currentID:        s.currentNoradID,
+		oldGroupEntries:  s.currentGroupEntries,
+		windowFwd:        s.windowForward,
+		manualSel:        s.manualSelection,
+		forceBroadcast:   s.pendingManualBroadcast,
+		directedClientID: s.pendingDirectedClientID,
+	}
 	s.pendingManualBroadcast = false
 	s.pendingDirectedClientID = ""
 	s.mu.Unlock()
+	return snap
+}
 
-	if !active || provider == nil {
-		return
-	}
-
+func (s *SatelliteTrackingService) resolveGroupSatellites(
+	snap groupSnapshot,
+) ([]*tracker.Pass, []PassInfo, []PassInfo, time.Time, bool) {
 	horizonHours := int(DefaultGroupPassHorizon.Hours())
-	passes, err := provider.GetAllGroupsPasses(horizonHours, tracker.DefaultMinElevation)
+	passes, err := snap.provider.GetAllGroupsPasses(horizonHours, tracker.DefaultMinElevation)
 	if err != nil {
 		slog.Debug("group-update: failed to get passes", "error", err)
-		return
+		return nil, nil, nil, time.Time{}, false
 	}
 
 	now := time.Now().UTC()
-
-	rawSatellites := FindConcurrentPasses(passes, now, windowFwd)
+	rawSatellites := FindConcurrentPasses(passes, now, snap.windowFwd)
 	satellites := rawSatellites
 
 	if len(satellites) == 0 {
 		nearest := findNearestFuturePass(passes, now)
 		if nearest == nil {
 			slog.Debug("group-update: no passes available at all")
-			return
+			return nil, nil, nil, time.Time{}, false
 		}
 		satellites = []PassInfo{{
 			NoradID:      nearest.NoradID,
@@ -417,116 +476,108 @@ func (s *SatelliteTrackingService) updateGroup() {
 		)
 	}
 
-	// Проверяем, нужно ли сбросить ручной выбор (спутник вышел из окна).
-	trackingExpired := false
-	if manualSel != nil {
-		nowMs := now.UnixMilli()
-		inGroup := false
-		for _, s2 := range satellites {
-			if s2.NoradID == *manualSel {
-				inGroup = true
-				break
-			}
-		}
-		onlySubstitutedNextPass := len(rawSatellites) == 0 && len(satellites) == 1 &&
-			satellites[0].NoradID == *manualSel && !satellites[0].IsVisible &&
-			nowMs < satellites[0].Pass.AOS
-		endAfterFinishedPass := onlySubstitutedNextPass && NoradInPostLosGap(passes, *manualSel, now)
-		if !inGroup || endAfterFinishedPass {
-			trackingExpired = true
-			expiredNorad := *manualSel
-			s.clientState.ClearTrackingForNorad(expiredNorad)
-			s.mu.Lock()
-			s.manualSelection = nil
-			s.mu.Unlock()
-			manualSel = nil
-			slog.Info("group-update: tracking ended (left window or pass ended before next AOS)",
-				"norad_id", expiredNorad,
-				"after_los_next_pass_row", endAfterFinishedPass,
-			)
-		}
+	return passes, satellites, rawSatellites, now, true
+}
+
+func (s *SatelliteTrackingService) checkTrackingExpiry(
+	manualSel *int, rawSatellites, satellites []PassInfo, passes []*tracker.Pass, now time.Time,
+) (bool, *int) {
+	if manualSel == nil {
+		return false, nil
 	}
 
-	// Выбор primary: уважаем «не переключай», если пролёт текущего primary ещё активен.
-	var newPrimaryID int
+	nowMs := now.UnixMilli()
+	inGroup := false
+	for _, s2 := range satellites {
+		if s2.NoradID == *manualSel {
+			inGroup = true
+			break
+		}
+	}
+	onlySubstitutedNextPass := len(rawSatellites) == 0 && len(satellites) == 1 &&
+		satellites[0].NoradID == *manualSel && !satellites[0].IsVisible &&
+		nowMs < satellites[0].Pass.AOS
+	endAfterFinishedPass := onlySubstitutedNextPass && NoradInPostLosGap(passes, *manualSel, now)
+
+	if inGroup && !endAfterFinishedPass {
+		return false, manualSel
+	}
+
+	expiredNorad := *manualSel
+	s.clientState.ClearTrackingForNorad(expiredNorad)
+	s.mu.Lock()
+	s.manualSelection = nil
+	s.mu.Unlock()
+	slog.Info("group-update: tracking ended (left window or pass ended before next AOS)",
+		"norad_id", expiredNorad,
+		"after_los_next_pass_row", endAfterFinishedPass,
+	)
+	return true, nil
+}
+
+func (s *SatelliteTrackingService) choosePrimary(
+	currentID int, manualSel *int, satellites []PassInfo, now time.Time,
+) int {
 	if currentID > 0 && manualSel == nil {
 		shouldSwitch, newID := ShouldSwitchPrimary(currentID, satellites, now)
 		if shouldSwitch {
-			newPrimaryID = newID
-		} else {
-			newPrimaryID = currentID
+			return newID
 		}
-	} else {
-		newPrimaryID = SelectPrimarySatellite(satellites, manualSel, now)
+		return currentID
 	}
+	return SelectPrimarySatellite(satellites, manualSel, now)
+}
 
-	// Change detection по полным данным (NoradID + IsVisible + AOS + LOS).
-	newGroupEntries := GroupEntries(satellites)
-	groupChanged := GroupEntriesChanged(oldGroupEntries, newGroupEntries)
-	primaryChanged := newPrimaryID != currentID
-
-	if !groupChanged && !primaryChanged && !forceBroadcast && !trackingExpired {
-		return
-	}
-
-	// Обновляем состояние.
+func (s *SatelliteTrackingService) applyGroupState(
+	entries []GroupEntry, primaryID int, satellites []PassInfo,
+) {
 	s.mu.Lock()
-	s.currentGroupEntries = newGroupEntries
+	s.currentGroupEntries = entries
 	s.currentGroupIDs = GroupIDs(satellites)
-	s.currentNoradID = newPrimaryID
+	s.currentNoradID = primaryID
 	s.tracked = make(map[int]*trackedSatellite, len(satellites))
 	s.lastTracks = nil
 	s.mu.Unlock()
 
 	for _, sat := range satellites {
-		if err2 := s.TrackSatellite(sat.NoradID); err2 != nil {
+		if err := s.TrackSatellite(sat.NoradID); err != nil {
 			slog.Debug("group-update: failed to add satellite",
-				"norad_id", sat.NoradID,
-				"name", sat.SatName,
-				"error", err2,
+				"norad_id", sat.NoradID, "name", sat.SatName, "error", err,
 			)
 		}
 	}
+}
 
-	slog.Info("group-update: group changed",
-		"satellites", len(satellites),
-		"primary", newPrimaryID,
-		"primary_changed", primaryChanged,
-		"group_data_changed", groupChanged,
-	)
-
-	group := BuildConcurrentPassGroup(satellites, newPrimaryID)
-	s.broadcastGroupUpdate(group, now, 0)
-
-	if forceBroadcast && directedClientID != "" {
+func (s *SatelliteTrackingService) sendPostGroupNotifications(
+	snap groupSnapshot, manualSel *int, trackingExpired, groupChanged, primaryChanged bool,
+	newPrimaryID int, satellites []PassInfo,
+) {
+	if snap.forceBroadcast && snap.directedClientID != "" {
 		trackingID := 0
 		if manualSel != nil {
 			trackingID = *manualSel
 		}
-		s.sendClientStateRestore(directedClientID, trackingID)
+		s.sendClientStateRestore(snap.directedClientID, trackingID)
 	}
 
-	if trackingExpired {
+	switch {
+	case trackingExpired:
 		s.broadcastSatelliteChange(newPrimaryID, s.getSatName(newPrimaryID, satellites), "tracking_ended")
-		if directedClientID != "" {
-			s.sendClientStateRestore(directedClientID, 0)
+		if snap.directedClientID != "" {
+			s.sendClientStateRestore(snap.directedClientID, 0)
 		}
-	} else if primaryChanged || currentID == 0 {
+	case primaryChanged || snap.currentID == 0:
 		reason := "auto"
 		if manualSel != nil {
 			reason = "manual"
 		}
-		if currentID == 0 {
+		if snap.currentID == 0 {
 			reason = "initial"
 		}
 		s.broadcastSatelliteChange(newPrimaryID, s.getSatName(newPrimaryID, satellites), reason)
-	} else if groupChanged {
-		// Данные пролёта изменились (IsVisible/AOS/LOS), но primary тот же NORAD —
-		// отправляем satellite_change(auto), чтобы фронтенд обновил sky path и таблицу.
+	case groupChanged:
 		s.broadcastSatelliteChange(newPrimaryID, s.getSatName(newPrimaryID, satellites), "auto")
 	}
-
-	s.computeAndBroadcastState(true)
 }
 
 // getSatName возвращает название спутника из группы по NORAD ID.
@@ -589,8 +640,8 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 			LOS:           sat.Pass.LOS,
 			Duration:      sat.Pass.Duration,
 			IsVisible:     sat.IsVisible,
-			UiColDuration: uiDur,
-			UiColUntil:    uiUntil,
+			UIColDuration: uiDur,
+			UIColUntil:    uiUntil,
 		}
 	}
 

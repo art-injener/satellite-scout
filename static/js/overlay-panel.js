@@ -23,7 +23,7 @@
     }
 
     OverlayPanel.prototype._setClosedState = function(closed) {
-        this._manuallyHidden = !!closed;
+        this._manuallyHidden = Boolean(closed);
         if (closed) {
             this._el.classList.remove('overlay-panel--visible');
             if (this._container) {
@@ -39,8 +39,8 @@
 
     // Привязка кнопки «×»
     OverlayPanel.prototype._initClose = function() {
-        var self = this;
-        var closeBtn = document.getElementById('overlay-panel-close');
+        const self = this;
+        const closeBtn = document.getElementById('overlay-panel-close');
         if (closeBtn) {
             closeBtn.addEventListener('click', function() {
                 self._setClosedState(true);
@@ -50,8 +50,8 @@
 
     // Кнопка «КА» — восстановить overlay
     OverlayPanel.prototype._initRestore = function() {
-        var self = this;
-        var restoreBtn = document.getElementById('overlay-panel-restore');
+        const self = this;
+        const restoreBtn = document.getElementById('overlay-panel-restore');
         if (restoreBtn) {
             restoreBtn.addEventListener('click', function() {
                 self._setClosedState(false);
@@ -61,8 +61,8 @@
 
     // Подписка: overlay показывается ТОЛЬКО при сопровождении (tracking).
     OverlayPanel.prototype._subscribeToState = function(sm) {
-        var self = this;
-        var SE = window.StateEventType;
+        const self = this;
+        const SE = window.StateEventType;
         if (!SE) { return; }
 
         sm.subscribe(SE.TRACKING_CHANGE, function(state) {

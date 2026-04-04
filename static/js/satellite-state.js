@@ -97,7 +97,7 @@ const TRACK_COLOR_PALETTE = Object.freeze([
  * Лимит одновременно видимых дополнительных трасс (не считая tracking и selected).
  * 0 = без ограничений. Значение > 0 = лимит (будет задаваться из настроек).
  */
-let MAX_VISIBLE_TRACKS = 0;
+const MAX_VISIBLE_TRACKS = 0;
 
 /** Ключ sessionStorage для сохранения selected КА (per-tab). */
 const SELECTED_SAT_STORAGE_KEY = 'satellite-scout-selected-id';
@@ -154,6 +154,15 @@ class SatelliteStateManager {
          * @type {boolean}
          */
         this._showAllMode = false;
+
+        /**
+         * NORAD ID, вручную скрытые оператором в режиме showAll.
+         * _applyShowAll() пропускает эти ID, чтобы ручные отключения
+         * переживали периодические satellite_group_update.
+         * Очищается при переключении master-toggle (setShowAllMode).
+         * @type {Set<number>}
+         */
+        this._hiddenInShowAll = new Set();
 
         /**
          * Карта NORAD ID → цвет из палитры. Назначается случайно при формировании группы.
@@ -341,7 +350,7 @@ class SatelliteStateManager {
             const oldFp = SatelliteStateManager._trackFingerprint(oldTrack.past, oldTrack.future);
             const newFp = SatelliteStateManager._trackFingerprint(newPast, newFuture);
             if (oldFp === newFp) {
-                return false;
+                return;
             }
         }
 
@@ -355,8 +364,6 @@ class SatelliteStateManager {
         if (noradId === this._selectedSatelliteId) {
             this._notify(StateEventType.TRACK, state);
         }
-
-        return true;
     }
 
     /**
@@ -502,7 +509,7 @@ class SatelliteStateManager {
     /**
      * @deprecated Использовать setSelectedSatellite / setTrackingSatellite.
      */
-    setActiveSatellite(noradId, name, orbitalParams) {
+    setActiveSatellite(noradId, name) {
         return this.setSelectedSatellite(noradId, name, false);
     }
 
@@ -661,6 +668,7 @@ class SatelliteStateManager {
         if (typeof noradId !== 'number' || noradId <= 0) { return false; }
         if (this._visibleTrackIds.has(noradId)) {
             this._visibleTrackIds.delete(noradId);
+            if (this._showAllMode) { this._hiddenInShowAll.add(noradId); }
             this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
             return false;
         }
@@ -675,6 +683,7 @@ class SatelliteStateManager {
             }
             return false;
         }
+        this._hiddenInShowAll.delete(noradId);
         this._visibleTrackIds.add(noradId);
         this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
         return true;
@@ -744,7 +753,8 @@ class SatelliteStateManager {
      * @param {boolean} on
      */
     setShowAllMode(on) {
-        this._showAllMode = !!on;
+        this._showAllMode = Boolean(on);
+        this._hiddenInShowAll.clear();
         if (this._showAllMode) {
             this._applyShowAll();
         } else {
@@ -767,12 +777,15 @@ class SatelliteStateManager {
             groupIds.add(sat.norad_id);
         }
 
-        // Удалить ушедших из colorMap и visibleTrackIds.
+        // Удалить ушедших из colorMap, visibleTrackIds и hiddenInShowAll.
         for (const id of this._colorMap.keys()) {
             if (!groupIds.has(id)) { this._colorMap.delete(id); }
         }
         for (const id of this._visibleTrackIds) {
             if (!groupIds.has(id)) { this._visibleTrackIds.delete(id); }
+        }
+        for (const id of this._hiddenInShowAll) {
+            if (!groupIds.has(id)) { this._hiddenInShowAll.delete(id); }
         }
 
         // Назначить цвета новым КА (случайный выбор из палитры).
@@ -833,10 +846,10 @@ class SatelliteStateManager {
         if (!this._satelliteGroup || !this._satelliteGroup.satellites) { return; }
         for (const sat of this._satelliteGroup.satellites) {
             const nid = sat.norad_id;
-            if (nid !== this._trackingSatelliteId && nid !== this._selectedSatelliteId) {
-                if (MAX_VISIBLE_TRACKS > 0 && this._visibleTrackIds.size >= MAX_VISIBLE_TRACKS) { break; }
-                this._visibleTrackIds.add(nid);
-            }
+            if (nid === this._trackingSatelliteId || nid === this._selectedSatelliteId) { continue; }
+            if (this._hiddenInShowAll.has(nid)) { continue; }
+            if (MAX_VISIBLE_TRACKS > 0 && this._visibleTrackIds.size >= MAX_VISIBLE_TRACKS) { break; }
+            this._visibleTrackIds.add(nid);
         }
     }
 
@@ -897,6 +910,7 @@ class SatelliteStateManager {
         this._activeSatelliteId = null;
         this._manualTableSelection = false;
         this._visibleTrackIds.clear();
+        this._hiddenInShowAll.clear();
         this._colorMap.clear();
         this._showAllMode = false;
     }

@@ -144,10 +144,10 @@ class SSEClient {
         this._setStatus(SSEConnectionStatus.CONNECTING);
 
         // Добавляем client_id в URL для per-client state (TRACK-STATE-003).
-        var url = this._url;
-        var clientId = getClientId();
+        let url = this._url;
+        const clientId = getClientId();
         if (clientId) {
-            var sep = url.indexOf('?') >= 0 ? '&' : '?';
+            const sep = url.indexOf('?') >= 0 ? '&' : '?';
             url = url + sep + 'client_id=' + encodeURIComponent(clientId);
         }
 
@@ -264,10 +264,6 @@ class SSEClient {
         if (typeof data.norad_id !== 'number') { return; }
 
         const reason = data.reason || '';
-        let orbitalParams = null;
-        if (typeof data.inclination === 'number' || typeof data.period === 'number') {
-            orbitalParams = { inclination: data.inclination, period: data.period };
-        }
 
         // satellite_change(manual) не обрабатываем — tracking устанавливается
         // через client_state_restore (TRACK-STATE-003: per-client).
@@ -427,11 +423,11 @@ class SSEClient {
  * @returns {string}
  */
 function getClientId() {
-    var key = 'satellite-scout-client-id';
+    const key = 'satellite-scout-client-id';
     if (typeof sessionStorage !== 'undefined') {
-        var existing = sessionStorage.getItem(key);
+        const existing = sessionStorage.getItem(key);
         if (existing) { return existing; }
-        var id = _generateUUID();
+        const id = _generateUUID();
         sessionStorage.setItem(key, id);
         return id;
     }
@@ -443,7 +439,7 @@ function _generateUUID() {
         return crypto.randomUUID();
     }
     return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
-        var r = Math.random() * 16 | 0;
+        const r = Math.random() * 16 | 0;
         return (c === 'x' ? r : (r & 0x3 | 0x8)).toString(16);
     });
 }

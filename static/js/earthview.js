@@ -477,7 +477,7 @@
         let hasSouthPole = false, hasNorthPole = false;
         for (let i = 0; i < coords.length; i++) {
             if (coords[i][1] <= -89.5) { hasSouthPole = true; }
-            if (coords[i][1] >= 89.5)  { hasNorthPole = true; }
+            if (coords[i][1] >= 89.5) { hasNorthPole = true; }
         }
 
         ctx.beginPath();
@@ -494,7 +494,7 @@
             if (prevP && Math.abs(p.x - prevP.x) > w / 2) {
                 // Пересечение антимеридиана
                 const goingRightToLeft = p.x < prevP.x;
-                const edgeX         = goingRightToLeft ? w : 0;
+                const edgeX = goingRightToLeft ? w : 0;
                 const oppositeEdgeX = goingRightToLeft ? 0 : w;
                 const yPrev = Math.max(0, Math.min(h, prevP.y));
 
@@ -824,7 +824,7 @@
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
             const labelY = p.y + 12 * s;
-            var label = _shortName(this.satellite.name);
+            const label = _shortName(this.satellite.name);
             ctx.strokeStyle = this.colors.satLabelStroke || 'rgba(0,0,0,0.85)';
             ctx.lineWidth = 2.5;
             ctx.strokeText(label, p.x, labelY);
@@ -1078,19 +1078,19 @@
      * @private
      */
     EarthView.prototype._drawSelectedLayer = function() {
-        var sel = this._selectedSatellite;
-        var track = sel.groundTrack;
+        const sel = this._selectedSatellite;
+        const track = sel.groundTrack;
         if (!track) { return; }
 
-        var ctx = this.ctx;
-        var color = this.colors.selectedTrack;
-        var dpr = window.devicePixelRatio || 1;
+        const ctx = this.ctx;
+        const color = this.colors.selectedTrack;
+        const dpr = window.devicePixelRatio || 1;
 
         ctx.strokeStyle = color;
         ctx.lineWidth = 2 * dpr;
         ctx.setLineDash([]);
 
-        var segments = [];
+        let segments = [];
         if (track && typeof track === 'object' && !Array.isArray(track)) {
             if (Array.isArray(track.past)) { segments = segments.concat(track.past); }
             if (Array.isArray(track.future)) { segments = segments.concat(track.future); }
@@ -1098,14 +1098,14 @@
             segments = [track];
         }
 
-        for (var s = 0; s < segments.length; s++) {
-            var seg = segments[s];
+        for (let s = 0; s < segments.length; s++) {
+            const seg = segments[s];
             if (!seg || seg.length < 2) { continue; }
             ctx.beginPath();
-            var prevP = null;
-            var moved = false;
-            for (var k = 0; k < seg.length; k++) {
-                var pt = this.project(seg[k].lon, seg[k].lat);
+            let prevP = null;
+            let moved = false;
+            for (let k = 0; k < seg.length; k++) {
+                const pt = this.project(seg[k].lon, seg[k].lat);
                 if (prevP && Math.abs(pt.x - prevP.x) > this.width / 2) {
                     ctx.stroke();
                     ctx.beginPath();
@@ -1125,24 +1125,24 @@
      * @private
      */
     EarthView.prototype._drawSelectedVisibilityZone = function() {
-        var segments = this._selectedSatellite.visibilityZone;
+        const segments = this._selectedSatellite.visibilityZone;
         if (!segments || segments.length === 0) { return; }
 
-        var ctx = this.ctx;
-        var dpr = window.devicePixelRatio || 1;
-        var fillColor = this.colors.selectedFootprintFill || 'rgba(93, 173, 226, 0.12)';
-        var strokeColor = this.colors.selectedFootprint || 'rgba(93, 173, 226, 0.6)';
+        const ctx = this.ctx;
+        const dpr = window.devicePixelRatio || 1;
+        const fillColor = this.colors.selectedFootprintFill || 'rgba(93, 173, 226, 0.12)';
+        const strokeColor = this.colors.selectedFootprint || 'rgba(93, 173, 226, 0.6)';
 
-        for (var k = 0; k < segments.length; k++) {
-            var seg = segments[k];
+        for (let k = 0; k < segments.length; k++) {
+            const seg = segments[k];
             if (!seg || seg.length < 3) { continue; }
-            var projected = [];
-            for (var i = 0; i < seg.length; i++) {
+            const projected = [];
+            for (let i = 0; i < seg.length; i++) {
                 projected.push(this.project(seg[i].lon, seg[i].lat));
             }
             ctx.beginPath();
             ctx.moveTo(projected[0].x, projected[0].y);
-            for (var j = 1; j < projected.length; j++) {
+            for (let j = 1; j < projected.length; j++) {
                 ctx.lineTo(projected[j].x, projected[j].y);
             }
             ctx.closePath();
@@ -1159,15 +1159,15 @@
      * @private
      */
     EarthView.prototype._drawSelectedSatelliteIcon = function() {
-        var sel = this._selectedSatellite;
-        var pos = sel.position;
+        const sel = this._selectedSatellite;
+        const pos = sel.position;
         if (!pos) { return; }
 
-        var ctx = this.ctx;
-        var p = this.project(pos.lon, pos.lat);
-        var dpr = window.devicePixelRatio || 1;
-        var s = dpr * 1.2;
-        var color = this.colors.selectedMarker || '#2ecc71';
+        const ctx = this.ctx;
+        const p = this.project(pos.lon, pos.lat);
+        const dpr = window.devicePixelRatio || 1;
+        const s = dpr * 1.2;
+        const color = this.colors.selectedMarker || '#2ecc71';
 
         ctx.strokeStyle = color;
         ctx.fillStyle = color;
@@ -1195,11 +1195,11 @@
         ctx.shadowBlur = 0;
 
         if (sel.name) {
-            var fontSize = Math.round(12 * s);
+            const fontSize = Math.round(12 * s);
             ctx.font = 'bold ' + fontSize + 'px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            var labelY = p.y + 12 * s;
+            const labelY = p.y + 12 * s;
             ctx.strokeStyle = 'rgba(0,0,0,0.85)';
             ctx.lineWidth = 2.5;
             ctx.strokeText(sel.name, p.x, labelY);
@@ -1212,7 +1212,7 @@
 
     // Палитра вторичных спутников без включённой трассы: крупные маркеры + высокая яркость
     // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте (UX-MAP-VIS-001).
-    var SECONDARY_SAT_COLORS = [
+    const SECONDARY_SAT_COLORS = [
         '#ffffff', '#f0fcff', '#e8ffff', '#fffef0',
         '#f5fff8', '#ffe8f5', '#e8f4ff', '#fffff0'
     ];
@@ -1225,8 +1225,8 @@
      */
     EarthView.prototype.setSecondaryPositions = function(satArray) {
         if (!satArray) { return; }
-        for (var i = 0; i < satArray.length; i++) {
-            var s = satArray[i];
+        for (let i = 0; i < satArray.length; i++) {
+            const s = satArray[i];
             if (!s || !s.noradId) { continue; }
             if (!this._secondarySatellites[s.noradId]) {
                 this._secondarySatellites[s.noradId] = { noradId: s.noradId, name: s.name || '', track: null };
@@ -1235,11 +1235,11 @@
             if (s.name) { this._secondarySatellites[s.noradId].name = s.name; }
         }
         // Удаляем спутники, которые больше не в группе.
-        var activeIds = {};
-        for (var j = 0; j < satArray.length; j++) {
+        const activeIds = {};
+        for (let j = 0; j < satArray.length; j++) {
             if (satArray[j] && satArray[j].noradId) { activeIds[satArray[j].noradId] = true; }
         }
-        for (var id in this._secondarySatellites) {
+        for (const id in this._secondarySatellites) {
             if (!activeIds[id]) { delete this._secondarySatellites[id]; }
         }
     };
@@ -1269,15 +1269,15 @@
      * @private
      */
     EarthView.prototype._drawSecondaryLayer = function() {
-        var ids = Object.keys(this._secondarySatellites);
-        var sm = window._stateManager;
-        for (var i = 0; i < ids.length; i++) {
-            var sat = this._secondarySatellites[ids[i]];
-            var nid = parseInt(ids[i], 10);
-            var trackVisible = sm && sm.isTrackVisible(nid);
-            var markerColor = sm ? sm.getMarkerColor(nid) : null;
+        const ids = Object.keys(this._secondarySatellites);
+        const sm = window._stateManager;
+        for (let i = 0; i < ids.length; i++) {
+            const sat = this._secondarySatellites[ids[i]];
+            const nid = parseInt(ids[i], 10);
+            const trackVisible = sm && sm.isTrackVisible(nid);
+            const markerColor = sm ? sm.getMarkerColor(nid) : null;
             if (sat.track && trackVisible) {
-                var trackColor = sm ? sm.getTrackColor(nid) : null;
+                const trackColor = sm ? sm.getTrackColor(nid) : null;
                 this._drawSecondaryGroundTrack(sat, i, trackColor);
             }
             if (sat.position) {
@@ -1293,30 +1293,30 @@
      * @private
      */
     EarthView.prototype._drawSecondaryGroundTrack = function(sat, colorIdx, paletteColor) {
-        var ctx = this.ctx;
-        var track = sat.track;
+        const ctx = this.ctx;
+        const track = sat.track;
         if (!track) { return; }
 
         // Цвет как в таблице (полная насыщенность); линия чуть тоньше, чем у selected/tracking.
-        var color = paletteColor || 'rgba(200, 220, 235, 0.9)';
-        var dpr = window.devicePixelRatio || 1;
+        const color = paletteColor || 'rgba(200, 220, 235, 0.9)';
+        const dpr = window.devicePixelRatio || 1;
 
         ctx.setLineDash([5, 5]);
         ctx.strokeStyle = color;
         ctx.lineWidth = 1.5 * dpr;
 
-        var segments = [];
+        let segments = [];
         if (Array.isArray(track.future)) { segments = segments.concat(track.future); }
-        if (Array.isArray(track.past))   { segments = segments.concat(track.past); }
+        if (Array.isArray(track.past)) { segments = segments.concat(track.past); }
 
-        for (var s = 0; s < segments.length; s++) {
-            var seg = segments[s];
+        for (let s = 0; s < segments.length; s++) {
+            const seg = segments[s];
             if (!seg || seg.length < 2) { continue; }
             ctx.beginPath();
-            var first = this.project(seg[0].lon, seg[0].lat);
+            const first = this.project(seg[0].lon, seg[0].lat);
             ctx.moveTo(first.x, first.y);
-            for (var k = 1; k < seg.length; k++) {
-                var pt = this.project(seg[k].lon, seg[k].lat);
+            for (let k = 1; k < seg.length; k++) {
+                const pt = this.project(seg[k].lon, seg[k].lat);
                 ctx.lineTo(pt.x, pt.y);
             }
             ctx.stroke();
@@ -1330,15 +1330,15 @@
      * @private
      */
     EarthView.prototype._drawSecondaryMarker = function(sat, colorIdx, markerColor) {
-        var ctx = this.ctx;
-        var pos = sat.position;
+        const ctx = this.ctx;
+        const pos = sat.position;
         if (!pos) { return; }
 
-        var p = this.project(pos.lon, pos.lat);
-        var dpr = window.devicePixelRatio || 1;
-        var r = 6 * dpr;
-        var color = markerColor || SECONDARY_SAT_COLORS[colorIdx % SECONDARY_SAT_COLORS.length];
-        var shape = sat.noradId % 4; // 0=circle, 1=square, 2=triangle, 3=diamond
+        const p = this.project(pos.lon, pos.lat);
+        const dpr = window.devicePixelRatio || 1;
+        const r = 6 * dpr;
+        const color = markerColor || SECONDARY_SAT_COLORS[colorIdx % SECONDARY_SAT_COLORS.length];
+        const shape = sat.noradId % 4; // 0=circle, 1=square, 2=triangle, 3=diamond
 
         ctx.fillStyle = color;
         // Тёмная обводка фигуры — контраст со светлой заливкой на карте
@@ -1367,14 +1367,14 @@
 
         // Подпись крупнее и жирнее — читаемость на суше/океане
         if (sat.name) {
-            var fs = Math.round(12 * dpr);
+            const fs = Math.round(12 * dpr);
             ctx.font = '700 ' + fs + 'px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            var labelY = p.y + r + 3 * dpr;
+            const labelY = p.y + r + 3 * dpr;
             ctx.strokeStyle = 'rgba(0,0,0,0.92)';
             ctx.lineWidth = 2.75;
-            var label = _shortName(sat.name);
+            const label = _shortName(sat.name);
             ctx.strokeText(label, p.x, labelY);
             ctx.fillStyle = color;
             ctx.fillText(label, p.x, labelY);

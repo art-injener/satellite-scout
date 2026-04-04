@@ -4,9 +4,9 @@ import "testing"
 
 func TestParseSatName(t *testing.T) {
 	tests := []struct {
-		input         string
-		wantPrimary   string
-		wantAlias     string
+		input       string
+		wantPrimary string
+		wantAlias   string
 	}{
 		{"ISS (ZARYA)", "ISS", "ZARYA"},
 		{"YUBILEINY (RS30)", "YUBILEINY", "RS30"},

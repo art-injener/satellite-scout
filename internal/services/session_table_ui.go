@@ -5,11 +5,11 @@ import (
 	"time"
 )
 
-// FormatSessionTableColumns — значения для столбцов «длит.» и «до сеанса» в таблице плана пролетов.
-// До AOS: длит. = полная длительность пролёта (LOS−AOS), до сеанса = обратный отсчёт до AOS.
-// В окне [AOS, LOS]: до сеанса = «сейчас», длит. = оставшееся время до LOS.
+// FormatSessionTableColumns — значения для столбцов «Длит.» и «До AOS» в таблице плана сеансов наблюдения.
+// До AOS: длит. = полная длительность пролёта (LOS−AOS), до AOS = обратный отсчёт до AOS.
+// В окне [AOS, LOS]: до AOS = «ЗРВ», длит. = оставшееся время до LOS.
 // После LOS: «—» (строка не должна показываться в скользящем окне).
-func FormatSessionTableColumns(aosMs, losMs int64, now time.Time) (colDuration, colUntil string) {
+func FormatSessionTableColumns(aosMs, losMs int64, now time.Time) (string, string) {
 	if aosMs <= 0 || losMs <= 0 || losMs <= aosMs {
 		return "—", "—"
 	}
@@ -21,7 +21,7 @@ func FormatSessionTableColumns(aosMs, losMs int64, now time.Time) (colDuration, 
 		return formatRuDuration(total), formatRuCountdown(aos.Sub(now))
 	}
 	if !now.After(los) {
-		return formatRuDuration(los.Sub(now)), "сейчас"
+		return formatRuDuration(los.Sub(now)), "ЗРВ"
 	}
 	return "—", "—"
 }
