@@ -38,20 +38,21 @@
         // Видимость спутника
         this.isVisible = true;
 
-        // Цвета
         this.colors = {
-            bgPrimary: '#0a0e14',
-            bgSecondary: '#12171f',
-            border: '#2a3444',
-            accent: '#00d4aa',
-            accentBlue: '#00a8ff',
-            accentRed: '#ff6b6b',
-            textPrimary: '#e6e8eb',
-            textSecondary: '#8b919a',
-            textMuted: '#5c6370',
-            satelliteLine: 'rgba(255, 255, 255, 0.5)',
-            satelliteMarker: '#ffffff',
-            outOfView: 'rgba(255, 107, 107, 0.7)'
+            bgPrimary:       cssVar('--ind-bg',               '#0c1420'),
+            bgSecondary:     cssVar('--ind-bg-secondary',     '#182838'),
+            border:          cssVar('--ind-border',           '#3a5060'),
+            accent:          cssVar('--ind-accent',           '#7ab8d0'),
+            antennaAccent:   cssVar('--ind-antenna', '#22a05a'),
+            accentBlue:      cssVar('--ind-accent-blue',      '#86b8d4'),
+            accentRed:       cssVar('--ind-accent-red',       '#d05545'),
+            textPrimary:     cssVar('--ind-text',             '#c8d0d8'),
+            textSecondary:   cssVar('--ind-text-secondary',   '#8a9aaa'),
+            textMuted:       cssVar('--ind-text-muted',       '#708898'),
+            labelMuted:      cssVar('--ind-label-muted',       '#d0d8e0'),
+            satelliteLine:   themeRgba('ind-satellite-line', 'rgba(255, 255, 255, 0.5)'),
+            satelliteMarker: cssVar('--ind-satellite-marker', '#ffffff'),
+            outOfView:       themeRgba('ind-out-of-view',    'rgba(255, 107, 107, 0.7)')
         };
 
         this.antennaScale = this.radius / 100 * 0.95;
@@ -104,11 +105,11 @@
 
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, 0, Math.PI * 2);
-        ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = this.colors.accentBlue;
+        ctx.lineWidth = 1;
         ctx.stroke();
 
-        ctx.font = '11px monospace';
+        ctx.font = '13px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
@@ -140,7 +141,7 @@
                 else if (deg === 180) { label = 'S'; }
                 else if (deg === 270) { label = 'W'; }
 
-                ctx.fillStyle = (deg % 90 === 0) ? this.colors.textPrimary : this.colors.textSecondary;
+                ctx.fillStyle = this.colors.labelMuted;
                 ctx.fillText(
                     label,
                     cx + Math.cos(rad) * labelR,
@@ -289,7 +290,7 @@
         const cy = this.centerY;
         const cfg = this.platformBaseConfig;
 
-        ctx.strokeStyle = this.colors.accent;
+        ctx.strokeStyle = this.colors.antennaAccent;
         ctx.lineWidth = cfg.lineWidth;
 
         if (cfg.useDash) {

@@ -49,18 +49,20 @@
         this.isVisible = true;
 
         this.colors = {
-            bgPrimary: '#0a0e14',
-            bgSecondary: '#12171f',
-            border: '#2a3444',
-            accent: '#00d4aa',
-            accentBlue: '#00a8ff',
-            accentRed: '#ff6b6b',
-            textPrimary: '#e6e8eb',
-            textSecondary: '#8b919a',
-            textMuted: '#5c6370',
-            satelliteLine: 'rgba(255, 255, 255, 0.5)',
-            satelliteMarker: '#ffffff',
-            outOfView: 'rgba(255, 107, 107, 0.7)'
+            bgPrimary:       cssVar('--ind-bg',               '#0c1420'),
+            bgSecondary:     cssVar('--ind-bg-secondary',     '#182838'),
+            border:          cssVar('--ind-border',           '#3a5060'),
+            accent:          cssVar('--ind-accent',           '#7ab8d0'),
+            antennaAccent:   cssVar('--ind-antenna', '#22a05a'),
+            accentBlue:      cssVar('--ind-accent-blue',      '#86b8d4'),
+            accentRed:       cssVar('--ind-accent-red',       '#d05545'),
+            textPrimary:     cssVar('--ind-text',             '#c8d0d8'),
+            textSecondary:   cssVar('--ind-text-secondary',   '#8a9aaa'),
+            textMuted:       cssVar('--ind-text-muted',       '#708898'),
+            labelMuted:      cssVar('--ind-label-muted',       '#d0d8e0'),
+            satelliteLine:   themeRgba('ind-satellite-line', 'rgba(255, 255, 255, 0.5)'),
+            satelliteMarker: cssVar('--ind-satellite-marker', '#ffffff'),
+            outOfView:       themeRgba('ind-out-of-view',    'rgba(255, 107, 107, 0.7)')
         };
 
         this.antennaScale = this.radius / 100 * 0.95;
@@ -143,8 +145,8 @@
 
         ctx.beginPath();
         ctx.arc(cx, cy, r - 18, Math.PI, 0, false);
-        ctx.strokeStyle = this.colors.border;
-        ctx.lineWidth = 2;
+        ctx.strokeStyle = this.colors.accentBlue;
+        ctx.lineWidth = 1;
         ctx.stroke();
 
         // Зенит = 90°
@@ -155,7 +157,7 @@
         ctx.lineWidth = 2;
         ctx.stroke();
 
-        ctx.font = '10px monospace';
+        ctx.font = '12px monospace';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
@@ -181,7 +183,7 @@
                 const labelR = r + 12;
                 const label = labelValue.toString() + '°';
 
-                ctx.fillStyle = (labelValue === 90) ? this.colors.textPrimary : this.colors.textSecondary;
+                ctx.fillStyle = this.colors.labelMuted;
                 ctx.fillText(label, cx + Math.cos(radLeft) * labelR, cy - Math.sin(radLeft) * labelR);
             }
 
@@ -198,7 +200,7 @@
                     const labelR2 = r + 12;
                     const label2 = labelValue.toString() + '°';
 
-                    ctx.fillStyle = this.colors.textSecondary;
+                    ctx.fillStyle = this.colors.labelMuted;
                     ctx.fillText(label2, cx + Math.cos(radRight) * labelR2, cy - Math.sin(radRight) * labelR2);
                 }
             }
@@ -206,7 +208,7 @@
 
         // W и E
         ctx.font = 'bold 11px monospace';
-        ctx.fillStyle = this.colors.textMuted;
+        ctx.fillStyle = this.colors.labelMuted;
         ctx.textAlign = 'center';
         ctx.fillText('W', cx - r - 12, cy + 15);
         ctx.fillText('E', cx + r + 12, cy + 15);
@@ -309,7 +311,7 @@
         const outerArcRadius = innerArcRadius + 5 * s;
 
         // === 1. Внешнее кольцо шарнира ===
-        ctx.strokeStyle = this.colors.accent;
+        ctx.strokeStyle = this.colors.antennaAccent;
         ctx.lineWidth = 1.5;
 
         ctx.beginPath();
@@ -336,7 +338,7 @@
 
         // Диагональные распорки внутри колонны
         ctx.lineWidth = 0.7;
-        ctx.strokeStyle = this.colors.accent;
+        ctx.strokeStyle = this.colors.antennaAccent;
         ctx.globalAlpha = 0.5;
         const braceCount = 2;
         for (let i = 1; i <= braceCount; i++) {
@@ -352,7 +354,7 @@
 
         // === 3. Фланцевая пластина (переход колонна → основание) ===
         ctx.lineWidth = 1.5;
-        ctx.strokeStyle = this.colors.accent;
+        ctx.strokeStyle = this.colors.antennaAccent;
         const flangeH = 15 * s;
         const flangeW = colBotW + 4 * s;
 

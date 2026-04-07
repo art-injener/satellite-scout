@@ -7,6 +7,7 @@ services:
     environment:
       - PORT=8080
       - DEV_MODE=false
+      - THEME=${THEME:-default}
       - OBSERVER_LAT=${OBSERVER_LAT:-47.315813}
       - OBSERVER_LON=${OBSERVER_LON:-39.788243}
       - OBSERVER_ALT=${OBSERVER_ALT:-70}

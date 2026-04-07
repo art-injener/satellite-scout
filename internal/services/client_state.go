@@ -7,7 +7,7 @@ import (
 
 // clientState — состояние одного клиента UI.
 type clientState struct {
-	TrackingID int       // NORAD ID спутника на сопровождении (0 = нет).
+	TrackingID int       // NORAD ID спутника на слежении (0 = нет).
 	LastSeen   time.Time // Время последней активности (для TTL).
 }
 
@@ -50,7 +50,7 @@ func (s *ClientStateStore) ClearTracking(clientID string) {
 	}
 }
 
-// ClearTrackingForNorad сбрасывает сопровождение у всех клиентов с данным NORAD (окончание сеанса).
+// ClearTrackingForNorad сбрасывает слежение у всех клиентов с данным NORAD (окончание сеанса).
 func (s *ClientStateStore) ClearTrackingForNorad(noradID int) {
 	if noradID <= 0 {
 		return

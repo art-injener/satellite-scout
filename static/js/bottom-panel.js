@@ -1,4 +1,4 @@
-// Нижняя панель: вкладки «Обзор» / «Сопровождение» / «ТМИ».
+// Нижняя панель: вкладки «Обзор» / «Слежение» / «ТМИ».
 // Компоненты: SpectrumDataSource, WaterfallView, FFTSpectrumView, BottomPanel.
 
 (function() {
@@ -9,7 +9,7 @@
     // ════════════════════════════════════════════════════════════════════════
 
     // Горячая палитра: 0→чёрный → синий → зелёный → жёлтый → красный → белый
-    function hotColor(v) {
+    function hotColorFull(v) {
         v = Math.max(0, Math.min(1, v));
         let r, g, b;
         if (v < 0.2) {
@@ -31,6 +31,68 @@
     }
 
     /**
+     * Приглушённая палитра водопада для светлой темы (меньше неона, комфортнее глазу).
+     */
+    function hotColorLight(v) {
+        v = Math.max(0, Math.min(1, v));
+        let r; let g; let b;
+        if (v < 0.22) {
+            const t = v / 0.22;
+            r = Math.round(36 + t * 28);
+            g = Math.round(44 + t * 40);
+            b = Math.round(52 + t * 95);
+        } else if (v < 0.45) {
+            const t = (v - 0.22) / 0.23;
+            r = Math.round(64 + t * 55);
+            g = Math.round(84 + t * 125);
+            b = Math.round(147 - t * 75);
+        } else if (v < 0.68) {
+            const t = (v - 0.45) / 0.23;
+            r = Math.round(119 + t * 80);
+            g = Math.round(209 - t * 55);
+            b = Math.round(72 - t * 32);
+        } else if (v < 0.88) {
+            const t = (v - 0.68) / 0.2;
+            r = Math.round(199 + t * 28);
+            g = Math.round(154 - t * 48);
+            b = Math.round(40 + t * 28);
+        } else {
+            const t = (v - 0.88) / 0.12;
+            r = Math.round(227 + t * 18);
+            g = Math.round(106 + t * 42);
+            b = Math.round(68 + t * 38);
+        }
+        return [r, g, b];
+    }
+
+    function hotColor(v) {
+        if (typeof window.getThemeId === 'function' && window.getThemeId() === 'light') {
+            return hotColorLight(v);
+        }
+        return hotColorFull(v);
+    }
+
+    /** RGB из CSS-переменной вида #rrggbb (водопад, поля canvas). */
+    function cssVarRgbHex(name, fallbackHex) {
+        const raw = typeof window.cssVar === 'function' ? window.cssVar(name, fallbackHex) : fallbackHex;
+        const s = String(raw || fallbackHex).trim();
+        if (s.charAt(0) === '#') {
+            let h = s.slice(1);
+            if (h.length === 3) {
+                h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+            }
+            if (h.length === 6) {
+                return [
+                    parseInt(h.slice(0, 2), 16),
+                    parseInt(h.slice(2, 4), 16),
+                    parseInt(h.slice(4, 6), 16)
+                ];
+            }
+        }
+        return [0, 0, 0];
+    }
+
+    /**
      * Подбор «красивого» шага для шкалы частот.
      * @param {number} spanMHz — ширина полосы (МГц)
      * @param {number} widthPx — ширина области (пиксели)
@@ -48,13 +110,7 @@
         return niceSteps[niceSteps.length - 1];
     }
 
-    // Чтение CSS-переменной из :root с запасным значением
-    function cssVar(name, fallback) {
-        try {
-            const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-            return v || fallback;
-        } catch (e) { return fallback; }
-    }
+    // cssVar() определена глобально в css-vars.js
 
     // ════════════════════════════════════════════════════════════════════════
     // SpectrumDataSource — генератор спектральных данных (шум + сигнал)
@@ -139,7 +195,7 @@
         return this._buf;
     };
 
-    // Срез вокруг centerBin шириной widthBins (для узкополосного водопада «Сопровождение»)
+    // Срез вокруг centerBin шириной widthBins (узкополосный водопад вкладки «Слежение»)
     SpectrumDataSource.prototype.getSlice = function(centerBin, widthBins) {
         const half = Math.floor(widthBins / 2);
         const start = centerBin - half;
@@ -190,7 +246,7 @@
         }
     };
 
-    // Шкала частот на отдельном canvas (над водопадом «Сопровождение»)
+    // Шкала частот на отдельном canvas (над водопадом «Слежение»)
     WaterfallView.prototype._drawFreqScale = function(width) {
         const sc = this._scaleCanvas;
         if (!sc || !width) { return; }
@@ -206,8 +262,8 @@
             sc.width = width;
             sc.height = 18;
         }
-        const bg = cssVar('--bg-tertiary', '#1a1e24');
-        const fg = cssVar('--text-muted', '#8a9199');
+        const bg = cssVar('--bg-tertiary', '#243848');
+        const fg = cssVar('--text-muted', '#c8d0d8');
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, width, 18);
         ctx.strokeStyle = fg;
@@ -247,7 +303,13 @@
         if (!this._imageData || this._imageData.width !== w || this._imageData.height !== h) {
             this._imageData = this._ctx.createImageData(w, h);
             const d = this._imageData.data;
-            for (let j = 3; j < d.length; j += 4) { d[j] = 255; }
+            const cold0 = cssVarRgbHex('--waterfall-cold-bg', '#000000');
+            for (let j = 0; j < d.length; j += 4) {
+                d[j] = cold0[0];
+                d[j + 1] = cold0[1];
+                d[j + 2] = cold0[2];
+                d[j + 3] = 255;
+            }
         }
 
         const data = this._imageData.data;
@@ -260,11 +322,15 @@
         if (plotW < 2) { plotW = w; ml = 0; mr = 0; }
 
         // Область отступов — чёрный фон (rgba 0,0,0,255)
+        const marginRgb = cssVarRgbHex('--waterfall-margin-bg', '#000000');
         const bins = buf.length;
         for (let x = 0; x < w; x++) {
             const idx = x * 4;
             if (x < ml || x >= w - mr) {
-                data[idx] = 0; data[idx + 1] = 0; data[idx + 2] = 0; data[idx + 3] = 255;
+                data[idx] = marginRgb[0];
+                data[idx + 1] = marginRgb[1];
+                data[idx + 2] = marginRgb[2];
+                data[idx + 3] = 255;
             } else {
                 const srcIdx = Math.min(Math.floor(((x - ml) / plotW) * bins), bins - 1);
                 const col = hotColor(buf[srcIdx]);
@@ -287,13 +353,14 @@
         const tickMs = this._tickMs || 80;
         const totalSec = (h * tickMs) / 1000;
 
-        // Фон шкалы
-        ctx.fillStyle = cssVar('--bg-primary', '#0d1117');
+        // Фон боковой шкалы времени — как поле водопада/отступы, не --bg-primary (в light иначе серая полоса)
+        const axisBg = cssVar('--waterfall-margin-bg', cssVar('--spectrum-instrument-bg', '#2a3440'));
+        ctx.fillStyle = axisBg;
         ctx.fillRect(0, 0, ml, h);
 
         // Подбор шага (2, 5 или 10 секунд)
         const stepSec = totalSec <= 10 ? 2 : (totalSec <= 30 ? 5 : 10);
-        const fg = cssVar('--text-muted', '#8a9199');
+        const fg = cssVar('--spectrum-axis-text', cssVar('--text-muted', '#e4e8ec'));
         ctx.font = '9px monospace';
         ctx.fillStyle = fg;
         ctx.strokeStyle = fg;
@@ -325,7 +392,13 @@
         if (w < 2 || h < 2) { return; }
         this._imageData = this._ctx.createImageData(w, h);
         const d = this._imageData.data;
-        for (let i = 3; i < d.length; i += 4) { d[i] = 255; }
+        const cold = cssVarRgbHex('--waterfall-cold-bg', '#000000');
+        for (let i = 0; i < d.length; i += 4) {
+            d[i] = cold[0];
+            d[i + 1] = cold[1];
+            d[i + 2] = cold[2];
+            d[i + 3] = 255;
+        }
         this._ctx.putImageData(this._imageData, 0, 0);
     };
 
@@ -384,17 +457,19 @@
         const plotH = h - mt - mb;
         if (plotW < 4 || plotH < 4) { return; }
 
-        const borderClr = cssVar('--border-color', '#2a3444');
-        const textMuted = cssVar('--text-muted', '#8a9199');
+        const plotBg = cssVar('--spectrum-plot-bg', cssVar('--spectrum-bg', '#0c1420'));
+        const gridCol = cssVar('--spectrum-plot-grid', 'rgba(255,255,255,0.08)');
+        const axisText = cssVar('--spectrum-axis-text', cssVar('--text-muted', '#c8d0d8'));
         const dbRange = this._dbMax - this._dbMin;
         const dbStep = dbRange <= 60 ? 10 : 20;
 
-        ctx.clearRect(0, 0, w, h);
+        ctx.fillStyle = plotBg;
+        ctx.fillRect(0, 0, w, h);
 
         // ── Сетка (пунктирные линии) ──
         ctx.save();
-        ctx.strokeStyle = borderClr;
-        ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = gridCol;
+        ctx.globalAlpha = 1;
         ctx.setLineDash([4, 4]);
         ctx.lineWidth = 1;
 
@@ -423,7 +498,7 @@
         // ── Подписи оси Y (dB) ──
         ctx.save();
         ctx.font = '9px monospace';
-        ctx.fillStyle = textMuted;
+        ctx.fillStyle = axisText;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
         for (let dbL = this._dbMin; dbL <= this._dbMax; dbL += dbStep) {
@@ -448,7 +523,7 @@
             const yPt = mt + plotH * (1 - vv);
             if (bp === 0) { ctx.moveTo(xPt, yPt); } else { ctx.lineTo(xPt, yPt); }
         }
-        ctx.strokeStyle = '#00ff80';
+        ctx.strokeStyle = cssVar('--spectrum-trace', '#00ff80');
         ctx.lineWidth = 1.5;
         ctx.stroke();
         ctx.restore();
@@ -462,7 +537,7 @@
 
         ctx.save();
         ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = '#ffd700';
+        ctx.strokeStyle = cssVar('--spectrum-crosshair', '#ffd700');
         ctx.lineWidth = 1;
         // Вертикаль через пик — от верха до низа canvas
         ctx.beginPath();
@@ -480,14 +555,14 @@
         ctx.save();
         ctx.beginPath();
         ctx.arc(peakX, peakY, 3, 0, Math.PI * 2);
-        ctx.fillStyle = '#ff3333';
+        ctx.fillStyle = cssVar('--spectrum-peak-dot', '#ff3333');
         ctx.fill();
         ctx.restore();
 
         // Подписи: частота внизу вертикали, dB слева горизонтали
         ctx.save();
         ctx.font = '9px monospace';
-        ctx.fillStyle = '#ffd700';
+        ctx.fillStyle = cssVar('--spectrum-peak-label', '#ffd700');
         ctx.textAlign = 'center';
         ctx.textBaseline = 'bottom';
         ctx.fillText(peakFreq.toFixed(3), peakX, mt + plotH - 2);
@@ -513,8 +588,8 @@
             canvas.height = 18;
         }
         const ctx = canvas.getContext('2d');
-        const bg = cssVar('--bg-tertiary', '#1a1e24');
-        const fg = cssVar('--text-muted', '#8a9199');
+        const bg = cssVar('--bg-tertiary', '#243848');
+        const fg = cssVar('--text-muted', '#c8d0d8');
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, totalW, 18);
 
@@ -558,19 +633,27 @@
     // Миграция старых ключей вкладок (UX-BOTTOM-RENAME-001)
     const LEGACY_BOTTOM_TAB = { spectrum: 'overview', antenna: 'follow' };
 
+    const VALID_BOTTOM_TABS = ['overview', 'follow', 'tmi', 'plan'];
+
     function migrateBottomTabFromStorage() {
         const raw = localStorage.getItem('ux.bottomTab');
         if (!raw) { return 'overview'; }
         const next = LEGACY_BOTTOM_TAB[raw] || raw;
+        if (VALID_BOTTOM_TABS.indexOf(next) < 0) {
+            try { localStorage.setItem('ux.bottomTab', 'overview'); } catch (e) { /* ignore */ }
+            return 'overview';
+        }
         if (next !== raw) {
             try { localStorage.setItem('ux.bottomTab', next); } catch (e) { /* ignore */ }
         }
         return next;
     }
 
-    const TAB_LABELS = { follow: 'Сопровождение', overview: 'Обзор', tmi: 'ТМИ' };
+    const TAB_LABELS = { follow: 'Слежение', overview: 'Обзор', tmi: 'ТМИ', plan: 'План сеансов' };
+    /** Вертикальная колонка в полоске РТН (по одной букве; «Слежение» укладывается по высоте) */
+    const TAB_LABELS_SIDE = { follow: 'СЛЕЖЕНИЕ', overview: 'ОБЗОР', tmi: 'ТМИ', plan: 'ПЛАН' };
 
-    // Центральный bin и ширина среза для узкополосного водопада «Сопровождение»
+    // Центральный bin и ширина среза для узкополосного водопада вкладки «Слежение»
     const FOLLOW_CENTER_BIN = 256;
     const FOLLOW_NARROW_BINS = 128;
 
@@ -615,10 +698,13 @@
         }
     };
 
-    // Привязываем клики по кнопкам аккордеона в sidebar (Обзор / Сопровождение / ТМИ)
+    // Кнопки режима РТН: полоска слева от тела нижней панели
+    var BOTTOM_TAB_BTN_SELECTOR = '.bottom-panel__tab-btn';
+
+    // Привязываем клики (Обзор / Слежение / ТМИ)
     BottomPanel.prototype._initTabs = function() {
         const self = this;
-        const tabs = document.querySelectorAll('.sidebar-accordion__btn');
+        const tabs = document.querySelectorAll(BOTTOM_TAB_BTN_SELECTOR);
         for (let i = 0; i < tabs.length; i++) {
             (function(tab) {
                 tab.addEventListener('click', function() {
@@ -630,17 +716,23 @@
 
     // Переключение активной вкладки
     BottomPanel.prototype._switchTab = function(name, save) {
-        const tabs = document.querySelectorAll('.sidebar-accordion__btn');
+        const tabs = document.querySelectorAll(BOTTOM_TAB_BTN_SELECTOR);
         for (let i = 0; i < tabs.length; i++) {
-            tabs[i].classList.toggle('active', tabs[i].getAttribute('data-tab') === name);
+            const on = tabs[i].getAttribute('data-tab') === name;
+            tabs[i].classList.toggle('active', on);
+            if (tabs[i].getAttribute('role') === 'tab') {
+                tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
+            }
         }
         for (const key in this._panes) {
             this._panes[key].classList.toggle('bp-pane--hidden', key !== name);
         }
-        // Подпись в заголовке — столбиком (по одной букве)
+        // Подпись в полоске — столбиком (по одной букве); только короткий вариант
         const modeEl = document.getElementById('bottom-panel-mode');
         if (modeEl) {
-            const label = TAB_LABELS[name] || name;
+            const full = TAB_LABELS[name] || name;
+            modeEl.setAttribute('title', full);
+            const label = TAB_LABELS_SIDE[name] || full;
             modeEl.innerHTML = label.split('').map(function(c) {
                 return '<span>' + (c === ' ' ? '\u00A0' : c) + '</span>';
             }).join('');
@@ -649,6 +741,9 @@
         this._overviewScaleDrawn = false;
         if (save) {
             try { localStorage.setItem('ux.bottomTab', name); } catch (e) { /* ignore */ }
+        }
+        if (name === 'plan' && typeof window.ensurePassesTableBottom === 'function') {
+            window.ensurePassesTableBottom();
         }
         // Отложенное обновление размеров видимых компонентов
         const self = this;
@@ -668,6 +763,7 @@
         } else if (this._currentTab === 'follow') {
             if (this._followWF) { this._followWF.refresh(); }
         }
+        // plan — только таблица в скролле, спектр не трогаем
     };
 
     // Инициализация всех компонентов спектра
@@ -680,7 +776,7 @@
 
         const ds = this._dataSource;
 
-        // Водопад «Сопровождение»
+        // Водопад «Слежение»
         const followCanvas = document.getElementById('waterfall-compact');
         const followScale = document.getElementById('waterfall-freq-scale');
         if (followCanvas) {
@@ -778,7 +874,7 @@
 
     /**
      * Переключить вкладку программно.
-     * @param {string} name — 'overview' | 'follow' | 'tmi'
+     * @param {string} name — 'overview' | 'follow' | 'tmi' | 'plan'
      * @param {boolean} [persist=false] — true при клике пользователя (localStorage)
      */
     BottomPanel.prototype.showTab = function(name, persist) {
@@ -793,14 +889,14 @@
         if (this._overviewWF) { this._overviewWF.clear(); }
     };
 
-    // Запуск водопада «Сопровождение» (при взятии на сопровождение)
+    // Запуск водопада «Слежение» (кнопка «Слежение» в правой панели)
     BottomPanel.prototype.startWaterfall = function() {
         this.resetSimulation();
         this._followRunning = true;
         if (this._followWF) { this._followWF.start(); }
     };
 
-    // Остановка и очистка водопада «Сопровождение» (при сбросе)
+    // Остановка и очистка водопада «Слежение» (кнопка «Сброс»)
     BottomPanel.prototype.stopWaterfallAndClear = function() {
         this._followRunning = false;
         if (this._followWF) { this._followWF.clear(); }

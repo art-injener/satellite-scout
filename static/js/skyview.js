@@ -44,64 +44,68 @@
         }, options || {});
 
         /**
-         * Цветовая схема (тёмная тема)
-         * Все цвета легко настраиваются для интеграции
+         * Цветовая схема из CSS-переменных темы (colors-*.css)
          */
         this.colors = {
-            // Фон
-            background: '#0a0e14',
-            skyFill: '#1a2a3a',
+            background: cssVar('--sky-bg',   '#0c1420'),
+            skyFill:    cssVar('--sky-fill',  '#182838'),
 
-            // Сетка
-            grid: '#006666',
-            gridText: '#008080',
+            grid:     cssVar('--sky-grid',      '#3a5060'),
+            gridText: cssVar('--sky-grid-text',  '#d0d8e0'),
 
-            // Метки углов возвышения
-            elevationLabel: '#ffffff', // Белый цвет для контраста
-            elevationLabelOffsetX: -5, // Смещение влево от центра
-            elevationLabelOffsetY: -5, // Смещение вверх
-            elevationLabelSize: 8, // Размер шрифта
+            elevationLabel: cssVar('--sky-elevation-label', '#d0d8e0'),
+            elevationLabelOffsetX: -5,
+            elevationLabelOffsetY: -5,
+            elevationLabelSize: 11,
 
-            // Метки азимута на внешней окружности
-            azimuthLabel: '#00cccc', // Бирюзовый цвет для азимутальных меток
+            cardinalLabel: cssVar('--sky-label-muted', '#d0d8e0'),
 
-            // Траектория
-            track: '#00cc00',
-            trackArrow: '#88ff88', // Цвет стрелок направления
+            azimuthLabel: cssVar('--sky-azimuth-label', '#d0d8e0'),
 
-            // Маркеры AOS/LOS
-            aosMarker: '#00ff00', // Зелёный - начало видимости
-            losMarker: '#ff4444', // Красный - конец видимости
-            markerBorder: '#ffffff',
+            track:      cssVar('--sky-track',       '#00cc00'),
+            trackArrow: cssVar('--sky-track-arrow',  '#66dd66'),
 
-            // Спутник
-            satellite: '#00ffff',
-            satelliteGlow: 'rgba(0, 255, 255, 0.3)',
-            satelliteSignal: 'rgba(0, 255, 200, 0.5)',
-            satLabel: '#ffffff',
+            aosMarker:    cssVar('--sky-aos',           '#00ff00'),
+            losMarker:    cssVar('--sky-los',           '#ff4444'),
+            markerBorder: cssVar('--sky-marker-border', '#ffffff'),
 
-            // Аура вокруг спутника (бледно-красная, тёмная заливка)
-            satelliteAura: 'rgba(197, 88, 88, 1)',
-            satelliteAuraBorder: '#ff8888',
+            satellite:       cssVar('--sky-satellite',        '#00ffff'),
+            satelliteGlow:   themeRgba('sky-satellite-glow',   'rgba(0, 255, 255, 0.3)'),
+            satelliteSignal: themeRgba('sky-satellite-signal',  'rgba(0, 255, 200, 0.5)'),
+            satLabel:        cssVar('--sky-satellite-label',  '#ffffff'),
 
-            // Наблюдатель (центр)
-            observer: '#ffaa00',
-            observerSecondary: '#ff6600',
+            satelliteAura:       themeRgba('sky-satellite-aura', 'rgba(197, 88, 88, 1)'),
+            satelliteAuraBorder: cssVar('--sky-satellite-aura-border', '#ff8888'),
 
-            // Информационный блок
-            infoText: '#00d4aa',
-            infoLabel: '#ffffff',
-            timeText: '#00a8ff',
+            observer:          cssVar('--sky-observer',           '#ffaa00'),
+            observerSecondary: cssVar('--sky-observer-secondary', '#ff6600'),
 
-            // Текущий (выбранный) спутник: сплошная жёлтая трасса, зелёный маркер
-            selectedTrack: '#ffff00',
-            selectedMarker: '#2ecc71' // зелёный — маркер
+            infoText:  cssVar('--sky-info-text',  '#00d4aa'),
+            infoLabel: cssVar('--sky-info-label',  '#ffffff'),
+            timeText:  cssVar('--sky-time-text',   '#708898'),
+
+            selectedTrack:  cssVar('--sky-selected-track',  '#ffff00'),
+            selectedSatLabel: cssVar('--sky-selected-sat-label', '#d8c878'),
+            selectedMarker: cssVar('--sky-selected-marker', '#2ecc71'),
+
+            /* Обводки canvas (подписи, стрелки, «солнечные панели») — заданы в теме */
+            canvasTextStroke: cssVar('--sky-canvas-text-stroke', 'rgba(0, 0, 0, 0.9)'),
+            satPanelLine:     cssVar('--sky-sat-panel-line', 'rgba(255, 255, 255, 0.3)'),
+            satBodyOutline:   cssVar('--sky-sat-body-outline', '#ffffff'),
+            arrowOutline:     cssVar('--sky-arrow-outline', 'rgba(0, 0, 0, 0.75)'),
+            signalWaveRgb:    (function() {
+                var s = cssVar('--sky-signal-wave-rgb', '0, 255, 200').trim().replace(/\s/g, '');
+                return s || '0,255,200';
+            })()
         };
+
+        this._skyGridLineW = parseFloat(cssVar('--sky-grid-line-width', '1')) || 1;
+        this._skyGridOuterW = parseFloat(cssVar('--sky-grid-outer-width', '2')) || 2;
 
         // Расчёт геометрии
         this._updateGeometry();
 
-        // Спутник на сопровождении (tracking) — текущий стиль (зелёный + аура).
+        // Спутник на слежении (tracking) — текущий стиль (зелёный + аура).
         this.satellite = {
             name: '',
             noradId: null,
@@ -224,7 +228,7 @@
 
         // Концентрические круги (каждые 30° elevation)
         ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = this._skyGridLineW;
 
         for (let el = 30; el <= 60; el += 30) {
             const ro = 1 - (el / 90);
@@ -241,12 +245,12 @@
         ctx.beginPath();
         ctx.arc(cx, cy, r, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 2;
+        ctx.lineWidth = this._skyGridOuterW;
         ctx.stroke();
 
         // Линии N-S и E-W
         ctx.strokeStyle = this.colors.grid;
-        ctx.lineWidth = 1;
+        ctx.lineWidth = this._skyGridLineW;
 
         // N-S (вертикальная)
         ctx.beginPath();
@@ -280,9 +284,9 @@
             ctx.setLineDash([]);
         }
 
-        // Метки сторон света — белым цветом снаружи окружности, тем же шрифтом что и цифры
-        ctx.font = '12px sans-serif';
-        ctx.fillStyle = '#ffffff';
+        // Метки сторон света — приглушённый белый
+        ctx.font = '15px sans-serif';
+        ctx.fillStyle = this.colors.cardinalLabel;
         ctx.textAlign = 'center';
         ctx.textBaseline = 'middle';
 
@@ -311,7 +315,7 @@
         const tickLen = 5; // длина засечки от окружности
         const labelOffset = 14; // отступ подписи от окружности (было 8)
 
-        ctx.font = '9px sans-serif';
+        ctx.font = '12px sans-serif';
         ctx.fillStyle = this.colors.azimuthLabel;
 
         for (let az = step; az < 360; az += step) {
@@ -418,7 +422,7 @@
         ctx.closePath();
         ctx.fillStyle = fillColor || this.colors.trackArrow;
         ctx.fill();
-        ctx.strokeStyle = 'rgba(0, 0, 0, 0.75)';
+        ctx.strokeStyle = this.colors.arrowOutline;
         ctx.lineWidth = 1.5;
         ctx.stroke();
 
@@ -703,7 +707,7 @@
         ctx.fillRect(p.x + size / 2 + 2, p.y - panelHeight / 2, panelWidth, panelHeight);
 
         // Линии на панелях (детализация)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.strokeStyle = this.colors.satPanelLine;
         ctx.lineWidth = 1;
 
         // Линии на левой панели
@@ -726,28 +730,34 @@
 
         // Обводка корпуса
         ctx.shadowBlur = 0;
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = this.colors.satBodyOutline;
         ctx.lineWidth = 1;
         ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
 
-        ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
-        ctx.shadowBlur = 3;
+        // Подписи спутника на слежении — обводка из темы (светлая тема: светлый ореол)
+        ctx.shadowBlur = 0;
+        ctx.lineJoin = 'round';
+        ctx.miterLimit = 2;
+        ctx.strokeStyle = this.colors.canvasTextStroke;
+        ctx.lineWidth = 3;
 
         if (this.satellite.name) {
-            ctx.font = 'bold 10px sans-serif';
-            ctx.fillStyle = this.colors.satLabel;
+            const nm = _shortName(this.satellite.name);
+            ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'bottom';
-            ctx.fillText(_shortName(this.satellite.name), p.x, p.y - 12);
+            ctx.strokeText(nm, p.x, p.y - 12);
+            ctx.fillStyle = this.colors.satLabel;
+            ctx.fillText(nm, p.x, p.y - 12);
         }
 
-        ctx.font = 'bold 11px sans-serif';
-        ctx.fillStyle = this.colors.satLabel;
+        const azel = '[' + pos.az.toFixed(1) + '\u00b0/' + pos.el.toFixed(1) + '\u00b0]';
+        ctx.font = 'bold 12px sans-serif';
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
-        ctx.fillText('[' + pos.az.toFixed(1) + '\u00b0/' + pos.el.toFixed(1) + '\u00b0]', p.x, p.y + 10);
-
-        ctx.shadowBlur = 0;
+        ctx.strokeText(azel, p.x, p.y + 10);
+        ctx.fillStyle = this.colors.satLabel;
+        ctx.fillText(azel, p.x, p.y + 10);
     };
 
     /**
@@ -793,7 +803,7 @@
 
                 ctx.beginPath();
                 ctx.arc(waveCenterX, waveCenterY, waveR, arcStart, arcEnd);
-                ctx.strokeStyle = `rgba(0, 255, 200, ${alpha})`;
+                ctx.strokeStyle = 'rgba(' + this.colors.signalWaveRgb + ',' + alpha + ')';
                 ctx.lineWidth = 2;
                 ctx.stroke();
             }
@@ -854,7 +864,7 @@
             this._selectedSatellite.noradId !== this.satellite.noradId) {
             this._drawSelectedLayer();
         }
-        // Слой 3: спутник на сопровождении (текущий стиль).
+        // Слой 3: спутник на слежении (текущий стиль).
         if (this.satellite.noradId) {
             this._drawSatelliteAura();
             this._drawTrack();
@@ -958,7 +968,7 @@
     };
 
     /** Обновление текстового блока под графиком: AOS, LOS, Длит., время до конца сеанса (Осталось).
-     * При отображении выбранного спутника (отличного от сопровождаемого) показываются данные выбранного. */
+     * При отображении выбранного спутника (отличного от отслеживаемого) показываются данные выбранного. */
     SkyView.prototype._updateInfoPanelDOM = function() {
         const e = this._infoEls;
         if (!e.aos && !e.los && !e.dur && !e.remaining) {return;}
@@ -1047,7 +1057,7 @@
     };
 
     /**
-     * Значок спутника такой же формы, как у сопровождаемого (корпус + панели + линии),
+     * Значок спутника такой же формы, как у спутника на слежении (корпус + панели + линии),
      * без анимации и без пульсирующего круга. Используется для текущего (выбранного) спутника.
      * @param {CanvasRenderingContext2D} ctx
      * @param {number} x - центр X
@@ -1055,7 +1065,7 @@
      * @param {string} fillColor - цвет заливки (например selectedMarker)
      */
     SkyView.prototype._drawSatelliteIconStatic = function(ctx, x, y, fillColor) {
-        const size = 8; // как у сопровождаемого
+        const size = 8; // как у маркера на слежении
         const panelWidth = size * 1.2;
         const panelHeight = size * 0.5;
 
@@ -1066,7 +1076,7 @@
         ctx.fillRect(x - size / 2 - panelWidth - 2, y - panelHeight / 2, panelWidth, panelHeight);
         ctx.fillRect(x + size / 2 + 2, y - panelHeight / 2, panelWidth, panelHeight);
         // Линии на панелях (детализация)
-        ctx.strokeStyle = 'rgba(255, 255, 255, 0.3)';
+        ctx.strokeStyle = this.colors.satPanelLine;
         ctx.lineWidth = 1;
         for (let i = 1; i < 3; i++) {
             const lx = x - size / 2 - panelWidth - 2 + (panelWidth / 3) * i;
@@ -1083,7 +1093,7 @@
             ctx.stroke();
         }
         // Обводка корпуса
-        ctx.strokeStyle = '#ffffff';
+        ctx.strokeStyle = this.colors.satBodyOutline;
         ctx.lineWidth = 1;
         ctx.strokeRect(x - size / 2, y - size / 2, size, size);
     };
@@ -1159,7 +1169,7 @@
             }
         }
 
-        // Маркер — такой же значок, как у сопровождаемого, другим цветом и без анимации.
+        // Маркер — такой же значок, как на слежении, другим цветом и без анимации.
         if (sel.currentPos && sel.currentPos.el > 0) {
             const mp = this.azElToXY(sel.currentPos.az, sel.currentPos.el);
             this._drawSatelliteIconStatic(ctx, mp.x, mp.y, this.colors.selectedMarker);
@@ -1169,24 +1179,24 @@
 
             if (sel.name) {
                 const nameLabel = _shortName(sel.name);
-                ctx.font = 'bold 11px sans-serif';
+                ctx.font = 'bold 12px sans-serif';
                 ctx.textAlign = 'center';
                 ctx.textBaseline = 'bottom';
-                ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+                ctx.strokeStyle = this.colors.canvasTextStroke;
                 ctx.lineWidth = 3;
                 ctx.strokeText(nameLabel, mp.x, mp.y - 12);
-                ctx.fillStyle = '#ffff00';
+                ctx.fillStyle = this.colors.selectedSatLabel;
                 ctx.fillText(nameLabel, mp.x, mp.y - 12);
             }
 
             const azelLabel = '[' + sel.currentPos.az.toFixed(1) + '\u00b0/' + sel.currentPos.el.toFixed(1) + '\u00b0]';
-            ctx.font = 'bold 11px sans-serif';
+            ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
-            ctx.strokeStyle = 'rgba(0, 0, 0, 0.9)';
+            ctx.strokeStyle = this.colors.canvasTextStroke;
             ctx.lineWidth = 3;
             ctx.strokeText(azelLabel, mp.x, mp.y + 10);
-            ctx.fillStyle = '#ffff00';
+            ctx.fillStyle = this.colors.selectedSatLabel;
             ctx.fillText(azelLabel, mp.x, mp.y + 10);
         }
     };
@@ -1264,9 +1274,10 @@
         const track = sat.track;
         if (!track || track.length < 2) { return; }
 
+        const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
         ctx.strokeStyle = paletteColor || 'rgba(160, 160, 160, 0.85)';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 3]);
+        ctx.lineWidth = isLight ? 1.05 : 1.5;
+        ctx.setLineDash(isLight ? [3, 5] : [4, 3]);
         ctx.beginPath();
 
         let started = false;
@@ -1295,14 +1306,17 @@
         if (!pos || pos.el < 0) { return; }
 
         const xy = this.azElToXY(pos.az, pos.el);
-        const r = 4;
+        const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
+        const r = isLight ? 3 : 4;
 
         ctx.beginPath();
         ctx.arc(xy.x, xy.y, r, 0, Math.PI * 2);
         ctx.fillStyle = paletteColor || 'rgba(140, 140, 140, 0.95)';
         ctx.fill();
-        ctx.strokeStyle = paletteColor ? 'rgba(255,255,255,0.7)' : 'rgba(220, 220, 220, 0.9)';
-        ctx.lineWidth = 1.5;
+        ctx.strokeStyle = paletteColor
+            ? (isLight ? 'rgba(42,48,58,0.32)' : 'rgba(255,255,255,0.7)')
+            : 'rgba(220, 220, 220, 0.9)';
+        ctx.lineWidth = isLight ? 1 : 1.5;
         ctx.stroke();
     };
 

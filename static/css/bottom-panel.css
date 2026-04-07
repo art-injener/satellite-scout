@@ -1,4 +1,19 @@
-/* ===== Нижняя панель: вкладки Обзор / Сопровождение / ТМИ ===== */
+/* ===== Нижняя панель: вкладки Обзор / Слежение / ТМИ / План ===== */
+
+/* Вкладка «План»: полная таблица пролётов со скроллом */
+#bp-pane-plan {
+    flex-direction: column;
+    min-height: 0;
+}
+
+.bp-plan-scroll {
+    flex: 1;
+    width: 100%;
+    min-height: 0;
+    overflow: auto;
+    padding: 4px 6px;
+    box-sizing: border-box;
+}
 
 /* Общий контейнер вкладки — на всю ширину и высоту тела панели */
 .bp-pane {
@@ -14,7 +29,7 @@
     display: none !important;
 }
 
-/* ===== Вкладка: Сопровождение ===== */
+/* ===== Вкладка: Слежение ===== */
 
 /* Компоновка: Az (квадрат) | Водопад (1fr) | El (квадрат). stretch — контейнер водопада на всю высоту, шапка и шкала сверху */
 #bp-pane-follow {
@@ -81,12 +96,13 @@
 }
 
 .bp-indicator-info__label {
-    color: var(--text-muted);
+    color: var(--bp-info-label, #ffffff);
 }
 
 .bp-indicator-info__value {
     font-variant-numeric: tabular-nums;
-    color: #00a8ff;
+    font-weight: 600;
+    color: var(--bp-info-value, #00a8ff);
 }
 
 /* Контейнер водопада — занимает оставшееся место; min-height чтобы область не схлопывалась до 0 до layout */
@@ -109,7 +125,7 @@
     padding: 0 8px;
     font-family: var(--font-mono);
     font-size: 10px;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-muted));
     background: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
@@ -132,7 +148,7 @@
 
 .bp-wf-res {
     flex-shrink: 0;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-muted));
 }
 
 .bp-wf-sep {
@@ -230,7 +246,8 @@
     flex: 4;
     display: flex;
     flex-direction: column;
-    background: var(--bg-primary);
+    /* Единый «приборный» фон с областью отрисовки (светлая тема — тёмный блок) */
+    background: var(--spectrum-instrument-bg, var(--bg-primary));
     overflow: hidden;
     min-height: 0;
 }
@@ -239,13 +256,14 @@
 .bp-overview-freq-scale-wrap {
     height: 18px;
     flex-shrink: 0;
-    background: var(--bg-tertiary);
+    /* Стыкуется с FFT/водопадом; фон canvas шкалы — в JS (--bg-tertiary) */
+    background: var(--bp-overview-freq-scale-bg, var(--bg-tertiary));
     overflow: hidden;
 }
 
 .bp-specwf-container {
     flex: 6;
-    background: var(--bg-primary);
+    background: var(--spectrum-instrument-bg, var(--bg-primary));
     overflow: hidden;
     min-height: 0;
 }
@@ -256,7 +274,7 @@
     padding: 0 8px;
     font-family: var(--font-mono);
     font-size: 9px;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-muted));
     background: var(--bg-tertiary);
     border-bottom: 1px solid var(--border-color);
     flex-shrink: 0;
@@ -289,7 +307,7 @@
     font-family: var(--font-mono);
     font-size: 11px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-muted));
     text-transform: uppercase;
     letter-spacing: 0.4px;
     margin-bottom: 6px;
@@ -305,7 +323,7 @@
     display: block;
     font-family: var(--font-mono);
     font-size: 11px;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-muted));
     margin-bottom: 2px;
 }
 
@@ -348,7 +366,7 @@
 }
 
 .bp-sdr-btn:hover {
-    background: rgba(0, 212, 170, 0.12);
+    background: var(--bp-sdr-btn-hover-bg, rgba(0, 212, 170, 0.12));
 }
 
 /* Строки статистики демодулятора */
@@ -357,7 +375,7 @@
     justify-content: space-between;
     align-items: center;
     padding: 2px 0;
-    border-bottom: 1px solid rgba(42, 52, 68, 0.3);
+    border-bottom: 1px solid var(--bp-stat-row-border, rgba(42, 52, 68, 0.3));
 }
 
 .bp-stat-row:last-child {
@@ -367,7 +385,7 @@
 .bp-stat-label {
     font-family: var(--font-mono);
     font-size: 11px;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-muted));
 }
 
 .bp-stat-val {
@@ -435,7 +453,7 @@
     padding: 4px 8px;
     font-size: 9px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-muted));
     text-transform: uppercase;
     letter-spacing: 0.3px;
     background: var(--bg-tertiary);
@@ -447,7 +465,7 @@
 .bp-tmi-table td {
     padding: 3px 8px;
     color: var(--text-secondary);
-    border-bottom: 1px solid rgba(42, 52, 68, 0.3);
+    border-bottom: 1px solid var(--bp-stat-row-border, rgba(42, 52, 68, 0.3));
     white-space: nowrap;
 }
 

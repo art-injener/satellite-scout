@@ -16,6 +16,7 @@
     min-height: 0;
     overflow-y: auto;
     overflow-x: hidden;
+    background: var(--passes-scroll-bg, transparent);
 }
 
 .passes-compact__table {
@@ -37,21 +38,21 @@
 }
 
 .passes-compact__table th {
-    padding: 5px 6px;
-    font-size: 12px;
+    padding: 7px 6px;
+    font-size: 14px;
     font-weight: 600;
-    color: var(--text-muted);
+    color: var(--panel-header-title, var(--text-primary));
     text-transform: uppercase;
     letter-spacing: 0.3px;
     background: var(--bg-tertiary);
-    border-bottom: 1px solid rgba(80, 95, 120, 0.7);
-    border-right: 1px solid rgba(80, 95, 120, 0.45);
+    border: none;
+    box-shadow: inset -1px 0 0 var(--border-color), inset 0 -1px 0 var(--border-color);
     text-align: center;
     white-space: nowrap;
 }
 
 .passes-compact__table th:last-child {
-    border-right: none;
+    box-shadow: inset 0 -1px 0 var(--border-color);
 }
 
 /* Колонки: глаз (28px) | NORAD/имя (auto) | Азим./Угол (62px) | До AOS/LOS (62px) | Частота/Мод. (54px) */
@@ -82,12 +83,12 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
     font-weight: 600;
-    color: var(--text-muted);
+    color: inherit;
 }
 
 .pc-th-sat__line {
@@ -109,12 +110,12 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
     font-weight: 600;
-    color: var(--text-muted);
+    color: inherit;
 }
 
 .pc-th-azel__line {
@@ -145,12 +146,12 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
     font-weight: 600;
-    color: var(--text-muted);
+    color: inherit;
 }
 
 .pc-th-freq__line {
@@ -164,12 +165,12 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 11px;
+    font-size: 13px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
     font-weight: 600;
-    color: var(--text-muted);
+    color: inherit;
 }
 
 .pc-th-countdown__line {
@@ -209,22 +210,22 @@
 
 /* Трасса видна — цвет задаётся inline из палитры (svg stroke/fill). Заголовок — акцентный. */
 .pc-th-track--on .pc-track-eye-svg-wrap {
-    color: #00d4aa;
+    color: var(--accent-primary);
 }
 
 /* Трасса скрыта — приглушённый глаз с диагональю «выкл.» */
 .pc-track-cell--off .pc-track-eye-svg-wrap,
 .pc-th-track--off .pc-track-eye-svg-wrap {
-    color: rgba(230, 232, 235, 0.42);
+    color: var(--passes-eye-muted, rgba(230, 232, 235, 0.42));
 }
 
 .passes-compact__table td {
     padding: 4px 6px;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     text-align: center;
     vertical-align: middle;
-    border-bottom: 1px solid rgba(80, 95, 120, 0.45);
-    border-right: 1px solid rgba(80, 95, 120, 0.3);
+    border-bottom: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
 }
 
 .passes-compact__table td:last-child {
@@ -232,7 +233,7 @@
 }
 
 .passes-compact__table td:first-child {
-    border-right: 1px solid rgba(80, 95, 120, 0.45);
+    border-right: 1px solid var(--border-color);
     vertical-align: middle;
 }
 
@@ -242,36 +243,37 @@
     transition: background 0.1s ease;
     height: auto;
     min-height: 38px;
+    background: var(--passes-row-bg, transparent);
 }
 
 .passes-compact__table tbody tr.pc-row:hover {
     background: var(--bg-tertiary);
 }
 
-/* Выбранный (selected) — жёлтая подсветка */
+/* Выбранный (selected) — цвет из темы (светлая: синяя подсветка) */
 .passes-compact__table tbody tr.pc-row--selected {
-    background: rgba(255, 215, 0, 0.2) !important;
-    border-left: 3px solid #d4a800;
+    background: var(--passes-row-selected-bg, rgba(255, 215, 0, 0.2)) !important;
+    border-left: 3px solid var(--passes-row-selected-border, #d4a800);
 }
 
 .passes-compact__table tbody tr.pc-row--selected td:first-child {
     padding-left: 3px;
 }
 
-/* На сопровождении (tracking) */
+/* На слежении (tracking) */
 .passes-compact__table tbody tr.pc-row--tracking {
-    background: rgba(255, 68, 68, 0.1) !important;
-    border-left: 3px solid #ff4444;
+    background: var(--passes-row-tracking-bg, rgba(255, 68, 68, 0.1)) !important;
+    border-left: 3px solid var(--passes-row-tracking-border, #ff4444);
 }
 
 .passes-compact__table tbody tr.pc-row--tracking td:first-child {
     padding-left: 3px;
 }
 
-/* selected + tracking — приоритет стиля сопровождения */
+/* selected + tracking — приоритет стиля слежения */
 .passes-compact__table tbody tr.pc-row--selected.pc-row--tracking {
-    background: rgba(255, 68, 68, 0.16) !important;
-    border-left: 3px solid #ff4444;
+    background: var(--passes-row-tracking-bg, rgba(255, 68, 68, 0.16)) !important;
+    border-left: 3px solid var(--passes-row-tracking-border, #ff4444);
 }
 
 /* ===== Двухстрочные ячейки ===== */
@@ -338,14 +340,14 @@
 
 .pc-azel-az {
     font-size: 13px;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     line-height: 1.4;
     white-space: nowrap;
 }
 
 .pc-azel-el {
     font-size: 13px;
-    color: var(--text-secondary);
+    color: var(--text-primary);
     line-height: 1.4;
     white-space: nowrap;
 }
@@ -384,12 +386,20 @@
 }
 
 .pc-col3-dur {
-    color: var(--text-secondary);
+    color: var(--text-primary);
 }
 
 .pc-col3-until {
-    color: var(--accent-primary);
+    color: var(--text-primary);
     font-weight: 600;
+}
+
+.pc-col3-label--aos {
+    color: var(--color-aos, #00cc00);
+}
+
+.pc-col3-label--los {
+    color: var(--color-los, #d94848);
 }
 
 .pc-col3-dur:empty { min-height: 1em; }
@@ -419,7 +429,7 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 8px;
+    gap: 0;
     padding: 10px 12px;
     min-height: 42px;
     font-family: var(--font-mono);
@@ -433,13 +443,6 @@
     white-space: nowrap;
     transition: all 0.12s ease;
     line-height: 1.15;
-}
-
-/* Крупнее знак ⊕ / ✕ относительно подписи */
-.rp-ctrl__glyph {
-    font-size: 1.35em;
-    font-weight: 700;
-    line-height: 1;
 }
 
 .rp-ctrl__label {
@@ -457,7 +460,7 @@
     cursor: not-allowed;
 }
 
-/* Кнопка Сопровождение */
+/* Кнопка «Слежение» */
 .rp-ctrl--track:not(:disabled):hover {
     color: var(--accent-primary);
     border-color: var(--accent-primary);
@@ -501,12 +504,15 @@
     background: var(--bg-primary);
 }
 
-/* Специфика SkyView: фон и ширина (общая высота/шрифт — в main.css) */
+/* Специфика SkyView: как в исходной схеме (коммит до правок UX), см. right-panel в репозитории */
 .skyview-info {
     width: 100%;
     flex-shrink: 0;
     background: var(--bg-tertiary);
     border-top: 1px solid var(--border-color);
+    /* Если строка шире блока 320px — прокрутка, без уменьшения шрифта из main.css */
+    overflow-x: auto;
+    overflow-y: hidden;
 }
 
 /* Вся строка в одну линию: AOS | LOS | Ост. */
@@ -533,17 +539,17 @@
     min-width: 0;
 }
 
-/* Шрифт подписей (AOS, LOS, Длит.) — размер наследуется от .skyview-info */
+/* Шрифт подписей (AOS, LOS, Длит.) — размер наследуется от .skyview-info в main.css (12px) */
 .skyview-info__label {
     font-family: var(--font-mono);
 }
 
 .skyview-info__label--aos {
-    color: #00cc00; /* зелёный — подпись AOS */
+    color: var(--color-aos, #00cc00);
 }
 
 .skyview-info__label--los {
-    color: #ff4444; /* красный — подпись LOS */
+    color: var(--color-los, #d94848);
 }
 
 .skyview-info__label--dur,
@@ -553,7 +559,7 @@
 
 .skyview-info__value {
     font-variant-numeric: tabular-nums;
-    color: #00a8ff; /* синий — значения */
+    color: var(--sky-info-value, #00a8ff);
 }
 
 /* ── Тост: лимит трасс — overlay внизу области таблицы (не в потоке, без прокрутки страницы) ── */
@@ -565,14 +571,14 @@
     z-index: 10;
     box-sizing: border-box;
     padding: 0.65rem 0.5rem;
-    background: rgba(18, 28, 42, 0.96);
-    border: 1px solid #006666;
+    background: var(--pc-limit-toast-bg, rgba(18, 28, 42, 0.96));
+    border: 1px solid var(--pc-limit-toast-border, #006666);
     border-radius: 6px;
-    box-shadow: 0 6px 22px rgba(0, 0, 0, 0.5);
+    box-shadow: var(--pc-limit-toast-shadow, 0 6px 22px rgba(0, 0, 0, 0.5));
     font-family: var(--font-sans, system-ui, sans-serif);
     font-size: 11px;
     line-height: 1.45;
-    color: #e6e8eb;
+    color: var(--pc-limit-toast-text, #e6e8eb);
     pointer-events: none;
     animation: pc-limit-toast-in 0.22s ease-out;
 }

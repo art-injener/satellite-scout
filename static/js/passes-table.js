@@ -340,8 +340,8 @@ class PassesTable {
      * @param {string} message — текст ошибки.
      */
     _showError(message) {
-        if (this.container) {
-            this.container.innerHTML = `
+        if (!this.container) { return; }
+        this.container.innerHTML = `
                 <div class="passes-error">
                     <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
                         <circle cx="12" cy="12" r="10"/>
@@ -349,9 +349,13 @@ class PassesTable {
                         <line x1="12" y1="16" x2="12.01" y2="16"/>
                     </svg>
                     <p>${this._escapeHtml(message)}</p>
-                    <button class="btn btn-secondary" onclick="passesTable.loadPasses()">Повторить</button>
+                    <button type="button" class="btn btn-secondary" data-passes-retry>Повторить</button>
                 </div>
             `;
+        const retryBtn = this.container.querySelector('[data-passes-retry]');
+        if (retryBtn) {
+            const self = this;
+            retryBtn.addEventListener('click', function() { self.loadPasses(); });
         }
     }
 
@@ -381,21 +385,39 @@ class PassesTable {
     }
 }
 
-// Глобальная переменная для доступа из HTML.
+// Экземпляр полной таблицы на странице /passes
 let passesTable = null;
+// Экземпляр в нижней панели /tracking (вкладка «План»)
+let passesTableBottom = null;
 
 /**
  * Инициализация расписания сеансов наблюдения.
- * Вызывается при загрузке страницы /passes.
+ * @param {string} [containerId='passes-table-container']
  */
-window.initPassesTable = function initPassesTable() {
+window.initPassesTable = function initPassesTable(containerId) {
+    const id = containerId || 'passes-table-container';
     if (passesTable) {
         passesTable.destroy();
+        passesTable = null;
     }
 
-    const container = document.getElementById('passes-table-container');
-    if (container) {
-        passesTable = new PassesTable('passes-table-container');
+    if (document.getElementById(id)) {
+        passesTable = new PassesTable(id);
         passesTable.init();
     }
+};
+
+/**
+ * Ленивая инициализация полной таблицы во вкладке «План» нижней панели.
+ */
+window.ensurePassesTableBottom = function ensurePassesTableBottom() {
+    const el = document.getElementById('passes-full-bottom-container');
+    if (!el || el.dataset.passesInit === '1') { return; }
+    el.dataset.passesInit = '1';
+    if (passesTableBottom) {
+        passesTableBottom.destroy();
+        passesTableBottom = null;
+    }
+    passesTableBottom = new PassesTable('passes-full-bottom-container');
+    passesTableBottom.init();
 };

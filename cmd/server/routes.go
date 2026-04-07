@@ -48,7 +48,7 @@ func setupRoutes(
 	// API пролётов.
 	mux.HandleFunc("GET /api/passes", passHandler.GetPasses)
 
-	// API управления сопровождением.
+	// API управления слежением (tracking).
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
 

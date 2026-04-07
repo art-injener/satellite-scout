@@ -4,11 +4,98 @@
     <section class="map-area">
         <div class="earth-view-container">
             <canvas id="earth-view" width="800" height="400"></canvas>
+
+            <!-- SVG-маркер спутника на слежении (tracking) — тот же логотип, цвет tracking -->
+            <div class="map-sat-marker map-sat-marker--tracking" id="map-sat-tracking" style="display:none">
+                <div class="map-sat-flip" aria-hidden="true">
+                <svg class="map-sat-icon" viewBox="-20 -20 140 140" width="56" height="56" aria-hidden="true">
+                    <style>
+                        @keyframes map-sat-orbit { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(0) rotate(3deg)} }
+                        @keyframes map-wave-pulse { 0%{opacity:0;stroke-width:2} 28%{opacity:1;stroke-width:5} 100%{opacity:0;stroke-width:2} }
+                        @keyframes map-horn-blink { 0%,100%{fill:var(--map-icon-tracking-fill,#00d4aa);filter:none} 50%{fill:#fff;filter:drop-shadow(0 0 7px var(--map-icon-tracking-fill,#00d4aa))} }
+                        #map-sat-tracking .map-sat-icon { animation: map-sat-orbit 5s ease-in-out infinite; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.35)); }
+                        #map-sat-tracking .mw1 { animation: map-wave-pulse 2s infinite 0s; }
+                        #map-sat-tracking .mw2 { animation: map-wave-pulse 2s infinite 0.4s; }
+                        #map-sat-tracking .mw3 { animation: map-wave-pulse 2s infinite 0.8s; }
+                        #map-sat-tracking .mhorn { animation: map-horn-blink 1.5s infinite; }
+                    </style>
+                    <g>
+                        <rect x="21" y="42.5" width="58" height="7" rx="1" fill="var(--map-icon-boom-fill,#8b919a)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <rect x="-5" y="22.5" width="32" height="47" rx="3" fill="var(--map-icon-tracking-fill,#00d4aa)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <path d="M -5 38 L 27 38 M -5 53 L 27 53 M 5.5 22.5 L 5.5 69.5 M 16.5 22.5 L 16.5 69.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
+                        <rect x="73" y="22.5" width="32" height="47" rx="3" fill="var(--map-icon-tracking-fill,#00d4aa)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <path d="M 73 38 L 105 38 M 73 53 L 105 53 M 83.5 22.5 L 83.5 69.5 M 94.5 22.5 L 94.5 69.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
+                        <path d="M 39 16.5 L 43 3.5 L 57 3.5 L 61 16.5 Z" fill="var(--map-icon-boom-fill,#8b919a)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5" stroke-linejoin="round"/>
+                        <rect x="36.5" y="16.5" width="27" height="51" rx="3" fill="var(--map-icon-neutral-fill,#e6e8eb)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <rect x="34" y="23.5" width="32" height="8.5" rx="1.5" fill="var(--map-icon-stroke,#222938)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <circle cx="40" cy="27.8" r="2.1" fill="var(--map-icon-tracking-fill,#00d4aa)"/>
+                        <circle cx="50" cy="27.8" r="2.1" fill="var(--map-icon-tracking-fill,#00d4aa)"/>
+                        <circle cx="60" cy="27.8" r="2.1" fill="var(--map-icon-tracking-fill,#00d4aa)"/>
+                        <rect x="34" y="47.5" width="32" height="8.5" rx="1.5" fill="var(--map-icon-stroke,#222938)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <circle cx="40" cy="51.8" r="2.1" fill="var(--map-icon-logo-dots,#ffb347)"/>
+                        <circle cx="50" cy="51.8" r="2.1" fill="var(--map-icon-logo-dots,#ffb347)"/>
+                        <circle cx="60" cy="51.8" r="2.1" fill="var(--map-icon-logo-dots,#ffb347)"/>
+                        <path d="M 10 68.5 Q 50 43 90 68.5 Q 50 58 10 68.5 Z" fill="var(--map-icon-neutral-fill,#e6e8eb)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5" stroke-linejoin="round"/>
+                        <line x1="27" y1="65.5" x2="50" y2="88.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.8" stroke-linecap="round"/>
+                        <line x1="73" y1="65.5" x2="50" y2="88.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.8" stroke-linecap="round"/>
+                        <circle cx="50" cy="88.5" r="5.2" class="mhorn" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
+                        <path d="M 38 96.5 A 15 15 0 0 0 62 96.5" class="mw1" stroke="var(--map-icon-tracking-fill,#00d4aa)" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+                        <path d="M 29 104.5 A 25 25 0 0 0 71 104.5" class="mw2" stroke="var(--map-icon-tracking-fill,#00d4aa)" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+                        <path d="M 20 112.5 A 35 35 0 0 0 80 112.5" class="mw3" stroke="var(--map-icon-tracking-fill,#00d4aa)" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+                    </g>
+                </svg>
+                </div>
+                <span class="map-sat-label" id="map-sat-tracking-label"></span>
+            </div>
+
+            <!-- SVG-маркер выбранного спутника (selected) — тот же логотип, цвет selected -->
+            <div class="map-sat-marker map-sat-marker--selected" id="map-sat-selected" style="display:none">
+                <div class="map-sat-flip" aria-hidden="true">
+                <svg class="map-sat-icon" viewBox="-20 -20 140 140" width="56" height="56" aria-hidden="true">
+                    <style>
+                        @keyframes map-sat-orbit-sel { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(0) rotate(2deg)} }
+                        @keyframes map-wave-pulse-sel { 0%{opacity:0;stroke-width:2} 28%{opacity:1;stroke-width:5} 100%{opacity:0;stroke-width:2} }
+                        @keyframes map-horn-blink-sel { 0%,100%{fill:var(--map-icon-selected-fill,#ffb347);filter:none} 50%{fill:#fff;filter:drop-shadow(0 0 7px var(--map-icon-selected-fill,#ffb347))} }
+                        #map-sat-selected .map-sat-icon { animation: map-sat-orbit-sel 6s ease-in-out infinite; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.35)); }
+                        #map-sat-selected .mw1 { animation: map-wave-pulse-sel 2s infinite 0.15s; }
+                        #map-sat-selected .mw2 { animation: map-wave-pulse-sel 2s infinite 0.55s; }
+                        #map-sat-selected .mw3 { animation: map-wave-pulse-sel 2s infinite 0.95s; }
+                        #map-sat-selected .mhorn { animation: map-horn-blink-sel 1.5s infinite; }
+                    </style>
+                    <g>
+                        <rect x="21" y="42.5" width="58" height="7" rx="1" fill="var(--map-icon-boom-fill,#8b919a)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <rect x="-5" y="22.5" width="32" height="47" rx="3" fill="var(--map-icon-selected-fill,#ffb347)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <path d="M -5 38 L 27 38 M -5 53 L 27 53 M 5.5 22.5 L 5.5 69.5 M 16.5 22.5 L 16.5 69.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
+                        <rect x="73" y="22.5" width="32" height="47" rx="3" fill="var(--map-icon-selected-fill,#ffb347)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <path d="M 73 38 L 105 38 M 73 53 L 105 53 M 83.5 22.5 L 83.5 69.5 M 94.5 22.5 L 94.5 69.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
+                        <path d="M 39 16.5 L 43 3.5 L 57 3.5 L 61 16.5 Z" fill="var(--map-icon-boom-fill,#8b919a)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5" stroke-linejoin="round"/>
+                        <rect x="36.5" y="16.5" width="27" height="51" rx="3" fill="var(--map-icon-neutral-fill,#e6e8eb)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <rect x="34" y="23.5" width="32" height="8.5" rx="1.5" fill="var(--map-icon-stroke,#222938)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <circle cx="40" cy="27.8" r="2.1" fill="var(--map-icon-selected-fill,#ffb347)"/>
+                        <circle cx="50" cy="27.8" r="2.1" fill="var(--map-icon-selected-fill,#ffb347)"/>
+                        <circle cx="60" cy="27.8" r="2.1" fill="var(--map-icon-selected-fill,#ffb347)"/>
+                        <rect x="34" y="47.5" width="32" height="8.5" rx="1.5" fill="var(--map-icon-stroke,#222938)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <circle cx="40" cy="51.8" r="2.1" fill="var(--map-icon-logo-dots,#ffb347)"/>
+                        <circle cx="50" cy="51.8" r="2.1" fill="var(--map-icon-logo-dots,#ffb347)"/>
+                        <circle cx="60" cy="51.8" r="2.1" fill="var(--map-icon-logo-dots,#ffb347)"/>
+                        <path d="M 10 68.5 Q 50 43 90 68.5 Q 50 58 10 68.5 Z" fill="var(--map-icon-neutral-fill,#e6e8eb)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5" stroke-linejoin="round"/>
+                        <line x1="27" y1="65.5" x2="50" y2="88.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.8" stroke-linecap="round"/>
+                        <line x1="73" y1="65.5" x2="50" y2="88.5" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.8" stroke-linecap="round"/>
+                        <circle cx="50" cy="88.5" r="5.2" class="mhorn" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
+                        <path d="M 38 96.5 A 15 15 0 0 0 62 96.5" class="mw1" stroke="var(--map-icon-selected-fill,#ffb347)" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+                        <path d="M 29 104.5 A 25 25 0 0 0 71 104.5" class="mw2" stroke="var(--map-icon-selected-fill,#ffb347)" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+                        <path d="M 20 112.5 A 35 35 0 0 0 80 112.5" class="mw3" stroke="var(--map-icon-selected-fill,#ffb347)" fill="none" stroke-width="2.5" stroke-linecap="round"/>
+                    </g>
+                </svg>
+                </div>
+                <span class="map-sat-label map-sat-label--selected" id="map-sat-selected-label"></span>
+            </div>
+
             <!-- Оверлей при смене спутника (loading spinner) -->
             <div id="tracking-overlay" class="tracking-overlay hidden">
                 <div class="tracking-overlay-content">
                     <div class="tracking-spinner"></div>
-                    <div class="tracking-overlay-text">Берём на сопровождение</div>
+                    <div class="tracking-overlay-text">Берём на слежение</div>
                     <div class="tracking-overlay-sat" id="tracking-overlay-sat">
                         NORAD <span id="tracking-overlay-norad">---</span>
                     </div>
@@ -86,7 +173,7 @@
 <section class="right-panel" id="right-panel">
     <div class="panel-header">
         <span class="panel-header__title">ПЛАН СЕАНСОВ НАБЛЮДЕНИЯ</span>
-        <button class="panel-collapse-btn" id="right-panel-toggle" title="Свернуть">◀</button>
+        <button class="panel-collapse-btn" id="right-panel-toggle" title="Свернуть">▶</button>
     </div>
     <div class="right-panel__body">
         <div class="passes-compact" id="passes-compact">
@@ -109,12 +196,7 @@
                                     <span class="pc-th-azel__line">Уг.мест</span>
                                 </div>
                             </th>
-                            <th class="pc-th-countdown">
-                                <div class="pc-th-countdown__stack">
-                                    <span class="pc-th-countdown__line">До AOS</span>
-                                    <span class="pc-th-countdown__line">До LOS</span>
-                                </div>
-                            </th>
+                            <th class="pc-th-countdown">ЗРВ</th>
                             <th class="pc-th-freq">
                                 <div class="pc-th-freq__stack">
                                     <span class="pc-th-freq__line">Част.</span>
@@ -128,8 +210,8 @@
             </div>
         </div>
         <div class="right-panel__controls">
-            <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Взять на сопровождение"><span class="rp-ctrl__glyph" aria-hidden="true">⊕</span><span class="rp-ctrl__label">Сопров.</span></button>
-            <button class="rp-ctrl rp-ctrl--reset" id="rp-reset" disabled title="Снять с сопровождения"><span class="rp-ctrl__glyph" aria-hidden="true">✕</span><span class="rp-ctrl__label">Сброс</span></button>
+            <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Слежение за выбранным спутником: антенна, узкополосный водопад" aria-label="Слежение"><span class="rp-ctrl__label">Слежение</span></button>
+            <button class="rp-ctrl rp-ctrl--reset" id="rp-reset" disabled title="Снять со слежения" aria-label="Снять со слежения"><span class="rp-ctrl__label">Сброс</span></button>
         </div>
         <!-- SkyView: окружность 300×300 px + отдельная панель информации (не влияет на размер окна отрисовки) -->
         <div class="right-panel__skyview" id="right-panel-skyview">
@@ -165,12 +247,49 @@
 <!-- Нижняя панель: вынесена в main-wrapper (вторая строка grid), от края до края по ширине -->
 <section class="bottom-panel" id="bottom-panel">
     <div class="bottom-panel__side">
-        <span class="bottom-panel__mode" id="bottom-panel-mode">Обзор</span>
+        <div class="bottom-panel__tabs" role="tablist" aria-label="Режим нижней панели: обзор, слежение, ТМИ, план сеансов">
+            <button type="button" class="bottom-panel__tab-btn" data-tab="overview" role="tab" aria-selected="false" title="Обзор" aria-label="Обзор">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <path d="M2 12c2-3 4-6 6 0s4 3 6 0 4-3 6 0 2 3 2 0" stroke-width="2" stroke-linecap="round"/>
+                    <line x1="2" y1="17" x2="22" y2="17" opacity="0.4"/>
+                    <line x1="2" y1="7" x2="22" y2="7" opacity="0.4"/>
+                </svg>
+            </button>
+            <button type="button" class="bottom-panel__tab-btn" data-tab="follow" role="tab" aria-selected="false" title="Слежение: азимут, угол места, узкополосный водопад" aria-label="Слежение">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9"/>
+                    <path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5"/>
+                    <circle cx="12" cy="9" r="2"/>
+                    <path d="M16.2 4.7a6.14 6.14 0 0 1 .8 7.5"/>
+                    <path d="M19.1 1.9a10.3 10.3 0 0 1 0 14.2"/>
+                    <path d="M12 11v10"/>
+                    <path d="M8 21h8"/>
+                </svg>
+            </button>
+            <button type="button" class="bottom-panel__tab-btn" data-tab="tmi" role="tab" aria-selected="false" title="ТМИ" aria-label="ТМИ">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="16" rx="2"/>
+                    <path d="M7 9l3 3-3 3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <line x1="13" y1="15" x2="17" y2="15" stroke-linecap="round"/>
+                </svg>
+            </button>
+            <button type="button" class="bottom-panel__tab-btn" data-tab="plan" role="tab" aria-selected="false" title="План сеансов" aria-label="План сеансов">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <rect x="3" y="4" width="18" height="18" rx="2"/>
+                    <line x1="3" y1="10" x2="21" y2="10"/>
+                    <line x1="8" y1="2" x2="8" y2="6"/>
+                    <line x1="16" y1="2" x2="16" y2="6"/>
+                    <circle cx="12" cy="15" r="3"/>
+                    <polyline points="12 14 12 15 13.5 16" stroke-linecap="round"/>
+                </svg>
+            </button>
+        </div>
+        <span class="bottom-panel__mode" id="bottom-panel-mode" title="Обзор">ОБЗОР</span>
         <button class="panel-collapse-btn" id="bottom-panel-toggle" title="Свернуть">▼</button>
     </div>
     <div class="bottom-panel__body" id="bottom-panel-body">
 
-        <!-- Вкладка: Сопровождение (Az | Водопад | El); по умолчанию открыт Обзор -->
+        <!-- Вкладка: Слежение (Az | Водопад | El); по умолчанию открыт Обзор -->
         <div class="bp-pane bp-pane--hidden" id="bp-pane-follow">
             <div class="bp-az-container">
                 <div class="bp-indicator-canvas-wrap">
@@ -223,7 +342,7 @@
         <div class="bp-pane" id="bp-pane-overview">
             <div class="bp-overview-col bp-overview-col--sdr">
                 <div class="bp-sdr-section">
-                    <div class="bp-sdr-title">Настройки SDR</div>
+                    <!-- <div class="bp-sdr-title">Настройки SDR</div> -->
                     <div class="bp-sdr-field">
                         <label class="bp-sdr-label">Устройство</label>
                         <select id="sdr-device" class="bp-input"><option>RTL-SDR #0</option><option>Нет устройства</option></select>
@@ -297,6 +416,11 @@
                     </tbody>
                 </table>
             </div>
+        </div>
+
+        <!-- Вкладка: полное расписание пролётов (ленивая загрузка в passes-table.js) -->
+        <div class="bp-pane bp-pane--hidden" id="bp-pane-plan">
+            <div class="bp-plan-scroll" id="passes-full-bottom-container"></div>
         </div>
 
     </div>

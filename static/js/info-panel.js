@@ -3,7 +3,7 @@
  *
  * Подписывается на StateManager (POSITION, SATELLITE_CHANGE),
  * загружает данные пролёта из /api/passes при смене спутника.
- * Управляет кнопкой «Сопровождение» и модальным окном подтверждения.
+ * Управляет кнопкой слежения и модальным окном подтверждения.
  */
 (function() {
     'use strict';
@@ -138,7 +138,7 @@
             if (trkState) { self._updateFromPosition(trkState); }
         });
 
-        // При смене сопровождения — обновляем данные.
+        // При смене слежения — обновляем данные.
         this._stateManager.subscribe(SE.TRACKING_CHANGE, function(state) {
             if (state && state.noradId) {
                 self._onSatelliteChange(state);

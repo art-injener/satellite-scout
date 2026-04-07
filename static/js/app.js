@@ -100,6 +100,12 @@
         // Нижняя панель: переключение вкладок + водопад
         initBottomPanel();
 
+        // Открыть вкладку «План» по ссылке /tracking?tab=plan
+        if (/[?&]tab=plan(?:&|$)/.test(window.location.search) &&
+            window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
+            window._bottomPanel.showTab('plan', false);
+        }
+
         // ── Нижняя панель: сворачивание (класс на main-wrapper уменьшает высоту строки 2 grid) ──
         const mainWrapper = document.querySelector('.main-wrapper');
         const bottomPanel = document.getElementById('bottom-panel');
@@ -150,9 +156,10 @@
             const LS_RIGHT = 'ux.rightCollapsed';
             if (localStorage.getItem(LS_RIGHT) === '1') {
                 rightPanelWrapper.classList.add('right-collapsed');
-                rightToggle.textContent = '▶';
+                rightToggle.textContent = '◀';
                 rightToggle.setAttribute('title', 'Развернуть');
             } else {
+                rightToggle.textContent = '▶';
                 rightToggle.setAttribute('title', 'Свернуть');
             }
             rightToggle.addEventListener('click', function() {
@@ -226,7 +233,7 @@
                         window.earthView.setSelectedVisibilityZone(state.visibilityZone.segments);
                     }
                 }
-                // Слой «на сопровождении»: данные только с бэка (tracking_id в group_update, позиции/треки в state_update).
+                // Слой слежения: данные только с бэка (tracking_id в group_update, позиции/треки в state_update).
                 if (trackingId) {
                     const trkState = sm.getState(trackingId);
                     if (trkState && trkState.position) {
@@ -237,7 +244,7 @@
                         }
                     }
                 } else {
-                    // Сопровождения нет — полностью очищаем слой tracking, чтобы не рисовать красный/зелёный.
+                    // Слежения нет — полностью очищаем слой tracking, чтобы не рисовать красный/зелёный.
                     window.earthView.clearTrackingLayer();
                 }
                 _updateSecondaryPositions();
@@ -335,17 +342,17 @@
             }
         });
 
-        // ── TRACKING_CHANGE: смена/сброс сопровождения ──
+        // ── TRACKING_CHANGE: смена/сброс слежения ──
         sm.subscribe(StateEventType.TRACKING_CHANGE, function(state) {
             if (state) {
                 console.log('[app.js] Tracking ON:', state.noradId, state.name);
                 showTrackingOverlay(state.noradId, state.name || '');
 
-                // Запуск отрисовки водопада при включении сопровождения
+                // Запуск отрисовки водопада при включении слежения
                 if (window._bottomPanel && typeof window._bottomPanel.startWaterfall === 'function') {
                     window._bottomPanel.startWaterfall();
                 }
-                // Вкладка «Сопровождение» (Az/El/водопад) при сопровождении
+                // Вкладка «Слежение» (Az/El/водопад) при активном слежении
                 if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
                     window._bottomPanel.showTab('follow', false);
                 }
@@ -368,7 +375,7 @@
                 }
             } else {
                 console.log('[app.js] Tracking OFF');
-                // Остановка водопада и очистка окна при сбросе сопровождения
+                // Остановка водопада и очистка окна при сбросе слежения
                 if (window._bottomPanel && typeof window._bottomPanel.stopWaterfallAndClear === 'function') {
                     window._bottomPanel.stopWaterfallAndClear();
                 }
@@ -622,7 +629,7 @@
         }
         if (document.getElementById('bottom-panel-body') && typeof window.BottomPanel === 'function') {
             window._bottomPanel = new window.BottomPanel();
-            // Синхронизация водопада с текущим сопровождением (например после HTMX-навигации)
+            // Синхронизация водопада с текущим слежением (например после HTMX-навигации)
             if (window._stateManager && window._stateManager.getTrackingSatelliteId() && typeof window._bottomPanel.startWaterfall === 'function') {
                 window._bottomPanel.startWaterfall();
             }
@@ -659,7 +666,7 @@
                 }
                 // Подтягиваем накопленные данные из StateManager (track/position могли прийти до init).
                 // Используем selected-слой: tracking-слой устанавливается только когда пользователь
-                // нажимает «Сопровождение» и бэкенд присылает satellite_group_update с tracking_id.
+                // нажимает «Слежение» и бэкенд присылает satellite_group_update с tracking_id.
                 if (window._stateManager) {
                     const sm = window._stateManager;
                     const selectedId = sm.getSelectedSatelliteId();
@@ -871,6 +878,11 @@
 
         initRightPanel();
         initBottomPanel();
+
+        if (/[?&]tab=plan(?:&|$)/.test(window.location.search) &&
+            window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
+            window._bottomPanel.showTab('plan', false);
+        }
     });
 
     // Переключение активного класса на табах при клике
@@ -900,7 +912,7 @@
                 const sm = window._stateManager;
                 const trackingId = sm.getTrackingSatelliteId();
                 const selectedId = sm.getSelectedSatelliteId();
-                // Позиция сопровождаемого — всегда из состояния сопровождаемого (не из active/selected)
+                // Позиция спутника на слежении — всегда из его состояния (не из active/selected)
                 if (trackingId) {
                     const trkState = sm.getState(trackingId);
                     if (trkState && trkState.position && trkState.position.az !== null && trkState.position.el !== null) {

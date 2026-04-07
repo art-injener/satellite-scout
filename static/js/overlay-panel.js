@@ -59,7 +59,7 @@
         }
     };
 
-    // Подписка: overlay показывается ТОЛЬКО при сопровождении (tracking).
+    // Подписка: overlay показывается ТОЛЬКО при слежении (tracking).
     OverlayPanel.prototype._subscribeToState = function(sm) {
         const self = this;
         const SE = window.StateEventType;

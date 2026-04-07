@@ -8,7 +8,7 @@
     overflow: hidden;
 }
 
-/* Кнопка "Сопровождение" */
+/* Кнопка слежения (overlay) */
 .info-panel__track-btn {
     display: inline-flex;
     align-items: center;
@@ -22,8 +22,8 @@
     font-size: 0.75rem;
     font-weight: 600;
     color: var(--accent-primary);
-    background: rgba(0, 212, 170, 0.1);
-    border: 1px solid rgba(0, 212, 170, 0.4);
+    background: var(--info-track-btn-bg, rgba(0, 212, 170, 0.1));
+    border: 1px solid var(--info-track-btn-border, rgba(0, 212, 170, 0.4));
     cursor: pointer;
     white-space: nowrap;
     text-transform: uppercase;
@@ -36,12 +36,12 @@
 }
 
 .info-panel__track-btn:hover {
-    background: rgba(0, 212, 170, 0.2);
+    background: var(--info-track-btn-hover-bg, rgba(0, 212, 170, 0.2));
     border-color: var(--accent-primary);
 }
 
 .info-panel__track-btn:active {
-    background: rgba(0, 212, 170, 0.3);
+    background: var(--info-track-btn-active-bg, rgba(0, 212, 170, 0.3));
     transform: scale(0.97);
 }
 
@@ -69,7 +69,7 @@
 .modal__backdrop {
     position: absolute;
     inset: 0;
-    background: rgba(0, 0, 0, 0.6);
+    background: var(--modal-backdrop, rgba(0, 0, 0, 0.6));
     cursor: pointer;
 }
 
@@ -81,7 +81,7 @@
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    box-shadow: var(--modal-box-shadow, 0 8px 32px rgba(0, 0, 0, 0.4));
 }
 
 .modal__text {
@@ -175,14 +175,14 @@
 }
 
 .info-card .info-label {
-    color: #ffffff;
+    color: var(--info-card-label, var(--text-label, #e6e8eb));
     font-size: 0.9rem;
     white-space: nowrap;
     flex-shrink: 0;
 }
 
 .info-card .info-value {
-    color: #00d4aa;
+    color: var(--info-card-value, var(--accent-primary, #00d4aa));
     font-size: 1.1rem;
     font-weight: 600;
     text-align: right;

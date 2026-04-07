@@ -22,8 +22,8 @@ const (
 	envTLECacheDir = "TLE_CACHE_DIR"
 	envTheme       = "THEME"
 
-	// Тема по умолчанию — Classic (оригинальная).
-	defaultTheme = "classic"
+	// Тема по умолчанию — Operations Center.
+	defaultTheme = "default"
 )
 
 // Config содержит конфигурацию приложения.
@@ -43,7 +43,7 @@ type Config struct {
 	// Настройки TLE (загрузка, кеширование, обновление)
 	TLE *tracker.TLEStoreConfig
 
-	// Цветовая тема UI: "default" (Operations Center), "classic" и т.д.
+	// Цветовая тема UI: "default" (Operations Center), "classic", "light" и т.д.
 	// Определяет файл static/css/colors-{Theme}.css.
 	Theme string
 }

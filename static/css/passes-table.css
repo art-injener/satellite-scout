@@ -4,6 +4,23 @@
  * Минимальная читаемая величина: 12px = 0.857rem.
  */
 
+/* Навигация со страницы /passes */
+.passes-header__nav {
+    margin: 0 0 var(--spacing-sm);
+    text-align: left;
+}
+
+.passes-header__link {
+    color: var(--accent-primary);
+    text-decoration: none;
+    font-size: 0.95rem;
+    font-weight: 600;
+}
+
+.passes-header__link:hover {
+    text-decoration: underline;
+}
+
 /* Таблица */
 .passes-table {
     width: 100%;
@@ -19,7 +36,7 @@
 
 .passes-table th {
     background: var(--bg-tertiary);
-    color: #a0a8b4; /* ярче чем --text-muted, хорошо читается */
+    color: var(--panel-header-title, var(--text-muted));
     font-weight: 700;
     font-size: 1.071rem; /* 15px */
     text-transform: uppercase;
@@ -49,7 +66,7 @@
 
 /* Статусы строк */
 .pass-row--active {
-    background: rgba(74, 222, 128, 0.1);
+    background: var(--passes-schedule-active-row-bg, rgba(74, 222, 128, 0.1));
 }
 
 .pass-row--active .sat-name {
@@ -67,7 +84,7 @@
 }
 
 .pass-row--completed .sat-name {
-    color: #a0a8b4;
+    color: var(--text-muted);
 }
 
 /* Ячейки */
@@ -131,7 +148,7 @@
 .pass-cell--duration {
     font-family: var(--font-mono);
     font-size: 1.5rem; /* 21px */
-    color: #c0c8d0;
+    color: var(--passes-schedule-duration-color, var(--text-muted));
     text-align: center;
 }
 
@@ -161,30 +178,30 @@
 
 .mini-path .horizon-circle {
     fill: none;
-    stroke: rgba(255, 255, 255, 0.25);
+    stroke: var(--passes-mini-horizon, rgba(255, 255, 255, 0.25));
     stroke-width: 0.04;
 }
 
 .mini-path .elevation-30 {
     fill: none;
-    stroke: rgba(255, 255, 255, 0.15);
+    stroke: var(--passes-mini-ring-mid, rgba(255, 255, 255, 0.15));
     stroke-width: 0.03;
 }
 
 .mini-path .elevation-60 {
     fill: none;
-    stroke: rgba(255, 255, 255, 0.12);
+    stroke: var(--passes-mini-ring-inner, rgba(255, 255, 255, 0.12));
     stroke-width: 0.025;
 }
 
 .mini-path .crosshair {
-    stroke: rgba(255, 255, 255, 0.15);
+    stroke: var(--passes-mini-crosshair, rgba(255, 255, 255, 0.15));
     stroke-width: 0.02;
 }
 
 .mini-path .sky-track {
     fill: none;
-    stroke: #00d4ff; /* яркий голубой — контрастный на тёмном фоне */
+    stroke: var(--passes-mini-track, #00d4ff);
     stroke-width: 0.12;
     stroke-linecap: round;
     stroke-linejoin: round;
@@ -206,7 +223,7 @@
     justify-content: center;
     gap: var(--spacing-md);
     padding: calc(var(--spacing-xl) * 2);
-    color: #a0a8b4;
+    color: var(--passes-empty-text, var(--text-muted));
     min-height: 300px;
 }
 
@@ -237,7 +254,7 @@
 
 .passes-error p {
     margin: 0;
-    color: #a0a8b4;
+    color: var(--passes-empty-text, var(--text-muted));
 }
 
 /* Responsive: экраны до 1200px — уменьшаем на шаг */

@@ -4,6 +4,20 @@
 (function() {
     'use strict';
 
+    /** Половина стороны DOM-маркера (px) — совпадает с .map-sat-marker в main.css */
+    var MAP_SAT_MARKER_HALF_PX = 28;
+
+    /**
+     * Три поворота .map-sat-flip (CSS rotate, deg).
+     * SVG без внутреннего rotate: антенна строго вниз.
+     *   0°   = нейтраль → антенна вниз.
+     *  −45°  = летит на восток → антенна нижний-правый.
+     *  +45°  = летит на запад → антенна нижний-левый.
+     */
+    var MAP_SAT_ROT_NEUTRAL = 0;
+    var MAP_SAT_ROT_RIGHT   = -45;
+    var MAP_SAT_ROT_LEFT    = 45;
+
     /** Обрезка имени спутника для canvas-подписей. */
     function _shortName(name, maxLen) {
         if (!name) { return ''; }
@@ -37,37 +51,51 @@
             trackDotInterval: 60000 // Интервал точек в мс (1 минута)
         }, options || {});
 
-        // Цветовая схема в стиле STSPLUS (улучшенная для читаемости)
         this.colors = {
-            background: '#000010', // Тёмно-синий фон (океаны)
-            landFill: '#0d1a22', // Заливка материков (тёмный сине-зелёный)
-            coastline: '#4d9999', // #5b8a8a #00d4d4, // Циан - береговые линии
-            grid: '#3a4a4a', // Серый - сетка #556677 #2a3d4d #334455 #3d5566
-            gridMajor: '#4a5e5e', // Светлее - основные линии #667788 #3a5060 #445566 #4d6677
-            orbitFuture: '#00ff00', // Зелёный - будущая орбита
-            orbitPast: '#ff4444', // Красный - прошлая орбита
-            orbitDots: '#ffff00', // Жёлтый - точки орбиты
-            satellite: '#ffffff', // Белый - маркер спутника
-            satelliteGlow: '#00ffff', // Циан - свечение спутника
-            footprint: 'rgba(200, 100, 255, 0.55)', // Пурпурный - контур зоны видимости (контрастирует с бирюзой и зелёным)
-            footprintFill: 'rgba(200, 100, 255, 0.09)', // Пурпурный полупрозрачный - заливка зоны
-            observer: '#ff0000', // маркер наблюдателя (треугольник)
-            observerLabel: '#ff9500', // цвет треугольника наблюдателя — янтарный
-            observerLabelStroke: 'rgba(0,0,0,0.9)', // обводка треугольника/подписи наблюдателя
-            observerLabelBg: 'rgba(220, 220, 228, 0.92)', // фон под подпись наблюдателя — светло-серый
-            textPrimary: '#ffffff',
-            textSecondary: '#00d4d4', // Циан для подписей
-            textGrid: '#ffffff', // Белые подписи сетки
-            satLabel: '#ffeb3b', // подпись спутника — яркий жёлтый
-            satLabelStroke: 'rgba(0,0,0,0.85)', // обводка подписи спутника
-            satLabelBg: 'rgba(220, 220, 228, 0.92)', // фон под подпись спутника — светло-серый
-            russiaBorder: '#aabbcc',
-            russiaLabel: '#ffcc00',
-            selectedTrack: '#ffff00', // Жёлтый — пунктирная траектория текущего (выбранного) спутника
-            selectedMarker: '#2ecc71', // Зелёный — маркер текущего спутника
-            selectedFootprint: 'rgba(93, 173, 226, 0.6)', // Голубой — контур зоны радиовидимости выбранного (отличается от пурпурной зоны при сопровождении)
-            selectedFootprintFill: 'rgba(93, 173, 226, 0.12)' // Голубой — заливка зоны
+            background:    cssVar('--map-ocean',      '#0a1018'),
+            landFill:      cssVar('--map-land',       '#1a2c3c'),
+            coastline:     cssVar('--map-coast',      '#5a9aac'),
+            grid:          cssVar('--map-grid',       '#2a4050'),
+            gridMajor:     cssVar('--map-grid-major', '#385868'),
+            orbitFuture:   cssVar('--orbit-future',   '#00cc00'),
+            orbitPast:     cssVar('--orbit-past',     '#d94848'),
+            orbitDots:     cssVar('--orbit-dots',     '#ffff00'),
+            satellite:     cssVar('--sat-marker',     '#ffffff'),
+            satelliteGlow: cssVar('--sat-glow',       '#00ffff'),
+            footprint:              themeRgba('map-footprint',               'rgba(0,255,255,0.6)'),
+            footprintFill:          themeRgba('map-footprint-fill',          'rgba(0,255,255,0.05)'),
+            /* Точка на карте: заливка треугольника = цвет маркера наблюдателя из темы */
+            observer:      cssVar('--observer-marker', '#ff0000'),
+            observerLabel:       cssVar('--observer-marker', '#ff9500'),
+            observerLabelStroke: themeRgba('map-observer-label-stroke', 'rgba(0,0,0,0.9)'),
+            observerLabelBg:     themeRgba('map-observer-label-bg',     'rgba(0,0,0,0.6)'),
+            textPrimary:    '#ffffff',
+            textSecondary:  cssVar('--map-text-secondary', '#00d4d4'),
+            textGrid:       cssVar('--map-grid-text',      '#7890a0'),
+            satLabel:       cssVar('--sat-label',          '#ffeb3b'),
+            satLabelStroke: themeRgba('map-sat-label-stroke', 'rgba(0,0,0,0.85)'),
+            satLabelBg:     themeRgba('map-sat-label-bg',     'rgba(0,0,0,0.6)'),
+            selectedTrack:         cssVar('--selected-track',  '#ffff00'),
+            selectedMarker:        cssVar('--selected-marker', '#2ecc71'),
+            selectedFootprint:     themeRgba('map-selected-footprint',      'rgba(93,173,226,0.6)'),
+            selectedFootprintFill: themeRgba('map-selected-footprint-fill', 'rgba(93,173,226,0.12)'),
+            russiaBorder:   cssVar('--map-russia-border',  '#aabbcc'),
+            russiaLabel:    cssVar('--map-russia-label',   '#ffcc00'),
+            cityLabel:  cssVar('--map-city-label',  '#ffffff'),
+            cityMarker: cssVar('--map-city-marker', '#cc6666'),
+            /* Фирменный маркер КА на карте (слежение / выбранный в плане) */
+            mapIconStroke:        cssVar('--map-icon-stroke', 'rgba(10,14,20,0.94)'),
+            mapIconTrackingFill:  cssVar('--map-icon-tracking-fill', '#00d4aa'),
+            mapIconSelectedFill:  cssVar('--map-icon-selected-fill', '#ffb347'),
+            mapIconNeutralFill:   cssVar('--map-icon-neutral-fill', '#e6e8eb'),
+            mapIconBoomFill:      cssVar('--map-icon-boom-fill', '#8b919a')
         };
+
+        this._mapTrackLineWidth = parseFloat(cssVar('--map-track-line-width', '1.5')) || 1.5;
+        this._mapFootprintLineWidth = parseFloat(cssVar('--map-footprint-line-width', '1.5')) || 1.5;
+
+        // Данные границ РФ (GeoJSON)
+        this.russiaData = null;
 
         // Данные береговых линий (GeoJSON)
         this.coastlineData = null;
@@ -75,14 +103,12 @@
         // Данные полигонов суши (GeoJSON) — для заливки материков
         this.landData = null;
 
-        // Данные границ РФ (GeoJSON)
-        this.russiaData = null;
 
         // Состояние карты
         this.center = { lon: 0, lat: 0 }; // Центр карты
         this.zoom = 1.0; // Масштаб (1.0 = вся карта)
 
-        // Спутник на сопровождении (tracking): red/green + dots + footprint.
+        // Спутник на слежении (tracking): red/green + dots + footprint.
         this.satellite = {
             position: null,
             groundTrack: [],
@@ -151,6 +177,8 @@
             this.canvas.height = backingHeight;
             this.width = backingWidth;
             this.height = backingHeight;
+            // Иначе скачок экранных координат ломает логику «влево/вправо»
+            this._domMarkerState = null;
         }
     };
 
@@ -266,12 +294,10 @@
             })
             .then(function(data) {
                 self.russiaData = data;
-                // eslint-disable-next-line no-console
                 console.log('EarthView: загружены границы РФ');
                 return data;
             })
             .catch(function(error) {
-                // eslint-disable-next-line no-console
                 console.warn('EarthView: границы РФ не загружены:', error.message);
                 return null;
             });
@@ -310,6 +336,11 @@
         // Столицы мира
         this._drawCities();
 
+        // Наблюдатель — на уровне географических объектов
+        if (this.observer) {
+            this._drawObserver();
+        }
+
         // Подписи координат — поверх всех географических слоёв
         if (this.options.showGrid) {
             this._drawGridLabels();
@@ -325,7 +356,7 @@
             this._drawSelectedLayer();
         }
 
-        // Слой 3: спутник на сопровождении (red/green + dots + footprint).
+        // Слой 3: спутник на слежении (red/green + dots + footprint).
         if (this.satellite.noradId) {
             if (this._hasGroundTrack()) {
                 this._drawGroundTrack();
@@ -335,17 +366,14 @@
             }
         }
 
-        // Наблюдатель
-        if (this.observer) {
-            this._drawObserver();
-        }
-
-        // Маркер спутника на сопровождении (tracking).
+        // Маркер спутника на слежении (tracking) — DOM SVG.
         if (this.satellite.noradId && this.satellite.position) {
             this._drawSatellite();
+        } else {
+            this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label', null, '', 'tracking', null);
         }
 
-        // Зона видимости и полноценная иконка выбранного спутника (если не на сопровождении).
+        // Зона видимости и маркер выбранного спутника — DOM SVG (если не на слежении).
         if (this._selectedSatellite.noradId &&
             this._selectedSatellite.noradId !== this.satellite.noradId) {
             if (this.options.showFootprint && this._selectedSatellite.visibilityZone && this._selectedSatellite.visibilityZone.length > 0) {
@@ -354,6 +382,8 @@
             if (this._selectedSatellite.position) {
                 this._drawSelectedSatelliteIcon();
             }
+        } else {
+            this._positionDomMarker('map-sat-selected', 'map-sat-selected-label', null, '', 'selected', null);
         }
     };
 
@@ -567,12 +597,11 @@
             // Кружок с мягкой заливкой (маленький)
             ctx.beginPath();
             ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
-            ctx.fillStyle = '#cc6666';
+            ctx.fillStyle = this.colors.cityMarker;
             ctx.fill();
 
-            // Название города белым (мелкий шрифт)
             ctx.font = 'bold 11px sans-serif';
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = this.colors.cityLabel;
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
             ctx.fillText(city.name, p.x + 5, p.y);
@@ -647,19 +676,6 @@
             }
         }
 
-        // Подпись «Россия» — в центре территории (приблизительно 95°E, 60°N)
-        const labelLon = 95;
-        const labelLat = 60;
-        const labelPoint = this.project(labelLon, labelLat);
-        ctx.font = 'bold 14px sans-serif';
-        ctx.fillStyle = this.colors.russiaLabel || '#ffffff';
-        ctx.strokeStyle = 'rgba(0,0,0,0.8)';
-        ctx.lineWidth = 3;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        const text = 'Россия';
-        ctx.strokeText(text, labelPoint.x, labelPoint.y);
-        ctx.fillText(text, labelPoint.x, labelPoint.y);
     };
 
     /**
@@ -679,7 +695,7 @@
     };
 
     /**
-     * Отрисовка наземной трассы сопровождаемого спутника.
+     * Отрисовка наземной трассы спутника на слежении.
      * Сплошные линии: красная — прошлая орбита, зелёная — будущая; плюс точки (минутные метки).
      */
     EarthView.prototype._drawGroundTrack = function() {
@@ -724,7 +740,7 @@
         // Отрисовка линии
         if (mode === 'line' || mode === 'both') {
             ctx.strokeStyle = color;
-            ctx.lineWidth = 1.5;
+            ctx.lineWidth = this._mapTrackLineWidth;
             ctx.beginPath();
 
             let prevP = null;
@@ -754,9 +770,9 @@
             ctx.stroke();
         }
 
-        // Отрисовка точек (минутные метки) - жёлтым цветом
+        // Отрисовка точек (минутные метки)
         if (mode === 'dots' || mode === 'both') {
-            ctx.fillStyle = this.colors.orbitDots; // Жёлтый
+            ctx.fillStyle = this.colors.orbitDots;
             let lastDotTime = -Infinity;
 
             for (let k = 0; k < points.length; k++) {
@@ -765,7 +781,7 @@
                 if (t - lastDotTime >= dotInterval) {
                     const pp = this.project(point.lon, point.lat);
                     ctx.beginPath();
-                    ctx.arc(pp.x, pp.y, 2.5, 0, Math.PI * 2); // Очень маленькие точки
+                    ctx.arc(pp.x, pp.y, Math.max(2.5, this._mapTrackLineWidth * 1.2), 0, Math.PI * 2);
                     ctx.fill();
                     lastDotTime = t;
                 }
@@ -774,66 +790,93 @@
     };
 
     /**
-     * Отрисовка маркера спутника (значок МКС в стиле STSPLUS)
+     * Позиционирование DOM SVG-маркера поверх canvas.
+     * Антенна/сигнал по касательной к трассе на карте (экранный atan2), до этого — нейтраль вниз.
+     * @param {string} elId — id контейнера (.map-sat-marker)
+     * @param {string} labelId — id <span> подписи
+     * @param {{lon:number,lat:number}|null} pos — координаты КА
+     * @param {string} name — имя КА
+     * @param {string} [markerKey] — 'tracking' | 'selected' (состояние направления отдельно)
+     * @param {number|null} [noradId] — смена КА сбрасывает предыдущую точку
+     */
+    EarthView.prototype._positionDomMarker = function(elId, labelId, pos, name, markerKey, noradId) {
+        var el = document.getElementById(elId);
+        if (!el) { return; }
+        markerKey = markerKey || '_';
+        if (!this._domMarkerState) {
+            this._domMarkerState = {};
+        }
+        var st = this._domMarkerState[markerKey];
+        if (!st) {
+            st = {
+                prevGeo: null,
+                orientReady: false,
+                rotDeg: MAP_SAT_ROT_NEUTRAL,
+                noradId: null
+            };
+            this._domMarkerState[markerKey] = st;
+        }
+        var flipEl = el.querySelector('.map-sat-flip');
+        if (!pos) {
+            el.style.display = 'none';
+            el.style.left = '';
+            el.style.top = '';
+            st.prevGeo = null;
+            st.orientReady = false;
+            st.rotDeg = MAP_SAT_ROT_NEUTRAL;
+            st.noradId = null;
+            if (flipEl) {
+                flipEl.style.transform = 'rotate(' + MAP_SAT_ROT_NEUTRAL + 'deg)';
+            }
+            return;
+        }
+        if (noradId != null && st.noradId != null && noradId !== st.noradId) {
+            st.prevGeo = null;
+            st.orientReady = false;
+            st.rotDeg = MAP_SAT_ROT_NEUTRAL;
+        }
+        st.noradId = noradId != null ? noradId : st.noradId;
+
+        var pw = this.width;
+        var ph = this.height;
+        if (pw <= 0 || ph <= 0) { return; }
+        var p = this.project(pos.lon, pos.lat);
+
+        // Направление: только влево/вправо по долготе (зеркало).
+        if (st.prevGeo) {
+            var dLon = pos.lon - st.prevGeo.lon;
+            if (dLon > 180) { dLon -= 360; }
+            if (dLon < -180) { dLon += 360; }
+            if (Math.abs(dLon) > 1e-7) {
+                st.rotDeg = dLon > 0 ? MAP_SAT_ROT_RIGHT : MAP_SAT_ROT_LEFT;
+                st.orientReady = true;
+            }
+        }
+        st.prevGeo = { lon: pos.lon, lat: pos.lat };
+
+        if (flipEl) {
+            flipEl.style.transform = 'rotate(' + st.rotDeg + 'deg)';
+        }
+
+        // Доля буфера canvas = доля контейнера; центр квадрата маркера на географической точке.
+        var pctX = (p.x / pw) * 100;
+        var pctY = (p.y / ph) * 100;
+        var h = MAP_SAT_MARKER_HALF_PX;
+        el.style.display = 'block';
+        el.style.left = 'calc(' + pctX + '% - ' + h + 'px)';
+        el.style.top = 'calc(' + pctY + '% - ' + h + 'px)';
+        var lbl = document.getElementById(labelId);
+        if (lbl) {
+            lbl.textContent = name ? _shortName(name) : '';
+        }
+    };
+
+    /**
+     * Маркер спутника на слежении — DOM SVG (анимированный логотип).
      */
     EarthView.prototype._drawSatellite = function() {
-        const ctx = this.ctx;
-        const pos = this.satellite.position;
-        const p = this.project(pos.lon, pos.lat);
-
-        // Масштаб для HiDPI (буфер увеличен на dpr, значит пиксели нужно масштабировать)
-        const dpr = window.devicePixelRatio || 1;
-        const s = dpr * 1.2; // базовый множитель для увеличения
-
-        ctx.strokeStyle = this.colors.satellite;
-        ctx.fillStyle = this.colors.satellite;
-        ctx.lineWidth = 2 * s;
-
-        // Неоновая обводка (glow эффект)
-        ctx.shadowColor = '#ff00ff'; // magenta неоновый
-        ctx.shadowBlur = 4 * s;
-        ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 0;
-
-        // Иконка спутника в стиле STSPLUS (упрощённая МКС)
-        // Центральный модуль
-        ctx.fillRect(p.x - 3 * s, p.y - 8 * s, 6 * s, 16 * s);
-
-        // Солнечные панели (горизонтальные)
-        ctx.fillRect(p.x - 16 * s, p.y - 3 * s, 10 * s, 6 * s);
-        ctx.fillRect(p.x + 6 * s, p.y - 3 * s, 10 * s, 6 * s);
-
-        // Дополнительные элементы панелей
-        ctx.lineWidth = 1.5 * s;
-        ctx.beginPath();
-        ctx.moveTo(p.x - 16 * s, p.y);
-        ctx.lineTo(p.x - 19 * s, p.y - 4 * s);
-        ctx.moveTo(p.x - 16 * s, p.y);
-        ctx.lineTo(p.x - 19 * s, p.y + 4 * s);
-        ctx.moveTo(p.x + 16 * s, p.y);
-        ctx.lineTo(p.x + 19 * s, p.y - 4 * s);
-        ctx.moveTo(p.x + 16 * s, p.y);
-        ctx.lineTo(p.x + 19 * s, p.y + 4 * s);
-        ctx.stroke();
-
-        // Сброс свечения
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-
-        // Название спутника — цвет и обводка (без фона)
-        if (this.satellite.name) {
-            const fontSize = Math.round(12 * s);
-            ctx.font = 'bold ' + fontSize + 'px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            const labelY = p.y + 12 * s;
-            const label = _shortName(this.satellite.name);
-            ctx.strokeStyle = this.colors.satLabelStroke || 'rgba(0,0,0,0.85)';
-            ctx.lineWidth = 2.5;
-            ctx.strokeText(label, p.x, labelY);
-            ctx.fillStyle = this.colors.satLabel || '#ffeb3b';
-            ctx.fillText(label, p.x, labelY);
-        }
+        this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label',
+            this.satellite.position, this.satellite.name, 'tracking', this.satellite.noradId);
     };
 
     /**
@@ -856,17 +899,17 @@
         ctx.fill();
         ctx.stroke();
 
-        // Название точки наблюдения — белый цвет
+        // Название точки наблюдения — обводка из темы (светлая тема: светлый ореол)
         if (this.observer.name) {
             const obsText = this.observer.name.toLocaleUpperCase();
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
             const labelX = p.x + size + 3;
-            ctx.strokeStyle = 'rgba(0,0,0,0.9)';
+            ctx.strokeStyle = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
             ctx.lineWidth = 2;
             ctx.strokeText(obsText, labelX, p.y);
-            ctx.fillStyle = '#ffffff';
+            ctx.fillStyle = this.colors.cityLabel || '#ffffff';
             ctx.fillText(obsText, labelX, p.y);
         }
     };
@@ -906,7 +949,7 @@
 
             // Контур
             ctx.strokeStyle = this.colors.footprint;
-            ctx.lineWidth = 1.5 * dpr;
+            ctx.lineWidth = this._mapFootprintLineWidth * dpr;
             ctx.setLineDash([]);
             ctx.beginPath();
             ctx.moveTo(projected[0].x, projected[0].y);
@@ -965,13 +1008,14 @@
         this.satellite.noradId = noradId;
     };
 
-    /** Полная очистка слоя «на сопровождении» (когда сопровождения нет). */
+    /** Полная очистка слоя слежения (когда слежения нет). */
     EarthView.prototype.clearTrackingLayer = function() {
         this.satellite.position = null;
         this.satellite.name = '';
         this.satellite.noradId = null;
         this.satellite.groundTrack = [];
         this.satellite.visibilityZone = null;
+        this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label', null, '', 'tracking', null);
     };
 
     /**
@@ -1074,6 +1118,7 @@
 
     EarthView.prototype.clearSelectedSatellite = function() {
         this._selectedSatellite = { position: null, groundTrack: null, visibilityZone: null, name: '', noradId: null };
+        this._positionDomMarker('map-sat-selected', 'map-sat-selected-label', null, '', 'selected', null);
     };
 
     /**
@@ -1152,63 +1197,18 @@
             ctx.fillStyle = fillColor;
             ctx.fill();
             ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = 1.5 * dpr;
+            ctx.lineWidth = this._mapFootprintLineWidth * dpr;
             ctx.stroke();
         }
     };
 
     /**
-     * Полноценная иконка выбранного спутника (аналогично сопровождению, цвет — оранжевый).
+     * Полноценная иконка выбранного спутника (аналогично слою слежения, цвет — оранжевый).
      * @private
      */
     EarthView.prototype._drawSelectedSatelliteIcon = function() {
-        const sel = this._selectedSatellite;
-        const pos = sel.position;
-        if (!pos) { return; }
-
-        const ctx = this.ctx;
-        const p = this.project(pos.lon, pos.lat);
-        const dpr = window.devicePixelRatio || 1;
-        const s = dpr * 1.2;
-        const color = this.colors.selectedMarker || '#2ecc71';
-
-        ctx.strokeStyle = color;
-        ctx.fillStyle = color;
-        ctx.lineWidth = 2 * s;
-        ctx.shadowColor = color;
-        ctx.shadowBlur = 4 * s;
-
-        // Иконка в стиле МКС (как у спутника на сопровождении)
-        ctx.fillRect(p.x - 3 * s, p.y - 8 * s, 6 * s, 16 * s);
-        ctx.fillRect(p.x - 16 * s, p.y - 3 * s, 10 * s, 6 * s);
-        ctx.fillRect(p.x + 6 * s, p.y - 3 * s, 10 * s, 6 * s);
-        ctx.lineWidth = 1.5 * s;
-        ctx.beginPath();
-        ctx.moveTo(p.x - 16 * s, p.y);
-        ctx.lineTo(p.x - 19 * s, p.y - 4 * s);
-        ctx.moveTo(p.x - 16 * s, p.y);
-        ctx.lineTo(p.x - 19 * s, p.y + 4 * s);
-        ctx.moveTo(p.x + 16 * s, p.y);
-        ctx.lineTo(p.x + 19 * s, p.y - 4 * s);
-        ctx.moveTo(p.x + 16 * s, p.y);
-        ctx.lineTo(p.x + 19 * s, p.y + 4 * s);
-        ctx.stroke();
-
-        ctx.shadowColor = 'transparent';
-        ctx.shadowBlur = 0;
-
-        if (sel.name) {
-            const fontSize = Math.round(12 * s);
-            ctx.font = 'bold ' + fontSize + 'px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            const labelY = p.y + 12 * s;
-            ctx.strokeStyle = 'rgba(0,0,0,0.85)';
-            ctx.lineWidth = 2.5;
-            ctx.strokeText(sel.name, p.x, labelY);
-            ctx.fillStyle = color;
-            ctx.fillText(sel.name, p.x, labelY);
-        }
+        this._positionDomMarker('map-sat-selected', 'map-sat-selected-label',
+            this._selectedSatellite.position, this._selectedSatellite.name, 'selected', this._selectedSatellite.noradId);
     };
 
     // ========== Вторичные спутники ==========
@@ -1300,13 +1300,17 @@
         const track = sat.track;
         if (!track) { return; }
 
-        // Цвет как в таблице (полная насыщенность); линия чуть тоньше, чем у selected/tracking.
-        const color = paletteColor || 'rgba(200, 220, 235, 0.9)';
+        const color = paletteColor || cssVar('--map-secondary-track-fallback', 'rgba(200, 220, 235, 0.9)');
         const dpr = window.devicePixelRatio || 1;
+        const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
 
-        ctx.setLineDash([5, 5]);
+        /* Светлая тема: тоньше пунктир, больше «воздуха» — меньше шума на карте */
+        ctx.setLineDash(isLight ? [4, 7] : [5, 5]);
         ctx.strokeStyle = color;
-        ctx.lineWidth = 1.5 * dpr;
+        const lw = isLight
+            ? Math.max(1, this._mapTrackLineWidth * 0.62)
+            : Math.max(1.5, this._mapTrackLineWidth);
+        ctx.lineWidth = lw * dpr;
 
         let segments = [];
         if (Array.isArray(track.future)) { segments = segments.concat(track.future); }
@@ -1339,14 +1343,14 @@
 
         const p = this.project(pos.lon, pos.lat);
         const dpr = window.devicePixelRatio || 1;
-        const r = 6 * dpr;
+        const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
+        const r = (isLight ? 4.5 : 6) * dpr;
         const color = markerColor || SECONDARY_SAT_COLORS[colorIdx % SECONDARY_SAT_COLORS.length];
         const shape = sat.noradId % 4; // 0=circle, 1=square, 2=triangle, 3=diamond
 
         ctx.fillStyle = color;
-        // Тёмная обводка фигуры — контраст со светлой заливкой на карте
-        ctx.strokeStyle = 'rgba(0,0,0,0.82)';
-        ctx.lineWidth = Math.max(1.25, 1.5 * dpr);
+        ctx.strokeStyle = isLight ? 'rgba(42, 48, 58, 0.4)' : 'rgba(0,0,0,0.82)';
+        ctx.lineWidth = isLight ? Math.max(0.85, 1 * dpr) : Math.max(1.25, 1.5 * dpr);
 
         ctx.beginPath();
         if (shape === 0) {
@@ -1368,15 +1372,14 @@
         ctx.fill();
         ctx.stroke();
 
-        // Подпись крупнее и жирнее — читаемость на суше/океане
         if (sat.name) {
-            const fs = Math.round(12 * dpr);
-            ctx.font = '700 ' + fs + 'px monospace';
+            const fs = Math.round((isLight ? 10 : 12) * dpr);
+            ctx.font = (isLight ? '500 ' : '700 ') + fs + 'px monospace';
             ctx.textAlign = 'center';
             ctx.textBaseline = 'top';
             const labelY = p.y + r + 3 * dpr;
-            ctx.strokeStyle = 'rgba(0,0,0,0.92)';
-            ctx.lineWidth = 2.75;
+            ctx.strokeStyle = isLight ? 'rgba(232, 236, 240, 0.95)' : 'rgba(0,0,0,0.92)';
+            ctx.lineWidth = isLight ? 1.2 : 2.75;
             const label = _shortName(sat.name);
             ctx.strokeText(label, p.x, labelY);
             ctx.fillStyle = color;

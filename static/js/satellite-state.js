@@ -52,7 +52,7 @@ const StateEventType = Object.freeze({
     TRACK: 'track',
     /** Смена выбранного спутника (selected) — клик в таблице или авто из группы. */
     SELECTED_CHANGE: 'selected_change',
-    /** Смена спутника на сопровождении (tracking) — только кнопка «Сопровождение». */
+    /** Смена спутника в режиме слежения (tracking) — только кнопка «Слежение». */
     TRACKING_CHANGE: 'tracking_change',
     /** Обновление группы скользящего окна. */
     SATELLITE_GROUP_UPDATE: 'satellite_group_update',
@@ -70,7 +70,7 @@ const StateEventType = Object.freeze({
  * Не используется для tracking (красно-зелёный) и selected (циан/жёлтый).
  * Цвет назначается случайно при формировании группы через _colorMap.
  */
-const TRACK_COLOR_PALETTE = Object.freeze([
+const _PALETTE_DARK = Object.freeze([
     '#ff6b6b', // коралловый
     '#51cf66', // зелёный
     '#339af0', // голубой
@@ -92,6 +92,36 @@ const TRACK_COLOR_PALETTE = Object.freeze([
     '#a9e34b', // салатовый
     '#74c0fc', // небесный
 ]);
+
+/**
+ * Насыщенная палитра для светлой темы — контрастные цвета на светлом фоне карты.
+ */
+const _PALETTE_LIGHT = Object.freeze([
+    '#c62828',
+    '#1565c0',
+    '#2e7d32',
+    '#d84315',
+    '#7b1fa2',
+    '#00838f',
+    '#c2185b',
+    '#283593',
+    '#558b2f',
+    '#6a1b9a',
+    '#00796b',
+    '#bf360c',
+    '#0277bd',
+    '#8e24aa',
+    '#e65100',
+    '#1b5e20',
+    '#4a148c',
+    '#01579b',
+    '#b71c1c',
+    '#004d40',
+]);
+
+const TRACK_COLOR_PALETTE = (typeof getThemeId === 'function' && getThemeId() === 'light')
+    ? _PALETTE_LIGHT
+    : _PALETTE_DARK;
 
 /**
  * Лимит одновременно видимых дополнительных трасс (не считая tracking и selected).
@@ -125,8 +155,8 @@ class SatelliteStateManager {
         this._selectedSatelliteId = null;
 
         /**
-         * Спутник на сопровождении (красный/зелёный + overlay + az/el).
-         * Устанавливается: только кнопка «Сопровождение» → API → SSE.
+         * Спутник на слежении (красный/зелёный + overlay + az/el).
+         * Устанавливается: только кнопка «Слежение» → API → SSE.
          * @type {?number}
          */
         this._trackingSatelliteId = null;
@@ -425,7 +455,7 @@ class SatelliteStateManager {
      * @param {string} [name] — имя.
      * @param {boolean} [manual=false] — ручной выбор в таблице.
      * @param {boolean} [forceNotify=false] — если true, снова шлём SELECTED_CHANGE/TRACK при том же NORAD
-     *   (нужно после tracking_ended: сняли сопровождение, тот же primary — перерисовать таблицу и трассы).
+     *   (нужно после tracking_ended: сняли со слежения, тот же primary — перерисовать таблицу и трассы).
      * @returns {boolean}
      */
     setSelectedSatellite(noradId, name, manual = false, forceNotify = false) {
@@ -462,10 +492,10 @@ class SatelliteStateManager {
         return this._manualTableSelection;
     }
 
-    // ── Спутник на сопровождении (tracking) ──────────────────
+    // ── Спутник на слежении (tracking) ──────────────────
 
     /**
-     * Установка спутника на сопровождение.
+     * Установка спутника на слежение.
      * Вызывается из SSE-события (reason "manual") после подтверждения бэкендом.
      *
      * @param {number} noradId — NORAD ID.
@@ -491,7 +521,7 @@ class SatelliteStateManager {
     }
 
     /**
-     * Сброс сопровождения (tracking_ended или ручной сброс).
+     * Сброс слежения (tracking_ended или ручной сброс).
      */
     clearTrackingSatellite() {
         if (this._trackingSatelliteId === null) { return; }
@@ -499,7 +529,7 @@ class SatelliteStateManager {
         this._notify(StateEventType.TRACKING_CHANGE, null);
     }
 
-    /** NORAD ID спутника на сопровождении (null = нет). */
+    /** NORAD ID спутника на слежении (null = нет). */
     getTrackingSatelliteId() {
         return this._trackingSatelliteId;
     }

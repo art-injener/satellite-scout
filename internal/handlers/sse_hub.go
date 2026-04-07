@@ -188,7 +188,7 @@ func (st *hubState) cleanup(ctx context.Context) {
 //
 // satellite_change НЕ кешируется: это событие-транзакция («что произошло»),
 // актуально только для живых клиентов. Отправлять его новому клиенту бессмысленно
-// и вызывает мелькание сопровождения при обновлении страницы.
+// и вызывает мелькание индикатора слежения при обновлении страницы.
 func sendCachedEvents(client *sseClient, lastEvents map[string]SSEEvent) {
 	for _, eventType := range []string{
 		"satellite_group_update",

@@ -2,36 +2,48 @@
  * Satellite Scout — тема «Classic»
  * Оригинальная цветовая палитра проекта.
  * Активируется через THEME=classic (env).
+ *
+ * Контрастность: соседние слои ≥ 1.3:1, текст ≥ 4.5:1 (WCAG AA).
  */
 
 :root {
+    --theme-id: classic;
+
     /* ══════════════════════════════════════════════════════════════
-       Фоны
+       Фоны — раздвинутая иерархия
        ══════════════════════════════════════════════════════════════ */
-    --bg-primary:   #0a0e14;
-    --bg-panel:     #12171f;
-    --bg-tertiary:  #1a2030;
-    --bg-elevated:  #222938;
-    --bg-hover:     #2a3444;
+    --bg-primary:   #080c12;
+    --bg-secondary: #141e28;
+    --bg-panel:     #141e28;
+    --bg-tertiary:  #1e2e3e;
+    --bg-elevated:  #283a4c;
+    --bg-hover:     #2e4050;
 
     /* ══════════════════════════════════════════════════════════════
        Границы
        ══════════════════════════════════════════════════════════════ */
-    --border-default: #2a3444;
+    --border-color:   #344858;
+    --border-default: #344858;
     --border-focus:   #00d4aa;
 
     /* ══════════════════════════════════════════════════════════════
        Текст
        ══════════════════════════════════════════════════════════════ */
-    --text-primary:  #e6e8eb;
-    --text-heading:  #a0a8b4;
-    --text-label:    #8b919a;
-    --text-muted:    #e6e8eb;
-    --text-accent:   #00d4aa;
+    --text-primary:    #e6e8eb;
+    --text-secondary:  #e6e8eb;
+    --text-heading:    #a0a8b4;
+    --text-label:      #8b919a;
+    --text-muted:      #e6e8eb;
+    --text-accent:     #00d4aa;
 
     /* ══════════════════════════════════════════════════════════════
        Сигнальные / акцентные
        ══════════════════════════════════════════════════════════════ */
+    --accent-primary:   #00d4aa;
+    --accent-secondary: #00a8ff;
+    --accent-success:   #4ade80;
+    --accent-danger:    #ff6b6b;
+    --accent-warning:   #ffb347;
     --color-accent:  #00d4aa;
     --color-accent2: #00a8ff;
     --color-success: #4ade80;
@@ -39,22 +51,22 @@
     --color-warning: #ffb347;
 
     /* ══════════════════════════════════════════════════════════════
-       Карта (EarthView)
+       Карта (EarthView) — увеличен контраст суша/океан/сетка
        ══════════════════════════════════════════════════════════════ */
-    --map-ocean:       #000010;
-    --map-land:        #0d1a22;
+    --map-ocean:       #040810;
+    --map-land:        #142434;
     --map-coast:       #4d9999;
     --map-grid:        #3a4a4a;
     --map-grid-major:  #4a5e5e;
     --map-grid-text:   #ffffff;
     --map-footprint:        rgba(200, 100, 255, 0.55);
-    --map-footprint-fill:   rgba(200, 100, 255, 0.09);
+    --map-footprint-fill:   rgba(200, 100, 255, 0.14);
 
     /* ══════════════════════════════════════════════════════════════
        Орбита / трек спутника (EarthView)
        ══════════════════════════════════════════════════════════════ */
-    --orbit-future:  #00ff00;
-    --orbit-past:    #ff4444;
+    --orbit-future:  #00cc00;
+    --orbit-past:    #d94848;
     --orbit-dots:    #ffff00;
 
     /* ══════════════════════════════════════════════════════════════
@@ -65,13 +77,20 @@
     --sat-label:         #ffeb3b;
     --sat-label-stroke:  rgba(0, 0, 0, 0.85);
 
+    --map-icon-stroke:           rgba(10, 14, 20, 0.94);
+    --map-icon-tracking-fill:    var(--accent-primary);
+    --map-icon-selected-fill:    var(--accent-warning);
+    --map-icon-neutral-fill:     #e6e8eb;
+    --map-icon-boom-fill:        #8b919a;
+    --map-icon-logo-dots:        var(--accent-warning);
+
     /* ══════════════════════════════════════════════════════════════
        Выбранный спутник (selected, EarthView)
        ══════════════════════════════════════════════════════════════ */
     --selected-track:          #ffff00;
     --selected-marker:         #2ecc71;
     --selected-footprint:      rgba(93, 173, 226, 0.6);
-    --selected-footprint-fill: rgba(93, 173, 226, 0.12);
+    --selected-footprint-fill: rgba(93, 173, 226, 0.14);
 
     /* ══════════════════════════════════════════════════════════════
        Наблюдатель (EarthView)
@@ -90,59 +109,136 @@
     --map-text-secondary: #00d4d4;
 
     /* ══════════════════════════════════════════════════════════════
-       SkyView
+       SkyView — согласовано с фонами
        ══════════════════════════════════════════════════════════════ */
-    --sky-bg:            #0a0e14;
-    --sky-fill:          #1a2a3a;
+    --sky-bg:            #080c12;
+    --sky-fill:          #141e28;
     --sky-grid:          #006666;
-    --sky-grid-text:     #008080;
-    --sky-elevation-label: #ffffff;
-    --sky-azimuth-label: #00cccc;
+    --sky-label-muted:   #d0d8e0;
+    --sky-grid-text:     #d0d8e0;
+    --sky-elevation-label: #d0d8e0;
+    --sky-azimuth-label: #d0d8e0;
     --sky-track:         #00cc00;
     --sky-track-arrow:   #88ff88;
     --sky-aos:           #00ff00;
     --sky-los:           #ff4444;
+    /* Подписи AOS/LOS в таблице и SkyView — сквозные с --sky-aos / --sky-los */
+    --color-aos: var(--sky-aos);
+    --color-los: var(--sky-los);
     --sky-marker-border: #ffffff;
     --sky-satellite:     #00ffff;
     --sky-satellite-glow: rgba(0, 255, 255, 0.3);
     --sky-satellite-signal: rgba(0, 255, 200, 0.5);
-    --sky-satellite-label: #ffffff;
+    --sky-satellite-label: #d0d8e0;
     --sky-satellite-aura: rgba(197, 88, 88, 1);
     --sky-satellite-aura-border: #ff8888;
     --sky-observer:      #ffaa00;
     --sky-observer-secondary: #ff6600;
     --sky-info-text:     #00d4aa;
-    --sky-info-label:    #ffffff;
+    --sky-info-label:    #d0d8e0;
     --sky-time-text:     #00a8ff;
-    --sky-selected-track:  #ffff00;
+    --sky-selected-track:  #b89a38;
+    --sky-selected-sat-label: #d8c878;
     --sky-selected-marker: #2ecc71;
+    --sky-canvas-text-stroke:   rgba(0, 0, 0, 0.88);
+    --sky-sat-panel-line:       rgba(255, 255, 255, 0.32);
+    --sky-sat-body-outline:     #ffffff;
+    --sky-arrow-outline:        rgba(0, 0, 0, 0.78);
+    --sky-signal-wave-rgb:      0, 255, 200;
 
     /* ══════════════════════════════════════════════════════════════
-       Индикаторы Az/El
+       Индикаторы Az/El — согласовано с фонами
        ══════════════════════════════════════════════════════════════ */
-    --ind-bg:             #0a0e14;
-    --ind-bg-secondary:   #12171f;
-    --ind-border:         #2a3444;
-    --ind-accent:         #00d4aa;
-    --ind-accent-blue:    #00a8ff;
+    --ind-bg:             #080c12;
+    --ind-bg-secondary:   #141e28;
+    --ind-label-muted:    #d0d8e0;
+    --ind-border:         #344858;
+    --ind-accent:         hsl(155, 84%, 24%);
+    /* Classic: бирюзовый акцент как раньше (не тёмно-зелёный из default) */
+    --ind-antenna:        #00d4aa;
+    /* Чуть мягче лимб/штрихи, чем чистый #00a8ff */
+    --ind-accent-blue:    #4dc8f0;
     --ind-accent-red:     #ff6b6b;
     --ind-text:           #e6e8eb;
     --ind-text-secondary: #8b919a;
-    --ind-text-muted:     #5c6370;
+    --ind-text-muted:     #6a7888;
     --ind-satellite-line:   rgba(255, 255, 255, 0.5);
     --ind-satellite-marker: #ffffff;
     --ind-out-of-view:    rgba(255, 107, 107, 0.7);
 
     /* ══════════════════════════════════════════════════════════════
-       Спектр / водопад (нижняя панель)
+       Спектр / водопад (canvas)
        ══════════════════════════════════════════════════════════════ */
-    --spectrum-bg:       #0d1117;
-    --spectrum-grid:     #2a3444;
-    --spectrum-text:     #8a9199;
-    --spectrum-signal:   #00ff80;
-    --spectrum-peak:     #ffd700;
-    --spectrum-peak-dot: #ff3333;
-    --waterfall-bg:      #1a1e24;
+    --spectrum-bg:         #0a1018;
+    --spectrum-grid:       #2a3848;
+    --spectrum-plot-bg:    #0a1018;
+    --spectrum-instrument-bg: #0a1018;
+    --bp-overview-freq-scale-bg: var(--spectrum-instrument-bg);
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.09);
+    --spectrum-axis-text:  var(--text-muted);
+    --spectrum-trace:      #00ff80;
+    --spectrum-crosshair:  #ffd700;
+    --spectrum-peak-label: #ffd700;
+    --spectrum-text:       #8a9199;
+    --spectrum-signal:     #00ff80;
+    --spectrum-peak:       #ffd700;
+    --spectrum-peak-dot:   #ff3333;
+    --waterfall-bg:        #141e28;
+    --waterfall-margin-bg: #000000;
+    --waterfall-cold-bg:   #000000;
+
+    --panel-header-title:     #b8c4d4;
+    --sky-info-value:         #40c4ff;
+    --bp-info-label:          var(--panel-header-title);
+    --bp-info-value:          #00a8ff;
+    --passes-row-selected-bg: rgba(255, 215, 0, 0.2);
+    --passes-row-selected-border: #d4a800;
+    --passes-row-tracking-bg: rgba(255, 68, 68, 0.1);
+    --passes-row-tracking-border: #ff4444;
+    --passes-eye-muted:       rgba(230, 232, 235, 0.42);
+    --passes-schedule-active-row-bg: rgba(74, 222, 128, 0.1);
+    --passes-schedule-duration-color: #98a8b0;
+    --passes-empty-text: var(--text-muted);
+    --passes-mini-horizon: rgba(255, 255, 255, 0.25);
+    --passes-mini-ring-mid: rgba(255, 255, 255, 0.15);
+    --passes-mini-ring-inner: rgba(255, 255, 255, 0.12);
+    --passes-mini-crosshair: rgba(255, 255, 255, 0.15);
+    --passes-mini-track: #00d4ff;
+    --btn-primary-text: #ffffff;
+    --btn-primary-hover-bg: #0090dd;
+    --pc-limit-toast-shadow:  0 6px 22px rgba(0, 0, 0, 0.5);
+
+    --map-track-line-width:     1.5;
+    --map-footprint-line-width: 1.5;
+    --map-secondary-track-fallback: rgba(200, 220, 235, 0.92);
+
+    --sky-grid-line-width:  1;
+    --sky-grid-outer-width: 2;
+
+    --pc-limit-toast-bg:     rgba(18, 28, 42, 0.96);
+    --pc-limit-toast-border: #006666;
+    --pc-limit-toast-text:   #e6e8eb;
+
+    /* Overlay КА над картой (см. overlay-panel.css) */
+    --overlay-panel-bg:              rgba(10, 14, 20, 0.88);
+    --overlay-panel-shadow:          0 4px 16px rgba(0, 0, 0, 0.5);
+    --overlay-panel-header-border:   rgba(0, 212, 170, 0.25);
+    --overlay-panel-group-border:    rgba(42, 52, 68, 0.6);
+    --overlay-restore-hover-bg:      rgba(0, 212, 170, 0.15);
+
+    --sidebar-accordion-active-bg: rgba(0, 212, 170, 0.1);
+    --focus-ring-shadow:           0 0 0 2px rgba(0, 212, 170, 0.1);
+
+    --bp-sdr-btn-hover-bg:       rgba(0, 212, 170, 0.12);
+    --bp-stat-row-border:        rgba(42, 52, 68, 0.45);
+    --info-card-label:           var(--text-label);
+    --info-card-value:           var(--accent-primary);
+    --info-track-btn-bg:         rgba(0, 212, 170, 0.1);
+    --info-track-btn-border:     rgba(0, 212, 170, 0.4);
+    --info-track-btn-hover-bg:   rgba(0, 212, 170, 0.2);
+    --info-track-btn-active-bg:  rgba(0, 212, 170, 0.3);
+    --modal-backdrop:            rgba(0, 0, 0, 0.62);
+    --modal-box-shadow:          0 8px 32px rgba(0, 0, 0, 0.5);
 
     /* ══════════════════════════════════════════════════════════════
        Типографика

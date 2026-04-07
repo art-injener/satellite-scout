@@ -1,0 +1,234 @@
+/*
+ * Satellite Scout — тема «Light».
+ * Единый холст — #ccd0d8 (умеренно темнее); острова — #b8bcc6.
+ * Тёмные вставки: спектр/водопад. THEME=light
+ */
+
+:root {
+    --theme-id: light;
+
+    /* Фоны: холст #ccd0d8; острова #b8bcc6 — шапки, thead, rp-ctrl, skyview-info, bp-info */
+    --bg-primary:   #ccd0d8;
+    --bg-secondary: #ccd0d8;
+    --bg-tertiary:  #b8bcc6;
+    --bg-elevated:  #d4d8e0;
+    --bg-hover:     #a8adb8;
+
+    --border-color:   #989dad;
+    --border-focus:   #1a5a98;
+
+    /* Overlay КА над картой — светлая стеклянная панель */
+    --overlay-panel-bg:              rgba(204, 208, 216, 0.94);
+    --overlay-panel-shadow:          0 4px 20px rgba(35, 45, 60, 0.14);
+    --overlay-panel-header-border:   rgba(10, 110, 140, 0.22);
+    --overlay-panel-group-border:    rgba(100, 112, 128, 0.38);
+    --overlay-restore-hover-bg:      rgba(10, 110, 140, 0.12);
+
+    /* Общие UI-детали (main.css — аккордеон sidebar, фокус полей) */
+    --sidebar-accordion-active-bg: rgba(10, 110, 140, 0.12);
+    --focus-ring-shadow:           0 0 0 2px rgba(10, 110, 140, 0.2);
+
+    /* Footer — ближе к остальным инфо-панелям (mono 12px), без «гигантской» строки */
+    --station-footer-font-size: 0.95rem;
+
+    /* Текст: не чистый чёрный — комфортнее для длительной работы */
+    --text-primary:    #2a3038;
+    --text-secondary:  #2a3038;
+    --text-heading:    #1a2430;
+    --text-label:      #4a5565;
+    --text-muted:      #5a6575;
+    --text-accent:     #0a5878;
+
+    --accent-primary:  #0a6e8c;
+    --accent-secondary: #154a8a;
+    --accent-warning:  #a06800;
+    --accent-danger:   #b01818;
+    --accent-success:  #0d7035;
+
+    /* Карта — приглушённый океан/суша, заметные трассы и ЗРВ (см. themeRgba в css-vars.js) */
+    --map-ocean:       #b8c8d4;
+    --map-land:        #d0c8bc;
+    --map-coast:       #6a7a88;
+    --map-grid:        #8a96a4;
+    --map-grid-major:  #6a7688;
+    --map-grid-text:   #3a4858;
+    /* Дубли для справки; canvas берёт rgba через themeRgba() */
+    --map-footprint:        rgba(175, 48, 32, 0.88);
+    --map-footprint-fill:   rgba(175, 48, 32, 0.18);
+
+    /* Трассы: насыщенные для читаемости на светлом фоне */
+    --orbit-future:  #00aa00;
+    --orbit-past:    #cc3030;
+    --orbit-dots:    #cc8800;
+
+    --sat-marker:        #2a3038;
+    --sat-glow:          #0a6e8c;
+    --sat-label:         #2a3038;
+    --sat-label-stroke:  rgba(214, 218, 225, 0.95);
+
+    --map-icon-stroke:           rgba(26, 36, 48, 0.92);
+    /* Маркеры на карте: живая бирюза/мятная, как в оригинальном логотипе */
+    --map-icon-tracking-fill:    #0d9488;
+    --map-icon-selected-fill:    #5eead4;
+    /* Акцентные точки на панелях логотипа — лайм к бирюзе */
+    --map-icon-logo-dots:        #84cc16;
+    --map-icon-neutral-fill:     #dde1ea;
+    --map-icon-boom-fill:        #7a8494;
+
+    /* Подписи DOM-маркеров на карте: тёмный текст на светлой «таблетке» (не цвет панелей КА) */
+    --map-sat-label-pill-bg:         rgba(255, 255, 255, 0.94);
+    --map-sat-label-pill-shadow:     0 0 0 1px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.12);
+    --map-sat-label-color:           #0f172a;
+    --map-sat-label-selected-color:  #0d4f4a;
+    --map-sat-label-shadow:          0 1px 2px rgba(0, 0, 0, 0.18);
+
+    /* Выбранный КА — синий трек на карте/небе; шкала Az/El отдельно (графит, вариант 1) */
+    --selected-track:          #1a72b8;
+    --selected-marker:         var(--selected-track);
+    --selected-footprint:      rgba(26, 114, 184, 0.68);
+    --selected-footprint-fill: rgba(26, 114, 184, 0.22);
+
+    /* Наблюдатель: тёмно-зелёный — не спутник и не вода */
+    --observer-marker:        #15803d;
+    --observer-marker-stroke: rgba(255, 255, 255, 0.95);
+    --observer-label:         #0f172a;
+
+    --map-russia-border:  #5a6878;
+    --map-russia-label:   #cc8800;
+    --map-city-label:     #2a3038;
+    --map-city-marker:    #a03830;
+    --map-text-secondary: #0a5878;
+
+    --map-track-line-width:     2.5;
+    --map-footprint-line-width: 2.5;
+    --map-secondary-track-fallback: rgba(26, 114, 184, 0.92);
+
+    /* SkyView: холст = общий фон; диск неба чуть прохладнее */
+    --sky-bg:            #ccd0d8;
+    --sky-fill:          #dde4ec;
+    --sky-grid:          #8898a8;
+    --sky-label-muted:   #3a4858;
+    --sky-grid-text:     #3a4858;
+    --sky-elevation-label: #4a5a6a;
+    --sky-azimuth-label: #3a4858;
+    --sky-track:         #00aa00;
+    --sky-track-arrow:   #008800;
+    --sky-aos:           #00aa00;
+    --sky-los:           #cc3030;
+    /* Подписи AOS/LOS в таблице и SkyView — сквозные с --sky-aos / --sky-los */
+    --color-aos: var(--sky-aos);
+    --color-los: var(--sky-los);
+    --sky-marker-border: #2a3038;
+    --sky-satellite:     #08506a;
+    --sky-satellite-glow: rgba(8, 80, 106, 0.30);
+    --sky-satellite-signal: rgba(14, 122, 40, 0.35);
+    --sky-satellite-label: #1a2830;
+    --sky-satellite-aura: rgba(176, 24, 24, 0.55);
+    --sky-satellite-aura-border: #a01414;
+    --sky-observer:      #cc8800;
+    --sky-observer-secondary: #aa6600;
+    --sky-info-text:     #0a6e8c;
+    --sky-info-label:    #1e2832;
+    --sky-time-text:     #3d4754;
+    --sky-selected-track:  var(--selected-track);
+    --sky-selected-sat-label: #125892;
+    --sky-selected-marker: var(--selected-track);
+    --sky-grid-line-width:  1.0;
+    --sky-grid-outer-width: 2.0;
+    /* Canvas SkyView: голубой диск — мягкие обводки, полупрозрачный ореол у текста */
+    --sky-canvas-text-stroke:   rgba(219, 226, 234, 0.92);
+    --sky-sat-panel-line:       rgba(42, 48, 58, 0.48);
+    --sky-sat-body-outline:     #1a2838;
+    --sky-arrow-outline:        rgba(26, 36, 48, 0.60);
+    --sky-signal-wave-rgb:      10, 100, 70;
+
+    /* Az/El: шкала — графит (нейтраль); антенна и маркер КА — синие (--ind-antenna / --selected-track) */
+    --ind-bg:             #ccd0d8;
+    --ind-bg-secondary:   #ccd0d8;
+    --ind-label-muted:    #323b47;
+    --ind-border:         #6f7d8e;
+    --ind-antenna:        #0d5082;
+    --ind-accent:         var(--ind-antenna);
+    --ind-accent-blue:    #3f4a5a;
+    --ind-accent-red:     #cc3030;
+    --ind-text:           #2a3038;
+    --ind-text-secondary: #1e2832;
+    --ind-text-muted:     #3d4754;
+    --ind-satellite-line:   rgba(63, 74, 90, 0.45);
+    --ind-satellite-marker: var(--selected-marker);
+    --ind-out-of-view:    rgba(200, 50, 50, 0.5);
+
+    /* Спектр: обрамление в тон холста; прибор — тёмный */
+    --spectrum-bg:         #ccd0d8;
+    --spectrum-grid:       #3a4550;
+    --spectrum-plot-bg:    #2a3440;
+    /* Обзор: контейнеры FFT/водопада = тот же тон, что и canvas */
+    --spectrum-instrument-bg: #2a3440;
+    /* Полоска шкалы частот между FFT и водопадом — как остров UI, не приборный фон */
+    --bp-overview-freq-scale-bg: var(--bg-tertiary);
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.14);
+    --spectrum-axis-text:  #e4e8ec;
+    --spectrum-trace:      #5ee878;
+    --spectrum-crosshair:  #ffcc66;
+    --spectrum-peak-label: #ffffff;
+    --spectrum-text:       #3d4754;
+    --spectrum-signal:     #8a6500;
+    --spectrum-peak:       #6a4800;
+    --spectrum-peak-dot:   #ff5555;
+    --waterfall-bg:        #2a3440;
+    --waterfall-margin-bg: #2a3440;
+    --waterfall-cold-bg:   #242c38;
+    /* РТН: кнопки и разделители (bottom-panel.css) */
+    --bp-sdr-btn-hover-bg:    rgba(10, 110, 140, 0.14);
+    --bp-stat-row-border:     rgba(88, 98, 112, 0.38);
+    /* InfoPanel + модалка завершения сеанса */
+    --info-card-label:           var(--text-label);
+    --info-card-value:           var(--accent-primary);
+    --info-track-btn-bg:         rgba(10, 110, 140, 0.1);
+    --info-track-btn-border:     rgba(10, 110, 140, 0.38);
+    --info-track-btn-hover-bg:   rgba(10, 110, 140, 0.18);
+    --info-track-btn-active-bg:  rgba(10, 110, 140, 0.26);
+    --modal-backdrop:            rgba(32, 42, 55, 0.42);
+    --modal-box-shadow:          0 10px 36px rgba(35, 45, 58, 0.18);
+
+    /* Заголовки панелей и РТН — акцент; Az/El под графиком — подпись/значение без пары близких синих */
+    --panel-header-title:     #143a6e;
+    --sky-info-value:         #0a4a70;
+    --bp-info-label:          var(--text-label);
+    --bp-info-value:          var(--text-heading);
+    --passes-row-selected-bg: rgba(25, 90, 160, 0.14);
+    --passes-row-selected-border: #1565c0;
+    --passes-row-tracking-bg: rgba(176, 24, 24, 0.08);
+    --passes-row-tracking-border: #b01818;
+    --passes-eye-muted:       rgba(42, 50, 60, 0.48);
+    /* Таблица плана: явный фон скролла и строк (как --bg-secondary) */
+    --passes-scroll-bg:       var(--bg-secondary);
+    --passes-row-bg:          var(--bg-secondary);
+    --passes-schedule-active-row-bg: rgba(13, 112, 53, 0.14);
+    --passes-schedule-duration-color: var(--text-muted);
+    --passes-empty-text: var(--text-muted);
+    --passes-mini-horizon: rgba(42, 52, 64, 0.32);
+    --passes-mini-ring-mid: rgba(42, 52, 64, 0.2);
+    --passes-mini-ring-inner: rgba(42, 52, 64, 0.14);
+    --passes-mini-crosshair: rgba(42, 52, 64, 0.2);
+    --passes-mini-track: #0a6e8c;
+    --btn-primary-text: #f0f4f8;
+    --btn-primary-hover-bg: #123a72;
+    --pc-limit-toast-shadow:  0 6px 18px rgba(35, 45, 58, 0.12);
+
+    --pc-limit-toast-bg:     rgba(204, 208, 216, 0.97);
+    --pc-limit-toast-border: #0a6e8c;
+    --pc-limit-toast-text:   #1a222c;
+
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* «Острова» на едином холсте: чуть сильнее граница шапок; кнопки — отклик по hover */
+.panel-header {
+    box-shadow: inset 0 -1px 0 rgba(26, 36, 48, 0.06);
+}
+
+.rp-ctrl:hover:not(:disabled) {
+    background: var(--bg-hover);
+}

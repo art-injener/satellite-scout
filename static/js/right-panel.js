@@ -67,7 +67,7 @@
         this._tbody = document.getElementById('passes-compact-body');
         this._group = null;
         this._selectedNoradId = null; // Выбранный в таблице спутник
-        this._trackingNoradId = null; // На сопровождении (red/green).
+        this._trackingNoradId = null; // На слежении (red/green).
         this._countdownTimer = null;
         /** Смещение клиентских часов относительно server ts из satellite_group_update (мс). */
         this._serverSkewMs = 0;
@@ -272,8 +272,12 @@
             const durEl = row.querySelector('.pc-col3-dur');
             const untilEl = row.querySelector('.pc-col3-until');
             const c = this._fmtSessionCols(aos, los, this._serverNowMs());
-            if (durEl) { durEl.textContent = c.dur; }
-            if (untilEl) { untilEl.textContent = c.until; }
+            if (durEl) { durEl.textContent = c.time; }
+            if (untilEl) {
+                untilEl.textContent = c.label;
+                untilEl.classList.remove('pc-col3-label--aos', 'pc-col3-label--los');
+                untilEl.classList.add(c.label === 'LOS:' ? 'pc-col3-label--los' : 'pc-col3-label--aos');
+            }
 
             const azel = this._getAzEl(noradId);
             const azEl2 = row.querySelector('.pc-azel-az');
@@ -313,23 +317,23 @@
 
     RightPanelTable.prototype._fmtSessionCols = function(aos, los, nowMs) {
         if (!aos || !los || los <= aos) {
-            return { dur: '—', until: '—' };
+            return { label: '', time: '—' };
         }
         const now = nowMs;
         if (now < aos) {
-            return { dur: this._fmtRuDuration(los - aos), until: this._fmtRuDuration(aos - now) };
+            return { label: 'AOS:', time: this._fmtRuDuration(aos - now) };
         }
         if (now <= los) {
-            return { dur: this._fmtRuDuration(los - now), until: 'ЗРВ' };
+            return { label: 'LOS:', time: this._fmtRuDuration(los - now) };
         }
-        return { dur: '—', until: '—' };
+        return { label: '', time: '—' };
     };
 
     RightPanelTable.prototype._renderCol3Html = function(aos, los) {
         const c = this._fmtSessionCols(aos, los, this._serverNowMs());
-        // Сверху until (До AOS / «ЗРВ»), снизу dur (длит. пролёта или до LOS)
-        return '<div class="pc-col3-until">' + this._escapeHtml(c.until) + '</div>' +
-            '<div class="pc-col3-dur">' + this._escapeHtml(c.dur) + '</div>';
+        var cls = c.label === 'LOS:' ? 'pc-col3-label--los' : 'pc-col3-label--aos';
+        return '<div class="pc-col3-until ' + cls + '">' + this._escapeHtml(c.label) + '</div>' +
+            '<div class="pc-col3-dur">' + this._escapeHtml(c.time) + '</div>';
     };
 
     // ── Привязка кликов по строкам ──
@@ -444,11 +448,11 @@
 
     RightPanelTable.prototype._updateControls = function() {
         if (this._trackBtn) {
-            // «Сопровождение» активна если есть выбранный спутник.
+            // «Слежение» активна если есть выбранный спутник.
             this._trackBtn.disabled = !this._selectedNoradId;
         }
         if (this._resetBtn) {
-            // «Сброс» активна если есть спутник на сопровождении.
+            // «Сброс» активна если есть спутник на слежении.
             this._resetBtn.disabled = !this._trackingNoradId;
         }
     };

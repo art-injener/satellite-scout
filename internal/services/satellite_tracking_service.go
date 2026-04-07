@@ -42,7 +42,7 @@ type satelliteStateUpdate struct {
 type satelliteGroupUpdate struct {
 	Satellites []groupSatInfo `json:"satellites"`
 	PrimaryID  int            `json:"primary_id"`
-	TrackingID int            `json:"tracking_id"` // NORAD ID спутника на сопровождении (0 = нет).
+	TrackingID int            `json:"tracking_id"` // NORAD ID спутника на слежении (0 = нет).
 	TimeWindow groupTimeWin   `json:"time_window"`
 	TS         int64          `json:"ts"`
 }
@@ -154,7 +154,7 @@ type SatelliteTrackingService struct {
 	autoTrackActive bool          // Флаг активности авто-трекинга (скользящее окно).
 	manualSelection *int          // Ручной выбор: primary (legacy, для авто-трекинга).
 
-	// Per-client состояние сопровождения (TRACK-STATE-003).
+	// Per-client состояние слежения (TRACK-STATE-003).
 	clientState *ClientStateStore
 	// clientID последнего SetManualSelection — для направленного SSE-уведомления.
 	lastManualClientID string
