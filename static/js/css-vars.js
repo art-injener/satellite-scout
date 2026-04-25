@@ -5,14 +5,14 @@
 // Для rgba-значений CSS custom properties ненадёжны (getComputedStyle
 // возвращает пустую строку для rgba-записей). Поэтому все rgba-цвета
 // хранятся в JS-карте _THEME_RGBA, а доступ к ним — через themeRgba().
-;(function() {
+(function() {
     'use strict';
 
-    var _style = null;
-    var _themeId = null;
+    let _style = null;
+    let _themeId = null;
 
     // ── rgba-цвета, сгруппированные по теме ──────────────────────
-    var _THEME_RGBA = {
+    const _THEME_RGBA = {
         'classic': {
             // earthview
             'map-footprint':            'rgba(0, 255, 255, 0.6)',
@@ -49,6 +49,70 @@
             'ind-satellite-line': 'rgba(200, 208, 216, 0.35)',
             'ind-out-of-view':    'rgba(208, 85, 69, 0.5)'
         },
+        // Breeze Dark (оригинальный KDE Breeze Dark, почти чёрный)
+        'breeze-dark': {
+            'map-footprint':            'rgba(61, 174, 233, 0.80)',
+            'map-footprint-fill':       'rgba(61, 174, 233, 0.10)',
+            'map-selected-footprint':      'rgba(61, 174, 233, 0.60)',
+            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.12)',
+            'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
+            'map-observer-label-bg':     'rgba(0,0,0,0.6)',
+            'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
+            'map-sat-label-bg':          'rgba(0,0,0,0.6)',
+            'sky-satellite-glow':   'rgba(61, 174, 233, 0.25)',
+            'sky-satellite-signal': 'rgba(39, 174, 96, 0.35)',
+            'sky-satellite-aura':   'rgba(218, 68, 83, 0.70)',
+            'ind-satellite-line': 'rgba(228, 230, 232, 0.35)',
+            'ind-out-of-view':    'rgba(218, 68, 83, 0.50)'
+        },
+        // Breeze (нейтральный серый, светлее dark): акценты KDE Breeze
+        'breeze': {
+            'map-footprint':            'rgba(61, 174, 233, 0.80)',
+            'map-footprint-fill':       'rgba(61, 174, 233, 0.10)',
+            'map-selected-footprint':      'rgba(61, 174, 233, 0.60)',
+            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.12)',
+            'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
+            'map-observer-label-bg':     'rgba(0,0,0,0.6)',
+            'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
+            'map-sat-label-bg':          'rgba(0,0,0,0.6)',
+            'sky-satellite-glow':   'rgba(61, 174, 233, 0.25)',
+            'sky-satellite-signal': 'rgba(39, 174, 96, 0.35)',
+            'sky-satellite-aura':   'rgba(218, 68, 83, 0.70)',
+            'ind-satellite-line': 'rgba(228, 230, 232, 0.35)',
+            'ind-out-of-view':    'rgba(218, 68, 83, 0.50)'
+        },
+        // Breeze-Steel (угольный со стальным подтоном)
+        'breeze-steel': {
+            'map-footprint':            'rgba(61, 174, 233, 0.80)',
+            'map-footprint-fill':       'rgba(61, 174, 233, 0.10)',
+            'map-selected-footprint':      'rgba(61, 174, 233, 0.60)',
+            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.12)',
+            'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
+            'map-observer-label-bg':     'rgba(0,0,0,0.6)',
+            'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
+            'map-sat-label-bg':          'rgba(0,0,0,0.6)',
+            'sky-satellite-glow':   'rgba(61, 174, 233, 0.25)',
+            'sky-satellite-signal': 'rgba(39, 174, 96, 0.35)',
+            'sky-satellite-aura':   'rgba(218, 68, 83, 0.70)',
+            'ind-satellite-line': 'rgba(224, 228, 232, 0.35)',
+            'ind-out-of-view':    'rgba(218, 68, 83, 0.50)'
+        },
+        // Breeze Light (оригинальный KDE Breeze, светлый фон #eff0f1)
+        'breeze-light': {
+            'map-footprint':            'rgba(218, 68, 83, 0.85)',
+            'map-footprint-fill':       'rgba(218, 68, 83, 0.14)',
+            'map-selected-footprint':      'rgba(41, 128, 185, 0.65)',
+            'map-selected-footprint-fill': 'rgba(41, 128, 185, 0.18)',
+            'map-observer-label-stroke': 'rgba(239, 240, 241, 0.95)',
+            'map-observer-label-bg':     'rgba(239, 240, 241, 0.92)',
+            'map-sat-label-stroke':      'rgba(239, 240, 241, 0.95)',
+            'map-sat-label-bg':          'rgba(239, 240, 241, 0.90)',
+            'sky-satellite-glow':   'rgba(41, 128, 185, 0.28)',
+            'sky-satellite-signal': 'rgba(39, 174, 96, 0.35)',
+            'sky-satellite-aura':   'rgba(218, 68, 83, 0.55)',
+            'ind-satellite-line': 'rgba(65, 75, 90, 0.40)',
+            'ind-out-of-view':    'rgba(218, 68, 83, 0.50)'
+        },
         // Светлая тема: значения согласованы с static/css/colors-light.css (themeRgba для canvas)
         'light': {
             'map-footprint':            'rgba(175, 48, 32, 0.88)',
@@ -78,7 +142,7 @@
             if (!_style) {
                 _style = getComputedStyle(document.documentElement);
             }
-            var v = _style.getPropertyValue(name).trim();
+            const v = _style.getPropertyValue(name).trim();
             return v || fallback || '';
         } catch (_) {
             return fallback || '';
@@ -87,7 +151,7 @@
 
     /**
      * Возвращает текущий идентификатор темы (кешируется).
-     * @returns {string} 'classic' | 'ops-center' | 'light'
+     * @returns {string} значение --theme-id из CSS (classic, ops-center, light, breeze, breeze-steel, breeze-dark, breeze-light, …)
      */
     window.getThemeId = function getThemeId() {
         if (!_themeId) {
@@ -103,8 +167,8 @@
      * @returns {string}
      */
     window.themeRgba = function themeRgba(key, fallback) {
-        var id = getThemeId();
-        var palette = _THEME_RGBA[id] || _THEME_RGBA['classic'];
+        const id = getThemeId();
+        const palette = _THEME_RGBA[id] || _THEME_RGBA['classic'];
         return palette[key] || fallback || '';
     };
 

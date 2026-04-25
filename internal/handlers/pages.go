@@ -57,9 +57,32 @@ type PageData struct {
 	Theme     string
 }
 
+// Допустимые имена тем (совпадают с файлами colors-*.css).
+var allowedThemes = map[string]bool{
+	"default": true, "classic": true, "light": true,
+	"breeze-light": true, "breeze": true, "breeze-steel": true, "breeze-dark": true,
+}
+
+// themeFromCookie возвращает тему из cookie ss-theme, если она допустима.
+func themeFromCookie(r *http.Request) string {
+	c, err := r.Cookie("ss-theme")
+	if err != nil || c.Value == "" {
+		return ""
+	}
+	if allowedThemes[c.Value] {
+		return c.Value
+	}
+	return ""
+}
+
 // pageData создаёт PageData с общими полями (тема).
-func (h *PageHandler) pageData(title, tab string) PageData {
-	return PageData{Title: title, ActiveTab: tab, Theme: h.theme}
+// Приоритет: cookie ss-theme > config.Theme (env THEME).
+func (h *PageHandler) pageData(title, tab string, r *http.Request) PageData {
+	theme := h.theme
+	if ct := themeFromCookie(r); ct != "" {
+		theme = ct
+	}
+	return PageData{Title: title, ActiveTab: tab, Theme: theme}
 }
 
 // Index перенаправляет на страницу отслеживания.
@@ -69,22 +92,22 @@ func (h *PageHandler) Index(w http.ResponseWriter, r *http.Request) {
 
 // Tracking рендерит страницу отслеживания (вкладка 1).
 func (h *PageHandler) Tracking(w http.ResponseWriter, r *http.Request) {
-	h.render(w, h.pageData("Сеанс - Satellite Scout", "tracking"))
+	h.render(w, h.pageData("Сеанс - Satellite Scout", "tracking", r))
 }
 
 // Receiver рендерит страницу приёмника (вкладка 3).
 func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
-	h.render(w, h.pageData("Приёмник - Satellite Scout", "receiver"))
+	h.render(w, h.pageData("Приёмник - Satellite Scout", "receiver", r))
 }
 
 // Passes рендерит страницу пролётов (вкладка 2).
 func (h *PageHandler) Passes(w http.ResponseWriter, r *http.Request) {
-	h.render(w, h.pageData("План сеансов - Satellite Scout", "passes"))
+	h.render(w, h.pageData("План сеансов - Satellite Scout", "passes", r))
 }
 
 // Simulation рендерит страницу имитации (вкладка 4).
 func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
-	h.render(w, h.pageData("Имитация - Satellite Scout", "simulation"))
+	h.render(w, h.pageData("Имитация - Satellite Scout", "simulation", r))
 }
 
 func (h *PageHandler) loadTemplates() error {

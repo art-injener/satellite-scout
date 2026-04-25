@@ -110,10 +110,15 @@ func main() {
 
 // resolveAssets возвращает файловые системы для шаблонов и статики.
 // DevMode: чтение с диска (горячая перезагрузка). Production: встроенные embed.FS.
+// Если в dev-режиме директория templates/ не найдена (бинарник запущен не из корня проекта),
+// используется embed.FS как fallback.
 func resolveAssets(devMode bool) (fs.FS, fs.FS) {
 	if devMode {
-		slog.Info("assets: filesystem (dev mode)")
-		return os.DirFS("templates"), os.DirFS("static")
+		if _, err := os.Stat("templates/layouts"); err == nil {
+			slog.Info("assets: filesystem (dev mode)")
+			return os.DirFS("templates"), os.DirFS("static")
+		}
+		slog.Warn("assets: templates/ not found in CWD, falling back to embedded FS (dev mode degraded)")
 	}
 
 	slog.Info("assets: embedded (production)")

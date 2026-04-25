@@ -67,7 +67,7 @@
         this._tbody = document.getElementById('passes-compact-body');
         this._group = null;
         this._selectedNoradId = null; // Выбранный в таблице спутник
-        this._trackingNoradId = null; // На слежении (red/green).
+        this._trackingNoradId = null; // Под наблюдением (red/green).
         this._countdownTimer = null;
         /** Смещение клиентских часов относительно server ts из satellite_group_update (мс). */
         this._serverSkewMs = 0;
@@ -331,7 +331,7 @@
 
     RightPanelTable.prototype._renderCol3Html = function(aos, los) {
         const c = this._fmtSessionCols(aos, los, this._serverNowMs());
-        var cls = c.label === 'LOS:' ? 'pc-col3-label--los' : 'pc-col3-label--aos';
+        const cls = c.label === 'LOS:' ? 'pc-col3-label--los' : 'pc-col3-label--aos';
         return '<div class="pc-col3-until ' + cls + '">' + this._escapeHtml(c.label) + '</div>' +
             '<div class="pc-col3-dur">' + this._escapeHtml(c.time) + '</div>';
     };
@@ -448,11 +448,11 @@
 
     RightPanelTable.prototype._updateControls = function() {
         if (this._trackBtn) {
-            // «Слежение» активна если есть выбранный спутник.
+            // «Наблюдение» активна если есть выбранный спутник.
             this._trackBtn.disabled = !this._selectedNoradId;
         }
         if (this._resetBtn) {
-            // «Сброс» активна если есть спутник на слежении.
+            // «Сброс» активна если есть спутник под наблюдением.
             this._resetBtn.disabled = !this._trackingNoradId;
         }
     };

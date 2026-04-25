@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/docker/docker/api/types/container"
 	"github.com/stretchr/testify/require"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
@@ -81,8 +82,8 @@ func TestPredictPasses_ReferenceValidation(t *testing.T) {
 	// Запускаем контейнер с skyfield.
 	container := startRefContainer(t, ctx, tmpDir)
 	defer func() {
-		if err := container.Terminate(ctx); err != nil {
-			t.Logf("ошибка остановки контейнера: %v", err)
+		if termErr := container.Terminate(ctx); termErr != nil {
+			t.Logf("ошибка остановки контейнера: %v", termErr)
 		}
 	}()
 
@@ -180,10 +181,11 @@ func startRefContainer(t *testing.T, ctx context.Context, dataDir string) testco
 			Context:    refDockerfileCtx,
 			Dockerfile: "Dockerfile",
 		},
-		Cmd: []string{"/data/input.json", "/data/output.json"},
-		Mounts: testcontainers.Mounts(
-			testcontainers.BindMount(dataDir, "/data"),
-		),
+		Cmd:   []string{"/data/input.json", "/data/output.json"},
+		Files: []testcontainers.ContainerFile{},
+		HostConfigModifier: func(hc *container.HostConfig) {
+			hc.Binds = []string{dataDir + ":/data"}
+		},
 		WaitingFor: wait.ForExit().WithExitTimeout(3 * time.Minute),
 	}
 
@@ -221,17 +223,17 @@ func compareRefPasses(t *testing.T, input refInput, ref refOutput) {
 	for i, p := range ourPasses {
 		t.Logf("  наш  [%d]: AOS %s Az=%.0f° → TCA %s El=%.1f° → LOS %s Az=%.0f°",
 			i,
-			time.UnixMilli(p.AOS).UTC().Format("15:04:05"), p.AOSAz,
-			time.UnixMilli(p.TCA).UTC().Format("15:04:05"), p.TCAEl,
-			time.UnixMilli(p.LOS).UTC().Format("15:04:05"), p.LOSAz)
+			time.UnixMilli(p.AOS).UTC().Format(timeFormatHMS), p.AOSAz,
+			time.UnixMilli(p.TCA).UTC().Format(timeFormatHMS), p.TCAEl,
+			time.UnixMilli(p.LOS).UTC().Format(timeFormatHMS), p.LOSAz)
 	}
 
 	for i, rp := range ref.Passes {
 		t.Logf("  ref  [%d]: AOS %s Az=%.0f° → TCA %s El=%.1f° → LOS %s Az=%.0f°",
 			i,
-			time.UnixMilli(rp.AOSUnixMs).UTC().Format("15:04:05"), rp.AOSAz,
-			time.UnixMilli(rp.TCAUnixMs).UTC().Format("15:04:05"), rp.TCAEl,
-			time.UnixMilli(rp.LOSUnixMs).UTC().Format("15:04:05"), rp.LOSAz)
+			time.UnixMilli(rp.AOSUnixMs).UTC().Format(timeFormatHMS), rp.AOSAz,
+			time.UnixMilli(rp.TCAUnixMs).UTC().Format(timeFormatHMS), rp.TCAEl,
+			time.UnixMilli(rp.LOSUnixMs).UTC().Format(timeFormatHMS), rp.LOSAz)
 	}
 
 	// Матчим пролёты по близости TCA.
@@ -242,7 +244,7 @@ func compareRefPasses(t *testing.T, input refInput, ref refOutput) {
 		best := findClosestOurPass(ourPasses, rp.TCAUnixMs)
 		if best == nil {
 			t.Errorf("эталонный пролёт TCA=%s не найден в наших расчётах",
-				time.UnixMilli(rp.TCAUnixMs).UTC().Format("15:04:05"))
+				time.UnixMilli(rp.TCAUnixMs).UTC().Format(timeFormatHMS))
 			unmatched++
 
 			continue
@@ -309,8 +311,8 @@ func assertRefTimeDelta(t *testing.T, name string, wantMs, gotMs int64, toleranc
 	if delta > tolerance {
 		t.Errorf("%s: расхождение %v превышает допуск %v (эталон=%s, наш=%s)",
 			name, delta, tolerance,
-			time.UnixMilli(wantMs).UTC().Format("15:04:05"),
-			time.UnixMilli(gotMs).UTC().Format("15:04:05"))
+			time.UnixMilli(wantMs).UTC().Format(timeFormatHMS),
+			time.UnixMilli(gotMs).UTC().Format(timeFormatHMS))
 	}
 }
 

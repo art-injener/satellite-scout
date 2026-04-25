@@ -43,8 +43,8 @@ type Config struct {
 	// Настройки TLE (загрузка, кеширование, обновление)
 	TLE *tracker.TLEStoreConfig
 
-	// Цветовая тема UI: "default" (Operations Center), "classic", "light" и т.д.
-	// Определяет файл static/css/colors-{Theme}.css.
+	// Цветовая тема UI: default, classic, light, breeze, breeze-steel, breeze-dark.
+	// Стартовый файл static/css/colors-{Theme}.css; в браузере тему можно сменить (localStorage ss-ui-theme).
 	Theme string
 }
 

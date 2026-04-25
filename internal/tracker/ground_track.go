@@ -141,6 +141,11 @@ const (
 	defaultTrackPeriodsAhead = 0.7
 )
 
+// DefaultGroundTrackStep — шаг дискретизации наземной трассы в GenerateDefaultGroundTrack.
+// Должен совпадать с шагом второй пропагации для azimuth маркера на карте (см. SatelliteTrackingService),
+// иначе угол иконки расходится с отрезками полилинии на canvas.
+const DefaultGroundTrackStep = 30 * time.Second
+
 // GenerateDefaultGroundTrack генерирует трассу орбиты с автодиапазоном:
 // defaultTrackPeriodsBack периодов назад + defaultTrackPeriodsAhead периодов вперёд, шаг 30 секунд.
 func GenerateDefaultGroundTrack(tle *TLE, now time.Time) (*GroundTrack, error) {
@@ -153,12 +158,10 @@ func GenerateDefaultGroundTrack(tle *TLE, now time.Time) (*GroundTrack, error) {
 		return nil, fmt.Errorf("%w: orbital period %.2f min", ErrInvalidRange, tle.OrbitalPeriod())
 	}
 
-	const defaultStep = 30 * time.Second
-
 	start := now.Add(-time.Duration(float64(period) * defaultTrackPeriodsBack))
 	end := now.Add(time.Duration(float64(period) * defaultTrackPeriodsAhead))
 
-	return GenerateGroundTrack(tle, start, end, now, defaultStep)
+	return GenerateGroundTrack(tle, start, end, now, DefaultGroundTrackStep)
 }
 
 // generateTrackPoints генерирует массив точек TrackPoint для заданного временного интервала.

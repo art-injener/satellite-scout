@@ -260,7 +260,7 @@
     padding-left: 3px;
 }
 
-/* На слежении (tracking) */
+/* Под наблюдением (tracking) */
 .passes-compact__table tbody tr.pc-row--tracking {
     background: var(--passes-row-tracking-bg, rgba(255, 68, 68, 0.1)) !important;
     border-left: 3px solid var(--passes-row-tracking-border, #ff4444);
@@ -270,7 +270,7 @@
     padding-left: 3px;
 }
 
-/* selected + tracking — приоритет стиля слежения */
+/* selected + tracking — приоритет стиля наблюдения */
 .passes-compact__table tbody tr.pc-row--selected.pc-row--tracking {
     background: var(--passes-row-tracking-bg, rgba(255, 68, 68, 0.16)) !important;
     border-left: 3px solid var(--passes-row-tracking-border, #ff4444);
@@ -460,7 +460,7 @@
     cursor: not-allowed;
 }
 
-/* Кнопка «Слежение» */
+/* Кнопка «Наблюдение» */
 .rp-ctrl--track:not(:disabled):hover {
     color: var(--accent-primary);
     border-color: var(--accent-primary);

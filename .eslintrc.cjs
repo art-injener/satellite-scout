@@ -4,6 +4,11 @@ module.exports = {
         browser: true,
         es2022: true
     },
+    globals: {
+        cssVar: 'readonly',
+        themeRgba: 'readonly',
+        getThemeId: 'readonly'
+    },
     parserOptions: {
         ecmaVersion: 2022,
         sourceType: 'script'

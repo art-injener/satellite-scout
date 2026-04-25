@@ -20,12 +20,12 @@ type TrackingRequest struct {
 	ClientID string `json:"client_id,omitempty"`
 }
 
-// TrackingHandler обрабатывает запросы управления слежением спутника.
+// TrackingHandler обрабатывает запросы управления наблюдением за спутником.
 type TrackingHandler struct {
 	trackingService TrackingServiceInterface
 }
 
-// NewTrackingHandler создаёт обработчик управления слежением.
+// NewTrackingHandler создаёт обработчик управления наблюдением.
 func NewTrackingHandler(svc TrackingServiceInterface) *TrackingHandler {
 	return &TrackingHandler{trackingService: svc}
 }

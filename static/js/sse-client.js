@@ -175,7 +175,7 @@ class SSEClient {
             this._handleEvent('satellite_group_update', e);
         });
 
-        // Per-client восстановление слежения при подключении (TRACK-STATE-003).
+        // Per-client восстановление наблюдения при подключении.
         this._eventSource.addEventListener('client_state_restore', (e) => {
             this._handleEvent('client_state_restore', e);
         });

@@ -1,4 +1,4 @@
-// Нижняя панель: вкладки «Обзор» / «Слежение» / «ТМИ».
+// Нижняя панель: вкладки «Обзор» / «Наблюдение» / «ТМИ».
 // Компоненты: SpectrumDataSource, WaterfallView, FFTSpectrumView, BottomPanel.
 
 (function() {
@@ -143,17 +143,17 @@
 
     // Амплитуда сигнала по колоколу: максимум в TCA, затухание к AOS/LOS
     SpectrumDataSource.prototype._signalAmplitude = function(t) {
-        var d = (t - 0.5) / 0.35;
+        const d = (t - 0.5) / 0.35;
         return 0.75 * Math.exp(-0.5 * d * d);
     };
 
     // Заполняет буфер: шумовой пол + гауссов пик с доплеровским сдвигом
     SpectrumDataSource.prototype.generateLine = function() {
-        var bins = this._bins;
-        var buf = this._buf;
+        const bins = this._bins;
+        const buf = this._buf;
 
         if (!this._inPass) {
-            for (var n = 0; n < bins; n++) {
+            for (let n = 0; n < bins; n++) {
                 buf[n] = 0.04 + Math.random() * 0.06;
             }
             this._tick++;
@@ -164,16 +164,16 @@
             return;
         }
 
-        var t = this._tick / this._passDurationTicks;
-        var signalCenter = 0.5 + this._dopplerOffset(t);
-        var amplitude = this._signalAmplitude(t);
-        var signalWidth = 0.025 + 0.008 * (1 - amplitude);
+        const t = this._tick / this._passDurationTicks;
+        const signalCenter = 0.5 + this._dopplerOffset(t);
+        const amplitude = this._signalAmplitude(t);
+        const signalWidth = 0.025 + 0.008 * (1 - amplitude);
 
-        for (var i = 0; i < bins; i++) {
-            var fx = i / bins;
-            var noise = 0.04 + Math.random() * 0.06;
-            var dist = (fx - signalCenter) / signalWidth;
-            var signal = amplitude * Math.exp(-0.5 * dist * dist) * (0.85 + Math.random() * 0.3);
+        for (let i = 0; i < bins; i++) {
+            const fx = i / bins;
+            const noise = 0.04 + Math.random() * 0.06;
+            const dist = (fx - signalCenter) / signalWidth;
+            const signal = amplitude * Math.exp(-0.5 * dist * dist) * (0.85 + Math.random() * 0.3);
             buf[i] = noise + signal;
         }
 
@@ -195,7 +195,7 @@
         return this._buf;
     };
 
-    // Срез вокруг centerBin шириной widthBins (узкополосный водопад вкладки «Слежение»)
+    // Срез вокруг centerBin шириной widthBins (узкополосный водопад вкладки «Наблюдение»)
     SpectrumDataSource.prototype.getSlice = function(centerBin, widthBins) {
         const half = Math.floor(widthBins / 2);
         const start = centerBin - half;
@@ -246,7 +246,7 @@
         }
     };
 
-    // Шкала частот на отдельном canvas (над водопадом «Слежение»)
+    // Шкала частот на отдельном canvas (над водопадом «Наблюдение»)
     WaterfallView.prototype._drawFreqScale = function(width) {
         const sc = this._scaleCanvas;
         if (!sc || !width) { return; }
@@ -649,11 +649,11 @@
         return next;
     }
 
-    const TAB_LABELS = { follow: 'Слежение', overview: 'Обзор', tmi: 'ТМИ', plan: 'План сеансов' };
-    /** Вертикальная колонка в полоске РТН (по одной букве; «Слежение» укладывается по высоте) */
-    const TAB_LABELS_SIDE = { follow: 'СЛЕЖЕНИЕ', overview: 'ОБЗОР', tmi: 'ТМИ', plan: 'ПЛАН' };
+    const TAB_LABELS = { follow: 'Наблюдение', overview: 'Обзор', tmi: 'ТМИ', plan: 'План сеансов' };
+    /** Вертикальная колонка в полоске РТН (по одной букве; «Наблюдение» укладывается по высоте) */
+    const TAB_LABELS_SIDE = { follow: 'НАБЛЮДЕНИЕ', overview: 'ОБЗОР', tmi: 'ТМИ', plan: 'ПЛАН' };
 
-    // Центральный bin и ширина среза для узкополосного водопада вкладки «Слежение»
+    // Центральный bin и ширина среза для узкополосного водопада вкладки «Наблюдение»
     const FOLLOW_CENTER_BIN = 256;
     const FOLLOW_NARROW_BINS = 128;
 
@@ -699,9 +699,9 @@
     };
 
     // Кнопки режима РТН: полоска слева от тела нижней панели
-    var BOTTOM_TAB_BTN_SELECTOR = '.bottom-panel__tab-btn';
+    const BOTTOM_TAB_BTN_SELECTOR = '.bottom-panel__tab-btn';
 
-    // Привязываем клики (Обзор / Слежение / ТМИ)
+    // Привязываем клики (Обзор / Наблюдение / ТМИ)
     BottomPanel.prototype._initTabs = function() {
         const self = this;
         const tabs = document.querySelectorAll(BOTTOM_TAB_BTN_SELECTOR);
@@ -776,7 +776,7 @@
 
         const ds = this._dataSource;
 
-        // Водопад «Слежение»
+        // Водопад «Наблюдение»
         const followCanvas = document.getElementById('waterfall-compact');
         const followScale = document.getElementById('waterfall-freq-scale');
         if (followCanvas) {
@@ -889,14 +889,14 @@
         if (this._overviewWF) { this._overviewWF.clear(); }
     };
 
-    // Запуск водопада «Слежение» (кнопка «Слежение» в правой панели)
+    // Запуск водопада «Наблюдение» (кнопка «Наблюдение» в правой панели)
     BottomPanel.prototype.startWaterfall = function() {
         this.resetSimulation();
         this._followRunning = true;
         if (this._followWF) { this._followWF.start(); }
     };
 
-    // Остановка и очистка водопада «Слежение» (кнопка «Сброс»)
+    // Остановка и очистка водопада «Наблюдение» (кнопка «Сброс»)
     BottomPanel.prototype.stopWaterfallAndClear = function() {
         this._followRunning = false;
         if (this._followWF) { this._followWF.clear(); }
@@ -904,6 +904,24 @@
 
     // Принудительное обновление видимых водопадов (после resize / разворота)
     BottomPanel.prototype.refreshWaterfall = function() {
+        this._refreshCurrentTab();
+    };
+
+    /** После смены colors-*.css: сбросить буфер водопада (фон «холодных» пикселей) и перерисовать шкалы. */
+    BottomPanel.prototype.refreshAfterThemeChange = function() {
+        this._overviewScaleDrawn = false;
+        if (this._overviewWF) {
+            this._overviewWF._imageData = null;
+            if (!this._overviewWF._running) {
+                this._overviewWF.clear();
+            }
+        }
+        if (this._followWF) {
+            this._followWF._imageData = null;
+            if (!this._followWF._running) {
+                this._followWF.clear();
+            }
+        }
         this._refreshCurrentTab();
     };
 

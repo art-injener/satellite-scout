@@ -1024,8 +1024,25 @@ test('setShowAllMode(true) adds all group satellites to visibleTrackIds', () => 
     });
     m.setShowAllMode(true);
     const vis = m.getVisibleTrackIds();
+    assert.ok(vis.includes(100), 'primary A в наборе — чтобы при смене selected трасса не пропадала');
     assert.ok(vis.includes(200), 'B visible');
     assert.ok(vis.includes(300), 'C visible');
+});
+
+test('showAll + смена selected: предыдущий КА остаётся с видимой трассой', () => {
+    const m = new SatelliteStateManager();
+    m.setSatelliteGroup({
+        primary_id: 100,
+        satellites: [
+            { norad_id: 100, sat_name: 'A', aos: 1000, los: 2000, is_visible: true },
+            { norad_id: 200, sat_name: 'B', aos: 1000, los: 2000, is_visible: true },
+        ],
+    });
+    m.setShowAllMode(true);
+    m.setSelectedSatellite(100, 'A', true);
+    m.setSelectedSatellite(200, 'B', true);
+    assert.ok(m.isTrackVisible(100), 'бывший selected A остаётся видимым при включённых всех трассах');
+    assert.ok(m.isTrackVisible(200), 'новый selected B видим');
 });
 
 test('toggleTrackVisibility OFF in showAll mode: track stays hidden after group update', () => {

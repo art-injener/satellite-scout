@@ -26,6 +26,9 @@ const (
 
 	// Количество точек контура зоны видимости.
 	visibilityZonePoints = 72
+
+	// Совпадает с tracker.DefaultGroundTrackStep — направление маркера = касательная к отрезкам трека на карте.
+	mapMarkerRotPropagateStep = tracker.DefaultGroundTrackStep
 )
 
 // satelliteStateUpdate — JSON-структура группового SSE-события "satellite_state_update".
@@ -42,7 +45,7 @@ type satelliteStateUpdate struct {
 type satelliteGroupUpdate struct {
 	Satellites []groupSatInfo `json:"satellites"`
 	PrimaryID  int            `json:"primary_id"`
-	TrackingID int            `json:"tracking_id"` // NORAD ID спутника на слежении (0 = нет).
+	TrackingID int            `json:"tracking_id"` // NORAD ID спутника под наблюдением (0 = нет).
 	TimeWindow groupTimeWin   `json:"time_window"`
 	TS         int64          `json:"ts"`
 }
@@ -78,6 +81,11 @@ type positionData struct {
 	El             float64                 `json:"el"`
 	Range          float64                 `json:"range"`
 	VisibilityZone *tracker.VisibilityZone `json:"visibility_zone,omitempty"`
+	// Вторая точка подспутниковой треки (now + шаг трека) — клиент считает угол через project().
+	MapMarkerFwdLon *float64 `json:"map_marker_fwd_lon,omitempty"`
+	MapMarkerFwdLat *float64 `json:"map_marker_fwd_lat,omitempty"`
+	// Запасной угол при скачке долготы между точками на canvas (хорда в lat/lon, как трек).
+	MapMarkerRotDeg *float64 `json:"map_marker_rot_deg,omitempty"`
 }
 
 // satelliteChangeEvent — JSON-структура SSE-события "satellite_change".
@@ -154,7 +162,7 @@ type SatelliteTrackingService struct {
 	autoTrackActive bool          // Флаг активности авто-трекинга (скользящее окно).
 	manualSelection *int          // Ручной выбор: primary (legacy, для авто-трекинга).
 
-	// Per-client состояние слежения (TRACK-STATE-003).
+	// Per-client состояние наблюдения
 	clientState *ClientStateStore
 	// clientID последнего SetManualSelection — для направленного SSE-уведомления.
 	lastManualClientID string
@@ -807,7 +815,7 @@ func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now ti
 	// Зона видимости (72 точки контура).
 	zone := tracker.GenerateVisibilityZoneFromLLA(lla, sat.noradID, visibilityZonePoints)
 
-	return &positionData{
+	pd := &positionData{
 		NoradID:        sat.noradID,
 		Name:           sat.name,
 		Lat:            roundTo(lla.LatDeg(), 4),
@@ -817,7 +825,43 @@ func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now ti
 		El:             roundTo(aer.ElDeg(), 1),
 		Range:          roundTo(aer.Range, 1),
 		VisibilityZone: zone,
-	}, nil
+	}
+	if flon, flat, rot := computeMapMarkerOrientation(sat, now, lla); flon != nil && flat != nil && rot != nil {
+		pd.MapMarkerFwdLon = flon
+		pd.MapMarkerFwdLat = flat
+		r := roundTo(*rot, 2)
+		pd.MapMarkerRotDeg = &r
+	}
+	return pd, nil
+}
+
+// computeMapMarkerOrientation — вторая точка пропагации (как шаг наземного трека) и запасной угол
+// по хорде lat/lon на платовской карте (не азимут большого круга — совпадает с отрезками canvas).
+func computeMapMarkerOrientation(
+	sat *trackedSatellite, now time.Time, lla *tracker.LLA,
+) (*float64, *float64, *float64) {
+	if sat == nil || lla == nil {
+		return nil, nil, nil
+	}
+	eci2, err := sat.propagator.Propagate(now.Add(mapMarkerRotPropagateStep))
+	if err != nil {
+		return nil, nil, nil
+	}
+	ecef2 := tracker.ECIToECEF(eci2)
+	if ecef2 == nil {
+		return nil, nil, nil
+	}
+	lla2 := tracker.ECEFToLLA(ecef2)
+	if lla2 == nil {
+		return nil, nil, nil
+	}
+	if tracker.GreatCircleAngularDistanceRad(lla, lla2) < 1e-9 {
+		return nil, nil, nil
+	}
+	lonF := roundTo(lla2.LonDeg(), 4)
+	latF := roundTo(lla2.LatDeg(), 4)
+	r := tracker.MapMarkerRotDegPlatCarreChord(lla.LatDeg(), lla.LonDeg(), latF, lonF, 45)
+	return &lonF, &latF, &r
 }
 
 // roundTo округляет число до заданного количества десятичных знаков.

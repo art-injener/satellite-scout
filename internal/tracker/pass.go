@@ -6,6 +6,9 @@ import (
 	"time"
 )
 
+// timeFormatHMS — формат времени HH:MM:SS для логов пролётов.
+const timeFormatHMS = "15:04:05"
+
 // AzElPoint — точка траектории пролёта в топоцентрических координатах.
 // Содержит как сырые Az/El, так и предвычисленные X/Y полярной проекции.
 // Фронтенд использует X/Y напрямую для отрисовки SVG мини-проекции.
@@ -99,9 +102,9 @@ func (p *Pass) DurationSeconds() float64 {
 func (p *Pass) String() string {
 	return fmt.Sprintf("%s #%d (NORAD %d): AOS %s Az=%.0f° → TCA %s El=%.1f° → LOS %s Az=%.0f° [%.0fs]",
 		p.SatName, p.OrbitNumber, p.NoradID,
-		p.AOSTime().UTC().Format("15:04:05"), p.AOSAz,
-		p.TCATime().UTC().Format("15:04:05"), p.TCAEl,
-		p.LOSTime().UTC().Format("15:04:05"), p.LOSAz,
+		p.AOSTime().UTC().Format(timeFormatHMS), p.AOSAz,
+		p.TCATime().UTC().Format(timeFormatHMS), p.TCAEl,
+		p.LOSTime().UTC().Format(timeFormatHMS), p.LOSAz,
 		p.Duration,
 	)
 }

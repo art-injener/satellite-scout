@@ -320,6 +320,38 @@ func TestAERDegreeConversions(t *testing.T) {
 	}
 }
 
+func TestInitialBearingDeg_EastAlongEquator(t *testing.T) {
+	lat := 0.0
+	lon1 := 0.0
+	lon2 := 1.0 * Deg2Rad
+	br := InitialBearingDeg(lat, lon1, lat, lon2)
+	if !almostEqual(br, 90.0, 0.01) {
+		t.Errorf("bearing east: want 90°, got %v°", br)
+	}
+}
+
+func TestMapMarkerRotDegFromBearing_East(t *testing.T) {
+	rot := MapMarkerRotDegFromBearingDeg(90, 45)
+	if !almostEqual(rot, -45.0, 0.01) {
+		t.Errorf("east movement marker rot: want -45°, got %v°", rot)
+	}
+}
+
+func TestMapMarkerRotDegPlatCarreChord_East(t *testing.T) {
+	rot := MapMarkerRotDegPlatCarreChord(0, 0, 0, 1, 45)
+	if !almostEqual(rot, -45.0, 0.01) {
+		t.Errorf("plat carré east chord: want -45°, got %v°", rot)
+	}
+}
+
+func TestGreatCircleAngularDistanceRad_SamePoint(t *testing.T) {
+	a := &LLA{Lat: 0.5, Lon: 1.2}
+	b := &LLA{Lat: 0.5, Lon: 1.2}
+	if d := GreatCircleAngularDistanceRad(a, b); d > 1e-12 {
+		t.Errorf("same point: want ~0, got %v", d)
+	}
+}
+
 // TestKnownECEFToLLA проверяет преобразование для известных точек.
 func TestKnownECEFToLLA(t *testing.T) {
 	// Точка на экваторе (0°, 0°), уровень моря.

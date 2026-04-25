@@ -227,24 +227,24 @@
             // EarthView: selected satellite (оранжевый + иконка + зона видимости).
             if (window.earthView) {
                 if (state.noradId === selectedId) {
-                    window.earthView.setSelectedSatellitePosition(pos.lon, pos.lat, pos.alt);
+                    window.earthView.setSelectedSatellitePosition(pos.lon, pos.lat, pos.alt, pos);
                     window.earthView.setSelectedSatelliteInfo(state.name || '', state.noradId);
                     if (state.visibilityZone && state.visibilityZone.segments) {
                         window.earthView.setSelectedVisibilityZone(state.visibilityZone.segments);
                     }
                 }
-                // Слой слежения: данные только с бэка (tracking_id в group_update, позиции/треки в state_update).
+                // Слой наблюдения: данные только с бэка (tracking_id в group_update, позиции/треки в state_update).
                 if (trackingId) {
                     const trkState = sm.getState(trackingId);
                     if (trkState && trkState.position) {
-                        window.earthView.setSatellitePosition(trkState.position.lon, trkState.position.lat, trkState.position.alt);
+                        window.earthView.setSatellitePosition(trkState.position.lon, trkState.position.lat, trkState.position.alt, trkState.position);
                         window.earthView.setSatelliteInfo(trkState.name || '', trackingId);
                         if (trkState.visibilityZone && trkState.visibilityZone.segments) {
                             window.earthView.setVisibilityZone(trkState.visibilityZone.segments);
                         }
                     }
                 } else {
-                    // Слежения нет — полностью очищаем слой tracking, чтобы не рисовать красный/зелёный.
+                    // Наблюдения нет — полностью очищаем слой tracking, чтобы не рисовать красный/зелёный.
                     window.earthView.clearTrackingLayer();
                 }
                 _updateSecondaryPositions();
@@ -328,7 +328,7 @@
                 window.earthView.setSelectedSatelliteInfo(state.name || '', state.noradId);
                 window.earthView.setSelectedGroundTrack(state.track || null);
                 if (state.position) {
-                    window.earthView.setSelectedSatellitePosition(state.position.lon, state.position.lat, state.position.alt);
+                    window.earthView.setSelectedSatellitePosition(state.position.lon, state.position.lat, state.position.alt, state.position);
                 }
                 if (state.visibilityZone && state.visibilityZone.segments) {
                     window.earthView.setSelectedVisibilityZone(state.visibilityZone.segments);
@@ -342,17 +342,17 @@
             }
         });
 
-        // ── TRACKING_CHANGE: смена/сброс слежения ──
+        // ── TRACKING_CHANGE: смена/сброс наблюдения ──
         sm.subscribe(StateEventType.TRACKING_CHANGE, function(state) {
             if (state) {
                 console.log('[app.js] Tracking ON:', state.noradId, state.name);
                 showTrackingOverlay(state.noradId, state.name || '');
 
-                // Запуск отрисовки водопада при включении слежения
+                // Запуск отрисовки водопада при включении наблюдения
                 if (window._bottomPanel && typeof window._bottomPanel.startWaterfall === 'function') {
                     window._bottomPanel.startWaterfall();
                 }
-                // Вкладка «Слежение» (Az/El/водопад) при активном слежении
+                // Вкладка «Наблюдение» (Az/El/водопад) при активном наблюдении
                 if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
                     window._bottomPanel.showTab('follow', false);
                 }
@@ -362,7 +362,7 @@
                     window.earthView.setSatelliteInfo(state.name || '', state.noradId);
                     window.earthView.setGroundTrack(state.track || null);
                     if (state.position) {
-                        window.earthView.setSatellitePosition(state.position.lon, state.position.lat, state.position.alt);
+                        window.earthView.setSatellitePosition(state.position.lon, state.position.lat, state.position.alt, state.position);
                     }
                     if (state.visibilityZone && state.visibilityZone.segments) {
                         window.earthView.setVisibilityZone(state.visibilityZone.segments);
@@ -375,7 +375,7 @@
                 }
             } else {
                 console.log('[app.js] Tracking OFF');
-                // Остановка водопада и очистка окна при сбросе слежения
+                // Остановка водопада и очистка окна при сбросе наблюдения
                 if (window._bottomPanel && typeof window._bottomPanel.stopWaterfallAndClear === 'function') {
                     window._bottomPanel.stopWaterfallAndClear();
                 }
@@ -542,34 +542,50 @@
 
     // Показ/скрытие оверлея при смене спутника
     let overlayTimer = null;
+    let overlayFadeTimer = null;
+    let overlayShownForNorad = null;
+
     function showTrackingOverlay(noradId, name) {
         const overlay = document.getElementById('tracking-overlay');
-        if (!overlay) {return;}
+        if (!overlay) { return; }
 
-        // Отменяем предыдущий таймер
+        // Повторный вызов для того же NORAD не сбрасывает таймер — иначе серия событий даёт ощущение «долго висит»
+        if (overlayTimer !== null && overlayShownForNorad === noradId) {
+            return;
+        }
+
         if (overlayTimer) {
             clearTimeout(overlayTimer);
             overlayTimer = null;
         }
+        if (overlayFadeTimer) {
+            clearTimeout(overlayFadeTimer);
+            overlayFadeTimer = null;
+        }
 
-        // Заполняем данные
+        overlayShownForNorad = noradId;
+
         const noradEl = document.getElementById('tracking-overlay-norad');
         const nameEl = document.getElementById('tracking-overlay-name');
-        if (noradEl) {noradEl.textContent = noradId || '---';}
-        if (nameEl) {nameEl.textContent = name || '---';}
+        if (noradEl) { noradEl.textContent = noradId || '---'; }
+        if (nameEl) { nameEl.textContent = name || '---'; }
 
-        // Показываем
         overlay.classList.remove('hidden', 'fade-out');
 
-        // Скрываем через 3 секунды с плавным fade-out
+        // Короткий показ; overlayFadeMs = transition у .tracking-overlay в main.css
+        const overlayVisibleMs = 450;
+        const overlayFadeMs = 250;
+
         overlayTimer = setTimeout(function() {
+            overlayTimer = null;
             overlay.classList.add('fade-out');
-            // После завершения анимации скрываем полностью
-            setTimeout(function() {
+            overlayFadeTimer = setTimeout(function() {
+                overlayFadeTimer = null;
                 overlay.classList.add('hidden');
                 overlay.classList.remove('fade-out');
-            }, 600); // длительность transition в CSS
-        }, 3000);
+                overlayShownForNorad = null;
+            }, overlayFadeMs);
+        }, overlayVisibleMs);
     }
 
 
@@ -629,7 +645,7 @@
         }
         if (document.getElementById('bottom-panel-body') && typeof window.BottomPanel === 'function') {
             window._bottomPanel = new window.BottomPanel();
-            // Синхронизация водопада с текущим слежением (например после HTMX-навигации)
+            // Синхронизация водопада с текущим наблюдением (например после HTMX-навигации)
             if (window._stateManager && window._stateManager.getTrackingSatelliteId() && typeof window._bottomPanel.startWaterfall === 'function') {
                 window._bottomPanel.startWaterfall();
             }
@@ -666,7 +682,7 @@
                 }
                 // Подтягиваем накопленные данные из StateManager (track/position могли прийти до init).
                 // Используем selected-слой: tracking-слой устанавливается только когда пользователь
-                // нажимает «Слежение» и бэкенд присылает satellite_group_update с tracking_id.
+                // нажимает «Наблюдение» и бэкенд присылает satellite_group_update с tracking_id.
                 if (window._stateManager) {
                     const sm = window._stateManager;
                     const selectedId = sm.getSelectedSatelliteId();
@@ -677,7 +693,7 @@
                             window.earthView.setSelectedGroundTrack(selState.track);
                         }
                         if (selState.position) {
-                            window.earthView.setSelectedSatellitePosition(selState.position.lon, selState.position.lat, selState.position.alt);
+                            window.earthView.setSelectedSatellitePosition(selState.position.lon, selState.position.lat, selState.position.alt, selState.position);
                             window.earthView.setSelectedSatelliteInfo(selState.name || '', selState.noradId);
                         }
                         if (selState.visibilityZone && selState.visibilityZone.segments) {
@@ -690,7 +706,7 @@
                         if (trkState) {
                             if (trkState.track) { window.earthView.setGroundTrack(trkState.track); }
                             if (trkState.position) {
-                                window.earthView.setSatellitePosition(trkState.position.lon, trkState.position.lat, trkState.position.alt);
+                                window.earthView.setSatellitePosition(trkState.position.lon, trkState.position.lat, trkState.position.alt, trkState.position);
                                 window.earthView.setSatelliteInfo(trkState.name || '', trkState.noradId);
                             }
                             if (trkState.visibilityZone && trkState.visibilityZone.segments) {
@@ -912,7 +928,7 @@
                 const sm = window._stateManager;
                 const trackingId = sm.getTrackingSatelliteId();
                 const selectedId = sm.getSelectedSatelliteId();
-                // Позиция спутника на слежении — всегда из его состояния (не из active/selected)
+                // Позиция спутника под наблюдением — всегда из его состояния (не из active/selected)
                 if (trackingId) {
                     const trkState = sm.getState(trackingId);
                     if (trkState && trkState.position && trkState.position.az !== null && trkState.position.el !== null) {

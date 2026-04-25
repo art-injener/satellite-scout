@@ -269,6 +269,79 @@ func (lla *LLA) LonDeg() float64 {
 	return lla.Lon * Rad2Deg
 }
 
+// GreatCircleAngularDistanceRad возвращает угловое расстояние между точками на сфере (радианы).
+func GreatCircleAngularDistanceRad(a, b *LLA) float64 {
+	if a == nil || b == nil {
+		return 0
+	}
+	dLat := b.Lat - a.Lat
+	dLon := b.Lon - a.Lon
+	sa := math.Sin(dLat / 2)
+	sb := math.Sin(dLon / 2)
+	h := sa*sa + math.Cos(a.Lat)*math.Cos(b.Lat)*sb*sb
+	if h < 0 {
+		h = 0
+	}
+	if h > 1 {
+		h = 1
+	}
+	return 2 * math.Asin(math.Sqrt(h))
+}
+
+// InitialBearingDeg возвращает начальный азимут от точки a к точке b (градусы).
+// Широта и долгота в радианах. 0° — север, по часовой стрелке.
+func InitialBearingDeg(lat1, lon1, lat2, lon2 float64) float64 {
+	dLon := lon2 - lon1
+	// Кратчайший сдвиг долготы (устойчивость у линии перемены дат и больших скачков).
+	for dLon > math.Pi {
+		dLon -= 2 * math.Pi
+	}
+	for dLon < -math.Pi {
+		dLon += 2 * math.Pi
+	}
+	y := math.Sin(dLon) * math.Cos(lat2)
+	x := math.Cos(lat1)*math.Sin(lat2) - math.Sin(lat1)*math.Cos(lat2)*math.Cos(dLon)
+	br := math.Atan2(y, x) * Rad2Deg
+	for br < 0 {
+		br += 360
+	}
+	for br >= 360 {
+		br -= 360
+	}
+	return br
+}
+
+// MapMarkerRotDegFromBearingDeg — угол CSS transform:rotate для маркера на эквидистантной карте
+// (ось Y вниз), бум параллелен линии трассы. bearingFromNorthDeg — азимут движения (0° = север).
+// svgInternalRotateDeg — внутренний rotate в SVG-иконке (у нас 45°).
+func MapMarkerRotDegFromBearingDeg(bearingFromNorthDeg, svgInternalRotateDeg float64) float64 {
+	br := bearingFromNorthDeg * Deg2Rad
+	heading := math.Atan2(-math.Cos(br), math.Sin(br)) * Rad2Deg
+	v := heading - svgInternalRotateDeg
+	return NormalizeDegrees180(v)
+}
+
+// MapMarkerRotDegPlatCarreChord — угол CSS rotate по направлению хорды на платовской карте,
+// как отрезки наземного трека в EarthView.project (x∝lon, y∝−lat). Δ в градусах.
+// При соотношении сторон canvas 2:1 совпадает с atan2(Δy, Δx) между спроецированными точками.
+func MapMarkerRotDegPlatCarreChord(lat0Deg, lon0Deg, lat1Deg, lon1Deg, svgInternalRotateDeg float64) float64 {
+	dLon := lon1Deg - lon0Deg
+	for dLon > 180 {
+		dLon -= 360
+	}
+	for dLon < -180 {
+		dLon += 360
+	}
+	dLat := lat1Deg - lat0Deg
+	heading := math.Atan2(-dLat, dLon) * Rad2Deg
+	return NormalizeDegrees180(heading - svgInternalRotateDeg)
+}
+
+// NormalizeDegrees180 приводит угол к диапазону (-180, 180].
+func NormalizeDegrees180(a float64) float64 {
+	return math.Mod(a+540, 360) - 180
+}
+
 // NewObserver создаёт Observer с координатами в градусах.
 func NewObserver(latDeg, lonDeg, altKm float64) *Observer {
 	return &Observer{

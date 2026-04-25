@@ -81,6 +81,7 @@
     --map-icon-tracking-fill:    var(--accent-primary);
     --map-icon-selected-fill:    var(--accent-warning);
     --map-icon-neutral-fill:     #e6e8eb;
+    --map-icon-led-off:          #7a8a9c;
     --map-icon-boom-fill:        #8b919a;
     --map-icon-logo-dots:        var(--accent-warning);
 

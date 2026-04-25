@@ -48,22 +48,7 @@
         // Видимость спутника
         this.isVisible = true;
 
-        this.colors = {
-            bgPrimary:       cssVar('--ind-bg',               '#0c1420'),
-            bgSecondary:     cssVar('--ind-bg-secondary',     '#182838'),
-            border:          cssVar('--ind-border',           '#3a5060'),
-            accent:          cssVar('--ind-accent',           '#7ab8d0'),
-            antennaAccent:   cssVar('--ind-antenna', '#22a05a'),
-            accentBlue:      cssVar('--ind-accent-blue',      '#86b8d4'),
-            accentRed:       cssVar('--ind-accent-red',       '#d05545'),
-            textPrimary:     cssVar('--ind-text',             '#c8d0d8'),
-            textSecondary:   cssVar('--ind-text-secondary',   '#8a9aaa'),
-            textMuted:       cssVar('--ind-text-muted',       '#708898'),
-            labelMuted:      cssVar('--ind-label-muted',       '#d0d8e0'),
-            satelliteLine:   themeRgba('ind-satellite-line', 'rgba(255, 255, 255, 0.5)'),
-            satelliteMarker: cssVar('--ind-satellite-marker', '#ffffff'),
-            outOfView:       themeRgba('ind-out-of-view',    'rgba(255, 107, 107, 0.7)')
-        };
+        this._reloadColorsFromCss();
 
         this.antennaScale = this.radius / 100 * 0.95;
 
@@ -72,6 +57,29 @@
         // Вычисляем нижнюю точку постамента для позиционирования инфо-панели
         this._recalcPedestalBottom();
     }
+
+    ElevationIndicator.prototype._reloadColorsFromCss = function() {
+        this.colors = {
+            bgPrimary:       cssVar('--ind-bg', '#0c1420'),
+            bgSecondary:     cssVar('--ind-bg-secondary', '#182838'),
+            border:          cssVar('--ind-border', '#3a5060'),
+            accent:          cssVar('--ind-accent', '#7ab8d0'),
+            antennaAccent:   cssVar('--ind-antenna', '#22a05a'),
+            accentBlue:      cssVar('--ind-accent-blue', '#86b8d4'),
+            accentRed:       cssVar('--ind-accent-red', '#d05545'),
+            textPrimary:     cssVar('--ind-text', '#c8d0d8'),
+            textSecondary:   cssVar('--ind-text-secondary', '#8a9aaa'),
+            textMuted:       cssVar('--ind-text-muted', '#708898'),
+            labelMuted:      cssVar('--ind-label-muted', '#d0d8e0'),
+            satelliteLine:   themeRgba('ind-satellite-line', 'rgba(255, 255, 255, 0.5)'),
+            satelliteMarker: cssVar('--ind-satellite-marker', '#ffffff'),
+            outOfView:       themeRgba('ind-out-of-view', 'rgba(255, 107, 107, 0.7)')
+        };
+    };
+
+    ElevationIndicator.prototype.refreshThemeColors = function() {
+        this._reloadColorsFromCss();
+    };
 
     /**
      * Подстройка размера canvas под контейнер (квадрат по меньшей стороне)

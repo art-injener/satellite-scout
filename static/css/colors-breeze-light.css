@@ -1,0 +1,264 @@
+/*
+ * Satellite Scout — тема «Breeze Light».
+ * Настоящая палитра KDE Breeze (светлая): #eff0f1 фоны, #232629 текст,
+ * акцент #3daee9 (голубой), прохладный стальной серый без тёплого подтона.
+ * Приборные вставки (карта, спектр) — тёмные.
+ * Активируется: THEME=breeze-light
+ *
+ * Контрастность: соседние слои ≥ 1.3:1, текст ≥ 4.5:1 (WCAG AA).
+ */
+
+:root {
+    --theme-id: breeze-light;
+
+    /* ══════════════════════════════════════════════════════════════
+       Фоны — оригинал KDE Breeze:
+       Window #eff0f1, View #fcfcfc, Button #eff0f1
+       ══════════════════════════════════════════════════════════════ */
+    --bg-primary:   #eff0f1;
+    --bg-secondary: #eff0f1;
+    --bg-tertiary:  #e3e5e7;
+    --bg-elevated:  #fcfcfc;
+    --bg-hover:     #d7d9dc;
+
+    /* ══════════════════════════════════════════════════════════════
+       Границы — KDE Breeze separator/border
+       ══════════════════════════════════════════════════════════════ */
+    --border-color:   #bdc3c7;
+    --border-focus:   #3daee9;
+
+    /* Overlay КА над картой — светлая стеклянная панель */
+    --overlay-panel-bg:              rgba(239, 240, 241, 0.95);
+    --overlay-panel-shadow:          0 4px 20px rgba(35, 38, 41, 0.12);
+    --overlay-panel-header-border:   rgba(61, 174, 233, 0.25);
+    --overlay-panel-group-border:    rgba(125, 131, 137, 0.35);
+    --overlay-restore-hover-bg:      rgba(61, 174, 233, 0.12);
+
+    --sidebar-accordion-active-bg: rgba(61, 174, 233, 0.12);
+    --focus-ring-shadow:           0 0 0 2px rgba(61, 174, 233, 0.22);
+
+    --station-footer-font-size: 0.95rem;
+
+    /* ══════════════════════════════════════════════════════════════
+       Текст — KDE Breeze ForegroundNormal #232629 / Inactive #7f8c8d
+       ══════════════════════════════════════════════════════════════ */
+    --text-primary:    #232629;
+    --text-secondary:  #232629;
+    --text-heading:    #1a1c1e;
+    --text-label:      #5c6166;
+    --text-muted:      #7f8c8d;
+    --text-accent:     #2980b9;
+
+    /* ══════════════════════════════════════════════════════════════
+       Сигнальные / акцентные — палитра KDE Breeze
+       ══════════════════════════════════════════════════════════════ */
+    --accent-primary:  #3daee9;
+    --accent-secondary: #2980b9;
+    --accent-warning:  #f67400;
+    --accent-danger:   #da4453;
+    --accent-success:  #27ae60;
+
+    /* ══════════════════════════════════════════════════════════════
+       Карта (EarthView) — светлый океан, прохладная суша
+       ══════════════════════════════════════════════════════════════ */
+    --map-ocean:       #c4d0da;
+    --map-land:        #ddd6cc;
+    --map-coast:       #7a8a98;
+    --map-grid:        #98a4b0;
+    --map-grid-major:  #7a8896;
+    --map-grid-text:   #3a4550;
+    --map-footprint:        rgba(218, 68, 83, 0.85);
+    --map-footprint-fill:   rgba(218, 68, 83, 0.14);
+
+    /* ══════════════════════════════════════════════════════════════
+       Орбита / трек — насыщенные для читаемости на светлом
+       ══════════════════════════════════════════════════════════════ */
+    --orbit-future:  #1caa55;
+    --orbit-past:    #da4453;
+    --orbit-dots:    #e06800;
+
+    /* ══════════════════════════════════════════════════════════════
+       Маркер спутника
+       ══════════════════════════════════════════════════════════════ */
+    --sat-marker:        #232629;
+    --sat-glow:          #3daee9;
+    --sat-label:         #232629;
+    --sat-label-stroke:  rgba(239, 240, 241, 0.95);
+
+    --map-icon-stroke:           rgba(35, 38, 41, 0.92);
+    --map-icon-tracking-fill:    #3daee9;
+    --map-icon-selected-fill:    #f67400;
+    --map-icon-neutral-fill:     #e3e5e7;
+    --map-icon-led-off:          #8b97a8;
+    --map-icon-boom-fill:        #7f8c8d;
+    --map-icon-logo-dots:        #f67400;
+
+    --map-sat-label-pill-bg:         rgba(255, 255, 255, 0.95);
+    --map-sat-label-pill-shadow:     0 0 0 1px rgba(35, 38, 41, 0.08), 0 2px 8px rgba(35, 38, 41, 0.10);
+    --map-sat-label-color:           #232629;
+    --map-sat-label-selected-color:  #2980b9;
+    --map-sat-label-shadow:          0 1px 2px rgba(0, 0, 0, 0.14);
+
+    /* ══════════════════════════════════════════════════════════════
+       Выбранный спутник
+       ══════════════════════════════════════════════════════════════ */
+    --selected-track:          #2980b9;
+    --selected-marker:         var(--selected-track);
+    --selected-footprint:      rgba(41, 128, 185, 0.65);
+    --selected-footprint-fill: rgba(41, 128, 185, 0.18);
+
+    /* ══════════════════════════════════════════════════════════════
+       Наблюдатель
+       ══════════════════════════════════════════════════════════════ */
+    --observer-marker:        #27ae60;
+    --observer-marker-stroke: rgba(255, 255, 255, 0.95);
+    --observer-label:         #232629;
+
+    /* ══════════════════════════════════════════════════════════════
+       Прочие элементы карты
+       ══════════════════════════════════════════════════════════════ */
+    --map-russia-border:  #6a7888;
+    --map-russia-label:   #e06800;
+    --map-city-label:     #232629;
+    --map-city-marker:    #da4453;
+    --map-text-secondary: #2980b9;
+
+    --map-track-line-width:     2.5;
+    --map-footprint-line-width: 2.5;
+    --map-secondary-track-fallback: rgba(41, 128, 185, 0.88);
+
+    /* ══════════════════════════════════════════════════════════════
+       SkyView — прохладный небесный диск на общем фоне
+       ══════════════════════════════════════════════════════════════ */
+    --sky-bg:            #eff0f1;
+    --sky-fill:          #dde4ec;
+    --sky-grid:          #8898a8;
+    --sky-label-muted:   #3a4550;
+    --sky-grid-text:     #3a4550;
+    --sky-elevation-label: #4a5565;
+    --sky-azimuth-label: #3a4550;
+    --sky-track:         #1caa55;
+    --sky-track-arrow:   #0e8840;
+    --sky-aos:           #1caa55;
+    --sky-los:           #da4453;
+    --color-aos: var(--sky-aos);
+    --color-los: var(--sky-los);
+    --sky-marker-border: #232629;
+    --sky-satellite:     #2980b9;
+    --sky-satellite-glow: rgba(41, 128, 185, 0.28);
+    --sky-satellite-signal: rgba(39, 174, 96, 0.35);
+    --sky-satellite-label: #1a1c1e;
+    --sky-satellite-aura: rgba(218, 68, 83, 0.55);
+    --sky-satellite-aura-border: #da4453;
+    --sky-observer:      #f67400;
+    --sky-observer-secondary: #cc5e00;
+    --sky-info-text:     #2980b9;
+    --sky-info-label:    #232629;
+    --sky-time-text:     #5c6166;
+    --sky-selected-track:  var(--selected-track);
+    --sky-selected-sat-label: #1a5a92;
+    --sky-selected-marker: var(--selected-track);
+    --sky-grid-line-width:  1.0;
+    --sky-grid-outer-width: 2.0;
+    --sky-canvas-text-stroke:   rgba(239, 240, 241, 0.92);
+    --sky-sat-panel-line:       rgba(35, 38, 41, 0.40);
+    --sky-sat-body-outline:     #232629;
+    --sky-arrow-outline:        rgba(35, 38, 41, 0.55);
+    --sky-signal-wave-rgb:      28, 170, 85;
+
+    /* ══════════════════════════════════════════════════════════════
+       Индикаторы Az/El — прохладный стальной фон
+       ══════════════════════════════════════════════════════════════ */
+    --ind-bg:             #eff0f1;
+    --ind-bg-secondary:   #eff0f1;
+    --ind-label-muted:    #3a4550;
+    --ind-border:         #7f8c8d;
+    --ind-antenna:        #2980b9;
+    --ind-accent:         var(--ind-antenna);
+    --ind-accent-blue:    #4a5565;
+    --ind-accent-red:     #da4453;
+    --ind-text:           #232629;
+    --ind-text-secondary: #1a1c1e;
+    --ind-text-muted:     #5c6166;
+    --ind-satellite-line:   rgba(65, 75, 90, 0.40);
+    --ind-satellite-marker: var(--selected-marker);
+    --ind-out-of-view:    rgba(218, 68, 83, 0.50);
+
+    /* ══════════════════════════════════════════════════════════════
+       Спектр / водопад — тёмные приборные вставки
+       ══════════════════════════════════════════════════════════════ */
+    --spectrum-bg:         #eff0f1;
+    --spectrum-grid:       #3a4550;
+    --spectrum-plot-bg:    #2a3440;
+    --spectrum-instrument-bg: #2a3440;
+    --bp-overview-freq-scale-bg: var(--bg-tertiary);
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.12);
+    --spectrum-axis-text:  #e0e2e4;
+    --spectrum-trace:      #5ee878;
+    --spectrum-crosshair:  #ffcc66;
+    --spectrum-peak-label: #ffffff;
+    --spectrum-text:       #5c6166;
+    --spectrum-signal:     #a06800;
+    --spectrum-peak:       #6a4800;
+    --spectrum-peak-dot:   #da4453;
+    --waterfall-bg:        #2a3440;
+    --waterfall-margin-bg: #2a3440;
+    --waterfall-cold-bg:   #242c38;
+
+    /* ══════════════════════════════════════════════════════════════
+       РТН: кнопки и разделители
+       ══════════════════════════════════════════════════════════════ */
+    --bp-sdr-btn-hover-bg:    rgba(61, 174, 233, 0.14);
+    --bp-stat-row-border:     rgba(100, 110, 120, 0.30);
+    --info-card-label:           var(--text-label);
+    --info-card-value:           var(--accent-primary);
+    --info-track-btn-bg:         rgba(61, 174, 233, 0.10);
+    --info-track-btn-border:     rgba(61, 174, 233, 0.35);
+    --info-track-btn-hover-bg:   rgba(61, 174, 233, 0.18);
+    --info-track-btn-active-bg:  rgba(61, 174, 233, 0.28);
+    --modal-backdrop:            rgba(35, 38, 41, 0.38);
+    --modal-box-shadow:          0 10px 36px rgba(35, 38, 41, 0.16);
+
+    /* Заголовки панелей, таблицы */
+    --panel-header-title:     #1a1c1e;
+    --sky-info-value:         #2980b9;
+    --bp-info-label:          var(--text-label);
+    --bp-info-value:          #1a1c1e;
+    --passes-row-selected-bg: rgba(41, 128, 185, 0.12);
+    --passes-row-selected-border: #2980b9;
+    --passes-row-tracking-bg: rgba(218, 68, 83, 0.08);
+    --passes-row-tracking-border: #da4453;
+    --passes-eye-muted:       rgba(35, 38, 41, 0.42);
+    --passes-scroll-bg:       var(--bg-secondary);
+    --passes-row-bg:          var(--bg-secondary);
+    --passes-schedule-active-row-bg: rgba(39, 174, 96, 0.12);
+    --passes-schedule-duration-color: var(--text-muted);
+    --passes-empty-text: var(--text-muted);
+    --passes-mini-horizon: rgba(35, 38, 41, 0.28);
+    --passes-mini-ring-mid: rgba(35, 38, 41, 0.18);
+    --passes-mini-ring-inner: rgba(35, 38, 41, 0.12);
+    --passes-mini-crosshair: rgba(35, 38, 41, 0.18);
+    --passes-mini-track: #3daee9;
+    --btn-primary-text: #fcfcfc;
+    --btn-primary-hover-bg: #2980b9;
+    --pc-limit-toast-shadow:  0 6px 18px rgba(35, 38, 41, 0.10);
+
+    --pc-limit-toast-bg:     rgba(239, 240, 241, 0.97);
+    --pc-limit-toast-border: #3daee9;
+    --pc-limit-toast-text:   #232629;
+
+    /* ══════════════════════════════════════════════════════════════
+       Типографика
+       ══════════════════════════════════════════════════════════════ */
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}
+
+/* Разделитель шапок панелей — чуть заметнее на светлом фоне */
+.panel-header {
+    box-shadow: inset 0 -1px 0 rgba(35, 38, 41, 0.06);
+}
+
+.rp-ctrl:hover:not(:disabled) {
+    background: var(--bg-hover);
+}

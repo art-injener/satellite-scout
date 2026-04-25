@@ -5,18 +5,23 @@
     'use strict';
 
     /** Половина стороны DOM-маркера (px) — совпадает с .map-sat-marker в main.css */
-    var MAP_SAT_MARKER_HALF_PX = 28;
+    const MAP_SAT_MARKER_HALF_PX = 28;
 
     /**
-     * Три поворота .map-sat-flip (CSS rotate, deg).
-     * SVG без внутреннего rotate: антенна строго вниз.
-     *   0°   = нейтраль → антенна вниз.
-     *  −45°  = летит на восток → антенна нижний-правый.
-     *  +45°  = летит на запад → антенна нижний-левый.
+     * Поворот маркера с бэкенда (map_marker_rot_deg) — предпочтительно.
+     * Запасной вариант: локальный расчёт с учётом внутреннего rotate(45) в SVG.
      */
-    var MAP_SAT_ROT_NEUTRAL = 0;
-    var MAP_SAT_ROT_RIGHT   = -45;
-    var MAP_SAT_ROT_LEFT    = 45;
+    const MAP_SAT_SVG_OFFSET_DEG = -45;
+    const MAP_SAT_DEFAULT_ROT = 0;
+
+    /** Кратчайший доворот от currentDeg к targetDeg (градусы, в [-180, 180]). */
+    function _shortestRotDeltaDeg(currentDeg, targetDeg) {
+        let d = targetDeg - currentDeg;
+        d %= 360;
+        if (d > 180) { d -= 360; }
+        if (d < -180) { d += 360; }
+        return d;
+    }
 
     /** Обрезка имени спутника для canvas-подписей. */
     function _shortName(name, maxLen) {
@@ -51,48 +56,7 @@
             trackDotInterval: 60000 // Интервал точек в мс (1 минута)
         }, options || {});
 
-        this.colors = {
-            background:    cssVar('--map-ocean',      '#0a1018'),
-            landFill:      cssVar('--map-land',       '#1a2c3c'),
-            coastline:     cssVar('--map-coast',      '#5a9aac'),
-            grid:          cssVar('--map-grid',       '#2a4050'),
-            gridMajor:     cssVar('--map-grid-major', '#385868'),
-            orbitFuture:   cssVar('--orbit-future',   '#00cc00'),
-            orbitPast:     cssVar('--orbit-past',     '#d94848'),
-            orbitDots:     cssVar('--orbit-dots',     '#ffff00'),
-            satellite:     cssVar('--sat-marker',     '#ffffff'),
-            satelliteGlow: cssVar('--sat-glow',       '#00ffff'),
-            footprint:              themeRgba('map-footprint',               'rgba(0,255,255,0.6)'),
-            footprintFill:          themeRgba('map-footprint-fill',          'rgba(0,255,255,0.05)'),
-            /* Точка на карте: заливка треугольника = цвет маркера наблюдателя из темы */
-            observer:      cssVar('--observer-marker', '#ff0000'),
-            observerLabel:       cssVar('--observer-marker', '#ff9500'),
-            observerLabelStroke: themeRgba('map-observer-label-stroke', 'rgba(0,0,0,0.9)'),
-            observerLabelBg:     themeRgba('map-observer-label-bg',     'rgba(0,0,0,0.6)'),
-            textPrimary:    '#ffffff',
-            textSecondary:  cssVar('--map-text-secondary', '#00d4d4'),
-            textGrid:       cssVar('--map-grid-text',      '#7890a0'),
-            satLabel:       cssVar('--sat-label',          '#ffeb3b'),
-            satLabelStroke: themeRgba('map-sat-label-stroke', 'rgba(0,0,0,0.85)'),
-            satLabelBg:     themeRgba('map-sat-label-bg',     'rgba(0,0,0,0.6)'),
-            selectedTrack:         cssVar('--selected-track',  '#ffff00'),
-            selectedMarker:        cssVar('--selected-marker', '#2ecc71'),
-            selectedFootprint:     themeRgba('map-selected-footprint',      'rgba(93,173,226,0.6)'),
-            selectedFootprintFill: themeRgba('map-selected-footprint-fill', 'rgba(93,173,226,0.12)'),
-            russiaBorder:   cssVar('--map-russia-border',  '#aabbcc'),
-            russiaLabel:    cssVar('--map-russia-label',   '#ffcc00'),
-            cityLabel:  cssVar('--map-city-label',  '#ffffff'),
-            cityMarker: cssVar('--map-city-marker', '#cc6666'),
-            /* Фирменный маркер КА на карте (слежение / выбранный в плане) */
-            mapIconStroke:        cssVar('--map-icon-stroke', 'rgba(10,14,20,0.94)'),
-            mapIconTrackingFill:  cssVar('--map-icon-tracking-fill', '#00d4aa'),
-            mapIconSelectedFill:  cssVar('--map-icon-selected-fill', '#ffb347'),
-            mapIconNeutralFill:   cssVar('--map-icon-neutral-fill', '#e6e8eb'),
-            mapIconBoomFill:      cssVar('--map-icon-boom-fill', '#8b919a')
-        };
-
-        this._mapTrackLineWidth = parseFloat(cssVar('--map-track-line-width', '1.5')) || 1.5;
-        this._mapFootprintLineWidth = parseFloat(cssVar('--map-footprint-line-width', '1.5')) || 1.5;
+        this._reloadColorsFromCss();
 
         // Данные границ РФ (GeoJSON)
         this.russiaData = null;
@@ -108,7 +72,7 @@
         this.center = { lon: 0, lat: 0 }; // Центр карты
         this.zoom = 1.0; // Масштаб (1.0 = вся карта)
 
-        // Спутник на слежении (tracking): red/green + dots + footprint.
+        // Спутник под наблюдением (tracking): red/green + dots + footprint.
         this.satellite = {
             position: null,
             groundTrack: [],
@@ -303,6 +267,55 @@
             });
     };
 
+    // ========== Палитра из CSS (повторно после смены темы) ==========
+
+    EarthView.prototype._reloadColorsFromCss = function() {
+        this.colors = {
+            background:    cssVar('--map-ocean', '#0a1018'),
+            landFill:      cssVar('--map-land', '#1a2c3c'),
+            coastline:     cssVar('--map-coast', '#5a9aac'),
+            grid:          cssVar('--map-grid', '#2a4050'),
+            gridMajor:     cssVar('--map-grid-major', '#385868'),
+            orbitFuture:   cssVar('--orbit-future', '#00cc00'),
+            orbitPast:     cssVar('--orbit-past', '#d94848'),
+            orbitDots:     cssVar('--orbit-dots', '#ffff00'),
+            satellite:     cssVar('--sat-marker', '#ffffff'),
+            satelliteGlow: cssVar('--sat-glow', '#00ffff'),
+            footprint:              themeRgba('map-footprint', 'rgba(0,255,255,0.6)'),
+            footprintFill:          themeRgba('map-footprint-fill', 'rgba(0,255,255,0.05)'),
+            observer:      cssVar('--observer-marker', '#ff0000'),
+            observerLabel:       cssVar('--observer-marker', '#ff9500'),
+            observerLabelStroke: themeRgba('map-observer-label-stroke', 'rgba(0,0,0,0.9)'),
+            observerLabelBg:     themeRgba('map-observer-label-bg', 'rgba(0,0,0,0.6)'),
+            textPrimary:    cssVar('--text-primary', '#ffffff'),
+            textSecondary:  cssVar('--map-text-secondary', '#00d4d4'),
+            textGrid:       cssVar('--map-grid-text', '#7890a0'),
+            satLabel:       cssVar('--sat-label', '#ffeb3b'),
+            satLabelStroke: themeRgba('map-sat-label-stroke', 'rgba(0,0,0,0.85)'),
+            satLabelBg:     themeRgba('map-sat-label-bg', 'rgba(0,0,0,0.6)'),
+            selectedTrack:         cssVar('--selected-track', '#ffff00'),
+            selectedMarker:        cssVar('--selected-marker', '#2ecc71'),
+            selectedFootprint:     themeRgba('map-selected-footprint', 'rgba(93,173,226,0.6)'),
+            selectedFootprintFill: themeRgba('map-selected-footprint-fill', 'rgba(93,173,226,0.12)'),
+            russiaBorder:   cssVar('--map-russia-border', '#aabbcc'),
+            russiaLabel:    cssVar('--map-russia-label', '#ffcc00'),
+            cityLabel:  cssVar('--map-city-label', '#ffffff'),
+            cityMarker: cssVar('--map-city-marker', '#cc6666'),
+            mapIconStroke:        cssVar('--map-icon-stroke', 'rgba(10,14,20,0.94)'),
+            mapIconTrackingFill:  cssVar('--map-icon-tracking-fill', '#00d4aa'),
+            mapIconSelectedFill:  cssVar('--map-icon-selected-fill', '#ffb347'),
+            mapIconNeutralFill:   cssVar('--map-icon-neutral-fill', '#e6e8eb'),
+            mapIconBoomFill:      cssVar('--map-icon-boom-fill', '#8b919a')
+        };
+        this._mapTrackLineWidth = parseFloat(cssVar('--map-track-line-width', '1.5')) || 1.5;
+        this._mapFootprintLineWidth = parseFloat(cssVar('--map-footprint-line-width', '1.5')) || 1.5;
+    };
+
+    /** Вызов после смены colors-*.css (theme-switcher): обновить кэш и перерисовать. */
+    EarthView.prototype.refreshThemeColors = function() {
+        this._reloadColorsFromCss();
+    };
+
     // ========== Отрисовка ==========
 
     /**
@@ -356,7 +369,7 @@
             this._drawSelectedLayer();
         }
 
-        // Слой 3: спутник на слежении (red/green + dots + footprint).
+        // Слой 3: спутник под наблюдением (red/green + dots + footprint).
         if (this.satellite.noradId) {
             if (this._hasGroundTrack()) {
                 this._drawGroundTrack();
@@ -366,14 +379,14 @@
             }
         }
 
-        // Маркер спутника на слежении (tracking) — DOM SVG.
+        // Маркер спутника под наблюдением (tracking) — DOM SVG.
         if (this.satellite.noradId && this.satellite.position) {
             this._drawSatellite();
         } else {
             this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label', null, '', 'tracking', null);
         }
 
-        // Зона видимости и маркер выбранного спутника — DOM SVG (если не на слежении).
+        // Зона видимости и маркер выбранного спутника — DOM SVG (если не под наблюдением).
         if (this._selectedSatellite.noradId &&
             this._selectedSatellite.noradId !== this.satellite.noradId) {
             if (this.options.showFootprint && this._selectedSatellite.visibilityZone && this._selectedSatellite.visibilityZone.length > 0) {
@@ -695,7 +708,7 @@
     };
 
     /**
-     * Отрисовка наземной трассы спутника на слежении.
+     * Отрисовка наземной трассы спутника под наблюдением.
      * Сплошные линии: красная — прошлая орбита, зелёная — будущая; плюс точки (минутные метки).
      */
     EarthView.prototype._drawGroundTrack = function() {
@@ -791,88 +804,127 @@
 
     /**
      * Позиционирование DOM SVG-маркера поверх canvas.
-     * Антенна/сигнал по касательной к трассе на карте (экранный atan2), до этого — нейтраль вниз.
+     * Бум ∥ трассе: угол map_marker_rot_deg с бэкенда (SGP4) или запасной расчёт.
      * @param {string} elId — id контейнера (.map-sat-marker)
      * @param {string} labelId — id <span> подписи
-     * @param {{lon:number,lat:number}|null} pos — координаты КА
+     * @param {{lon:number,lat:number,map_marker_rot_deg?:number,map_marker_fwd_lon?:number,map_marker_fwd_lat?:number}|null} pos
      * @param {string} name — имя КА
-     * @param {string} [markerKey] — 'tracking' | 'selected' (состояние направления отдельно)
+     * @param {string} [markerKey] — 'tracking' | 'selected'
      * @param {number|null} [noradId] — смена КА сбрасывает предыдущую точку
      */
     EarthView.prototype._positionDomMarker = function(elId, labelId, pos, name, markerKey, noradId) {
-        var el = document.getElementById(elId);
+        const el = document.getElementById(elId);
         if (!el) { return; }
         markerKey = markerKey || '_';
         if (!this._domMarkerState) {
             this._domMarkerState = {};
         }
-        var st = this._domMarkerState[markerKey];
+        let st = this._domMarkerState[markerKey];
         if (!st) {
             st = {
                 prevGeo: null,
-                orientReady: false,
-                rotDeg: MAP_SAT_ROT_NEUTRAL,
-                noradId: null
+                rotDeg: MAP_SAT_DEFAULT_ROT,
+                noradId: null,
+                orientReady: false
             };
             this._domMarkerState[markerKey] = st;
         }
-        var flipEl = el.querySelector('.map-sat-flip');
+        const flipEl = el.querySelector('.map-sat-flip');
         if (!pos) {
             el.style.display = 'none';
             el.style.left = '';
             el.style.top = '';
             st.prevGeo = null;
-            st.orientReady = false;
-            st.rotDeg = MAP_SAT_ROT_NEUTRAL;
+            st.rotDeg = MAP_SAT_DEFAULT_ROT;
             st.noradId = null;
+            st.orientReady = false;
             if (flipEl) {
-                flipEl.style.transform = 'rotate(' + MAP_SAT_ROT_NEUTRAL + 'deg)';
+                flipEl.style.transform = 'rotate(' + MAP_SAT_DEFAULT_ROT + 'deg)';
             }
             return;
         }
-        if (noradId != null && st.noradId != null && noradId !== st.noradId) {
+        if (noradId !== null && st.noradId !== null && noradId !== st.noradId) {
             st.prevGeo = null;
+            st.rotDeg = MAP_SAT_DEFAULT_ROT;
             st.orientReady = false;
-            st.rotDeg = MAP_SAT_ROT_NEUTRAL;
         }
-        st.noradId = noradId != null ? noradId : st.noradId;
+        st.noradId = noradId !== null ? noradId : st.noradId;
 
-        var pw = this.width;
-        var ph = this.height;
+        const pw = this.width;
+        const ph = this.height;
         if (pw <= 0 || ph <= 0) { return; }
-        var p = this.project(pos.lon, pos.lat);
+        const p = this.project(pos.lon, pos.lat);
 
-        // Направление: только влево/вправо по долготе (зеркало).
-        if (st.prevGeo) {
-            var dLon = pos.lon - st.prevGeo.lon;
+        const serverRot = (typeof pos.map_marker_rot_deg === 'number' && !isNaN(pos.map_marker_rot_deg))
+            ? pos.map_marker_rot_deg
+            : null;
+        const fwdOk = typeof pos.map_marker_fwd_lon === 'number' && !isNaN(pos.map_marker_fwd_lon) &&
+            typeof pos.map_marker_fwd_lat === 'number' && !isNaN(pos.map_marker_fwd_lat);
+
+        let gotOrientation = false;
+        if (fwdOk) {
+            const p0 = this.project(pos.lon, pos.lat);
+            const p1 = this.project(pos.map_marker_fwd_lon, pos.map_marker_fwd_lat);
+            const ddx = p1.x - p0.x;
+            if (Math.abs(ddx) > pw / 2) {
+                if (serverRot !== null) {
+                    st.rotDeg += _shortestRotDeltaDeg(st.rotDeg, serverRot);
+                    gotOrientation = true;
+                }
+            } else {
+                const hDeg = Math.atan2(p1.y - p0.y, ddx) * 180 / Math.PI;
+                st.rotDeg += _shortestRotDeltaDeg(st.rotDeg, hDeg + MAP_SAT_SVG_OFFSET_DEG);
+                gotOrientation = true;
+            }
+        } else if (serverRot !== null) {
+            st.rotDeg += _shortestRotDeltaDeg(st.rotDeg, serverRot);
+            gotOrientation = true;
+        } else if (st.prevGeo) {
+            let dLon = pos.lon - st.prevGeo.lon;
             if (dLon > 180) { dLon -= 360; }
             if (dLon < -180) { dLon += 360; }
-            if (Math.abs(dLon) > 1e-7) {
-                st.rotDeg = dLon > 0 ? MAP_SAT_ROT_RIGHT : MAP_SAT_ROT_LEFT;
-                st.orientReady = true;
+            const dLat = pos.lat - st.prevGeo.lat;
+            if (Math.abs(dLon) < 90 && (Math.abs(dLon) > 1e-6 || Math.abs(dLat) > 1e-6)) {
+                const cosLat = Math.cos(pos.lat * Math.PI / 180);
+                const screenDx = dLon * cosLat;
+                const screenDy = -dLat;
+                const headingDeg = Math.atan2(screenDy, screenDx) * 180 / Math.PI;
+                st.rotDeg += _shortestRotDeltaDeg(st.rotDeg, headingDeg + MAP_SAT_SVG_OFFSET_DEG);
+                gotOrientation = true;
             }
         }
         st.prevGeo = { lon: pos.lon, lat: pos.lat };
 
-        if (flipEl) {
-            flipEl.style.transform = 'rotate(' + st.rotDeg + 'deg)';
+        const firstOrient = gotOrientation && !st.orientReady;
+        if (gotOrientation) {
+            st.orientReady = true;
         }
 
-        // Доля буфера canvas = доля контейнера; центр квадрата маркера на географической точке.
-        var pctX = (p.x / pw) * 100;
-        var pctY = (p.y / ph) * 100;
-        var h = MAP_SAT_MARKER_HALF_PX;
-        el.style.display = 'block';
+        if (flipEl) {
+            if (firstOrient) {
+                flipEl.style.transition = 'none';
+                flipEl.style.transform = 'rotate(' + st.rotDeg + 'deg)';
+                void flipEl.offsetHeight;
+                flipEl.style.transition = '';
+            } else {
+                flipEl.style.transform = 'rotate(' + st.rotDeg + 'deg)';
+            }
+        }
+
+        const pctX = (p.x / pw) * 100;
+        const pctY = (p.y / ph) * 100;
+        const h = MAP_SAT_MARKER_HALF_PX;
         el.style.left = 'calc(' + pctX + '% - ' + h + 'px)';
         el.style.top = 'calc(' + pctY + '% - ' + h + 'px)';
-        var lbl = document.getElementById(labelId);
+        el.style.display = st.orientReady ? 'block' : 'none';
+        const lbl = document.getElementById(labelId);
         if (lbl) {
             lbl.textContent = name ? _shortName(name) : '';
         }
     };
 
     /**
-     * Маркер спутника на слежении — DOM SVG (анимированный логотип).
+     * Маркер спутника под наблюдением — DOM SVG (анимированный логотип).
      */
     EarthView.prototype._drawSatellite = function() {
         this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label',
@@ -994,8 +1046,25 @@
      * @param {number} lat - Широта
      * @param {number} alt - Высота (км)
      */
-    EarthView.prototype.setSatellitePosition = function(lon, lat, alt) {
-        this.satellite.position = { lon: lon, lat: lat, alt: alt || 0 };
+    /**
+     * @param {number} lon
+     * @param {number} lat
+     * @param {number} alt
+     * @param {Object} [meta] — поля map_marker_rot_deg, map_marker_fwd_lon, map_marker_fwd_lat с state.position
+     */
+    EarthView.prototype.setSatellitePosition = function(lon, lat, alt, meta) {
+        const p = { lon: lon, lat: lat, alt: alt || 0 };
+        if (meta && typeof meta === 'object') {
+            if (typeof meta.map_marker_rot_deg === 'number' && !isNaN(meta.map_marker_rot_deg)) {
+                p.map_marker_rot_deg = meta.map_marker_rot_deg;
+            }
+            if (typeof meta.map_marker_fwd_lon === 'number' && !isNaN(meta.map_marker_fwd_lon) &&
+                typeof meta.map_marker_fwd_lat === 'number' && !isNaN(meta.map_marker_fwd_lat)) {
+                p.map_marker_fwd_lon = meta.map_marker_fwd_lon;
+                p.map_marker_fwd_lat = meta.map_marker_fwd_lat;
+            }
+        }
+        this.satellite.position = p;
     };
 
     /**
@@ -1008,7 +1077,7 @@
         this.satellite.noradId = noradId;
     };
 
-    /** Полная очистка слоя слежения (когда слежения нет). */
+    /** Полная очистка слоя наблюдения (когда наблюдения нет). */
     EarthView.prototype.clearTrackingLayer = function() {
         this.satellite.position = null;
         this.satellite.name = '';
@@ -1088,8 +1157,19 @@
 
     // ========== Выбранный спутник (selected, оранжевый) ==========
 
-    EarthView.prototype.setSelectedSatellitePosition = function(lon, lat, alt) {
-        this._selectedSatellite.position = { lon: lon, lat: lat, alt: alt || 0 };
+    EarthView.prototype.setSelectedSatellitePosition = function(lon, lat, alt, meta) {
+        const p = { lon: lon, lat: lat, alt: alt || 0 };
+        if (meta && typeof meta === 'object') {
+            if (typeof meta.map_marker_rot_deg === 'number' && !isNaN(meta.map_marker_rot_deg)) {
+                p.map_marker_rot_deg = meta.map_marker_rot_deg;
+            }
+            if (typeof meta.map_marker_fwd_lon === 'number' && !isNaN(meta.map_marker_fwd_lon) &&
+                typeof meta.map_marker_fwd_lat === 'number' && !isNaN(meta.map_marker_fwd_lat)) {
+                p.map_marker_fwd_lon = meta.map_marker_fwd_lon;
+                p.map_marker_fwd_lat = meta.map_marker_fwd_lat;
+            }
+        }
+        this._selectedSatellite.position = p;
     };
 
     EarthView.prototype.setSelectedSatelliteInfo = function(name, noradId) {
@@ -1203,7 +1283,7 @@
     };
 
     /**
-     * Полноценная иконка выбранного спутника (аналогично слою слежения, цвет — оранжевый).
+     * Полноценная иконка выбранного спутника (аналогично слою наблюдения, цвет — оранжевый).
      * @private
      */
     EarthView.prototype._drawSelectedSatelliteIcon = function() {
@@ -1350,7 +1430,7 @@
 
         ctx.fillStyle = color;
         ctx.strokeStyle = isLight ? 'rgba(42, 48, 58, 0.4)' : 'rgba(0,0,0,0.82)';
-        ctx.lineWidth = isLight ? Math.max(0.85, 1 * dpr) : Math.max(1.25, 1.5 * dpr);
+        ctx.lineWidth = isLight ? Math.max(0.85, Number(dpr)) : Math.max(1.25, 1.5 * dpr);
 
         ctx.beginPath();
         if (shape === 0) {

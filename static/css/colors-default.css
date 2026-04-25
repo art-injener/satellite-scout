@@ -62,7 +62,8 @@
        ══════════════════════════════════════════════════════════════ */
     --orbit-future:  #00cc00;
     --orbit-past:    #d94848;
-    --orbit-dots:    #d4a040;
+    /* Минутные точки орбиты на карте — как в классической схеме (жёлтый) */
+    --orbit-dots:    #ffff00;
 
     /* ══════════════════════════════════════════════════════════════
        Маркер спутника
@@ -72,18 +73,20 @@
     --sat-label:         #e0e8f0;
     --sat-label-stroke:  rgba(0, 0, 0, 0.85);
 
-    /* Значок КА на карте (корпус + панели + тарелка): слежение vs выбранный в таблице */
+    /* Значок КА на карте (корпус + панели + тарелка): наблюдение vs выбранный в таблице */
     --map-icon-stroke:           rgba(10, 14, 20, 0.94);
     --map-icon-tracking-fill:    var(--accent-primary);
     --map-icon-selected-fill:    var(--accent-warning);
     --map-icon-neutral-fill:     #c8d0dc;
+    /* Погасшие LED на карте (маркер КА) */
+    --map-icon-led-off:          #5f6e80;
     --map-icon-boom-fill:        #8896a8;
     --map-icon-logo-dots:        var(--accent-warning);
 
     /* ══════════════════════════════════════════════════════════════
-       Выбранный спутник (selected)
+       Выбранный спутник (selected) — трасса на карте жёлтая, как в Classic
        ══════════════════════════════════════════════════════════════ */
-    --selected-track:          #d4a040;
+    --selected-track:          #ffff00;
     --selected-marker:         #50b868;
     --selected-footprint:      rgba(100, 160, 210, 0.60);
     --selected-footprint-fill: rgba(100, 160, 210, 0.14);
@@ -114,6 +117,7 @@
     --sky-grid-text:     #d0d8e0;
     --sky-elevation-label: #d0d8e0;
     --sky-azimuth-label: #d0d8e0;
+    /* Наблюдаемый КА на SkyView — зелёная траектория */
     --sky-track:         #00cc00;
     --sky-track-arrow:   #66dd66;
     --sky-aos:           #50b868;
@@ -133,7 +137,8 @@
     --sky-info-text:     #7ab8d0;
     --sky-info-label:    #d0d8e0;
     --sky-time-text:     #708898;
-    --sky-selected-track:  #d4a040;
+    /* Выбранный в таблице КА (≠ наблюдаемому) — жёлтая трасса, как на карте */
+    --sky-selected-track:  #ffff00;
     --sky-selected-sat-label: #d8c878;
     --sky-selected-marker: #50b868;
     /* Canvas SkyView: обводки подписей и иконки (skyview.js) */

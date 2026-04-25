@@ -1,0 +1,242 @@
+/*
+ * Satellite Scout — тема «Breeze» (нейтральная).
+ * Палитра на базе KDE Breeze, но светлее: видимые серые фоны
+ * без цветного подтона, яркий голубой акцент #3daee9.
+ * Чистый «металлик». Активируется: THEME=breeze
+ *
+ * Контрастность: соседние слои ≥ 1.3:1, текст ≥ 4.5:1 (WCAG AA).
+ */
+
+:root {
+    --theme-id: breeze;
+
+    /* ══════════════════════════════════════════════════════════════
+       Фоны — нейтральный серый (без синего подтона), видимо серый
+       primary ≈ L18%, secondary ≈ L22%, tertiary ≈ L27%
+       ══════════════════════════════════════════════════════════════ */
+    --bg-primary:   #2c3034;
+    --bg-secondary: #363a3e;
+    --bg-tertiary:  #404448;
+    --bg-elevated:  #4a4e52;
+    --bg-hover:     #4a4e52;
+
+    /* ══════════════════════════════════════════════════════════════
+       Границы — нейтральный серый, видны на tertiary
+       ══════════════════════════════════════════════════════════════ */
+    --border-color:   #52565a;
+    --border-focus:   #3daee9;
+
+    /* ══════════════════════════════════════════════════════════════
+       Текст — Breeze ForegroundNormal / Inactive
+       ══════════════════════════════════════════════════════════════ */
+    --text-primary:    #e4e6e8;
+    --text-secondary:  #e4e6e8;
+    --text-heading:    #aab0b6;
+    --text-label:      #8a9096;
+    --text-muted:      #e4e6e8;
+    --text-accent:     #3daee9;
+
+    /* ══════════════════════════════════════════════════════════════
+       Сигнальные / акцентные — стандартная палитра KDE Breeze
+       ══════════════════════════════════════════════════════════════ */
+    --accent-primary:  #3daee9;
+    --accent-secondary: #1d99f3;
+    --accent-warning:  #f67400;
+    --accent-danger:   #da4453;
+    --accent-success:  #27ae60;
+
+    /* ══════════════════════════════════════════════════════════════
+       Карта (EarthView) — темнее панелей (приборная вставка)
+       ══════════════════════════════════════════════════════════════ */
+    --map-ocean:       #141618;
+    --map-land:        #22262a;
+    --map-coast:       #4a8890;
+    --map-grid:        #303438;
+    --map-grid-major:  #404448;
+    --map-grid-text:   #8a9096;
+    --map-footprint:        rgba(61, 174, 233, 0.80);
+    --map-footprint-fill:   rgba(61, 174, 233, 0.10);
+
+    /* ══════════════════════════════════════════════════════════════
+       Орбита / трек спутника
+       ══════════════════════════════════════════════════════════════ */
+    --orbit-future:  #27ae60;
+    --orbit-past:    #da4453;
+    --orbit-dots:    #f67400;
+
+    /* ══════════════════════════════════════════════════════════════
+       Маркер спутника
+       ══════════════════════════════════════════════════════════════ */
+    --sat-marker:        #e4e6e8;
+    --sat-glow:          #3daee9;
+    --sat-label:         #f0f2f4;
+    --sat-label-stroke:  rgba(0, 0, 0, 0.85);
+
+    --map-icon-stroke:           rgba(20, 22, 24, 0.94);
+    --map-icon-tracking-fill:    var(--accent-primary);
+    --map-icon-selected-fill:    var(--accent-warning);
+    --map-icon-neutral-fill:     #d0d4d8;
+    --map-icon-led-off:          #6d7a8a;
+    --map-icon-boom-fill:        #8a9096;
+    --map-icon-logo-dots:        var(--accent-warning);
+
+    /* ══════════════════════════════════════════════════════════════
+       Выбранный спутник (selected)
+       ══════════════════════════════════════════════════════════════ */
+    --selected-track:          #f67400;
+    --selected-marker:         #27ae60;
+    --selected-footprint:      rgba(61, 174, 233, 0.60);
+    --selected-footprint-fill: rgba(61, 174, 233, 0.12);
+
+    /* ══════════════════════════════════════════════════════════════
+       Наблюдатель
+       ══════════════════════════════════════════════════════════════ */
+    --observer-marker:        #f67400;
+    --observer-marker-stroke: rgba(0, 0, 0, 0.9);
+    --observer-label:         #f0f2f4;
+
+    /* ══════════════════════════════════════════════════════════════
+       Прочие элементы карты
+       ══════════════════════════════════════════════════════════════ */
+    --map-russia-border:  #585c60;
+    --map-russia-label:   #f67400;
+    --map-city-label:     #b4b8bc;
+    --map-city-marker:    #c06050;
+    --map-text-secondary: #3daee9;
+
+    /* ══════════════════════════════════════════════════════════════
+       SkyView — фон панели (bg-primary уровень)
+       ══════════════════════════════════════════════════════════════ */
+    --sky-bg:            #2c3034;
+    --sky-fill:          #363a3e;
+    --sky-grid:          #52565a;
+    --sky-label-muted:   #d0d4d8;
+    --sky-grid-text:     #d0d4d8;
+    --sky-elevation-label: #d0d4d8;
+    --sky-azimuth-label: #d0d4d8;
+    --sky-track:         #27ae60;
+    --sky-track-arrow:   #5cc88a;
+    --sky-aos:           #27ae60;
+    --sky-los:           #da4453;
+    --color-aos: var(--sky-aos);
+    --color-los: var(--sky-los);
+    --sky-marker-border: #e4e6e8;
+    --sky-satellite:     #3daee9;
+    --sky-satellite-glow: rgba(61, 174, 233, 0.25);
+    --sky-satellite-signal: rgba(39, 174, 96, 0.35);
+    --sky-satellite-label: #d0d4d8;
+    --sky-satellite-aura: rgba(218, 68, 83, 0.70);
+    --sky-satellite-aura-border: #da4453;
+    --sky-observer:      #f67400;
+    --sky-observer-secondary: #d06020;
+    --sky-info-text:     #3daee9;
+    --sky-info-label:    #d0d4d8;
+    --sky-time-text:     #8a9096;
+    --sky-selected-track:  #f67400;
+    --sky-selected-sat-label: #f09040;
+    --sky-selected-marker: #27ae60;
+    --sky-canvas-text-stroke:   rgba(0, 0, 0, 0.78);
+    --sky-sat-panel-line:       rgba(255, 255, 255, 0.28);
+    --sky-sat-body-outline:     #b4bcc4;
+    --sky-arrow-outline:        rgba(0, 0, 0, 0.68);
+    --sky-signal-wave-rgb:      39, 174, 96;
+
+    /* ══════════════════════════════════════════════════════════════
+       Индикаторы Az/El — нейтральный серый
+       ══════════════════════════════════════════════════════════════ */
+    --ind-bg:             #2c3034;
+    --ind-bg-secondary:   #363a3e;
+    --ind-label-muted:    #d0d4d8;
+    --ind-border:         #52565a;
+    --ind-accent:         #3daee9;
+    --ind-antenna:        #27ae60;
+    --ind-accent-blue:    #5cb8e8;
+    --ind-accent-red:     #da4453;
+    --ind-text:           #e4e6e8;
+    --ind-text-secondary: #aab0b6;
+    --ind-text-muted:     #8a9096;
+    --ind-satellite-line:   rgba(228, 230, 232, 0.35);
+    --ind-satellite-marker: #e4e6e8;
+    --ind-out-of-view:    rgba(218, 68, 83, 0.50);
+
+    /* ══════════════════════════════════════════════════════════════
+       Спектр / водопад — тёмная приборная область (темнее панелей)
+       ══════════════════════════════════════════════════════════════ */
+    --spectrum-bg:         #181a1e;
+    --spectrum-grid:       #303438;
+    --spectrum-plot-bg:    #181a1e;
+    --spectrum-instrument-bg: #181a1e;
+    --bp-overview-freq-scale-bg: var(--spectrum-instrument-bg);
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.08);
+    --spectrum-axis-text:  var(--text-muted);
+    --spectrum-trace:      #00ff80;
+    --spectrum-crosshair:  #ffd700;
+    --spectrum-peak-label: #ffd700;
+    --spectrum-text:       #8a9096;
+    --spectrum-signal:     #f0c040;
+    --spectrum-peak:       #f0e0a0;
+    --spectrum-peak-dot:   #da4453;
+    --waterfall-bg:        #181a1e;
+    --waterfall-margin-bg: #0e1012;
+    --waterfall-cold-bg:   #0e1012;
+
+    /* Заголовки панелей, таблицы, инфо Az/El */
+    --panel-header-title:     #aab0b6;
+    --sky-info-value:         #5cc0f0;
+    --bp-info-label:          var(--panel-header-title);
+    --bp-info-value:          #5cc0f0;
+    --passes-row-selected-bg: rgba(246, 116, 0, 0.15);
+    --passes-row-selected-border: #f67400;
+    --passes-row-tracking-bg: rgba(218, 68, 83, 0.10);
+    --passes-row-tracking-border: #da4453;
+    --passes-eye-muted:       rgba(228, 230, 232, 0.42);
+    --passes-schedule-active-row-bg: rgba(39, 174, 96, 0.10);
+    --passes-schedule-duration-color: #8a9098;
+    --passes-empty-text: var(--text-muted);
+    --passes-mini-horizon: rgba(255, 255, 255, 0.25);
+    --passes-mini-ring-mid: rgba(255, 255, 255, 0.15);
+    --passes-mini-ring-inner: rgba(255, 255, 255, 0.12);
+    --passes-mini-crosshair: rgba(255, 255, 255, 0.15);
+    --passes-mini-track: #3daee9;
+    --btn-primary-text: #ffffff;
+    --btn-primary-hover-bg: #1d99f3;
+    --pc-limit-toast-shadow:  0 6px 22px rgba(0, 0, 0, 0.40);
+
+    --map-track-line-width:     1.5;
+    --map-footprint-line-width: 1.5;
+    --map-secondary-track-fallback: rgba(200, 220, 235, 0.92);
+
+    --sky-grid-line-width:  1;
+    --sky-grid-outer-width: 2;
+
+    --pc-limit-toast-bg:     rgba(54, 58, 62, 0.96);
+    --pc-limit-toast-border: #3daee9;
+    --pc-limit-toast-text:   #e4e6e8;
+
+    /* Overlay КА над картой */
+    --overlay-panel-bg:              rgba(44, 48, 52, 0.92);
+    --overlay-panel-shadow:          0 4px 16px rgba(0, 0, 0, 0.40);
+    --overlay-panel-header-border:   rgba(61, 174, 233, 0.28);
+    --overlay-panel-group-border:    rgba(82, 86, 90, 0.50);
+    --overlay-restore-hover-bg:      rgba(61, 174, 233, 0.14);
+
+    --sidebar-accordion-active-bg: rgba(61, 174, 233, 0.12);
+    --focus-ring-shadow:           0 0 0 2px rgba(61, 174, 233, 0.18);
+
+    --bp-sdr-btn-hover-bg:       rgba(61, 174, 233, 0.14);
+    --bp-stat-row-border:        rgba(82, 86, 90, 0.50);
+    --info-card-label:           var(--text-label);
+    --info-card-value:           var(--accent-primary);
+    --info-track-btn-bg:         rgba(61, 174, 233, 0.12);
+    --info-track-btn-border:     rgba(61, 174, 233, 0.38);
+    --info-track-btn-hover-bg:   rgba(61, 174, 233, 0.22);
+    --info-track-btn-active-bg:  rgba(61, 174, 233, 0.32);
+    --modal-backdrop:            rgba(0, 0, 0, 0.50);
+    --modal-box-shadow:          0 8px 32px rgba(0, 0, 0, 0.40);
+
+    /* ══════════════════════════════════════════════════════════════
+       Типографика
+       ══════════════════════════════════════════════════════════════ */
+    --font-mono: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+    --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+}

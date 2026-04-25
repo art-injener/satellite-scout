@@ -222,16 +222,59 @@ body {
     gap: 8px;
 }
 
-/* Текстовый бренд без иконки в углу (логотип — маркеры на карте) */
-.station-footer__brand {
-    font-family: var(--font-mono);
-    font-weight: 700;
-    font-size: 0.95rem;
-    color: var(--text-heading, var(--text-primary));
-    letter-spacing: 0.06em;
-    padding: 3px 8px;
-    margin-right: 2px;
+/* Скрытый текст для screen readers (подпись к селектору темы) */
+.visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
+/* Выпадающий список темы — в стиле бейджей футера */
+.station-footer__theme-wrap {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
     flex-shrink: 0;
+    margin-left: 2px; /* вместе с gap слева — явный зазор от плашки SSE */
+    margin-right: 2px;
+}
+
+.station-footer__theme-label {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.station-footer__theme-select {
+    font-family: var(--font-mono);
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 4px 8px;
+    min-width: 12.5rem;
+    max-width: min(40vw, 18rem);
+    cursor: pointer;
+    line-height: 1.2;
+}
+
+.station-footer__theme-select:hover {
+    border-color: var(--text-muted, var(--border-color));
+}
+
+.station-footer__theme-select:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
 }
 
 .station-footer__left .station-footer__item:first-child {
@@ -277,10 +320,10 @@ body {
     color: var(--accent-success);
 }
 
-/* SSE-индикатор в footer */
+/* SSE-индикатор в footer: полная подпись без обрезки; flex-shrink: 0 — не сжимать в пользу селекта темы */
 .station-footer .sse-status {
+    flex-shrink: 0;
     padding: 3px 10px;
-    min-width: auto;
     min-height: auto;
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
@@ -293,7 +336,6 @@ body {
 }
 
 .station-footer .sse-status__label {
-    max-width: 6em;
     opacity: 1;
     font-size: 1rem;
 }
@@ -343,7 +385,17 @@ body {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
+    /* visible: волны сигнала и drop-shadow маркера не режутся у скругления */
+    overflow: visible;
+}
+
+/* Только холст режем по скруглению; DOM-маркеры — поверх, вне overflow:hidden */
+.earth-view-canvas-wrap {
+    position: absolute;
+    inset: 0;
     overflow: hidden;
+    border-radius: inherit;
+    z-index: 0;
 }
 
 /* SVG-маркеры на карте (DOM поверх canvas).
@@ -366,14 +418,16 @@ body {
     display: block;
     width: 56px;
     height: 56px;
+    overflow: visible;
 }
 
-/* Поворот иконки (антенна вниз → по курсу); подпись снаружи. transform — из earthview.js */
+/* Поворот иконки по курсу траектории; бум ⊥ направлению. transform — из earthview.js */
 .map-sat-flip {
     width: 56px;
     height: 56px;
     transform-origin: 50% 50%;
-    transition: transform 0.22s ease-out;
+    transition: transform 0.35s cubic-bezier(0.33, 0.12, 0.25, 1);
+    overflow: visible;
 }
 
 .map-sat-label {
@@ -536,7 +590,7 @@ body {
 
 .bottom-panel__mode span {
     display: block;
-    /* Плотнее столбик, чтобы подписи (ОБЗОР / СЛЕЖЕНИЕ / ТМИ) стабильно влезали */
+    /* Плотнее столбик, чтобы подписи (ОБЗОР / НАБЛЮДЕНИЕ / ТМИ) стабильно влезали */
     line-height: 1.08;
 }
 
@@ -1135,7 +1189,7 @@ section h2 {
     justify-content: center;
     z-index: 50;
     opacity: 1;
-    transition: opacity 0.6s ease-out;
+    transition: opacity 0.25s ease-out;
     pointer-events: none;
     border-radius: var(--radius-md);
 }

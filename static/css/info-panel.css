@@ -8,7 +8,7 @@
     overflow: hidden;
 }
 
-/* Кнопка слежения (overlay) */
+/* Кнопка наблюдения (overlay) */
 .info-panel__track-btn {
     display: inline-flex;
     align-items: center;

@@ -52,7 +52,7 @@ const StateEventType = Object.freeze({
     TRACK: 'track',
     /** Смена выбранного спутника (selected) — клик в таблице или авто из группы. */
     SELECTED_CHANGE: 'selected_change',
-    /** Смена спутника в режиме слежения (tracking) — только кнопка «Слежение». */
+    /** Смена спутника в режиме наблюдения (tracking) — только кнопка «Наблюдение». */
     TRACKING_CHANGE: 'tracking_change',
     /** Обновление группы скользящего окна. */
     SATELLITE_GROUP_UPDATE: 'satellite_group_update',
@@ -119,9 +119,13 @@ const _PALETTE_LIGHT = Object.freeze([
     '#004d40',
 ]);
 
-const TRACK_COLOR_PALETTE = (typeof getThemeId === 'function' && getThemeId() === 'light')
-    ? _PALETTE_LIGHT
-    : _PALETTE_DARK;
+/** Палитра трасс группы: зависит от темы — вызывать при назначении цветов (в т.ч. после смены темы). */
+function getTrackColorPalette() {
+    if (typeof getThemeId === 'function' && getThemeId() === 'light') {
+        return _PALETTE_LIGHT;
+    }
+    return _PALETTE_DARK;
+}
 
 /**
  * Лимит одновременно видимых дополнительных трасс (не считая tracking и selected).
@@ -155,8 +159,8 @@ class SatelliteStateManager {
         this._selectedSatelliteId = null;
 
         /**
-         * Спутник на слежении (красный/зелёный + overlay + az/el).
-         * Устанавливается: только кнопка «Слежение» → API → SSE.
+         * Спутник под наблюдением (красный/зелёный + overlay + az/el).
+         * Устанавливается: только кнопка «Наблюдение» → API → SSE.
          * @type {?number}
          */
         this._trackingSatelliteId = null;
@@ -171,8 +175,8 @@ class SatelliteStateManager {
         this._satelliteGroup = null;
 
         /**
-         * Набор NORAD ID с включённой видимостью трассы.
-         * Tracking и selected рисуют трассу всегда, здесь хранятся дополнительные.
+         * Набор NORAD ID с включённой видимостью трассы (ручной toggle и режим «все трассы»).
+         * isTrackVisible() также даёт true для текущих selected и tracking, если строка не в hiddenInShowAll.
          * @type {Set<number>}
          */
         this._visibleTrackIds = new Set();
@@ -307,6 +311,9 @@ class SatelliteStateManager {
      * @param {number} [data.range] — дальность (км).
      * @param {Object} [data.visibility_zone] — зона видимости.
      * @param {number} data.ts — timestamp (Unix ms).
+     * @param {number} [data.map_marker_rot_deg] — запасной угол маркера (градусы).
+     * @param {number} [data.map_marker_fwd_lon] — долгота вторая точка трека (для угла через project).
+     * @param {number} [data.map_marker_fwd_lat] — широта вторая точка трека.
      */
     updatePosition(data) {
         if (!data || typeof data.norad_id !== 'number') {
@@ -318,7 +325,7 @@ class SatelliteStateManager {
         const state = this._getOrCreateState(noradId, data.name);
 
         // Обновление позиции.
-        state.position = {
+        const pos = {
             lat: data.lat,
             lon: data.lon,
             alt: data.alt,
@@ -327,6 +334,15 @@ class SatelliteStateManager {
             range: data.range || 0,
             ts: data.ts,
         };
+        if (typeof data.map_marker_rot_deg === 'number' && !Number.isNaN(data.map_marker_rot_deg)) {
+            pos.map_marker_rot_deg = data.map_marker_rot_deg;
+        }
+        if (typeof data.map_marker_fwd_lon === 'number' && !Number.isNaN(data.map_marker_fwd_lon) &&
+            typeof data.map_marker_fwd_lat === 'number' && !Number.isNaN(data.map_marker_fwd_lat)) {
+            pos.map_marker_fwd_lon = data.map_marker_fwd_lon;
+            pos.map_marker_fwd_lat = data.map_marker_fwd_lat;
+        }
+        state.position = pos;
 
         // Обновление имени, если передано.
         if (data.name) {
@@ -455,7 +471,7 @@ class SatelliteStateManager {
      * @param {string} [name] — имя.
      * @param {boolean} [manual=false] — ручной выбор в таблице.
      * @param {boolean} [forceNotify=false] — если true, снова шлём SELECTED_CHANGE/TRACK при том же NORAD
-     *   (нужно после tracking_ended: сняли со слежения, тот же primary — перерисовать таблицу и трассы).
+     *   (нужно после tracking_ended: сняли с наблюдения, тот же primary — перерисовать таблицу и трассы).
      * @returns {boolean}
      */
     setSelectedSatellite(noradId, name, manual = false, forceNotify = false) {
@@ -492,10 +508,10 @@ class SatelliteStateManager {
         return this._manualTableSelection;
     }
 
-    // ── Спутник на слежении (tracking) ──────────────────
+    // ── Спутник под наблюдением (tracking) ──────────────────
 
     /**
-     * Установка спутника на слежение.
+     * Постановка спутника под наблюдение.
      * Вызывается из SSE-события (reason "manual") после подтверждения бэкендом.
      *
      * @param {number} noradId — NORAD ID.
@@ -521,7 +537,7 @@ class SatelliteStateManager {
     }
 
     /**
-     * Сброс слежения (tracking_ended или ручной сброс).
+     * Сброс наблюдения (tracking_ended или ручной сброс).
      */
     clearTrackingSatellite() {
         if (this._trackingSatelliteId === null) { return; }
@@ -529,7 +545,7 @@ class SatelliteStateManager {
         this._notify(StateEventType.TRACKING_CHANGE, null);
     }
 
-    /** NORAD ID спутника на слежении (null = нет). */
+    /** NORAD ID спутника под наблюдением (null = нет). */
     getTrackingSatelliteId() {
         return this._trackingSatelliteId;
     }
@@ -727,7 +743,7 @@ class SatelliteStateManager {
     }
 
     /**
-     * Набор NORAD ID с включённой трассой (без tracking/selected).
+     * Множество _visibleTrackIds (явные включения; в showAll — все группы минус скрытые глазом).
      * @returns {number[]}
      */
     getVisibleTrackIds() {
@@ -741,6 +757,10 @@ class SatelliteStateManager {
      * @returns {boolean}
      */
     isTrackVisible(noradId) {
+        // В режиме «все трассы» ручное скрытие глазом важнее «всегда видим» для selected/tracking.
+        if (this._showAllMode && this._hiddenInShowAll.has(noradId)) {
+            return false;
+        }
         return noradId === this._trackingSatelliteId ||
                noradId === this._selectedSatelliteId ||
                this._visibleTrackIds.has(noradId);
@@ -820,7 +840,8 @@ class SatelliteStateManager {
 
         // Назначить цвета новым КА (случайный выбор из палитры).
         const usedColors = new Set(this._colorMap.values());
-        const available = TRACK_COLOR_PALETTE.filter(c => !usedColors.has(c));
+        const palette = getTrackColorPalette();
+        const available = palette.filter(c => !usedColors.has(c));
         for (const sat of data.satellites) {
             const nid = sat.norad_id;
             if (!this._colorMap.has(nid)) {
@@ -829,7 +850,7 @@ class SatelliteStateManager {
                     const ri = Math.floor(Math.random() * available.length);
                     color = available.splice(ri, 1)[0];
                 } else {
-                    color = TRACK_COLOR_PALETTE[Math.floor(Math.random() * TRACK_COLOR_PALETTE.length)];
+                    color = palette[Math.floor(Math.random() * palette.length)];
                 }
                 this._colorMap.set(nid, color);
             }
@@ -868,7 +889,9 @@ class SatelliteStateManager {
     }
 
     /**
-     * Включить видимость трасс для всех КА текущей группы (кроме tracking/selected).
+     * Включить видимость трасс для всех КА текущей группы (включая tracking и selected).
+     * Иначе при смене строки «текущий» перестаёт попадать в _visibleTrackIds и трасса пропадает
+     * (раньше selected/tracking пропускались — они считались «всегда видимыми» только пока совпадают с ролью).
      * @private
      */
     _applyShowAll() {
@@ -876,7 +899,6 @@ class SatelliteStateManager {
         if (!this._satelliteGroup || !this._satelliteGroup.satellites) { return; }
         for (const sat of this._satelliteGroup.satellites) {
             const nid = sat.norad_id;
-            if (nid === this._trackingSatelliteId || nid === this._selectedSatelliteId) { continue; }
             if (this._hiddenInShowAll.has(nid)) { continue; }
             if (MAX_VISIBLE_TRACKS > 0 && this._visibleTrackIds.size >= MAX_VISIBLE_TRACKS) { break; }
             this._visibleTrackIds.add(nid);
@@ -983,12 +1005,12 @@ class SatelliteStateManager {
 
 // Экспорт для использования в других модулях и тестах.
 if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-    module.exports = { SatelliteStateManager, SatelliteState, StateEventType, TRACK_COLOR_PALETTE }; // eslint-disable-line no-undef
+    module.exports = { SatelliteStateManager, SatelliteState, StateEventType, getTrackColorPalette }; // eslint-disable-line no-undef
 }
 
 if (typeof window !== 'undefined') {
     window.SatelliteStateManager = SatelliteStateManager;
     window.SatelliteState = SatelliteState;
     window.StateEventType = StateEventType;
-    window.TRACK_COLOR_PALETTE = TRACK_COLOR_PALETTE;
+    window.getTrackColorPalette = getTrackColorPalette;
 }

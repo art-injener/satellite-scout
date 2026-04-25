@@ -5,13 +5,19 @@
     'use strict';
 
     /**
-     * Цвета для отрисовки
+     * Цвета для отрисовки (обновлять через refreshAntennaColorsFromCss после смены темы)
      */
     const colors = {
         bgPrimary: cssVar('--ind-bg', '#0c1420'),
         accent: cssVar('--ind-antenna', '#22a05a'),
-        accentRed: '#d05545'
+        accentRed: cssVar('--ind-accent-red', '#d05545')
     };
+
+    function refreshAntennaColorsFromCss() {
+        colors.bgPrimary = cssVar('--ind-bg', '#0c1420');
+        colors.accent = cssVar('--ind-antenna', '#22a05a');
+        colors.accentRed = cssVar('--ind-accent-red', '#d05545');
+    }
 
     /**
      * Отрисовка антенны
@@ -205,7 +211,8 @@
     // Экспорт
     window.AntennaDrawing = {
         draw: drawAntenna,
-        setColors: setColors
+        setColors: setColors,
+        refreshFromCss: refreshAntennaColorsFromCss
     };
 
 })();

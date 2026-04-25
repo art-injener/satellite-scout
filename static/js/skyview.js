@@ -43,69 +43,12 @@
             animationSpeed: 1 // Скорость анимации
         }, options || {});
 
-        /**
-         * Цветовая схема из CSS-переменных темы (colors-*.css)
-         */
-        this.colors = {
-            background: cssVar('--sky-bg',   '#0c1420'),
-            skyFill:    cssVar('--sky-fill',  '#182838'),
-
-            grid:     cssVar('--sky-grid',      '#3a5060'),
-            gridText: cssVar('--sky-grid-text',  '#d0d8e0'),
-
-            elevationLabel: cssVar('--sky-elevation-label', '#d0d8e0'),
-            elevationLabelOffsetX: -5,
-            elevationLabelOffsetY: -5,
-            elevationLabelSize: 11,
-
-            cardinalLabel: cssVar('--sky-label-muted', '#d0d8e0'),
-
-            azimuthLabel: cssVar('--sky-azimuth-label', '#d0d8e0'),
-
-            track:      cssVar('--sky-track',       '#00cc00'),
-            trackArrow: cssVar('--sky-track-arrow',  '#66dd66'),
-
-            aosMarker:    cssVar('--sky-aos',           '#00ff00'),
-            losMarker:    cssVar('--sky-los',           '#ff4444'),
-            markerBorder: cssVar('--sky-marker-border', '#ffffff'),
-
-            satellite:       cssVar('--sky-satellite',        '#00ffff'),
-            satelliteGlow:   themeRgba('sky-satellite-glow',   'rgba(0, 255, 255, 0.3)'),
-            satelliteSignal: themeRgba('sky-satellite-signal',  'rgba(0, 255, 200, 0.5)'),
-            satLabel:        cssVar('--sky-satellite-label',  '#ffffff'),
-
-            satelliteAura:       themeRgba('sky-satellite-aura', 'rgba(197, 88, 88, 1)'),
-            satelliteAuraBorder: cssVar('--sky-satellite-aura-border', '#ff8888'),
-
-            observer:          cssVar('--sky-observer',           '#ffaa00'),
-            observerSecondary: cssVar('--sky-observer-secondary', '#ff6600'),
-
-            infoText:  cssVar('--sky-info-text',  '#00d4aa'),
-            infoLabel: cssVar('--sky-info-label',  '#ffffff'),
-            timeText:  cssVar('--sky-time-text',   '#708898'),
-
-            selectedTrack:  cssVar('--sky-selected-track',  '#ffff00'),
-            selectedSatLabel: cssVar('--sky-selected-sat-label', '#d8c878'),
-            selectedMarker: cssVar('--sky-selected-marker', '#2ecc71'),
-
-            /* Обводки canvas (подписи, стрелки, «солнечные панели») — заданы в теме */
-            canvasTextStroke: cssVar('--sky-canvas-text-stroke', 'rgba(0, 0, 0, 0.9)'),
-            satPanelLine:     cssVar('--sky-sat-panel-line', 'rgba(255, 255, 255, 0.3)'),
-            satBodyOutline:   cssVar('--sky-sat-body-outline', '#ffffff'),
-            arrowOutline:     cssVar('--sky-arrow-outline', 'rgba(0, 0, 0, 0.75)'),
-            signalWaveRgb:    (function() {
-                var s = cssVar('--sky-signal-wave-rgb', '0, 255, 200').trim().replace(/\s/g, '');
-                return s || '0,255,200';
-            })()
-        };
-
-        this._skyGridLineW = parseFloat(cssVar('--sky-grid-line-width', '1')) || 1;
-        this._skyGridOuterW = parseFloat(cssVar('--sky-grid-outer-width', '2')) || 2;
+        this._reloadColorsFromCss();
 
         // Расчёт геометрии
         this._updateGeometry();
 
-        // Спутник на слежении (tracking) — текущий стиль (зелёный + аура).
+        // Спутник под наблюдением (tracking) — текущий стиль (зелёный + аура).
         this.satellite = {
             name: '',
             noradId: null,
@@ -627,7 +570,7 @@
     };
 
     /**
-     * Отрисовка ауры (окружности) вокруг спутника. Рисуется на заднем плане (до траектории и значка).
+     * Контур ауры вокруг спутника под наблюдением (без заливки). Рисуется до траектории и значка.
      * @param {number} [x] - X (если не задано — вычисляется из currentPos)
      * @param {number} [y] - Y (если не задано — вычисляется из currentPos)
      */
@@ -650,17 +593,8 @@
         const pulse = 1 + 0.15 * Math.sin(this._animationPhase * 2);
         const currentR = auraR * pulse;
 
-        // Градиентная заливка (тёмная в центре)
-        const gradient = ctx.createRadialGradient(x, y, 0, x, y, currentR);
-        gradient.addColorStop(0, this.colors.satelliteAura);
-        gradient.addColorStop(1, 'rgba(180, 80, 80, 0)');
-
-        ctx.beginPath();
-        ctx.arc(x, y, currentR, 0, Math.PI * 2);
-        ctx.fillStyle = gradient;
-        ctx.fill();
-
-        // Граница ауры
+        // Без радиальной заливки: на светлом небе тёмное пятно выглядело грязно.
+        // Оставляем только лёгкий контур по радиусу ауры.
         ctx.beginPath();
         ctx.arc(x, y, currentR, 0, Math.PI * 2);
         ctx.strokeStyle = this.colors.satelliteAuraBorder;
@@ -683,12 +617,9 @@
 
         // Аура рисуется в draw() до траектории, спутник — поверх
 
-        // Анимация свечения
-        const glowPulse = 0.5 + 0.5 * Math.sin(this._animationPhase * 3);
-
-        // Внешнее свечение
-        ctx.shadowColor = this.colors.satellite;
-        ctx.shadowBlur = 8 + 4 * glowPulse;
+        // Без canvas-shadow: на светлом небе размытие даёт тёмное «грязное» ореол вокруг значка.
+        ctx.shadowColor = 'transparent';
+        ctx.shadowBlur = 0;
 
         // Иконка спутника (улучшенный дизайн)
         const size = 8;
@@ -697,7 +628,7 @@
         ctx.fillStyle = this.colors.satellite;
         ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
 
-        // "Солнечные панели" - с градиентом
+        // Солнечные панели
         const panelWidth = size * 1.2;
         const panelHeight = size * 0.5;
 
@@ -734,7 +665,7 @@
         ctx.lineWidth = 1;
         ctx.strokeRect(p.x - size / 2, p.y - size / 2, size, size);
 
-        // Подписи спутника на слежении — обводка из темы (светлая тема: светлый ореол)
+        // Подписи спутника под наблюдением — обводка из темы (светлая тема: светлый ореол)
         ctx.shadowBlur = 0;
         ctx.lineJoin = 'round';
         ctx.miterLimit = 2;
@@ -834,6 +765,50 @@
         return min + 'm ' + (sec < 10 ? '0' : '') + sec + 's';
     };
 
+    SkyView.prototype._reloadColorsFromCss = function() {
+        const waveRgbRaw = cssVar('--sky-signal-wave-rgb', '0, 255, 200').trim().replace(/\s/g, '');
+        this.colors = {
+            background: cssVar('--sky-bg', '#0c1420'),
+            skyFill:    cssVar('--sky-fill', '#182838'),
+            grid:     cssVar('--sky-grid', '#3a5060'),
+            gridText: cssVar('--sky-grid-text', '#d0d8e0'),
+            elevationLabel: cssVar('--sky-elevation-label', '#d0d8e0'),
+            elevationLabelOffsetX: -5,
+            elevationLabelOffsetY: -5,
+            elevationLabelSize: 11,
+            cardinalLabel: cssVar('--sky-label-muted', '#d0d8e0'),
+            azimuthLabel: cssVar('--sky-azimuth-label', '#d0d8e0'),
+            track:      cssVar('--sky-track', '#00cc00'),
+            trackArrow: cssVar('--sky-track-arrow', '#66dd66'),
+            aosMarker:    cssVar('--sky-aos', '#00ff00'),
+            losMarker:    cssVar('--sky-los', '#ff4444'),
+            markerBorder: cssVar('--sky-marker-border', '#ffffff'),
+            satellite:       cssVar('--sky-satellite', '#00ffff'),
+            satelliteSignal: themeRgba('sky-satellite-signal', 'rgba(0, 255, 200, 0.5)'),
+            satLabel:        cssVar('--sky-satellite-label', '#ffffff'),
+            satelliteAuraBorder: cssVar('--sky-satellite-aura-border', '#ff8888'),
+            observer:          cssVar('--sky-observer', '#ffaa00'),
+            observerSecondary: cssVar('--sky-observer-secondary', '#ff6600'),
+            infoText:  cssVar('--sky-info-text', '#00d4aa'),
+            infoLabel: cssVar('--sky-info-label', '#ffffff'),
+            timeText:  cssVar('--sky-time-text', '#708898'),
+            selectedTrack:  cssVar('--sky-selected-track', '#ffff00'),
+            selectedSatLabel: cssVar('--sky-selected-sat-label', '#d8c878'),
+            selectedMarker: cssVar('--sky-selected-marker', '#2ecc71'),
+            canvasTextStroke: cssVar('--sky-canvas-text-stroke', 'rgba(0, 0, 0, 0.9)'),
+            satPanelLine:     cssVar('--sky-sat-panel-line', 'rgba(255, 255, 255, 0.3)'),
+            satBodyOutline:   cssVar('--sky-sat-body-outline', '#ffffff'),
+            arrowOutline:     cssVar('--sky-arrow-outline', 'rgba(0, 0, 0, 0.75)'),
+            signalWaveRgb:    waveRgbRaw || '0,255,200'
+        };
+        this._skyGridLineW = parseFloat(cssVar('--sky-grid-line-width', '1')) || 1;
+        this._skyGridOuterW = parseFloat(cssVar('--sky-grid-outer-width', '2')) || 2;
+    };
+
+    SkyView.prototype.refreshThemeColors = function() {
+        this._reloadColorsFromCss();
+    };
+
     /**
      * Обновление фазы анимации
      */
@@ -864,7 +839,7 @@
             this._selectedSatellite.noradId !== this.satellite.noradId) {
             this._drawSelectedLayer();
         }
-        // Слой 3: спутник на слежении (текущий стиль).
+        // Слой 3: спутник под наблюдением (текущий стиль).
         if (this.satellite.noradId) {
             this._drawSatelliteAura();
             this._drawTrack();
@@ -968,7 +943,7 @@
     };
 
     /** Обновление текстового блока под графиком: AOS, LOS, Длит., время до конца сеанса (Осталось).
-     * При отображении выбранного спутника (отличного от отслеживаемого) показываются данные выбранного. */
+     * При отображении выбранного спутника (отличного от наблюдаемого) показываются данные выбранного. */
     SkyView.prototype._updateInfoPanelDOM = function() {
         const e = this._infoEls;
         if (!e.aos && !e.los && !e.dur && !e.remaining) {return;}
@@ -1057,7 +1032,7 @@
     };
 
     /**
-     * Значок спутника такой же формы, как у спутника на слежении (корпус + панели + линии),
+     * Значок спутника такой же формы, как у спутника под наблюдением (корпус + панели + линии),
      * без анимации и без пульсирующего круга. Используется для текущего (выбранного) спутника.
      * @param {CanvasRenderingContext2D} ctx
      * @param {number} x - центр X
@@ -1065,7 +1040,7 @@
      * @param {string} fillColor - цвет заливки (например selectedMarker)
      */
     SkyView.prototype._drawSatelliteIconStatic = function(ctx, x, y, fillColor) {
-        const size = 8; // как у маркера на слежении
+        const size = 8; // как у маркера под наблюдением
         const panelWidth = size * 1.2;
         const panelHeight = size * 0.5;
 
@@ -1169,7 +1144,7 @@
             }
         }
 
-        // Маркер — такой же значок, как на слежении, другим цветом и без анимации.
+        // Маркер — такой же значок, как под наблюдением, другим цветом и без анимации.
         if (sel.currentPos && sel.currentPos.el > 0) {
             const mp = this.azElToXY(sel.currentPos.az, sel.currentPos.el);
             this._drawSatelliteIconStatic(ctx, mp.x, mp.y, this.colors.selectedMarker);

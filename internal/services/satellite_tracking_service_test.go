@@ -213,6 +213,16 @@ func TestComputePosition(t *testing.T) {
 		t.Errorf("range should be positive: %.1f", pos.Range)
 	}
 
+	if pos.MapMarkerFwdLon == nil || pos.MapMarkerFwdLat == nil {
+		t.Fatal("MapMarkerFwdLon/Lat should be set (second propagation step)")
+	}
+	if pos.MapMarkerRotDeg == nil {
+		t.Fatal("MapMarkerRotDeg should be set (plat carré chord fallback)")
+	}
+	if *pos.MapMarkerRotDeg < -180 || *pos.MapMarkerRotDeg > 180 {
+		t.Errorf("MapMarkerRotDeg out of [-180,180]: %v", *pos.MapMarkerRotDeg)
+	}
+
 	// Зона видимости: не nil, сегменты содержат ~72 точки (+ граничные при антимеридиане).
 	if pos.VisibilityZone == nil {
 		t.Fatal("visibility zone should not be nil")
@@ -261,6 +271,16 @@ func TestPositionDataJSON(t *testing.T) {
 
 	if _, ok := m["visibility_zone"]; !ok {
 		t.Error("missing visibility_zone in positionData JSON")
+	}
+
+	if _, ok := m["map_marker_fwd_lon"]; !ok {
+		t.Error("missing map_marker_fwd_lon in positionData JSON")
+	}
+	if _, ok := m["map_marker_fwd_lat"]; !ok {
+		t.Error("missing map_marker_fwd_lat in positionData JSON")
+	}
+	if _, ok := m["map_marker_rot_deg"]; !ok {
+		t.Error("missing map_marker_rot_deg in positionData JSON")
 	}
 
 	// TS теперь не в positionData, а в satelliteStateUpdate.
