@@ -54,6 +54,12 @@
     --radius-sm: 4px;
     --radius-md: 8px;
     --radius-lg: 12px;
+
+    /* State layers (Material-inspired): прозрачность overlay-слоя для интерактивных состояний */
+    --state-hover-opacity:    0.08;
+    --state-focus-opacity:    0.12;
+    --state-pressed-opacity:  0.16;
+    --state-disabled-opacity: 0.38;
 }
 
 /* Инфо-панели под графиками (SkyView, Az/El) — единая высота и шрифт */
@@ -683,12 +689,12 @@ body {
     right: 16px;
     font-size: 24px;
     font-weight: 700;
-    color: #ff6b6b;
+    color: var(--simulation-badge-color, var(--accent-danger, #ff6b6b));
     text-transform: uppercase;
     letter-spacing: 2px;
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     animation: blink 1.5s ease-in-out infinite;
-    text-shadow: 0 0 8px rgba(255, 107, 107, 0.6);
+    text-shadow: var(--simulation-badge-shadow, 0 0 8px rgba(255, 107, 107, 0.6));
     z-index: 10;
 }
 
@@ -731,7 +737,7 @@ body {
 .waterfall-container canvas {
     width: 100%;
     height: auto;
-    background: linear-gradient(to bottom, #000022, #000044);
+    background: var(--waterfall-container-bg, linear-gradient(to bottom, #000022, #000044));
     border-radius: var(--radius-md);
 }
 
@@ -801,23 +807,29 @@ body {
     font-size: 0.875rem;
 }
 
-.form-group input:focus,
-.form-group select:focus {
+.form-group input:focus-visible,
+.form-group select:focus-visible {
     outline: none;
     border-color: var(--border-focus);
     box-shadow: var(--focus-ring-shadow, 0 0 0 2px rgba(0, 212, 170, 0.1));
 }
 
-/* Buttons */
+/* Buttons — единый блок (DS-STATES-001).
+   Базовый .btn покрывает все варианты: основной, вторичный, опасный.
+   Состояния через :hover/:focus-visible/:active/:disabled с токенами state-layer. */
 .btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--spacing-xs);
     padding: var(--spacing-sm) var(--spacing-lg);
     background: var(--bg-tertiary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     color: var(--text-primary);
+    font-size: 0.875rem;
     font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s ease, border-color 0.2s ease, color 0.2s ease, box-shadow 0.15s ease;
 }
 
 .btn:hover:not(:disabled) {
@@ -825,20 +837,41 @@ body {
     border-color: var(--text-muted);
 }
 
+.btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-shadow, 0 0 0 2px rgba(0, 212, 170, 0.18));
+}
+
+.btn:active:not(:disabled) {
+    transform: translateY(1px);
+}
+
 .btn:disabled {
-    opacity: 0.5;
+    opacity: var(--state-disabled-opacity, 0.38);
     cursor: not-allowed;
+    pointer-events: none;
 }
 
 .btn-primary {
-    background: var(--accent-primary);
-    border-color: var(--accent-primary);
-    color: var(--bg-primary);
+    background: var(--accent-secondary);
+    border-color: var(--accent-secondary);
+    color: var(--btn-primary-text, #fff);
 }
 
 .btn-primary:hover:not(:disabled) {
-    background: #00eabb;
-    border-color: #00eabb;
+    background: var(--btn-primary-hover-bg, #0090dd);
+    border-color: var(--btn-primary-hover-bg, #0090dd);
+}
+
+.btn-secondary {
+    background: var(--bg-tertiary);
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: var(--border-color);
+    color: var(--text-primary);
 }
 
 .btn-danger {
@@ -1109,39 +1142,6 @@ section h2 {
     margin-left: auto;
 }
 
-/* Кнопки */
-.btn {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    padding: var(--spacing-sm) var(--spacing-md);
-    border: none;
-    border-radius: var(--radius-md);
-    font-size: 0.875rem;
-    font-weight: 500;
-    cursor: pointer;
-    transition: background-color 0.15s, color 0.15s;
-}
-
-.btn-secondary {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-}
-
-.btn-secondary:hover {
-    background: var(--border-color);
-    color: var(--text-primary);
-}
-
-.btn-primary {
-    background: var(--accent-secondary);
-    color: var(--btn-primary-text, #fff);
-}
-
-.btn-primary:hover {
-    background: var(--btn-primary-hover-bg, #0090dd);
-}
-
 /* Контейнер таблицы */
 .passes-table-container {
     flex: 1;
@@ -1183,7 +1183,7 @@ section h2 {
     left: 0;
     right: 0;
     bottom: 0;
-    background: rgba(6, 10, 18, 0.80);
+    background: var(--tracking-overlay-bg, rgba(6, 10, 18, 0.80));
     display: flex;
     align-items: center;
     justify-content: center;
@@ -1214,7 +1214,7 @@ section h2 {
 .tracking-spinner {
     width: 40px;
     height: 40px;
-    border: 3px solid rgba(0, 255, 200, 0.15);
+    border: 3px solid var(--tracking-spinner-border, rgba(0, 255, 200, 0.15));
     border-top-color: var(--accent-primary, #00ffc8);
     border-radius: 50%;
     animation: spin 0.9s linear infinite;

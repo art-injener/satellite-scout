@@ -32,7 +32,7 @@
     --text-primary:    #c8d0d8;   /* основной текст (значения) */
     --text-secondary:  #c8d0d8;   /* алиас для совместимости */
     --text-heading:    #8a9aaa;   /* заголовки панелей */
-    --text-label:      #708898;   /* метки полей — WCAG AA ≥ 4.5:1 */
+    --text-label:      #8ea1ad;   /* метки полей — WCAG AA 4.5:1 на bg-tertiary #243848 (4.53) */
     --text-muted:      #c8d0d8;   /* переопределяем — main.css использует для заголовков */
     --text-accent:     #7ab8d0;   /* акцентный текст данных */
 
@@ -42,7 +42,7 @@
     --accent-primary:  #7ab8d0;   /* акцентный бирюзовый */
     --accent-secondary: #5a8aaa;  /* вторичный акцент */
     --accent-warning:  #d4a040;   /* наблюдатель, gold */
-    --accent-danger:   #d05545;   /* опасность */
+    --accent-danger:   #d15949;   /* опасность — WCAG AA 4.5:1 на bg-primary #0c1420 (4.61) */
     --accent-success:  #50b868;   /* online, подключено */
 
     /* ══════════════════════════════════════════════════════════════
@@ -82,6 +82,8 @@
     --map-icon-led-off:          #5f6e80;
     --map-icon-boom-fill:        #8896a8;
     --map-icon-logo-dots:        var(--accent-warning);
+    --map-icon-flash-tracking:   #e8fff8;
+    --map-icon-flash-selected:   #fff5e8;
 
     /* ══════════════════════════════════════════════════════════════
        Выбранный спутник (selected) — трасса на карте жёлтая, как в Classic
@@ -211,6 +213,12 @@
     --btn-primary-hover-bg: #0090dd;
     --pc-limit-toast-shadow:  0 6px 22px rgba(0, 0, 0, 0.45);
 
+    /* Tracking overlay (модальный спиннер «Идёт наблюдение…») и значок симуляции */
+    --tracking-overlay-bg:     rgba(12, 20, 32, 0.84);
+    --tracking-spinner-border: rgba(122, 184, 208, 0.18);
+    --simulation-badge-color:  var(--accent-danger);
+    --simulation-badge-shadow: 0 0 8px rgba(208, 85, 69, 0.55);
+
     /* Карта: толщина линий (читаемость на светлой теме — в colors-light) */
     --map-track-line-width:     1.5;
     --map-footprint-line-width: 1.5;
@@ -244,6 +252,20 @@
     --info-track-btn-active-bg:  rgba(122, 184, 208, 0.32);
     --modal-backdrop:            rgba(0, 0, 0, 0.58);
     --modal-box-shadow:          0 8px 32px rgba(0, 0, 0, 0.45);
+
+    /* ══════════════════════════════════════════════════════════════
+       Подписи спутников на карте (DOM-маркеры) и таблица пролётов
+       Синхронизирующий блок: тёмные темы — прозрачный «pill», светлые
+       темы (light, breeze-light) переопределяют эти токены.
+       ══════════════════════════════════════════════════════════════ */
+    --map-sat-label-color:           var(--sat-label);
+    --map-sat-label-selected-color:  var(--map-icon-selected-fill);
+    --map-sat-label-pill-bg:         transparent;
+    --map-sat-label-pill-shadow:     none;
+    --map-sat-label-shadow:          0 0 3px rgba(0, 0, 0, 0.85), 0 0 6px rgba(0, 0, 0, 0.5);
+    --passes-row-bg:                 transparent;
+    --passes-scroll-bg:              transparent;
+    --station-footer-font-size:      1.1rem;
 
     /* ══════════════════════════════════════════════════════════════
        Типографика

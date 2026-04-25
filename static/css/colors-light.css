@@ -35,8 +35,8 @@
     --text-primary:    #2a3038;
     --text-secondary:  #2a3038;
     --text-heading:    #1a2430;
-    --text-label:      #4a5565;
-    --text-muted:      #5a6575;
+    --text-label:      #414b59;   /* WCAG AA 4.5:1 на bg-tertiary #b8bcc6 (4.65) */
+    --text-muted:      #4f5967;   /* WCAG AA 4.5:1 на bg-primary #ccd0d8 (4.59) */
     --text-accent:     #0a5878;
 
     --accent-primary:  #0a6e8c;
@@ -72,6 +72,8 @@
     --map-icon-selected-fill:    #5eead4;
     /* Акцентные точки на панелях логотипа — лайм к бирюзе */
     --map-icon-logo-dots:        #84cc16;
+    --map-icon-flash-tracking:   #ccfbf1;
+    --map-icon-flash-selected:   #ecfeff;
     --map-icon-neutral-fill:     #dde1ea;
     --map-icon-led-off:          #7d8a9a;
     --map-icon-boom-fill:        #7a8494;
@@ -216,6 +218,12 @@
     --btn-primary-text: #f0f4f8;
     --btn-primary-hover-bg: #123a72;
     --pc-limit-toast-shadow:  0 6px 18px rgba(35, 45, 58, 0.12);
+
+    /* Tracking overlay (модальный спиннер «Идёт наблюдение…») и значок симуляции */
+    --tracking-overlay-bg:     rgba(204, 208, 216, 0.85);
+    --tracking-spinner-border: rgba(10, 60, 100, 0.18);
+    --simulation-badge-color:  var(--accent-danger);
+    --simulation-badge-shadow: 0 0 8px rgba(204, 208, 216, 0.95), 0 0 12px rgba(176, 24, 24, 0.45);
 
     --pc-limit-toast-bg:     rgba(204, 208, 216, 0.97);
     --pc-limit-toast-border: #0a6e8c;

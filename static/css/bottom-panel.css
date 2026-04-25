@@ -339,9 +339,10 @@
     box-sizing: border-box;
 }
 
-.bp-input:focus {
+.bp-input:focus-visible {
     outline: none;
     border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring-shadow, 0 0 0 2px rgba(0, 212, 170, 0.18));
 }
 
 .bp-range {

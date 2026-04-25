@@ -4,7 +4,7 @@
     <section class="map-area">
         <div class="earth-view-container">
             <div class="earth-view-canvas-wrap">
-                <canvas id="earth-view" width="800" height="400"></canvas>
+                <canvas id="earth-view" width="800" height="400" role="img" aria-label="Карта Земли с орбитальными треками спутников и точкой наблюдения"></canvas>
             </div>
 
             <!-- SVG-маркер спутника под наблюдением (tracking) — тот же логотип, цвет tracking -->
@@ -16,7 +16,7 @@
                         /* Волны, рупоры и полосы — 3.8s; индикаторы без свечения, только смена fill в тон маркера. */
                         @keyframes map-horn-blink {
                             0%, 45%, 100% { fill: var(--map-icon-tracking-fill,#00d4aa); }
-                            22% { fill: #e8fff8; }
+                            22% { fill: var(--map-icon-flash-tracking,#e8fff8); }
                         }
                         @keyframes map-wave-pulse {
                             0%, 100% { opacity: 0; stroke-width: 2; }
@@ -88,7 +88,7 @@
                         @keyframes map-sat-orbit-sel { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(0) rotate(1deg)} }
                         @keyframes map-horn-blink-sel {
                             0%, 45%, 100% { fill: var(--map-icon-selected-fill,#ffb347); }
-                            22% { fill: #fff5e8; }
+                            22% { fill: var(--map-icon-flash-selected,#fff5e8); }
                         }
                         @keyframes map-wave-pulse-sel {
                             0%, 100% { opacity: 0; stroke-width: 2; }
@@ -270,7 +270,7 @@
         <!-- SkyView: окружность 300×300 px + отдельная панель информации (не влияет на размер окна отрисовки) -->
         <div class="right-panel__skyview" id="right-panel-skyview">
             <div class="right-panel__skyview-canvas">
-                <canvas id="sky-view" width="300" height="300"></canvas>
+                <canvas id="sky-view" width="300" height="300" role="img" aria-label="Полусфера небесной сцены: треки спутников по азимуту и углу места"></canvas>
             </div>
             <div class="skyview-info" id="skyview-info">
                 <div class="skyview-info__row">
@@ -347,7 +347,7 @@
         <div class="bp-pane bp-pane--hidden" id="bp-pane-follow">
             <div class="bp-az-container">
                 <div class="bp-indicator-canvas-wrap">
-                    <canvas id="azimuth-view" width="200" height="200"></canvas>
+                    <canvas id="azimuth-view" width="200" height="200" role="img" aria-label="Индикатор азимута: положение антенны и спутника по горизонту"></canvas>
                 </div>
                 <div class="bp-indicator-info" id="azimuth-info">
                     <div class="bp-indicator-info__row">
@@ -371,11 +371,11 @@
                 <div class="bp-freq-scale-wrap">
                     <canvas id="waterfall-freq-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
                 </div>
-                <canvas id="waterfall-compact" class="bp-waterfall-canvas"></canvas>
+                <canvas id="waterfall-compact" class="bp-waterfall-canvas" role="img" aria-label="Спектрограмма (водопад) сигнала спутника"></canvas>
             </div>
             <div class="bp-el-container">
                 <div class="bp-indicator-canvas-wrap">
-                    <canvas id="elevation-view" width="200" height="200"></canvas>
+                    <canvas id="elevation-view" width="200" height="200" role="img" aria-label="Индикатор угла места: положение антенны и спутника по вертикали"></canvas>
                 </div>
                 <div class="bp-indicator-info" id="elevation-info">
                     <div class="bp-indicator-info__row">
@@ -428,13 +428,13 @@
             </div>
             <div class="bp-overview-charts">
                 <div class="bp-fft-container">
-                    <canvas id="fft-spectrum" class="bp-stub-canvas"></canvas>
+                    <canvas id="fft-spectrum" class="bp-stub-canvas" role="img" aria-label="БПФ-спектр текущего сигнала"></canvas>
                 </div>
                 <div class="bp-overview-freq-scale-wrap">
                     <canvas id="overview-freq-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
                 </div>
                 <div class="bp-specwf-container">
-                    <canvas id="spectrum-waterfall" class="bp-stub-canvas"></canvas>
+                    <canvas id="spectrum-waterfall" class="bp-stub-canvas" role="img" aria-label="Спектрограмма (водопад) обзорного спектра"></canvas>
                 </div>
             </div>
             <div class="bp-overview-col bp-overview-col--demod">

@@ -52,10 +52,22 @@
     line-height: 1;
     padding: 0 2px;
     transition: color 0.15s ease;
+    /* a11y: расширенная зона клика без изменения визуального размера */
+    min-width: 28px;
+    min-height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
 }
 
 .overlay-panel__close:hover {
     color: var(--text-primary);
+}
+
+.overlay-panel__close:focus-visible {
+    outline: 2px solid var(--border-focus);
+    outline-offset: 2px;
+    border-radius: 3px;
 }
 
 /* Тело панели — компактно по контенту */

@@ -46,7 +46,7 @@
     --text-secondary:  #232629;
     --text-heading:    #1a1c1e;
     --text-label:      #5c6166;
-    --text-muted:      #7f8c8d;
+    --text-muted:      #646f70;   /* WCAG AA 4.5:1 на bg-primary #eff0f1 (4.54) */
     --text-accent:     #2980b9;
 
     /* ══════════════════════════════════════════════════════════════
@@ -92,6 +92,8 @@
     --map-icon-led-off:          #8b97a8;
     --map-icon-boom-fill:        #7f8c8d;
     --map-icon-logo-dots:        #f67400;
+    --map-icon-flash-tracking:   #d0eaf7;
+    --map-icon-flash-selected:   #fde8d2;
 
     --map-sat-label-pill-bg:         rgba(255, 255, 255, 0.95);
     --map-sat-label-pill-shadow:     0 0 0 1px rgba(35, 38, 41, 0.08), 0 2px 8px rgba(35, 38, 41, 0.10);
@@ -242,6 +244,12 @@
     --btn-primary-text: #fcfcfc;
     --btn-primary-hover-bg: #2980b9;
     --pc-limit-toast-shadow:  0 6px 18px rgba(35, 38, 41, 0.10);
+
+    /* Tracking overlay (модальный спиннер «Идёт наблюдение…») и значок симуляции */
+    --tracking-overlay-bg:     rgba(239, 240, 241, 0.86);
+    --tracking-spinner-border: rgba(61, 174, 233, 0.22);
+    --simulation-badge-color:  var(--accent-danger);
+    --simulation-badge-shadow: 0 0 8px rgba(239, 240, 241, 0.95), 0 0 12px rgba(218, 68, 83, 0.45);
 
     --pc-limit-toast-bg:     rgba(239, 240, 241, 0.97);
     --pc-limit-toast-border: #3daee9;

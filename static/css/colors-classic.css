@@ -14,7 +14,6 @@
        ══════════════════════════════════════════════════════════════ */
     --bg-primary:   #080c12;
     --bg-secondary: #141e28;
-    --bg-panel:     #141e28;
     --bg-tertiary:  #1e2e3e;
     --bg-elevated:  #283a4c;
     --bg-hover:     #2e4050;
@@ -23,7 +22,6 @@
        Границы
        ══════════════════════════════════════════════════════════════ */
     --border-color:   #344858;
-    --border-default: #344858;
     --border-focus:   #00d4aa;
 
     /* ══════════════════════════════════════════════════════════════
@@ -32,7 +30,7 @@
     --text-primary:    #e6e8eb;
     --text-secondary:  #e6e8eb;
     --text-heading:    #a0a8b4;
-    --text-label:      #8b919a;
+    --text-label:      #8e949c;   /* WCAG AA 4.5:1 на bg-tertiary (4.53) */
     --text-muted:      #e6e8eb;
     --text-accent:     #00d4aa;
 
@@ -44,11 +42,6 @@
     --accent-success:   #4ade80;
     --accent-danger:    #ff6b6b;
     --accent-warning:   #ffb347;
-    --color-accent:  #00d4aa;
-    --color-accent2: #00a8ff;
-    --color-success: #4ade80;
-    --color-danger:  #ff6b6b;
-    --color-warning: #ffb347;
 
     /* ══════════════════════════════════════════════════════════════
        Карта (EarthView) — увеличен контраст суша/океан/сетка
@@ -84,6 +77,8 @@
     --map-icon-led-off:          #7a8a9c;
     --map-icon-boom-fill:        #8b919a;
     --map-icon-logo-dots:        var(--accent-warning);
+    --map-icon-flash-tracking:   #e8fff8;
+    --map-icon-flash-selected:   #fff5e8;
 
     /* ══════════════════════════════════════════════════════════════
        Выбранный спутник (selected, EarthView)
@@ -209,6 +204,12 @@
     --btn-primary-hover-bg: #0090dd;
     --pc-limit-toast-shadow:  0 6px 22px rgba(0, 0, 0, 0.5);
 
+    /* Tracking overlay (модальный спиннер «Идёт наблюдение…») и значок симуляции */
+    --tracking-overlay-bg:     rgba(6, 10, 18, 0.80);
+    --tracking-spinner-border: rgba(0, 255, 200, 0.15);
+    --simulation-badge-color:  var(--accent-danger);
+    --simulation-badge-shadow: 0 0 8px rgba(255, 107, 107, 0.6);
+
     --map-track-line-width:     1.5;
     --map-footprint-line-width: 1.5;
     --map-secondary-track-fallback: rgba(200, 220, 235, 0.92);
@@ -240,6 +241,20 @@
     --info-track-btn-active-bg:  rgba(0, 212, 170, 0.3);
     --modal-backdrop:            rgba(0, 0, 0, 0.62);
     --modal-box-shadow:          0 8px 32px rgba(0, 0, 0, 0.5);
+
+    /* ══════════════════════════════════════════════════════════════
+       Подписи спутников на карте (DOM-маркеры) и таблица пролётов
+       Синхронизирующий блок: тёмные темы — прозрачный «pill», светлые
+       темы (light, breeze-light) переопределяют эти токены.
+       ══════════════════════════════════════════════════════════════ */
+    --map-sat-label-color:           var(--sat-label);
+    --map-sat-label-selected-color:  var(--map-icon-selected-fill);
+    --map-sat-label-pill-bg:         transparent;
+    --map-sat-label-pill-shadow:     none;
+    --map-sat-label-shadow:          0 0 3px rgba(0, 0, 0, 0.85), 0 0 6px rgba(0, 0, 0, 0.5);
+    --passes-row-bg:                 transparent;
+    --passes-scroll-bg:              transparent;
+    --station-footer-font-size:      1.1rem;
 
     /* ══════════════════════════════════════════════════════════════
        Типографика

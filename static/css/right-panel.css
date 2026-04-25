@@ -431,7 +431,7 @@
     justify-content: center;
     gap: 0;
     padding: 10px 12px;
-    min-height: 42px;
+    min-height: 44px;
     font-family: var(--font-mono);
     font-size: 14px;
     font-weight: 600;
@@ -443,6 +443,12 @@
     white-space: nowrap;
     transition: all 0.12s ease;
     line-height: 1.15;
+}
+
+.rp-ctrl:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring-shadow, 0 0 0 2px rgba(0, 212, 170, 0.18));
+    border-color: var(--border-focus);
 }
 
 .rp-ctrl__label {
