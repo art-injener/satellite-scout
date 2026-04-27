@@ -52,7 +52,7 @@ const StateEventType = Object.freeze({
     TRACK: 'track',
     /** Смена выбранного спутника (selected) — клик в таблице или авто из группы. */
     SELECTED_CHANGE: 'selected_change',
-    /** Смена спутника в режиме наблюдения (tracking) — только кнопка «Наблюдение». */
+    /** Смена спутника в режиме сопровождения (tracking) — только кнопка «Сопровождать». */
     TRACKING_CHANGE: 'tracking_change',
     /** Обновление группы скользящего окна. */
     SATELLITE_GROUP_UPDATE: 'satellite_group_update',
@@ -160,7 +160,7 @@ class SatelliteStateManager {
 
         /**
          * Спутник под наблюдением (красный/зелёный + overlay + az/el).
-         * Устанавливается: только кнопка «Наблюдение» → API → SSE.
+         * Устанавливается: только кнопка «Сопровождать» → API → SSE.
          * @type {?number}
          */
         this._trackingSatelliteId = null;
@@ -183,8 +183,11 @@ class SatelliteStateManager {
 
         /**
          * Режим «все трассы группы» (UX-TABLE-TRACK-GROUP-MODE-001).
-         * false (по умолчанию) = только selected + tracking + ручные включения;
-         * true = все КА группы с трассами.
+         * По умолчанию false — на карте/в небе видны только трассы selected
+         * и tracking; оператор включает master-toggle в заголовке таблицы,
+         * чтобы посмотреть трассы всех КА группы. Выбор сделан в пользу
+         * «тихого» дефолта: при больших группах визуальный шум от десятков
+         * пунктирных трасс перевешивает пользу от их одновременного показа.
          * @type {boolean}
          */
         this._showAllMode = false;

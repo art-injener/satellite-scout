@@ -14,6 +14,14 @@
     const MAP_SAT_SVG_OFFSET_DEG = -45;
     const MAP_SAT_DEFAULT_ROT = 0;
 
+    // Палитра вторичных спутников без включённой трассы: крупные маркеры + высокая яркость
+    // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте (UX-MAP-VIS-001).
+    // Используется как в _drawSecondaryMarker, так и в _collectCalloutMarkers.
+    const SECONDARY_SAT_COLORS = [
+        '#ffffff', '#f0fcff', '#e8ffff', '#fffef0',
+        '#f5fff8', '#ffe8f5', '#e8f4ff', '#fffff0'
+    ];
+
     /** Кратчайший доворот от currentDeg к targetDeg (градусы, в [-180, 180]). */
     function _shortestRotDeltaDeg(currentDeg, targetDeg) {
         let d = targetDeg - currentDeg;
@@ -378,6 +386,11 @@
                 this._drawVisibilityZone();
             }
         }
+
+        // Выноски (линии на canvas + DOM-карточки).
+        // Между трассами/футпринтом и SVG-маркерами: линии получаются под иконкой,
+        // DOM-карточки — на отдельном слое поверх (z-index в CSS).
+        this._drawCallouts();
 
         // Маркер спутника под наблюдением (tracking) — DOM SVG.
         if (this.satellite.noradId && this.satellite.position) {
@@ -931,6 +944,273 @@
             this.satellite.position, this.satellite.name, 'tracking', this.satellite.noradId);
     };
 
+    // ========== Выноски (callouts) ==========
+
+    /**
+     * Сбор маркеров спутников для расчёта выносок.
+     * Возвращает массив объектов { id, x, y, color, name } в physical-координатах canvas.
+     * @private
+     */
+    EarthView.prototype._collectCalloutMarkers = function() {
+        const dpr = window.devicePixelRatio || 1;
+        const ctx = this.ctx;
+        const sm = window._stateManager;
+        // Какую карточку выделять: при раздельном selected/tracking на карте «герой» UI —
+        // выбранный (оранжевая иконка, футпринт selected); иначе — спутник под наблюдением.
+        let selSm = sm && typeof sm.getSelectedSatelliteId === 'function' ? sm.getSelectedSatelliteId() : null;
+        let trkSm = sm && typeof sm.getTrackingSatelliteId === 'function' ? sm.getTrackingSatelliteId() : null;
+        if (trkSm == null && this.satellite.noradId) { trkSm = this.satellite.noradId; }
+        if (selSm == null && this._selectedSatellite.noradId) { selSm = this._selectedSatellite.noradId; }
+        let highlightNorad = null;
+        if (trkSm && selSm && String(selSm) !== String(trkSm)) {
+            highlightNorad = selSm;
+        } else if (trkSm) {
+            highlightNorad = trkSm;
+        } else if (selSm) {
+            highlightNorad = selSm;
+        }
+        const idEq = function(a, b) {
+            if (a == null || b == null) { return false; }
+            return String(a) === String(b);
+        };
+        const isHighlight = function(nid) { return highlightNorad != null && idEq(nid, highlightNorad); };
+        // Радиусы «видимой части» иконок маркеров для сбора препятствий.
+        // tracking/selected — DOM SVG-якорь 56×56, реальная иконка ≈36×36 → r=18.
+        // secondary — «киношный» силуэт ~38×19 logical (корпус+бумы+панели+антенна),
+        // полуширина 19 + 1 буфер → r=20.
+        const ICON_R_MAIN = 18 * dpr;
+        const ICON_R_SECONDARY = 20 * dpr;
+        // Подбор ширины карточки под содержимое (имя + #NORAD).
+        // Возвращает значение в physical px (как и остальные размеры аллокатора).
+        // Шрифты подобраны под .map-sat-callout: имя 12px bold, NORAD 10px medium.
+        // monospace fallback близок по метрикам к --font-mono без чтения computed style.
+        const measure = (name, nid) => {
+            ctx.save();
+            ctx.font = 'bold 12px monospace';
+            const wName = ctx.measureText(name || '').width;
+            ctx.font = '500 10px monospace';
+            const wNorad = ctx.measureText('#' + nid).width;
+            ctx.restore();
+            // Горизонтальные паддинги карточки (4+8+11) + 2px бордер ≈ 22 logical px.
+            // Прибавляем небольшой буфер на разницу шрифтов и округление.
+            const innerPad = 24 * dpr;
+            const target = Math.max(wName, wNorad) + innerPad;
+            const minW = 70 * dpr;
+            const maxW = 160 * dpr;
+            return Math.round(Math.max(minW, Math.min(maxW, target)));
+        };
+
+        const markers = [];
+        const trkId = this.satellite.noradId;
+        if (trkId && this.satellite.position) {
+            const p = this.project(this.satellite.position.lon, this.satellite.position.lat);
+            const name = this.satellite.name || '';
+            markers.push({
+                id: trkId,
+                x: p.x,
+                y: p.y,
+                color: this.colors.satLabel || '#ffeb3b',
+                name: name,
+                cardWidth: measure(name, trkId),
+                iconRadius: ICON_R_MAIN,
+                isTracked: isHighlight(trkId),
+            });
+        }
+        const selId = this._selectedSatellite.noradId;
+        if (selId && selId !== trkId && this._selectedSatellite.position) {
+            const p = this.project(this._selectedSatellite.position.lon, this._selectedSatellite.position.lat);
+            const name = this._selectedSatellite.name || '';
+            markers.push({
+                id: selId,
+                x: p.x,
+                y: p.y,
+                color: this.colors.mapIconSelectedFill || '#ffb347',
+                name: name,
+                cardWidth: measure(name, selId),
+                iconRadius: ICON_R_MAIN,
+                isTracked: isHighlight(selId),
+            });
+        }
+        const ids = Object.keys(this._secondarySatellites);
+        for (let i = 0; i < ids.length; i++) {
+            const sat = this._secondarySatellites[ids[i]];
+            const nid = parseInt(ids[i], 10);
+            if (nid === trkId || nid === selId) { continue; }
+            if (!sat.position) { continue; }
+            const p = this.project(sat.position.lon, sat.position.lat);
+            const fallback = SECONDARY_SAT_COLORS[i % SECONDARY_SAT_COLORS.length];
+            const c = sm ? (sm.getMarkerColor(nid) || fallback) : fallback;
+            const name = sat.name || '';
+            markers.push({
+                id: nid,
+                x: p.x,
+                y: p.y,
+                color: c,
+                name: name,
+                cardWidth: measure(name, nid),
+                iconRadius: ICON_R_SECONDARY,
+                isTracked: isHighlight(nid),
+            });
+        }
+        return markers;
+    };
+
+    /**
+     * Препятствия для CalloutLayout: bbox-ы городов и точки наблюдения.
+     * Координаты в physical px.
+     * @private
+     */
+    EarthView.prototype._collectCalloutObstacles = function(markers) {
+        const dpr = window.devicePixelRatio || 1;
+        const obstacles = [];
+        // Подписи городов: точка ~3px + текст справа ~80x14 logical
+        for (let i = 0; i < this.cities.length; i++) {
+            const c = this.cities[i];
+            const p = this.project(c.lon, c.lat);
+            obstacles.push({
+                x: p.x - 4 * dpr,
+                y: p.y - 8 * dpr,
+                w: 90 * dpr,
+                h: 16 * dpr,
+            });
+        }
+        if (this.observer) {
+            const p = this.project(this.observer.lon, this.observer.lat);
+            obstacles.push({
+                x: p.x - 10 * dpr,
+                y: p.y - 12 * dpr,
+                // Треугольник + подпись справа
+                w: 100 * dpr,
+                h: 24 * dpr,
+            });
+        }
+        // Иконки спутников — препятствия для карточек чужих выносок.
+        // Геометрия (stem ≥ 79px по Y, tail 24px по X) гарантирует, что
+        // карточка собственной выноски никогда не попадёт в свой же bbox,
+        // поэтому добавляем все маркеры без исключения.
+        if (markers && markers.length) {
+            for (let i = 0; i < markers.length; i++) {
+                const m = markers[i];
+                const r = m.iconRadius;
+                if (typeof r !== 'number' || !isFinite(r) || r <= 0) { continue; }
+                obstacles.push({
+                    x: m.x - r,
+                    y: m.y - r,
+                    w: 2 * r,
+                    h: 2 * r,
+                });
+            }
+        }
+        return obstacles;
+    };
+
+    /**
+     * Сегменты «запретных» трасс для пост-прохода CalloutLayout (ring-режим).
+     *
+     * Возвращает массив `{x1, y1, x2, y2}` в physical px:
+     *   1. Трасса selected (оранжевая) — `_selectedSatellite.groundTrack`.
+     *   2. Трасса tracking (синяя) — `this.satellite.groundTrack` (если она
+     *      отличается от selected, т.е. когда КА выбран и одновременно ведётся).
+     *
+     * Поддерживаем оба формата: массив точек `[{lon,lat,...}]` или объект
+     * `{past:[[seg],...], future:[[seg],...]}`. Антимеридиан рвёт полилинию на
+     * сегменты — пропускаем «прыжки» больше width/2 (так же, как в `_drawTrackSegment`).
+     *
+     * Вторичные пунктиры из `TRACK_COLOR_PALETTE` сюда НЕ включаются:
+     * иначе плотный кадр блокирует размещение карточек по всему кольцу.
+     *
+     * @private
+     */
+    EarthView.prototype._collectForbiddenSegments = function() {
+        const out = [];
+        const selSm = this._selectedSatellite ? this._selectedSatellite.noradId : null;
+        const trkSm = this.satellite ? this.satellite.noradId : null;
+        // selected (оранжевая) — главный «герой» кадра.
+        if (selSm) {
+            this._appendTrackSegments(out, this._selectedSatellite.groundTrack);
+        }
+        // tracking (синяя) — добавляем только если он отличен от selected,
+        // иначе тот же набор сегментов посчитался бы дважды.
+        if (trkSm && (!selSm || String(trkSm) !== String(selSm))) {
+            this._appendTrackSegments(out, this.satellite.groundTrack);
+        }
+        return out;
+    };
+
+    /**
+     * Преобразует наземную трассу (массив или {past, future}) в плоский
+     * список отрезков `{x1,y1,x2,y2}` в physical px. Разрывы по антимеридиану
+     * (|Δx| > width/2) превращаются в границы сегментов.
+     *
+     * @param {Array} out — массив-аккумулятор для добавления отрезков.
+     * @param {Array|Object|null} track — наземная трасса в исходном формате.
+     * @private
+     */
+    EarthView.prototype._appendTrackSegments = function(out, track) {
+        if (!track) { return; }
+        const polylines = [];
+        if (Array.isArray(track)) {
+            polylines.push(track);
+        } else if (typeof track === 'object') {
+            if (Array.isArray(track.past))   { Array.prototype.push.apply(polylines, track.past); }
+            if (Array.isArray(track.future)) { Array.prototype.push.apply(polylines, track.future); }
+        }
+        const halfW = this.width / 2;
+        for (let i = 0; i < polylines.length; i++) {
+            const poly = polylines[i];
+            if (!poly || poly.length < 2) { continue; }
+            let prev = null;
+            for (let k = 0; k < poly.length; k++) {
+                const pt = poly[k];
+                if (!pt || typeof pt.lon !== 'number' || typeof pt.lat !== 'number') {
+                    prev = null;
+                    continue;
+                }
+                const p = this.project(pt.lon, pt.lat);
+                if (prev && Math.abs(p.x - prev.x) <= halfW) {
+                    out.push({ x1: prev.x, y1: prev.y, x2: p.x, y2: p.y });
+                }
+                prev = p;
+            }
+        }
+    };
+
+    /**
+     * Главный слой выносок: layout → линии на canvas → DOM-карточки.
+     * @private
+     */
+    EarthView.prototype._drawCallouts = function() {
+        if (!this._calloutLayout || !this._calloutRenderer) { return; }
+        const markers = this._collectCalloutMarkers();
+        // Поддерживаем кеш чистым: убираем закешированные id, которых уже нет
+        const ids = [];
+        for (let i = 0; i < markers.length; i++) { ids.push(markers[i].id); }
+        this._calloutLayout.prune(ids);
+
+        if (markers.length === 0) {
+            this._calloutRenderer.clear();
+            return;
+        }
+        const obstacles = this._collectCalloutObstacles(markers);
+        const bounds = { width: this.width, height: this.height };
+        // Запретные сегменты трасс selected (оранжевая) + tracking (синяя):
+        // карточки не должны их пересекать — это «герой»-трассы кадра.
+        const forbiddenSegments = this._collectForbiddenSegments();
+        const layouts = this._calloutLayout.layout(markers, obstacles, bounds, forbiddenSegments);
+        const dpr = window.devicePixelRatio || 1;
+        this._calloutRenderer.drawLines(this.ctx, layouts, dpr);
+        const info = {};
+        for (let j = 0; j < markers.length; j++) {
+            const mid = markers[j].id;
+            info[mid] = {
+                name: markers[j].name,
+                norad: mid,
+                tracked: !!markers[j].isTracked,
+            };
+        }
+        this._calloutRenderer.update(layouts, bounds, info);
+    };
+
     /**
      * Отрисовка позиции наблюдателя
      */
@@ -1030,6 +1310,7 @@
         } else {
             window.addEventListener('resize', this._boundResize);
         }
+        this._initCallouts();
         return Promise.all([
             this.loadCoastlines(),
             this.loadLand(),
@@ -1038,6 +1319,49 @@
             self.draw();
             return self;
         });
+    };
+
+    /**
+     * Инициализация подсистемы выносок (CalloutLayout + CalloutRenderer).
+     * Layout рассчитывает геометрию в физических пикселях canvas
+     * (поэтому размеры умножаются на dpr); Renderer отрисовывает линии на canvas
+     * и поддерживает пул DOM-карточек .map-sat-callout.
+     */
+    EarthView.prototype._initCallouts = function() {
+        if (typeof window.CalloutLayout !== 'function' ||
+            typeof window.CalloutRenderer !== 'function') {
+            return;
+        }
+        const dpr = window.devicePixelRatio || 1;
+        // Размеры в physical px (canvas-координаты)
+        this._calloutLayout = new window.CalloutLayout({
+            stemLength:    80 * dpr,
+            tailLength:    24 * dpr,
+            cardWidth:    140 * dpr,
+            cardHeight:    36 * dpr,
+            minCardGap:     6 * dpr,
+            boundsPadding:  8 * dpr,
+            // Размещение карточек на расширенном PCA-эллипсе всех КА в кадре:
+            // иконки и трассы остаются неперекрытыми, карточки уходят в стороны.
+            // Единый эллипс на все маркеры — даже если tracked немного оторван
+            // от плотной группы, он гарантированно остаётся внутри кольца.
+            groupingMode: 'ring',
+            ringGap:       70 * dpr,
+            clusterDistance: Number.POSITIVE_INFINITY,
+            // Зазор от запретных трасс (selected оранжевая, tracking синяя):
+            // карточки уводятся от линии, чтобы не «прилипать» к ней визуально.
+            forbiddenPadding: 5 * dpr,
+        });
+        const container = document.getElementById('map-callouts');
+        if (container) {
+            this._calloutRenderer = new window.CalloutRenderer(container, {
+                lineWidth: 1.5,
+                bendDotRadius: 2.5,
+                fallbackColor: this.colors.satLabel || '#ffeb3b',
+            });
+        } else {
+            this._calloutRenderer = null;
+        }
     };
 
     /**
@@ -1293,13 +1617,6 @@
 
     // ========== Вторичные спутники ==========
 
-    // Палитра вторичных спутников без включённой трассы: крупные маркеры + высокая яркость
-    // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте (UX-MAP-VIS-001).
-    const SECONDARY_SAT_COLORS = [
-        '#ffffff', '#f0fcff', '#e8ffff', '#fffef0',
-        '#f5fff8', '#ffe8f5', '#e8f4ff', '#fffff0'
-    ];
-
     /**
      * Обновление позиций вторичных спутников группы.
      * Вызывается из app.js при каждом position-апдейте.
@@ -1412,8 +1729,11 @@
     };
 
     /**
-     * Отрисовка геометрического маркера вторичного спутника.
-     * Форма: circle, square, triangle или diamond — по хешу noradId.
+     * Отрисовка маркера вторичного спутника — «киношный» силуэт.
+     * Композиция (logical px): корпус 9×8 + 2 бума 1.5×1 + 2 панели 6×10 (с центральной
+     * перемычкой-гридом) + штырь-антенна 1×2 + точка-приёмник r=1. Габарит ≈24×12.
+     * Цвет КА несут корпус (alpha 1) и панели (alpha 0.7) — различение по цвету и подписи
+     * в callout-карточке. Tracked/selected рисуются как отдельные крупные SVG-иконки.
      * @private
      */
     EarthView.prototype._drawSecondaryMarker = function(sat, colorIdx, markerColor) {
@@ -1424,47 +1744,128 @@
         const p = this.project(pos.lon, pos.lat);
         const dpr = window.devicePixelRatio || 1;
         const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
-        const r = (isLight ? 4.5 : 6) * dpr;
         const color = markerColor || SECONDARY_SAT_COLORS[colorIdx % SECONDARY_SAT_COLORS.length];
-        const shape = sat.noradId % 4; // 0=circle, 1=square, 2=triangle, 3=diamond
 
+        // Габариты силуэта в logical px (умножаются на dpr внутри).
+        // Габарит ≈38×19 — явно различимый на карте, не конкурирует с tracked-иконкой (56×56).
+        const BODY_W   = 14;
+        const BODY_H   = 12;
+        const BOOM_W   = 2;
+        const BOOM_H   = 1.5;
+        const PANEL_W  = 10;
+        const PANEL_H  = 14;
+        const ANT_H    = 3;
+        const ANT_DOT  = 1.5;
+        const CORNER_R = 2;
+
+        const cx = p.x;
+        const cy = p.y;
+
+        const bodyHalfW = BODY_W / 2 * dpr;
+        const bodyHalfH = BODY_H / 2 * dpr;
+        const boomW = BOOM_W * dpr;
+        const boomH = BOOM_H * dpr;
+        const panelW = PANEL_W * dpr;
+        const panelH = PANEL_H * dpr;
+        const antH = ANT_H * dpr;
+        const antDot = ANT_DOT * dpr;
+        const cornerR = CORNER_R * dpr;
+
+        // Контур — нейтрально-тёмный, halo — мягкая тень (а не неоновое свечение).
+        // На light оставляем чуть «синь», но без насыщенности; на dark — почти чёрный
+        // тёплый графит, чтобы не сливалось с водой и не било в глаза неоном.
+        const stroke = isLight ? 'rgba(36, 44, 56, 0.78)' : 'rgba(20, 26, 34, 0.85)';
+        const halo   = isLight ? 'rgba(0, 0, 0, 0.18)'    : 'rgba(0, 0, 0, 0.45)';
+        const lwHair  = isLight ? Math.max(1, dpr)          : Math.max(1.1, 1.2 * dpr);
+        const lwPanel = isLight ? Math.max(1.2, 1.3 * dpr)  : Math.max(1.4, 1.6 * dpr);
+        const lwBody  = isLight ? Math.max(1.4, 1.5 * dpr)  : Math.max(1.6, 1.8 * dpr);
+
+        ctx.save();
+        ctx.lineCap = 'butt';
+        ctx.lineJoin = 'miter';
+        // Halo = мягкая тень: даёт «массу» иконке, но без свечения и неона.
+        ctx.shadowColor = halo;
+        ctx.shadowBlur = 2.5 * dpr;
+        ctx.shadowOffsetX = 0;
+        ctx.shadowOffsetY = 1 * dpr;
+
+        // ─── Антенна (штырь + точка) над корпусом ────────────────────
+        ctx.strokeStyle = stroke;
         ctx.fillStyle = color;
-        ctx.strokeStyle = isLight ? 'rgba(42, 48, 58, 0.4)' : 'rgba(0,0,0,0.82)';
-        ctx.lineWidth = isLight ? Math.max(0.85, Number(dpr)) : Math.max(1.25, 1.5 * dpr);
-
+        ctx.lineWidth = lwHair;
+        const antTop = cy - bodyHalfH - antH;
         ctx.beginPath();
-        if (shape === 0) {
-            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
-        } else if (shape === 1) {
-            ctx.rect(p.x - r, p.y - r, r * 2, r * 2);
-        } else if (shape === 2) {
-            ctx.moveTo(p.x, p.y - r);
-            ctx.lineTo(p.x + r, p.y + r);
-            ctx.lineTo(p.x - r, p.y + r);
-            ctx.closePath();
+        ctx.moveTo(cx, cy - bodyHalfH);
+        ctx.lineTo(cx, antTop);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(cx, antTop - antDot, antDot, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+
+        // ─── Бумы (короткие перемычки от корпуса к панелям) ─────────
+        ctx.fillStyle = stroke;
+        const boomY = cy - boomH / 2;
+        ctx.fillRect(cx - bodyHalfW - boomW, boomY, boomW, boomH);
+        ctx.fillRect(cx + bodyHalfW,         boomY, boomW, boomH);
+
+        // ─── Солнечные панели (заливка цветом КА, чуть полупрозрачно) ───
+        ctx.globalAlpha = 0.82;
+        ctx.fillStyle = color;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = lwPanel;
+        const panelY = cy - panelH / 2;
+        const leftX  = cx - bodyHalfW - boomW - panelW;
+        const rightX = cx + bodyHalfW + boomW;
+        ctx.beginPath();
+        ctx.rect(leftX, panelY, panelW, panelH);
+        ctx.fill();
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.rect(rightX, panelY, panelW, panelH);
+        ctx.fill();
+        ctx.stroke();
+
+        // Грид-линии на панелях (1 вертикальная + 1 горизонтальная) — без тени.
+        ctx.shadowColor = 'transparent';
+        ctx.globalAlpha = 0.65;
+        ctx.lineWidth = lwHair;
+        ctx.beginPath();
+        // Вертикальные посередине
+        ctx.moveTo(leftX + panelW / 2, panelY);
+        ctx.lineTo(leftX + panelW / 2, panelY + panelH);
+        ctx.moveTo(rightX + panelW / 2, panelY);
+        ctx.lineTo(rightX + panelW / 2, panelY + panelH);
+        // Горизонтальные посередине — добавляют ощущение «солнечных ячеек»
+        ctx.moveTo(leftX, panelY + panelH / 2);
+        ctx.lineTo(leftX + panelW, panelY + panelH / 2);
+        ctx.moveTo(rightX, panelY + panelH / 2);
+        ctx.lineTo(rightX + panelW, panelY + panelH / 2);
+        ctx.stroke();
+
+        // ─── Корпус (поверх всего, full alpha, скруглён) ────────────
+        ctx.globalAlpha = 1;
+        ctx.shadowColor = halo;
+        ctx.shadowBlur = 2.5 * dpr;
+        ctx.shadowOffsetY = 1 * dpr;
+        ctx.fillStyle = color;
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = lwBody;
+        const bx = cx - bodyHalfW;
+        const by = cy - bodyHalfH;
+        const bw = bodyHalfW * 2;
+        const bh = bodyHalfH * 2;
+        ctx.beginPath();
+        if (typeof ctx.roundRect === 'function') {
+            ctx.roundRect(bx, by, bw, bh, cornerR);
         } else {
-            ctx.moveTo(p.x, p.y - r);
-            ctx.lineTo(p.x + r, p.y);
-            ctx.lineTo(p.x, p.y + r);
-            ctx.lineTo(p.x - r, p.y);
-            ctx.closePath();
+            ctx.rect(bx, by, bw, bh);
         }
         ctx.fill();
         ctx.stroke();
 
-        if (sat.name) {
-            const fs = Math.round((isLight ? 10 : 12) * dpr);
-            ctx.font = (isLight ? '500 ' : '700 ') + fs + 'px monospace';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'top';
-            const labelY = p.y + r + 3 * dpr;
-            ctx.strokeStyle = isLight ? 'rgba(232, 236, 240, 0.95)' : 'rgba(0,0,0,0.92)';
-            ctx.lineWidth = isLight ? 1.2 : 2.75;
-            const label = _shortName(sat.name);
-            ctx.strokeText(label, p.x, labelY);
-            ctx.fillStyle = color;
-            ctx.fillText(label, p.x, labelY);
-        }
+        ctx.restore();
+        // Имя вторичного КА рисуется через CalloutRenderer; canvas-текст под маркером удалён.
     };
 
     // Экспорт

@@ -77,7 +77,6 @@
                     </g>
                 </svg>
                 </div>
-                <span class="map-sat-label" id="map-sat-tracking-label"></span>
             </div>
 
             <!-- SVG-маркер выбранного спутника (selected) — тот же логотип, цвет selected -->
@@ -142,8 +141,11 @@
                     </g>
                 </svg>
                 </div>
-                <span class="map-sat-label map-sat-label--selected" id="map-sat-selected-label"></span>
             </div>
+
+            <!-- Контейнер пула DOM-карточек выносок.
+                 Карточки добавляет/удаляет CalloutRenderer; позиция в процентах от .earth-view-container. -->
+            <div class="map-callouts" id="map-callouts" aria-hidden="true"></div>
 
             <!-- Оверлей при смене спутника (loading spinner) -->
             <div id="tracking-overlay" class="tracking-overlay hidden">
@@ -264,7 +266,7 @@
             </div>
         </div>
         <div class="right-panel__controls">
-            <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Наблюдение за выбранным спутником: антенна, узкополосный водопад" aria-label="Наблюдение"><span class="rp-ctrl__label">Наблюдение</span></button>
+            <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Сопровождать выбранный спутник: антенна, узкополосный водопад" aria-label="Сопровождать"><span class="rp-ctrl__label">Сопровождать</span></button>
             <button class="rp-ctrl rp-ctrl--reset" id="rp-reset" disabled title="Снять с наблюдения" aria-label="Снять с наблюдения"><span class="rp-ctrl__label">Сброс</span></button>
         </div>
         <!-- SkyView: окружность 300×300 px + отдельная панель информации (не влияет на размер окна отрисовки) -->
@@ -301,7 +303,7 @@
 <!-- Нижняя панель: вынесена в main-wrapper (вторая строка grid), от края до края по ширине -->
 <section class="bottom-panel" id="bottom-panel">
     <div class="bottom-panel__side">
-        <div class="bottom-panel__tabs" role="tablist" aria-label="Режим нижней панели: обзор, наблюдение, ТМИ, план сеансов">
+        <div class="bottom-panel__tabs" role="tablist" aria-label="Режим нижней панели: обзор, сопровождение, ТМИ, план сеансов">
             <button type="button" class="bottom-panel__tab-btn" data-tab="overview" role="tab" aria-selected="false" title="Обзор" aria-label="Обзор">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
                     <path d="M2 12c2-3 4-6 6 0s4 3 6 0 4-3 6 0 2 3 2 0" stroke-width="2" stroke-linecap="round"/>
@@ -309,7 +311,7 @@
                     <line x1="2" y1="7" x2="22" y2="7" opacity="0.4"/>
                 </svg>
             </button>
-            <button type="button" class="bottom-panel__tab-btn" data-tab="follow" role="tab" aria-selected="false" title="Наблюдение: азимут, угол места, узкополосный водопад" aria-label="Наблюдение">
+            <button type="button" class="bottom-panel__tab-btn" data-tab="follow" role="tab" aria-selected="false" title="Сопровождение: азимут, угол места, узкополосный водопад" aria-label="Сопровождение">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                     <path d="M4.9 16.1C1 12.2 1 5.8 4.9 1.9"/>
                     <path d="M7.8 4.7a6.14 6.14 0 0 0-.8 7.5"/>
@@ -343,7 +345,7 @@
     </div>
     <div class="bottom-panel__body" id="bottom-panel-body">
 
-        <!-- Вкладка: Наблюдение (Az | Водопад | El); по умолчанию открыт Обзор -->
+        <!-- Вкладка: Сопровождение (Az | Водопад | El); по умолчанию открыт Обзор -->
         <div class="bp-pane bp-pane--hidden" id="bp-pane-follow">
             <div class="bp-az-container">
                 <div class="bp-indicator-canvas-wrap">
@@ -398,8 +400,19 @@
                 <div class="bp-sdr-section">
                     <!-- <div class="bp-sdr-title">Настройки SDR</div> -->
                     <div class="bp-sdr-field">
-                        <label class="bp-sdr-label">Устройство</label>
-                        <select id="sdr-device" class="bp-input"><option>RTL-SDR #0</option><option>Нет устройства</option></select>
+                        <label class="bp-sdr-label" for="sdr-device">Устройство</label>
+                        <div class="bp-sdr-device-row">
+                            <select id="sdr-device" class="bp-input bp-input--device" name="sdr-device">
+                                <option value="none">Нет устройства</option>
+                                <option value="simulation" selected>Имитация</option>
+                            </select>
+                            <button type="button" class="bp-sdr-device-refresh" id="sdr-device-refresh" title="Обновить список устройств" aria-label="Обновить список устройств">
+                                <svg class="bp-sdr-device-refresh__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                                    <path d="M21 12a9 9 0 1 1-2.64-6.36"/>
+                                    <path d="M21 3v6h-6"/>
+                                </svg>
+                            </button>
+                        </div>
                     </div>
                     <div class="bp-sdr-field">
                         <label class="bp-sdr-label">Частота (MHz)</label>

@@ -352,7 +352,7 @@
                 if (window._bottomPanel && typeof window._bottomPanel.startWaterfall === 'function') {
                     window._bottomPanel.startWaterfall();
                 }
-                // Вкладка «Наблюдение» (Az/El/водопад) при активном наблюдении
+                // Вкладка «Сопровождение» (Az/El/водопад) при активном сопровождении
                 if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
                     window._bottomPanel.showTab('follow', false);
                 }
@@ -682,7 +682,7 @@
                 }
                 // Подтягиваем накопленные данные из StateManager (track/position могли прийти до init).
                 // Используем selected-слой: tracking-слой устанавливается только когда пользователь
-                // нажимает «Наблюдение» и бэкенд присылает satellite_group_update с tracking_id.
+                // нажимает «Сопровождать» и бэкенд присылает satellite_group_update с tracking_id.
                 if (window._stateManager) {
                     const sm = window._stateManager;
                     const selectedId = sm.getSelectedSatelliteId();

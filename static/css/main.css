@@ -436,29 +436,85 @@ body {
     overflow: visible;
 }
 
-.map-sat-label {
+/* Контейнер пула выносок над canvas карты.
+   Позиция = 100% .earth-view-container, дочерние карточки позиционируются абсолютно. */
+.map-callouts {
     position: absolute;
-    top: 100%;
-    left: 50%;
-    transform: translateX(-50%);
-    margin-top: 2px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1.25;
-    white-space: nowrap;
-    /* Текст подписи ≠ заливка иконки: на светлой карте иначе нет контраста с сушей */
-    color: var(--map-sat-label-color, var(--sat-label, #ffeb3b));
-    background: var(--map-sat-label-pill-bg, transparent);
-    box-shadow: var(--map-sat-label-pill-shadow, none);
-    text-shadow: var(--map-sat-label-shadow, 0 0 3px rgba(0, 0, 0, 0.85), 0 0 6px rgba(0, 0, 0, 0.5));
-    text-align: center;
+    inset: 0;
+    pointer-events: none;
+    z-index: 26;
 }
 
-.map-sat-label--selected {
-    color: var(--map-sat-label-selected-color, var(--map-icon-selected-fill, #ffb347));
+/* Одна выноска (диагональный стержень + горизонтальный хвост → карточка).
+   Линия рисуется на canvas, здесь — только сама карточка.
+   Цвет КА живёт только в полоске-акценте (3px) — текст использует
+   семантические токены темы, чтобы карточка читалась во всех темах.
+   По умолчанию полоска слева; модификатор --accent-right ставит её справа,
+   чтобы хвост входил именно в цветную метку. */
+.map-sat-callout {
+    position: absolute;
+    /* Ширина задаётся inline в CalloutRenderer (proc/cardW canvas-а, %),
+       высота согласована с CalloutLayout.opts.cardHeight (logical px).
+       min/max — защитная сетка на случай некорректных значений из layout. */
+    min-width: 70px;
+    max-width: 160px;
+    height: 36px;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: 4px 8px 4px 11px;
+    border-radius: 6px;
+    background: var(--map-callout-bg);
+    border: 1px solid var(--border-color);
+    box-shadow:
+        inset 3px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 2px 6px rgba(0, 0, 0, 0.25);
+    font-family: var(--font-mono);
+    line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    pointer-events: none;
+    will-change: left, top;
+    transition: left 0.25s ease, top 0.25s ease;
+}
+
+.map-sat-callout--accent-right {
+    padding: 4px 11px 4px 8px;
+    box-shadow:
+        inset -3px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 2px 6px rgba(0, 0, 0, 0.25);
+}
+
+/* Карточка «главного» КА: плотнее фон, толще полоска, мягкое свечение цветом КА. */
+.map-sat-callout--tracked {
+    z-index: 2;
+    background: var(--map-callout-bg-tracked, var(--map-callout-bg));
+    box-shadow:
+        inset 5px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 0 12px color-mix(in srgb, var(--callout-accent, var(--sat-label, #ffeb3b)) 30%, transparent),
+        0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.map-sat-callout--tracked.map-sat-callout--accent-right {
+    box-shadow:
+        inset -5px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 0 12px color-mix(in srgb, var(--callout-accent, var(--sat-label, #ffeb3b)) 30%, transparent),
+        0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.map-sat-callout__name {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--map-callout-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.map-sat-callout__norad {
+    font-size: 10px;
+    font-weight: 500;
+    color: var(--map-callout-text-muted);
 }
 
 /* Отображаемый размер = 100% контейнера; буфер для HiDPI задаётся в JS */
@@ -596,7 +652,7 @@ body {
 
 .bottom-panel__mode span {
     display: block;
-    /* Плотнее столбик, чтобы подписи (ОБЗОР / НАБЛЮДЕНИЕ / ТМИ) стабильно влезали */
+    /* Плотнее столбик, чтобы подписи (ОБЗОР / СОПРОВОЖД. / ТМИ) стабильно влезали */
     line-height: 1.08;
 }
 

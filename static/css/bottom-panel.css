@@ -1,4 +1,4 @@
-/* ===== Нижняя панель: вкладки Обзор / Наблюдение / ТМИ / План ===== */
+/* ===== Нижняя панель: вкладки Обзор / Сопровождение / ТМИ / План ===== */
 
 /* Вкладка «План»: полная таблица пролётов со скроллом */
 #bp-pane-plan {
@@ -29,7 +29,7 @@
     display: none !important;
 }
 
-/* ===== Вкладка: Наблюдение ===== */
+/* ===== Вкладка: Сопровождение ===== */
 
 /* Компоновка: Az (квадрат) | Водопад (1fr) | El (квадрат). stretch — контейнер водопада на всю высоту, шапка и шкала сверху */
 #bp-pane-follow {
@@ -325,6 +325,59 @@
     font-size: 11px;
     color: var(--panel-header-title, var(--text-muted));
     margin-bottom: 2px;
+}
+
+/* Строка «устройство»: select + кнопка обновления */
+.bp-sdr-device-row {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.bp-sdr-device-row .bp-input--device {
+    flex: 1;
+    min-width: 0;
+    width: auto;
+}
+
+/* Высота как у .bp-input (11px + padding 3px + рамка), не 44px — иначе громоздко рядом с select */
+.bp-sdr-device-refresh {
+    flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    min-width: 28px;
+    height: 26px;
+    min-height: 26px;
+    padding: 0;
+    margin: 0;
+    box-sizing: border-box;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease;
+}
+
+.bp-sdr-device-refresh:hover {
+    color: var(--accent-primary);
+    border-color: var(--text-muted);
+    background: var(--bp-sdr-btn-hover-bg, rgba(0, 212, 170, 0.08));
+}
+
+.bp-sdr-device-refresh:focus-visible {
+    outline: none;
+    border-color: var(--accent-primary);
+    box-shadow: var(--focus-ring-shadow, 0 0 0 2px rgba(0, 212, 170, 0.18));
+}
+
+.bp-sdr-device-refresh__icon {
+    width: 14px;
+    height: 14px;
+    display: block;
 }
 
 .bp-input {

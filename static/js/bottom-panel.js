@@ -1,4 +1,4 @@
-// Нижняя панель: вкладки «Обзор» / «Наблюдение» / «ТМИ».
+// Нижняя панель: вкладки «Обзор» / «Сопровождение» / «ТМИ».
 // Компоненты: SpectrumDataSource, WaterfallView, FFTSpectrumView, BottomPanel.
 
 (function() {
@@ -195,7 +195,7 @@
         return this._buf;
     };
 
-    // Срез вокруг centerBin шириной widthBins (узкополосный водопад вкладки «Наблюдение»)
+    // Срез вокруг centerBin шириной widthBins (узкополосный водопад вкладки «Сопровождение»)
     SpectrumDataSource.prototype.getSlice = function(centerBin, widthBins) {
         const half = Math.floor(widthBins / 2);
         const start = centerBin - half;
@@ -246,7 +246,7 @@
         }
     };
 
-    // Шкала частот на отдельном canvas (над водопадом «Наблюдение»)
+    // Шкала частот на отдельном canvas (над водопадом «Сопровождение»)
     WaterfallView.prototype._drawFreqScale = function(width) {
         const sc = this._scaleCanvas;
         if (!sc || !width) { return; }
@@ -649,11 +649,11 @@
         return next;
     }
 
-    const TAB_LABELS = { follow: 'Наблюдение', overview: 'Обзор', tmi: 'ТМИ', plan: 'План сеансов' };
-    /** Вертикальная колонка в полоске РТН (по одной букве; «Наблюдение» укладывается по высоте) */
-    const TAB_LABELS_SIDE = { follow: 'НАБЛЮДЕНИЕ', overview: 'ОБЗОР', tmi: 'ТМИ', plan: 'ПЛАН' };
+    const TAB_LABELS = { follow: 'Сопровождение', overview: 'Обзор', tmi: 'ТМИ', plan: 'План сеансов' };
+    /** Вертикальная колонка в полоске РТН (по одному знаку; follow — сокращение «Сопровожд.») */
+    const TAB_LABELS_SIDE = { follow: 'Сопр-ние', overview: 'ОБЗОР', tmi: 'ТМИ', plan: 'ПЛАН' };
 
-    // Центральный bin и ширина среза для узкополосного водопада вкладки «Наблюдение»
+    // Центральный bin и ширина среза для узкополосного водопада вкладки «Сопровождение»
     const FOLLOW_CENTER_BIN = 256;
     const FOLLOW_NARROW_BINS = 128;
 
@@ -701,7 +701,7 @@
     // Кнопки режима РТН: полоска слева от тела нижней панели
     const BOTTOM_TAB_BTN_SELECTOR = '.bottom-panel__tab-btn';
 
-    // Привязываем клики (Обзор / Наблюдение / ТМИ)
+    // Привязываем клики (Обзор / Сопровождение / ТМИ)
     BottomPanel.prototype._initTabs = function() {
         const self = this;
         const tabs = document.querySelectorAll(BOTTOM_TAB_BTN_SELECTOR);
@@ -776,7 +776,7 @@
 
         const ds = this._dataSource;
 
-        // Водопад «Наблюдение»
+        // Водопад «Сопровождение»
         const followCanvas = document.getElementById('waterfall-compact');
         const followScale = document.getElementById('waterfall-freq-scale');
         if (followCanvas) {
@@ -889,14 +889,14 @@
         if (this._overviewWF) { this._overviewWF.clear(); }
     };
 
-    // Запуск водопада «Наблюдение» (кнопка «Наблюдение» в правой панели)
+    // Запуск водопада «Сопровождение» (кнопка «Сопровождать» в правой панели)
     BottomPanel.prototype.startWaterfall = function() {
         this.resetSimulation();
         this._followRunning = true;
         if (this._followWF) { this._followWF.start(); }
     };
 
-    // Остановка и очистка водопада «Наблюдение» (кнопка «Сброс»)
+    // Остановка и очистка водопада «Сопровождение» (кнопка «Сброс»)
     BottomPanel.prototype.stopWaterfallAndClear = function() {
         this._followRunning = false;
         if (this._followWF) { this._followWF.clear(); }
@@ -950,10 +950,21 @@
             });
         }
 
+        const deviceSel = document.getElementById('sdr-device');
+        const deviceRefresh = document.getElementById('sdr-device-refresh');
+        if (deviceRefresh) {
+            deviceRefresh.addEventListener('click', function() {
+                console.log('[BottomPanel] TODO: GET /api/sdr/devices — обновление списка устройств', {
+                    current: deviceSel && deviceSel.value,
+                });
+            });
+        }
+
         const startBtn = document.getElementById('sdr-start');
         if (startBtn) {
             startBtn.addEventListener('click', function() {
                 console.log('[BottomPanel] TODO: POST /api/sdr/start', {
+                    device: deviceSel && deviceSel.value,
                     freq: document.getElementById('sdr-freq') && document.getElementById('sdr-freq').value,
                     gain: gainSlider && gainSlider.value,
                     bw:   document.getElementById('sdr-bw') && document.getElementById('sdr-bw').value,

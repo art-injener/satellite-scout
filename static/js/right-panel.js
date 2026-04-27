@@ -448,7 +448,7 @@
 
     RightPanelTable.prototype._updateControls = function() {
         if (this._trackBtn) {
-            // «Наблюдение» активна если есть выбранный спутник.
+            // «Сопровождать» активна если есть выбранный спутник.
             this._trackBtn.disabled = !this._selectedNoradId;
         }
         if (this._resetBtn) {

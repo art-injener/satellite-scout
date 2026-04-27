@@ -95,6 +95,13 @@
     --map-icon-flash-tracking:   #d0eaf7;
     --map-icon-flash-selected:   #fde8d2;
 
+    /* Карточка-выноска подписи КА (callout) — серебристо-серый прозрачный
+       «жетон» поверх светлой карты, чуть темнее land/ocean для контраста. */
+    --map-callout-bg:         rgba(176, 184, 196, 0.65);
+    --map-callout-bg-tracked: rgba(176, 184, 196, 0.88);
+    --map-callout-text:       #1c2530;
+    --map-callout-text-muted: #4a5260;
+
     --map-sat-label-pill-bg:         rgba(255, 255, 255, 0.95);
     --map-sat-label-pill-shadow:     0 0 0 1px rgba(35, 38, 41, 0.08), 0 2px 8px rgba(35, 38, 41, 0.10);
     --map-sat-label-color:           #232629;

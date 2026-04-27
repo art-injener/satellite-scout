@@ -466,7 +466,13 @@
     cursor: not-allowed;
 }
 
-/* Кнопка «Наблюдение» */
+/* Кнопка «Сопровождать» — подпись длиннее «Сброс»; размер шрифта см. ниже */
+.rp-ctrl--track {
+    font-size: 12px;
+    padding: 10px 6px;
+    letter-spacing: 0.01em;
+}
+
 .rp-ctrl--track:not(:disabled):hover {
     color: var(--accent-primary);
     border-color: var(--accent-primary);

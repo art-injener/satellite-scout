@@ -78,6 +78,13 @@
     --map-icon-led-off:          #7d8a9a;
     --map-icon-boom-fill:        #7a8494;
 
+    /* Карточка-выноска подписи КА (callout) — серебристо-серый прозрачный
+       «жетон» поверх светлой карты, чуть темнее land/ocean для контраста. */
+    --map-callout-bg:         rgba(176, 184, 196, 0.65);
+    --map-callout-bg-tracked: rgba(176, 184, 196, 0.88);
+    --map-callout-text:       #1a2430;
+    --map-callout-text-muted: #4f5967;
+
     /* Подписи DOM-маркеров на карте: тёмный текст на светлой «таблетке» (не цвет панелей КА) */
     --map-sat-label-pill-bg:         rgba(255, 255, 255, 0.94);
     --map-sat-label-pill-shadow:     0 0 0 1px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.12);
