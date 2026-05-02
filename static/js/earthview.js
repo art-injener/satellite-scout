@@ -27,6 +27,28 @@
     const MAP_SAT_SVG_OFFSET_DEG = -45;
     const MAP_SAT_DEFAULT_ROT = 0;
 
+    /**
+     * Порог «прыжка по долготе» внутри одного сегмента трассы (в градусах).
+     * При observerLon ≠ 0 пиксельная защита `|Δx| > thresh` не срабатывает для
+     * пары точек, разделённых большим Δlon, но лежащих по одну сторону от
+     * антимеридиана окна (например, lon=-120° и lon=+30° при observerLon=+40°
+     * дают |Δx|≈427 < threshold=512 — линия тянется через половину canvas).
+     * Дополнительная проверка |Δlon| > порог разрывает такие «палки».
+     * Нормальный шаг SGP4 (30 с) для LEO даёт Δlon ≈ 3.7°, для GEO ≈ 0°,
+     * polar — также ≤ 5°. 30° — заведомо больше любого нормального соседства.
+     */
+    const TRACK_LON_JUMP_DEG = 30;
+
+    /**
+     * Порог «прыжка по широте» внутри одного сегмента трассы (в градусах).
+     * Физически за 30 с (шаг SGP4) КА не может изменить широту больше чем
+     * на ~5° (LEO ~6.5°/мин по великому кругу). 15° — порог с запасом, но
+     * заведомо меньше любых артефактов «диагональной палки» (≥ 25°). Ловит
+     * случаи, когда backend передаёт точки с прыжком через полюс, у которых
+     * Δlon мал из-за raw-lon SGP4 и Δx проекции тоже мал.
+     */
+    const TRACK_LAT_JUMP_DEG = 15;
+
     // Палитра вторичных спутников без включённой трассы: крупные маркеры + высокая яркость
     // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте.
     // Используется как в _drawSecondaryMarker, так и в _collectCalloutMarkers.
@@ -466,6 +488,22 @@
             this._drawGridLabels();
         }
 
+        // Зоны радиовидимости — задний план (под трассами и маркерами), чтобы
+        // прозрачная заливка не «гасила» иконки спутников и не сбивала чтение
+        // трасс. Selected рисуется ПОСЛЕ tracking — оранжевая/синяя обводка
+        // выбранного КА видна, даже если зоны перекрываются.
+        if (this.satellite.noradId &&
+            this.options.showFootprint &&
+            this.satellite.visibilityZone && this.satellite.visibilityZone.length > 0) {
+            this._drawVisibilityZone();
+        }
+        if (this._selectedSatellite.noradId &&
+            this._selectedSatellite.noradId !== this.satellite.noradId &&
+            this.options.showFootprint &&
+            this._selectedSatellite.visibilityZone && this._selectedSatellite.visibilityZone.length > 0) {
+            this._drawSelectedVisibilityZone();
+        }
+
         // Слой 1: вторичные спутники (серые пунктиры).
         this._drawSecondaryLayer();
 
@@ -476,18 +514,13 @@
             this._drawSelectedLayer();
         }
 
-        // Слой 3: спутник под наблюдением (red/green + dots + footprint).
-        if (this.satellite.noradId) {
-            if (this._hasGroundTrack()) {
-                this._drawGroundTrack();
-            }
-            if (this.options.showFootprint && this.satellite.visibilityZone && this.satellite.visibilityZone.length > 0) {
-                this._drawVisibilityZone();
-            }
+        // Слой 3: трасса спутника под наблюдением (red/green + dots).
+        if (this.satellite.noradId && this._hasGroundTrack()) {
+            this._drawGroundTrack();
         }
 
         // Выноски (линии на canvas + DOM-карточки).
-        // Между трассами/футпринтом и SVG-маркерами: линии получаются под иконкой,
+        // Между трассами и SVG-маркерами: линии получаются под иконкой,
         // DOM-карточки — на отдельном слое поверх (z-index в CSS).
         this._drawCallouts();
 
@@ -498,12 +531,9 @@
             this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label', null, '', 'tracking', null);
         }
 
-        // Зона видимости и маркер выбранного спутника — DOM SVG (если не под наблюдением).
+        // Маркер выбранного спутника — DOM SVG (если не под наблюдением).
         if (this._selectedSatellite.noradId &&
             this._selectedSatellite.noradId !== this.satellite.noradId) {
-            if (this.options.showFootprint && this._selectedSatellite.visibilityZone && this._selectedSatellite.visibilityZone.length > 0) {
-                this._drawSelectedVisibilityZone();
-            }
             if (this._selectedSatellite.position) {
                 this._drawSelectedSatelliteIcon();
             }
@@ -971,6 +1001,41 @@
         const firstFutureSeg = future[0];
         if (!lastPastSeg || lastPastSeg.length === 0) { return past; }
         if (!firstFutureSeg || firstFutureSeg.length === 0) { return past; }
+
+        // Защита от «палки через всю карту»: если последняя точка past и первая
+        // точка future физически далеко друг от друга по lon или по времени —
+        // bridge не делаем. Такое возможно, когда past содержит только boundary-
+        // точку окна (КА вблизи антимеридиана окна) или сегменты разделены
+        // несколькими шагами SGP4 (gap в данных). Защита `_drawTrackSegment` по
+        // |Δx|>thresh не срабатывает, если точки на одной стороне окна → линия
+        // тянется наискосок через половину canvas.
+        const a = lastPastSeg[lastPastSeg.length - 1];
+        const b = firstFutureSeg[0];
+        if (a && b) {
+            // Δlon с учётом перехода через ±180°.
+            let dLon = (b.lon || 0) - (a.lon || 0);
+            while (dLon > 180) { dLon -= 360; }
+            while (dLon < -180) { dLon += 360; }
+            const aTs = (a.ts !== undefined && a.ts !== null) ? a.ts : a.time;
+            const bTs = (b.ts !== undefined && b.ts !== null) ? b.ts : b.time;
+            const hasTs = (aTs !== undefined && aTs !== null && bTs !== undefined && bTs !== null);
+            const dTs = hasTs ? Math.abs(bTs - aTs) : 0;
+            // Пороги: 30° по долготе ≈ 8 шагов SGP4 (~4 мин LEO),
+            // 120000 мс = 4 шага по 30 с — заведомо больше нормального соседства
+            // (нормальное соседство past_last ↔ now_point ≈ 1 шаг). Δlat>15° —
+            // тоже аномалия (LEO ~6.5°/мин по великому кругу): bridge через
+            // полюс при «zigzag»-данных давал диагональ через половину карты.
+            const BRIDGE_MAX_LON_GAP_DEG = 30;
+            const BRIDGE_MAX_LAT_GAP_DEG = 15;
+            const BRIDGE_MAX_TS_GAP_MS = 120000;
+            const dLat = Math.abs((b.lat || 0) - (a.lat || 0));
+            if (Math.abs(dLon) > BRIDGE_MAX_LON_GAP_DEG ||
+                dLat > BRIDGE_MAX_LAT_GAP_DEG ||
+                (dTs > 0 && dTs > BRIDGE_MAX_TS_GAP_MS)) {
+                return past;
+            }
+        }
+
         const extended = lastPastSeg.slice();
         extended.push(firstFutureSeg[0]);
         const out = past.slice(0, past.length - 1);
@@ -1000,14 +1065,32 @@
             ctx.beginPath();
             const thresh = this._antimeridianThreshold();
             let prevP = null;
+            let prevLon = null;
+            let prevLat = null;
             for (let k = 0; k < points.length; k++) {
                 const p = this.project(points[k].lon, points[k].lat);
-                if (k === 0 || (prevP && Math.abs(p.x - prevP.x) > thresh)) {
+                const lon = points[k].lon;
+                const lat = points[k].lat;
+                let isJump = false;
+                if (prevP && Math.abs(p.x - prevP.x) > thresh) {
+                    isJump = true;
+                } else if (prevLon !== null) {
+                    let dLon = lon - prevLon;
+                    while (dLon > 180) { dLon -= 360; }
+                    while (dLon < -180) { dLon += 360; }
+                    if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
+                }
+                if (!isJump && prevLat !== null && Math.abs(lat - prevLat) > TRACK_LAT_JUMP_DEG) {
+                    isJump = true;
+                }
+                if (k === 0 || isJump) {
                     ctx.moveTo(p.x, p.y);
                 } else {
                     ctx.lineTo(p.x, p.y);
                 }
                 prevP = p;
+                prevLon = lon;
+                prevLat = lat;
             }
             ctx.stroke();
         }
@@ -1527,60 +1610,194 @@
         if (!pts || pts.length < 3) { return; }
 
         const ctx = this.ctx;
-        const threshold = this._antimeridianThreshold();
-        const proj = new Array(pts.length);
-        for (let i = 0; i < pts.length; i++) { proj[i] = this.project(pts[i].lon, pts[i].lat); }
+        const w = this.width;
+        const h = this.height;
+        const z = this.zoom || 1;
+        const cy = this._effectiveCenterLat();
+        const halfW = w / 2;
+        const halfH = h / 2;
+        const wz = w * z;
 
-        // Считаем количество «прыжков» по антимеридиану.
-        let breaks = 0;
-        for (let i = 1; i < proj.length; i++) {
-            if (Math.abs(proj[i].x - proj[i - 1].x) > threshold) { breaks++; }
-        }
-
-        if (breaks === 0) {
-            // Сплошное кольцо без шва: заливка + обводка как раньше.
-            ctx.beginPath();
-            ctx.moveTo(proj[0].x, proj[0].y);
-            for (let i = 1; i < proj.length; i++) { ctx.lineTo(proj[i].x, proj[i].y); }
-            ctx.closePath();
-            if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
+        const projY = function(lat) { return halfH - ((lat - cy) / 90) * halfH * z; };
+        const stroke = function() {
             if (strokeStyle) {
                 ctx.strokeStyle = strokeStyle;
                 ctx.lineWidth = lineWidth;
                 ctx.stroke();
             }
+        };
+        const fill = function() {
+            if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
+        };
+
+        // Обнаружение полярного footprint: backend для polar-footprint
+        // выдаёт ОДИН сегмент с точками по всей долготе (огибает полюс).
+        // Признак — circular-spread долгот ≈ 360° (footprint покрывает все
+        // долготы). Считаем spread как 360°−max_gap между соседними
+        // отсортированными lon (учитывая циклический «шов» 360°→0°): это
+        // правильно отличает узкую дугу через ±180° (gap=356°→spread=4°)
+        // от настоящего полярного footprint (gap≈5°→spread≈355°).
+        // Сторона (north/south) — по знаку среднего lat. НЕ полагаемся на
+        // достижение lat=±85°: footprint малого радиуса вокруг полюса
+        // может не иметь высокоширотных точек, при этом он полностью
+        // охватывает полюс на сфере.
+        let sumLatRaw = 0;
+        const sortedLons = new Array(pts.length);
+        for (let i = 0; i < pts.length; i++) {
+            sumLatRaw += pts[i].lat;
+            sortedLons[i] = pts[i].lon;
+        }
+        sortedLons.sort(function(a, b) { return a - b; });
+        let maxGap = 0;
+        for (let i = 1; i < sortedLons.length; i++) {
+            const g = sortedLons[i] - sortedLons[i - 1];
+            if (g > maxGap) { maxGap = g; }
+        }
+        const wrapGap = 360 - (sortedLons[sortedLons.length - 1] - sortedLons[0]);
+        if (wrapGap > maxGap) { maxGap = wrapGap; }
+        const lonSpread = 360 - maxGap;
+        const avgLat = sumLatRaw / pts.length;
+        const isPolar = lonSpread > 270;
+        const isNorthPolar = isPolar && avgLat >= 0;
+        const isSouthPolar = isPolar && avgLat < 0;
+
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(0, 0, w, h);
+        ctx.clip();
+
+        if (isNorthPolar || isSouthPolar) {
+            // Для polar footprint строим «нижнюю огибающую» по корзинам
+            // долгот: для северного — min(lat) в каждой корзине, для южного —
+            // max(lat). Затем замыкаем полигон через верхний/нижний край
+            // canvas (`edgeY` за пределами видимой области, clip отсекает).
+            const bins = 72;
+            const step = 360 / bins;
+            const envelope = new Array(bins).fill(null);
+            for (let i = 0; i < pts.length; i++) {
+                let dLon = pts[i].lon - this.center.lon;
+                while (dLon > 180) { dLon -= 360; }
+                while (dLon <= -180) { dLon += 360; }
+                const idx = Math.floor((dLon + 180) / step);
+                const safeIdx = Math.max(0, Math.min(bins - 1, idx));
+                if (envelope[safeIdx] === null) {
+                    envelope[safeIdx] = pts[i].lat;
+                } else if (isNorthPolar) {
+                    if (pts[i].lat < envelope[safeIdx]) { envelope[safeIdx] = pts[i].lat; }
+                } else {
+                    if (pts[i].lat > envelope[safeIdx]) { envelope[safeIdx] = pts[i].lat; }
+                }
+            }
+            for (let i = 0; i < bins; i++) {
+                if (envelope[i] === null) {
+                    let left = i - 1, right = i + 1;
+                    while (left >= 0 && envelope[left] === null) { left--; }
+                    while (right < bins && envelope[right] === null) { right++; }
+                    if (left >= 0 && right < bins) {
+                        const f = (i - left) / (right - left);
+                        envelope[i] = envelope[left] * (1 - f) + envelope[right] * f;
+                    } else if (left >= 0) {
+                        envelope[i] = envelope[left];
+                    } else if (right < bins) {
+                        envelope[i] = envelope[right];
+                    } else {
+                        envelope[i] = isNorthPolar ? 90 : -90;
+                    }
+                }
+            }
+
+            const edgeY = isNorthPolar ? -10 : (h + 10);
+            const leftEdgeX = -wz / 2 + halfW;
+            const rightEdgeX = wz / 2 + halfW;
+            // Crontinuity на швах ±180°: по lon footprint цикличен — берём
+            // среднее между крайними корзинами (envelope[0] и envelope[N-1]),
+            // чтобы линия на левом и правом краю canvas была одной высоты
+            // (без видимого «уступа» при wrap).
+            const seamLat = (envelope[0] + envelope[bins - 1]) / 2;
+            const seamY = projY(seamLat);
+
+            // Fill и stroke рисуем РАЗНЫМИ path'ами, иначе stroke по
+            // замыкающим диагоналям к (corner_x, edgeY) попадает в
+            // видимую область у краёв carta и создаёт «трапеции».
+            // Fill: замкнутый полигон через top/bottom edge.
+            // Stroke: только нижняя огибающая, начинается на левом краю
+            // canvas и заканчивается на правом — без обрыва.
+            const drawOnce = function(offsetX) {
+                if (fillStyle) {
+                    ctx.beginPath();
+                    ctx.moveTo(leftEdgeX + offsetX, edgeY);
+                    ctx.lineTo(leftEdgeX + offsetX, seamY);
+                    for (let i = 0; i < bins; i++) {
+                        const lonDeg = -180 + (i + 0.5) * step;
+                        const x = (lonDeg / 360) * wz + halfW + offsetX;
+                        const y = projY(envelope[i]);
+                        ctx.lineTo(x, y);
+                    }
+                    ctx.lineTo(rightEdgeX + offsetX, seamY);
+                    ctx.lineTo(rightEdgeX + offsetX, edgeY);
+                    ctx.closePath();
+                    fill();
+                }
+                if (strokeStyle) {
+                    ctx.beginPath();
+                    ctx.moveTo(leftEdgeX + offsetX, seamY);
+                    for (let i = 0; i < bins; i++) {
+                        const lonDeg = -180 + (i + 0.5) * step;
+                        const x = (lonDeg / 360) * wz + halfW + offsetX;
+                        const y = projY(envelope[i]);
+                        ctx.lineTo(x, y);
+                    }
+                    ctx.lineTo(rightEdgeX + offsetX, seamY);
+                    stroke();
+                }
+            };
+            drawOnce(0);
+            drawOnce(wz);
+            drawOnce(-wz);
+            ctx.restore();
             return;
         }
 
-        // Кольцо пересекает шов: только обводка с разрывами на швах.
-        // Заливку делать корректно сложно (нужно полигон-cutting); отказ от неё
-        // визуально допустим — оператор видит обведённую границу зоны без артефакта.
-        if (!strokeStyle) { return; }
-        ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = lineWidth;
-        ctx.beginPath();
-        let moved = false;
-        let prev = null;
-        for (let i = 0; i < proj.length; i++) {
-            const p = proj[i];
-            if (prev && Math.abs(p.x - prev.x) > threshold) {
-                ctx.stroke();
-                ctx.beginPath();
-                moved = false;
-            }
-            if (!moved) { ctx.moveTo(p.x, p.y); moved = true; }
-            else { ctx.lineTo(p.x, p.y); }
-            prev = p;
+        // Обычный footprint: continuous unwrap проекция (раскручиваем lon
+        // последовательно, без normalize Δlon). Это сохраняет непрерывность
+        // полилинии при пересечении швов карты — нет «диагонали через всю
+        // карту» при closePath. Затем mass-shift сдвигает фигуру в текущую
+        // копию canvas, и 3 копии со смещением ±wz отрисовывают
+        // обёрнутые части.
+        const unwrap = new Array(pts.length);
+        unwrap[0] = pts[0].lon;
+        for (let i = 1; i < pts.length; i++) {
+            let step = pts[i].lon - pts[i - 1].lon;
+            while (step > 180) { step -= 360; }
+            while (step <= -180) { step += 360; }
+            unwrap[i] = unwrap[i - 1] + step;
         }
-        // Замыкание кольца к первой точке только если это не вызовет нового шва.
-        if (proj.length > 0) {
-            const last = proj[proj.length - 1];
-            const first = proj[0];
-            if (Math.abs(first.x - last.x) <= threshold) {
-                ctx.lineTo(first.x, first.y);
-            }
+        let sumLon = 0;
+        for (let i = 0; i < unwrap.length; i++) { sumLon += unwrap[i]; }
+        const avgLon = sumLon / unwrap.length;
+        let lonShift = 0;
+        while (avgLon + lonShift - this.center.lon > 180) { lonShift -= 360; }
+        while (avgLon + lonShift - this.center.lon < -180) { lonShift += 360; }
+        const proj = new Array(pts.length);
+        for (let i = 0; i < pts.length; i++) {
+            const dLon = unwrap[i] + lonShift - this.center.lon;
+            proj[i] = { x: (dLon / 360) * wz + halfW, y: projY(pts[i].lat) };
         }
-        ctx.stroke();
+
+        const drawOnce = function(offsetX) {
+            ctx.beginPath();
+            ctx.moveTo(proj[0].x + offsetX, proj[0].y);
+            for (let i = 1; i < proj.length; i++) {
+                ctx.lineTo(proj[i].x + offsetX, proj[i].y);
+            }
+            ctx.closePath();
+            fill();
+            stroke();
+        };
+        drawOnce(0);
+        drawOnce(wz);
+        drawOnce(-wz);
+        ctx.restore();
     };
 
     // ========== API методы ==========
@@ -2133,7 +2350,12 @@
     };
 
     /**
-     * Отрисовка слоя текущего (выбранного) спутника: сплошная жёлтая линия трассы (без пунктира).
+     * Отрисовка слоя текущего (выбранного) спутника: одна цветовая
+     * линия (--selected-track, жёлтый в тёмных темах / синий в светлых),
+     * но разный СТИЛЬ для past и future — прошлая часть рисуется
+     * круглыми точками, будущая сплошной линией. Контраст стиля помогает
+     * быстро понять направление движения КА: «откуда пришёл» (точки)
+     * vs «куда летит» (сплошная).
      * @private
      */
     EarthView.prototype._drawSelectedLayer = function() {
@@ -2142,28 +2364,50 @@
         if (!track) { return; }
 
         const ctx = this.ctx;
-        const color = this.colors.selectedTrack;
+        const trackColor = this.colors.selectedTrack;
+        const pastColor = trackColor;
+        const futureColor = trackColor;
         const dpr = window.devicePixelRatio || 1;
 
-        ctx.strokeStyle = color;
         ctx.lineWidth = 2 * dpr;
-        ctx.setLineDash([]);
 
         // Сегменты уже разрезаны на бэке по антимеридиану. Bridge'м past↔future,
-        // чтобы не было «дыры» в районе текущей позиции КА.
-        const drawSeg = function(self, seg) {
+        // чтобы не было «дыры» в районе текущей позиции КА. Дополнительно к
+        // пиксельной защите `|Δx|>thresh` разрываем линию при `|Δlon|>30°` —
+        // ловит «палки» через половину карты при observerLon ≠ 0 (см. doc у
+        // TRACK_LON_JUMP_DEG).
+        const drawSeg = function(self, seg, color) {
             if (!Array.isArray(seg) || seg.length < 2) { return; }
+            ctx.strokeStyle = color;
             ctx.beginPath();
             const thresh = self._antimeridianThreshold();
             let prevP = null;
+            let prevLon = null;
+            let prevLat = null;
             for (let k = 0; k < seg.length; k++) {
                 const p = self.project(seg[k].lon, seg[k].lat);
-                if (k === 0 || (prevP && Math.abs(p.x - prevP.x) > thresh)) {
+                const lon = seg[k].lon;
+                const lat = seg[k].lat;
+                let isJump = false;
+                if (prevP && Math.abs(p.x - prevP.x) > thresh) {
+                    isJump = true;
+                } else if (prevLon !== null) {
+                    let dLon = lon - prevLon;
+                    while (dLon > 180) { dLon -= 360; }
+                    while (dLon < -180) { dLon += 360; }
+                    if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
+                }
+                if (!isJump && prevLat !== null && Math.abs(lat - prevLat) > TRACK_LAT_JUMP_DEG) {
+                    isJump = true;
+                }
+                if (k === 0 || isJump) {
                     ctx.moveTo(p.x, p.y);
                 } else {
                     ctx.lineTo(p.x, p.y);
                 }
                 prevP = p;
+                prevLon = lon;
+                prevLat = lat;
             }
             ctx.stroke();
         };
@@ -2173,15 +2417,28 @@
             const futureSegs = Array.isArray(track.future) ? track.future : [];
             const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
             if (Array.isArray(bridgedPast)) {
+                // Past — крупные круглые точки через ~8 px:
+                // setLineDash([0, gap]) + lineCap='round' → нулевая длина
+                // штриха, gap между точками. Толщина 3*dpr — точки крупнее
+                // солидной future-линии и хорошо заметны.
+                const prevCap = ctx.lineCap;
+                const prevWidth = ctx.lineWidth;
+                ctx.lineCap = 'round';
+                ctx.lineWidth = 4 * dpr;
+                ctx.setLineDash([0, 10]);
                 for (let s = 0; s < bridgedPast.length; s++) {
-                    drawSeg(this, bridgedPast[s]);
+                    drawSeg(this, bridgedPast[s], pastColor);
                 }
+                ctx.lineCap = prevCap || 'butt';
+                ctx.lineWidth = prevWidth;
             }
+            ctx.setLineDash([]);
             for (let s = 0; s < futureSegs.length; s++) {
-                drawSeg(this, futureSegs[s]);
+                drawSeg(this, futureSegs[s], futureColor);
             }
         } else if (Array.isArray(track)) {
-            drawSeg(this, track);
+            ctx.setLineDash([]);
+            drawSeg(this, track, futureColor);
         }
         ctx.setLineDash([]);
     };
@@ -2309,21 +2566,41 @@
 
         // Каждый сегмент рисуется отдельным sub-path (бэк уже разрезал по
         // антимеридиану через splitAtAntimeridian); bridge'м past↔future для
-        // закрытия gap'a в районе текущей позиции КА.
+        // закрытия gap'a в районе текущей позиции КА. Дополнительная защита от
+        // «палки через половину карты» при observerLon ≠ 0: разрыв при |Δlon|>30°
+        // (см. TRACK_LON_JUMP_DEG).
         const self = this;
         const drawSeg = function(seg) {
             if (!Array.isArray(seg) || seg.length < 2) { return; }
             ctx.beginPath();
             const thresh = self._antimeridianThreshold();
             let prevP = null;
+            let prevLon = null;
+            let prevLat = null;
             for (let k = 0; k < seg.length; k++) {
                 const p = self.project(seg[k].lon, seg[k].lat);
-                if (k === 0 || (prevP && Math.abs(p.x - prevP.x) > thresh)) {
+                const lon = seg[k].lon;
+                const lat = seg[k].lat;
+                let isJump = false;
+                if (prevP && Math.abs(p.x - prevP.x) > thresh) {
+                    isJump = true;
+                } else if (prevLon !== null) {
+                    let dLon = lon - prevLon;
+                    while (dLon > 180) { dLon -= 360; }
+                    while (dLon < -180) { dLon += 360; }
+                    if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
+                }
+                if (!isJump && prevLat !== null && Math.abs(lat - prevLat) > TRACK_LAT_JUMP_DEG) {
+                    isJump = true;
+                }
+                if (k === 0 || isJump) {
                     ctx.moveTo(p.x, p.y);
                 } else {
                     ctx.lineTo(p.x, p.y);
                 }
                 prevP = p;
+                prevLon = lon;
+                prevLat = lat;
             }
             ctx.stroke();
         };

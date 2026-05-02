@@ -605,6 +605,596 @@ test('progress дробный → дорисовывается «кончик к
     assert.ok(Math.abs(last.args[0] - expectedX) < 0.01, 'tail x=' + last.args[0]);
 });
 
+// ── _bridgePastFuture: защита от «палки через всю карту» ─────────────────────
+
+console.log('\nEarthView: _bridgePastFuture');
+
+test('bridge: нормальное соседство (Δlon~3°, Δts=30s) — past_last↔future_first склеиваются', () => {
+    const ev = makeEv();
+    const past = [[
+        { lon: 5, lat: 30, ts: 1000000 },
+        { lon: 7, lat: 31, ts: 1030000 },
+    ]];
+    const future = [[
+        { lon: 10, lat: 32, ts: 1060000 },
+        { lon: 13, lat: 33, ts: 1090000 },
+    ]];
+    const out = ev._bridgePastFuture(past, future);
+    assert.strictEqual(out.length, 1, 'один сегмент в past');
+    assert.strictEqual(out[0].length, 3, 'last past дополнен first future');
+    assert.strictEqual(out[0][2].lon, 10, 'добавлена именно first future-точка');
+});
+
+test('bridge: разрыв по lon >30° — bridge НЕ делается (антипалка)', () => {
+    const ev = makeEv();
+    // past содержит только boundary-точку (КА вылетел за границу окна на первом шаге).
+    const past = [[
+        { lon: -139.99, lat: 37, ts: 1000000 },
+    ]];
+    const future = [[
+        // nowPoint далеко от boundary — палка пошла бы через половину карты.
+        { lon: 10, lat: 37, ts: 1030000 },
+        { lon: 13, lat: 37, ts: 1060000 },
+    ]];
+    const out = ev._bridgePastFuture(past, future);
+    assert.strictEqual(out.length, 1, 'past остался как был');
+    assert.strictEqual(out[0].length, 1, 'last past НЕ дополнен — палка не строится');
+});
+
+test('bridge: разрыв по времени >120 с — bridge НЕ делается', () => {
+    const ev = makeEv();
+    const past = [[
+        { lon: 5, lat: 30, ts: 1000000 },
+        { lon: 7, lat: 31, ts: 1030000 },
+    ]];
+    const future = [[
+        // gap 5 минут — например, между сегментами потеряны точки.
+        { lon: 10, lat: 32, ts: 1330000 },
+    ]];
+    const out = ev._bridgePastFuture(past, future);
+    assert.strictEqual(out[0].length, 2, 'past не дополнен при больших Δts');
+});
+
+test('bridge: переход через ±180° (Δlon учитывает антимеридиан) — короткий гэп склеивается', () => {
+    const ev = makeEv();
+    const past = [[
+        { lon: 178, lat: 0, ts: 1000000 },
+    ]];
+    const future = [[
+        // raw lon=-179°, физически рядом с +178° (Δlon=3° через ±180°).
+        { lon: -179, lat: 0, ts: 1030000 },
+    ]];
+    const out = ev._bridgePastFuture(past, future);
+    assert.strictEqual(out[0].length, 2, 'переход через ±180° не считается «палкой»');
+});
+
+test('bridge: пустой past возвращает входной массив без модификаций', () => {
+    const ev = makeEv();
+    const past = [];
+    assert.strictEqual(ev._bridgePastFuture(past, [[{ lon: 0, lat: 0, ts: 0 }]]), past);
+});
+
+test('bridge: null past возвращает null', () => {
+    const ev = makeEv();
+    assert.strictEqual(ev._bridgePastFuture(null, [[{ lon: 0, lat: 0, ts: 0 }]]), null);
+});
+
+test('bridge: пустой future возвращает past как есть', () => {
+    const ev = makeEv();
+    const past = [[{ lon: 0, lat: 0, ts: 0 }]];
+    assert.strictEqual(ev._bridgePastFuture(past, []), past);
+});
+
+test('bridge: разрыв по широте >15° — bridge НЕ делается (антидиагональ через карту)', () => {
+    const ev = makeEv();
+    // past_last на низкой широте, future_first — высоко (после потерянных
+    // точек прохождения полюса). Δlon мал, Δts мал → старая защита пропускала.
+    const past = [[
+        { lon: 5, lat: 20, ts: 1000000 },
+    ]];
+    const future = [[
+        { lon: 10, lat: 80, ts: 1030000 },
+    ]];
+    const out = ev._bridgePastFuture(past, future);
+    assert.strictEqual(out[0].length, 1, 'past не дополнен при Δlat>15°');
+});
+
+// ── _drawTrackSegment: разрыв линии при |Δlon|>30° внутри сегмента ───────────
+
+console.log('\nEarthView: _drawTrackSegment lon-jump break');
+
+/**
+ * Записываем moveTo/lineTo, чтобы посчитать число sub-path'ов.
+ * Для линии без разрыва lineTo вызывается N-1 раз, moveTo — 1 раз.
+ * При разрыве на каком-то шаге появляется лишний moveTo.
+ */
+function makeRecordingTrackEv() {
+    const calls = [];
+    const handler = {
+        get: function(_t, prop) {
+            if (prop === 'beginPath' || prop === 'stroke' || prop === 'fill' ||
+                prop === 'closePath' || prop === 'save' || prop === 'restore' ||
+                prop === 'arc' || prop === 'fillRect' ||
+                prop === 'strokeRect' || prop === 'clip') {
+                return function() { calls.push({ op: prop, args: [] }); };
+            }
+            if (prop === 'setLineDash') {
+                return function(pattern) { calls.push({ op: prop, args: [pattern] }); };
+            }
+            if (prop === 'moveTo' || prop === 'lineTo') {
+                return function(x, y) { calls.push({ op: prop, args: [x, y] }); };
+            }
+            if (prop === 'rect') {
+                return function(x, y, w, h) { calls.push({ op: prop, args: [x, y, w, h] }); };
+            }
+            if (prop === 'measureText') {
+                return function() { return { width: 0 }; };
+            }
+            return undefined;
+        },
+        set: function(_t, prop, value) {
+            if (prop === 'strokeStyle' || prop === 'fillStyle') {
+                calls.push({ op: prop, args: [value] });
+            }
+            return true;
+        }
+    };
+    const ctx = new Proxy({}, handler);
+    const canvas = {
+        width: 1024, height: 512, clientWidth: 1024, clientHeight: 512,
+        getContext: function() { return ctx; },
+        addEventListener: function() {}, parentElement: null
+    };
+    const ev = new EarthView(canvas, { animStyle: 'instant' });
+    ev._drawCount = 0;
+    ev._mapTrackLineWidth = 1;
+    return { ev: ev, calls: calls };
+}
+
+test('drawTrackSegment: соседние точки с Δlon=150° → разрыв (новый moveTo)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Сегмент с «дырой»: две точки разделены Δlon=150° на одной широте.
+    // Без новой защиты: |Δx|≈427 < threshold(512), разрыва нет → палка через
+    // полкарты. С защитой по Δlon — два moveTo.
+    const seg = [
+        { lon: -120, lat: 50, ts: 1000000 },
+        { lon: 30, lat: 50, ts: 1030000 },
+    ];
+    ev._drawTrackSegment(seg, '#ff0');
+    const moveTos = calls.filter(c => c.op === 'moveTo');
+    assert.strictEqual(moveTos.length, 2, 'должно быть 2 moveTo (разрыв)');
+});
+
+test('drawTrackSegment: нормальный шаг Δlon=4° → без разрыва (один moveTo)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    const seg = [
+        { lon: 10, lat: 50, ts: 1000000 },
+        { lon: 14, lat: 51, ts: 1030000 },
+        { lon: 18, lat: 52, ts: 1060000 },
+    ];
+    ev._drawTrackSegment(seg, '#ff0');
+    const moveTos = calls.filter(c => c.op === 'moveTo');
+    assert.strictEqual(moveTos.length, 1, 'один moveTo на сегмент');
+});
+
+test('drawTrackSegment: соседние точки с Δlat=40° → разрыв (антидиагональ через полюс)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Δlon=2°, Δlat=45° — pixel-check проходит, lon-check проходит, но
+    // физически нереально (LEO ~6.5°/мин). lat-check должен разорвать.
+    const seg = [
+        { lon: 30, lat: 40, ts: 1000000 },
+        { lon: 32, lat: 85, ts: 1030000 },
+    ];
+    ev._drawTrackSegment(seg, '#ff0');
+    const moveTos = calls.filter(c => c.op === 'moveTo');
+    assert.strictEqual(moveTos.length, 2, 'разрыв по Δlat>15°');
+});
+
+test('drawTrackSegment: нормальный шаг Δlat=2° → без разрыва', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    const seg = [
+        { lon: 30, lat: 50, ts: 1000000 },
+        { lon: 32, lat: 52, ts: 1030000 },
+        { lon: 34, lat: 54, ts: 1060000 },
+    ];
+    ev._drawTrackSegment(seg, '#ff0');
+    const moveTos = calls.filter(c => c.op === 'moveTo');
+    assert.strictEqual(moveTos.length, 1, 'нормальный Δlat — без разрыва');
+});
+
+test('drawZoneRing: кольцо целиком в окне → fill (минимум одна заливка, видимая в canvas)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Кольцо вокруг Москвы, целиком внутри окна.
+    const ring = [
+        { lon: 40, lat: 60 }, { lon: 50, lat: 55 }, { lon: 55, lat: 47 },
+        { lon: 50, lat: 39 }, { lon: 40, lat: 34 }, { lon: 30, lat: 39 },
+        { lon: 25, lat: 47 }, { lon: 30, lat: 55 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const fills = calls.filter(c => c.op === 'fill');
+    assert.ok(fills.length >= 1, 'кольцо в окне должно иметь заливку');
+    // Bbox видимой копии не должен охватывать половину canvas.
+    const lineTos = calls.filter(c => c.op === 'lineTo');
+    const visibleXs = lineTos
+        .map(c => c.args[0])
+        .filter(x => x >= 0 && x <= ev.width);
+    if (visibleXs.length > 0) {
+        const span = Math.max.apply(null, visibleXs) - Math.min.apply(null, visibleXs);
+        assert.ok(span < ev.width * 0.5, 'span видимой копии меньше половины canvas, реально=' + span);
+    }
+});
+
+test('drawZoneRing: кольцо в «обёрнутой» части окна (observerLon=+40, центр lon=-160°) → fill есть и компактный (duplicate-shift)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Кольцо вокруг lon=-160°: dLonRaw = -200..-220 (за левым краем canvas).
+    // drawOnce(0) viewport-фильтром пропускается, drawOnce(+wz) рисует
+    // компактный полигон в правой части canvas — заливка должна быть.
+    const ring = [
+        { lon: -150, lat: 0 }, { lon: -155, lat: 5 }, { lon: -160, lat: 7 },
+        { lon: -165, lat: 5 }, { lon: -170, lat: 0 }, { lon: -165, lat: -5 },
+        { lon: -160, lat: -7 }, { lon: -155, lat: -5 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const fills = calls.filter(c => c.op === 'fill');
+    assert.ok(fills.length >= 1, 'fill для кольца в обёрнутой части окна');
+    const lineTos = calls.filter(c => c.op === 'lineTo');
+    const visibleXs = lineTos
+        .map(c => c.args[0])
+        .filter(x => x >= 0 && x <= ev.width);
+    assert.ok(visibleXs.length >= 3, 'есть видимые точки');
+    const span = Math.max.apply(null, visibleXs) - Math.min.apply(null, visibleXs);
+    assert.ok(span < ev.width * 0.4, 'компактная видимая копия, span=' + span);
+});
+
+test('drawZoneRing: кольцо ровно на шве окна (observerLon=+40, центр lon=-140°) → fill есть, без палки через ВСЮ карту', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Кольцо ровно на антимеридиане окна — визуально разрывается на две дуги
+    // у противоположных краёв canvas. Нам важно: (а) fill вызывается;
+    // (б) НИ В ОДНОЙ из copy полигон не строится через всю карту —
+    // т.е. в каждом sub-path (между beginPath/closePath) span x ≤ 40% canvas.
+    const ring = [
+        { lon: -130, lat: 0 }, { lon: -135, lat: 5 }, { lon: -140, lat: 7 },
+        { lon: -145, lat: 5 }, { lon: -150, lat: 0 }, { lon: -145, lat: -5 },
+        { lon: -140, lat: -7 }, { lon: -135, lat: -5 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const fills = calls.filter(c => c.op === 'fill');
+    assert.ok(fills.length >= 1, 'fill вызван');
+    // Разбиваем calls на sub-path между beginPath. Считаем span x в каждом.
+    const subSpans = [];
+    let curXs = null;
+    for (const c of calls) {
+        if (c.op === 'beginPath') { curXs = []; continue; }
+        if (curXs && (c.op === 'moveTo' || c.op === 'lineTo')) {
+            curXs.push(c.args[0]);
+        }
+        if (c.op === 'closePath' || c.op === 'stroke' || c.op === 'fill') {
+            if (curXs && curXs.length >= 2) {
+                subSpans.push(Math.max.apply(null, curXs) - Math.min.apply(null, curXs));
+            }
+            curXs = [];
+        }
+    }
+    for (const s of subSpans) {
+        assert.ok(s < ev.width * 0.5, 'sub-path не растянут через полкарты, span=' + s);
+    }
+});
+
+test('drawZoneRing: open-arc после backend split — fill через дальний край canvas, без диагонали', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Имитируем сегмент после splitZoneAtAntimeridian: открытая дуга,
+    // first.lon=+178°, last.lon=-178°. После seam-fix continuous-проекция
+    // даёт большой |closeDx| > wz/2 — старый код тянул диагональ закрытия
+    // не на одной высоте, теперь должно замыкаться через дальний край canvas.
+    const ring = [
+        { lon: 178, lat: 60 },
+        { lon: 179, lat: 65 },
+        { lon: 180, lat: 70 },
+        { lon: -179, lat: 75 },
+        { lon: -178, lat: 80 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const fills = calls.filter(c => c.op === 'fill');
+    assert.ok(fills.length >= 1, 'fill для open-arc');
+    // Проверка: ни один sub-path не «растягивается» через всю карту по x
+    // (как раз случай прежней диагональной линии замыкания).
+    const subSpans = [];
+    let curXs = null;
+    for (const c of calls) {
+        if (c.op === 'beginPath') { curXs = []; continue; }
+        if (curXs && (c.op === 'moveTo' || c.op === 'lineTo')) {
+            const x = c.args[0];
+            if (x >= 0 && x <= ev.width) { curXs.push(x); }
+        }
+        if (c.op === 'closePath' || c.op === 'stroke' || c.op === 'fill') {
+            if (curXs && curXs.length >= 2) {
+                subSpans.push(Math.max.apply(null, curXs) - Math.min.apply(null, curXs));
+            }
+            curXs = [];
+        }
+    }
+    for (const s of subSpans) {
+        assert.ok(s < ev.width * 0.6, 'видимая часть sub-path < 60% canvas, span=' + s);
+    }
+});
+
+test('drawZoneRing: footprint, пересекающий полюс — заливка через верхний край canvas, без densify полюса', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Footprint вокруг полюса: точки от bearing 0..360, верхушка — на полюсе
+    // (lat>85). Нижняя дуга идёт через средние широты. Алгоритм должен:
+    // 1) заменить полярный блок на пары точек у y<0 (за верх canvas);
+    // 2) оставить нижнюю дугу как есть; 3) полигон замыкается через clip.
+    const ring = [
+        { lon: 30, lat: 88 },   { lon: 60, lat: 88 },   { lon: 90, lat: 87 },
+        { lon: 120, lat: 75 },  { lon: 150, lat: 70 },  { lon: 180, lat: 65 },
+        { lon: -150, lat: 65 }, { lon: -120, lat: 65 }, { lon: -90, lat: 70 },
+        { lon: -60, lat: 75 },  { lon: -30, lat: 87 },  { lon: 0, lat: 88 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const fills = calls.filter(c => c.op === 'fill');
+    assert.ok(fills.length >= 1, 'fill должен быть');
+    // Ищем хотя бы одну точку с y<0 (заменённая полярная точка) — это
+    // подтверждает, что верхушка ушла «за верх canvas».
+    const lineTos = calls.filter(c => c.op === 'lineTo' || c.op === 'moveTo');
+    const hasAboveTop = lineTos.some(c => c.args[1] < 0);
+    assert.ok(hasAboveTop, 'есть точка с y<0 — полярный блок заменён на верхний край');
+});
+
+test('drawZoneRing: малый polar footprint (lat=60..70°, lonSpread≈360°) — детектится как polar и заливается через top edge', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Footprint, охватывающий полюс с малым radius: на equirectangular
+    // точки распределены по всей долготе с lat=60..70° (отражение через
+    // полюс). НИ ОДНОЙ точки lat>85° нет, но lonSpread≈360° — это
+    // признак polar-pass и нужна ветка envelope+top-edge.
+    const ring = [];
+    for (let lon = -180; lon < 180; lon += 15) {
+        const lat = 65 + 5 * Math.cos((lon + 180) * Math.PI / 180);
+        ring.push({ lon: lon, lat: lat });
+    }
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const lineTos = calls.filter(c => c.op === 'lineTo' || c.op === 'moveTo');
+    const hasAboveTop = lineTos.some(c => c.args[1] < 0);
+    assert.ok(hasAboveTop, 'малый polar footprint должен использовать top-edge replacement (есть точка y<0)');
+});
+
+test('drawZoneRing: polar footprint — stroke рисуется ТОЛЬКО по envelope (без замыкающих диагоналей к y<0)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Polar footprint: lat=60..70°, lonSpread=360°.
+    const ring = [];
+    for (let lon = -180; lon < 180; lon += 15) {
+        const lat = 65 + 5 * Math.cos((lon + 180) * Math.PI / 180);
+        ring.push({ lon: lon, lat: lat });
+    }
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    // Разбиваем calls на sub-path'ы (между beginPath). Хотя бы один sub-path
+    // должен быть «stroke-only»: ВСЕ его lineTo/moveTo иметь y>=0 (нижняя
+    // огибающая) и завершаться вызовом stroke. Это гарантирует, что stroke
+    // НЕ рисует диагонали к (corner_x, edgeY=-10).
+    let strokeOnlyCleanPath = false;
+    let curPath = null;
+    for (const c of calls) {
+        if (c.op === 'beginPath') { curPath = { ys: [], hasStroke: false, hasFill: false }; continue; }
+        if (curPath && (c.op === 'moveTo' || c.op === 'lineTo')) {
+            curPath.ys.push(c.args[1]);
+        }
+        if (c.op === 'stroke' && curPath) { curPath.hasStroke = true; }
+        if (c.op === 'fill' && curPath) { curPath.hasFill = true; }
+        if ((c.op === 'stroke' || c.op === 'fill') && curPath) {
+            // Проверяем path при каждом fill/stroke — мы на pre-restore стадии.
+            if (curPath.hasStroke && !curPath.hasFill) {
+                const allPositive = curPath.ys.every(y => y >= 0);
+                if (allPositive && curPath.ys.length >= 2) { strokeOnlyCleanPath = true; }
+            }
+        }
+    }
+    assert.ok(strokeOnlyCleanPath, 'должен быть stroke-only sub-path с y>=0 (envelope без замыкающих диагоналей)');
+});
+
+test('drawZoneRing: узкая дуга через ±180° (lon=178..-178, малый Δlon) — НЕ polar, обычная ветка', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Узкая footprint-дуга ровно через антимеридиан, lonSpread по wrap = ~4°.
+    // Без circular-spread детект мог бы ложно определить как polar
+    // (max-min=359°). Должна попасть в обычную ветку: НЕТ y<0 точек.
+    const ring = [
+        { lon: 178, lat: 60 }, { lon: 179, lat: 65 }, { lon: 180, lat: 70 },
+        { lon: -179, lat: 75 }, { lon: -178, lat: 80 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const lineTos = calls.filter(c => c.op === 'lineTo' || c.op === 'moveTo');
+    const hasAboveTop = lineTos.some(c => c.args[1] < 0);
+    assert.ok(!hasAboveTop, 'узкая дуга НЕ должна попадать в polar-ветку (нет точек y<0)');
+});
+
+test('drawZoneRing: footprint без полюса — нет точек с y<0', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 40, lat: 47, name: 'Rostov' };
+    ev._syncCenterToObserver();
+    // Footprint в средних широтах (max lat=60) — полярный блок отсутствует,
+    // классическая отрисовка через closePath без edge-замены.
+    const ring = [
+        { lon: 40, lat: 60 }, { lon: 50, lat: 55 }, { lon: 55, lat: 47 },
+        { lon: 50, lat: 39 }, { lon: 40, lat: 34 }, { lon: 30, lat: 39 },
+        { lon: 25, lat: 47 }, { lon: 30, lat: 55 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const lineTos = calls.filter(c => c.op === 'lineTo' || c.op === 'moveTo');
+    const hasAboveTop = lineTos.some(c => c.args[1] < 0);
+    assert.ok(!hasAboveTop, 'нет точек выше canvas, polar replacement не применился');
+});
+
+test('drawZoneRing: clip-region выставлен на canvas (save/restore + clip)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    const ring = [
+        { lon: 0, lat: 5 }, { lon: 5, lat: 0 }, { lon: 0, lat: -5 }, { lon: -5, lat: 0 },
+    ];
+    ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
+    const saves = calls.filter(c => c.op === 'save');
+    const restores = calls.filter(c => c.op === 'restore');
+    assert.ok(saves.length >= 1 && restores.length >= 1, 'save/restore вокруг clip');
+});
+
+test('drawTrackSegment: переход через ±180° короткий (Δlon=3°) → без палки', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    // center=0, антимеридиан окна = ±180° = край canvas. Точки физически рядом
+    // (Δlon=3°), но raw lon перескакивает через ±180° → проекция даёт |Δx|≈large
+    // → пиксельная защита разрывает (это корректно, антимеридианный шов canvas).
+    // Защита по Δlon (3°<30°) разрыв НЕ добавляет — пиксельная справится сама.
+    const seg = [
+        { lon: 178, lat: 0, ts: 1000000 },
+        { lon: -179, lat: 0, ts: 1030000 },
+    ];
+    ev._drawTrackSegment(seg, '#ff0');
+    const moveTos = calls.filter(c => c.op === 'moveTo');
+    assert.strictEqual(moveTos.length, 2, 'разрыв по пиксельной защите на краю canvas');
+});
+
+// ── _drawSelectedLayer: двухцветная трасса past=red / future=yellow ──────────
+
+console.log('\nEarthView: _drawSelectedLayer two-color past/future');
+
+test('drawSelectedLayer: past и future рисуются одним цветом selectedTrack (различаются стилем линии)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    ev.colors.orbitPast = '#FF0000';
+    ev.colors.selectedTrack = '#FFFF00';
+    ev._selectedSatellite = {
+        position: null, name: 'TEST', noradId: 99999,
+        visibilityZone: null,
+        groundTrack: {
+            past: [[
+                { lon: 10, lat: 30, ts: 1000000 },
+                { lon: 15, lat: 32, ts: 1060000 },
+                { lon: 20, lat: 34, ts: 1120000 },
+            ]],
+            future: [[
+                { lon: 25, lat: 36, ts: 1180000 },
+                { lon: 30, lat: 38, ts: 1240000 },
+                { lon: 35, lat: 40, ts: 1300000 },
+            ]],
+        },
+    };
+    ev._drawSelectedLayer();
+
+    const colors = calls.filter(c => c.op === 'strokeStyle').map(c => c.args[0]);
+    assert.ok(colors.length >= 2, 'минимум 2 stroke (past и future), получено: ' + colors.length);
+    assert.ok(!colors.includes('#FF0000'), 'orbitPast НЕ должен использоваться (теперь оба сегмента — selectedTrack)');
+    assert.ok(colors.every(c => c === '#FFFF00'), 'все strokeStyle = selectedTrack: ' + colors.join(','));
+});
+
+test('drawSelectedLayer: только past → используется selectedTrack (без orbitPast)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    ev.colors.orbitPast = '#FF0000';
+    ev.colors.selectedTrack = '#FFFF00';
+    ev._selectedSatellite = {
+        position: null, name: 'TEST', noradId: 99999,
+        visibilityZone: null,
+        groundTrack: {
+            past: [[
+                { lon: 10, lat: 30, ts: 1000000 },
+                { lon: 15, lat: 32, ts: 1060000 },
+            ]],
+            future: [],
+        },
+    };
+    ev._drawSelectedLayer();
+
+    const colors = calls.filter(c => c.op === 'strokeStyle').map(c => c.args[0]);
+    assert.ok(colors.includes('#FFFF00'), 'past рисуется selectedTrack');
+    assert.ok(!colors.includes('#FF0000'), 'orbitPast НЕ должен использоваться');
+});
+
+test('drawSelectedLayer: past рисуется точками (setLineDash непустой), future — сплошной (setLineDash пустой)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    ev.colors.orbitPast = '#FF0000';
+    ev.colors.selectedTrack = '#FFFF00';
+    ev._selectedSatellite = {
+        position: null, name: 'TEST', noradId: 99999, visibilityZone: null,
+        groundTrack: {
+            past: [[
+                { lon: 10, lat: 30, ts: 1000000 },
+                { lon: 15, lat: 32, ts: 1060000 },
+            ]],
+            future: [[
+                { lon: 20, lat: 34, ts: 1120000 },
+                { lon: 25, lat: 36, ts: 1180000 },
+            ]],
+        },
+    };
+    ev._drawSelectedLayer();
+
+    // Past и future рисуются одинаковым цветом, но разным стилем линии.
+    // Смотрим dash на момент каждого stroke и проверяем: первый stroke
+    // (past) имеет dash непустой, второй (future) — пустой.
+    let curDash = [];
+    const strokeDashes = [];
+    for (const c of calls) {
+        if (c.op === 'setLineDash') {
+            curDash = Array.isArray(c.args[0]) ? c.args[0].slice() : [];
+        }
+        if (c.op === 'stroke') {
+            strokeDashes.push(curDash.slice());
+        }
+    }
+    assert.ok(strokeDashes.length >= 2, 'должно быть как минимум 2 stroke (past + future)');
+    assert.ok(strokeDashes[0].length > 0, 'первый stroke (past) — точки/dash: ' + JSON.stringify(strokeDashes[0]));
+    assert.ok(strokeDashes[strokeDashes.length - 1].length === 0,
+        'последний stroke (future) — сплошной: ' + JSON.stringify(strokeDashes[strokeDashes.length - 1]));
+});
+
+test('drawSelectedLayer: legacy-формат (массив точек) → используется selectedTrack (future-цвет)', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    ev.colors.orbitPast = '#FF0000';
+    ev.colors.selectedTrack = '#FFFF00';
+    ev._selectedSatellite = {
+        position: null, name: 'TEST', noradId: 99999,
+        visibilityZone: null,
+        groundTrack: [
+            { lon: 10, lat: 30, ts: 1000000 },
+            { lon: 15, lat: 32, ts: 1060000 },
+        ],
+    };
+    ev._drawSelectedLayer();
+
+    const colors = calls.filter(c => c.op === 'strokeStyle').map(c => c.args[0]);
+    assert.ok(colors.includes('#FFFF00'), 'legacy-формат = future-цвет');
+    assert.ok(!colors.includes('#FF0000'), 'для legacy past-цвет НЕ применяется (нет past/future)');
+});
+
 // ── Итоги ────────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed\n`);

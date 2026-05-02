@@ -16,9 +16,9 @@
         'classic': {
             // earthview
             'map-footprint':            'rgba(0, 255, 255, 0.6)',
-            'map-footprint-fill':       'rgba(0, 255, 255, 0.05)',
+            'map-footprint-fill':       'rgba(0, 255, 255, 0.12)',
             'map-selected-footprint':      'rgba(93, 173, 226, 0.6)',
-            'map-selected-footprint-fill': 'rgba(93, 173, 226, 0.12)',
+            'map-selected-footprint-fill': 'rgba(93, 173, 226, 0.17)',
             'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
             'map-observer-label-bg':     'rgba(0,0,0,0.6)',
             'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
@@ -34,9 +34,9 @@
         'ops-center': {
             // earthview
             'map-footprint':            'rgba(255, 100, 50, 0.85)',
-            'map-footprint-fill':       'rgba(255, 100, 50, 0.06)',
+            'map-footprint-fill':       'rgba(255, 100, 50, 0.13)',
             'map-selected-footprint':      'rgba(240, 240, 250, 0.70)',
-            'map-selected-footprint-fill': 'rgba(240, 240, 250, 0.04)',
+            'map-selected-footprint-fill': 'rgba(240, 240, 250, 0.10)',
             'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
             'map-observer-label-bg':     'rgba(220, 220, 228, 0.92)',
             'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
@@ -52,9 +52,9 @@
         // Breeze Dark (оригинальный KDE Breeze Dark, почти чёрный)
         'breeze-dark': {
             'map-footprint':            'rgba(61, 174, 233, 0.80)',
-            'map-footprint-fill':       'rgba(61, 174, 233, 0.10)',
+            'map-footprint-fill':       'rgba(61, 174, 233, 0.16)',
             'map-selected-footprint':      'rgba(61, 174, 233, 0.60)',
-            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.12)',
+            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.18)',
             'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
             'map-observer-label-bg':     'rgba(0,0,0,0.6)',
             'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
@@ -68,9 +68,9 @@
         // Breeze (нейтральный серый, светлее dark): акценты KDE Breeze
         'breeze': {
             'map-footprint':            'rgba(61, 174, 233, 0.80)',
-            'map-footprint-fill':       'rgba(61, 174, 233, 0.10)',
+            'map-footprint-fill':       'rgba(61, 174, 233, 0.16)',
             'map-selected-footprint':      'rgba(61, 174, 233, 0.60)',
-            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.12)',
+            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.18)',
             'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
             'map-observer-label-bg':     'rgba(0,0,0,0.6)',
             'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
@@ -84,9 +84,9 @@
         // Breeze-Steel (угольный со стальным подтоном)
         'breeze-steel': {
             'map-footprint':            'rgba(61, 174, 233, 0.80)',
-            'map-footprint-fill':       'rgba(61, 174, 233, 0.10)',
+            'map-footprint-fill':       'rgba(61, 174, 233, 0.16)',
             'map-selected-footprint':      'rgba(61, 174, 233, 0.60)',
-            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.12)',
+            'map-selected-footprint-fill': 'rgba(61, 174, 233, 0.18)',
             'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
             'map-observer-label-bg':     'rgba(0,0,0,0.6)',
             'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
@@ -100,9 +100,9 @@
         // Breeze Light (оригинальный KDE Breeze, светлый фон #eff0f1)
         'breeze-light': {
             'map-footprint':            'rgba(218, 68, 83, 0.85)',
-            'map-footprint-fill':       'rgba(218, 68, 83, 0.14)',
+            'map-footprint-fill':       'rgba(218, 68, 83, 0.19)',
             'map-selected-footprint':      'rgba(41, 128, 185, 0.65)',
-            'map-selected-footprint-fill': 'rgba(41, 128, 185, 0.18)',
+            'map-selected-footprint-fill': 'rgba(41, 128, 185, 0.22)',
             'map-observer-label-stroke': 'rgba(239, 240, 241, 0.95)',
             'map-observer-label-bg':     'rgba(239, 240, 241, 0.92)',
             'map-sat-label-stroke':      'rgba(239, 240, 241, 0.95)',
@@ -116,9 +116,9 @@
         // Светлая тема: значения согласованы с static/css/colors-light.css (themeRgba для canvas)
         'light': {
             'map-footprint':            'rgba(175, 48, 32, 0.88)',
-            'map-footprint-fill':       'rgba(175, 48, 32, 0.18)',
+            'map-footprint-fill':       'rgba(175, 48, 32, 0.23)',
             'map-selected-footprint':      'rgba(26, 114, 184, 0.68)',
-            'map-selected-footprint-fill': 'rgba(26, 114, 184, 0.22)',
+            'map-selected-footprint-fill': 'rgba(26, 114, 184, 0.26)',
             'map-observer-label-stroke': 'rgba(255, 255, 255, 0.92)',
             'map-observer-label-bg':     'rgba(204, 208, 216, 0.92)',
             'map-sat-label-stroke':      'rgba(214, 218, 225, 0.95)',

@@ -342,7 +342,9 @@ func TestGenerateVisibilityZoneFromLLA_Antimeridian(t *testing.T) {
 
 func TestGenerateVisibilityZoneFromLLA_PolarClosure(t *testing.T) {
 	// Footprint, пересекающий Северный полюс: lat=67° + radius=58° > 90°.
-	// Проверяем, что сегмент замыкается через полюс (содержит точку lat=90°).
+	// Проверяем, что для polar footprint backend выдаёт ОДИН сегмент
+	// (без split-at-AM), чтобы frontend мог построить «нижнюю огибающую»
+	// и закрыть полигон через верхний край карты.
 	lla := &LLA{
 		Lat: 67.0 * Deg2Rad,
 		Lon: 70.0 * Deg2Rad,
@@ -354,20 +356,91 @@ func TestGenerateVisibilityZoneFromLLA_PolarClosure(t *testing.T) {
 		t.Fatal("returned nil")
 	}
 
-	// Должна быть хотя бы одна точка с lat=90° (замыкание через полюс).
-	found90 := false
-	for _, seg := range zone.Segments {
-		for _, p := range seg {
-			if math.Abs(p.Lat-90.0) < 0.01 {
-				found90 = true
-				break
-			}
-		}
+	if len(zone.Segments) != 1 {
+		t.Errorf("polar-crossing footprint should be a single segment, got %d", len(zone.Segments))
+	}
+}
+
+func TestClosePolarSegments_DensifiedPath(t *testing.T) {
+	// Сегмент после splitZoneAtAntimeridian: первая точка на lon=-180,
+	// последняя на lon=+180 (типичный footprint, пересекающий и AM, и Северный
+	// полюс). closePolarSegments должен densify-ить полярный путь шагом ≤ 10°,
+	// чтобы линия от lon=+180 к lon=-180 на полюсе не «прыгала» в проекции
+	// со сдвинутым `observerLon`.
+	seg := []ZonePoint{
+		{Lon: -180.0, Lat: 75.0},
+		{Lon: -150.0, Lat: 80.0},
+		{Lon: -100.0, Lat: 85.0},
+		{Lon: -50.0, Lat: 87.0},
+		{Lon: 50.0, Lat: 87.0},
+		{Lon: 100.0, Lat: 85.0},
+		{Lon: 150.0, Lat: 80.0},
+		{Lon: 180.0, Lat: 75.0},
+	}
+	segments := [][]ZonePoint{seg}
+
+	// centerLat=80°, radius=15° → crossesNorth (80+15=95 > 90).
+	got := closePolarSegments(segments, 80.0, 15.0)
+	require.Len(t, got, 1)
+
+	closed := got[0]
+	require.Greater(t, len(closed), len(seg)+2,
+		"closePolar должен добавить densified-путь, не только 2 угла")
+
+	// Все добавленные точки имеют lat≈90°.
+	added := closed[len(seg):]
+	for i, p := range added {
+		require.InDeltaf(t, 90.0, p.Lat, 0.001,
+			"added[%d] lat=%.4f, ожидался 90.0", i, p.Lat)
 	}
 
-	if !found90 {
-		t.Error("polar-crossing footprint should have lat=90° boundary points")
+	// Соседние lon вдоль polar path с шагом ≤ densifyMaxLonGap (10°).
+	for i := 1; i < len(added); i++ {
+		gap := math.Abs(added[i].Lon - added[i-1].Lon)
+		require.LessOrEqualf(t, gap, densifyMaxLonGap+0.001,
+			"polar gap между %d и %d: %.2f° > %.2f°", i-1, i, gap, densifyMaxLonGap)
 	}
+
+	// Первая добавленная точка совпадает по lon с last исходной (last.Lon=+180).
+	require.InDelta(t, 180.0, added[0].Lon, 0.001)
+	// Последняя добавленная точка совпадает по lon с first исходной (first.Lon=-180).
+	require.InDelta(t, -180.0, added[len(added)-1].Lon, 0.001)
+}
+
+func TestClosePolarSegments_SouthPoleDensified(t *testing.T) {
+	// Footprint, пересекающий Южный полюс: lat=-80°, radius=15°.
+	seg := []ZonePoint{
+		{Lon: 180.0, Lat: -75.0},
+		{Lon: 90.0, Lat: -85.0},
+		{Lon: 0.0, Lat: -87.0},
+		{Lon: -90.0, Lat: -85.0},
+		{Lon: -180.0, Lat: -75.0},
+	}
+	segments := [][]ZonePoint{seg}
+	got := closePolarSegments(segments, -80.0, 15.0)
+	require.Len(t, got, 1)
+
+	closed := got[0]
+	added := closed[len(seg):]
+	for _, p := range added {
+		require.InDelta(t, -90.0, p.Lat, 0.001, "south polar lat=-90°")
+	}
+	for i := 1; i < len(added); i++ {
+		gap := math.Abs(added[i].Lon - added[i-1].Lon)
+		require.LessOrEqualf(t, gap, densifyMaxLonGap+0.001,
+			"south polar gap: %.2f°", gap)
+	}
+}
+
+func TestClosePolarSegments_NoCrossing_NoChange(t *testing.T) {
+	// Footprint в средних широтах не пересекает ни один полюс — массив без изменений.
+	seg := []ZonePoint{
+		{Lon: 0.0, Lat: 30.0}, {Lon: 30.0, Lat: 35.0}, {Lon: 0.0, Lat: 40.0},
+	}
+	segments := [][]ZonePoint{seg}
+	got := closePolarSegments(segments, 35.0, 5.0)
+	require.Len(t, got, 1)
+	require.Equal(t, seg, got[0], "non-polar footprint не должен меняться")
 }
 
 func TestGenerateVisibilityZoneFromLLA_HighOrbitDensified(t *testing.T) {
@@ -386,17 +459,8 @@ func TestGenerateVisibilityZoneFromLLA_HighOrbitDensified(t *testing.T) {
 		t.Fatal("GenerateVisibilityZoneFromLLA (high orbit) returned nil")
 	}
 
-	// После уплотнения должно быть больше точек, чем исходные 72.
-	totalPts := 0
-	for _, seg := range zone.Segments {
-		totalPts += len(seg)
-	}
-	if totalPts <= defaultZonePoints {
-		t.Errorf("expected densified contour to have more than %d points, got %d",
-			defaultZonePoints, totalPts)
-	}
-
-	// Проверяем: в каждом сегменте соседние точки не должны быть далеко друг от друга.
+	// Проверяем: в каждом сегменте соседние точки не должны быть далеко друг от друга
+	// после densify (короткая дуга по долготе ≤ densifyMaxLonGap + допуск).
 	maxGap := densifyMaxLonGap + 5.0 // допуск на интерполяцию антимеридиана
 	for si, seg := range zone.Segments {
 		for i := range len(seg) - 1 {

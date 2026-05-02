@@ -53,7 +53,7 @@
     --map-grid-major:  #4a5e5e;
     --map-grid-text:   #ffffff;
     --map-footprint:        rgba(200, 100, 255, 0.55);
-    --map-footprint-fill:   rgba(200, 100, 255, 0.14);
+    --map-footprint-fill:   rgba(200, 100, 255, 0.19);
 
     /* ══════════════════════════════════════════════════════════════
        Орбита / трек спутника (EarthView)
@@ -93,7 +93,7 @@
     --selected-track:          #ffff00;
     --selected-marker:         #2ecc71;
     --selected-footprint:      rgba(93, 173, 226, 0.6);
-    --selected-footprint-fill: rgba(93, 173, 226, 0.14);
+    --selected-footprint-fill: rgba(93, 173, 226, 0.19);
 
     /* ══════════════════════════════════════════════════════════════
        Наблюдатель (EarthView)

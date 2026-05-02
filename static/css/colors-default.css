@@ -55,7 +55,7 @@
     --map-grid-major:  #385868;
     --map-grid-text:   #7890a0;
     --map-footprint:        rgba(255, 100, 50, 0.90);
-    --map-footprint-fill:   rgba(255, 100, 50, 0.14);
+    --map-footprint-fill:   rgba(255, 100, 50, 0.19);
 
     /* ══════════════════════════════════════════════════════════════
        Орбита / трек спутника
@@ -101,7 +101,7 @@
     --selected-track:          #ffff00;
     --selected-marker:         #50b868;
     --selected-footprint:      rgba(100, 160, 210, 0.60);
-    --selected-footprint-fill: rgba(100, 160, 210, 0.14);
+    --selected-footprint-fill: rgba(100, 160, 210, 0.19);
 
     /* ══════════════════════════════════════════════════════════════
        Наблюдатель

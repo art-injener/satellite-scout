@@ -158,12 +158,20 @@ func GenerateVisibilityZoneFromLLA(lla *LLA, noradID, numPoints int) *Visibility
 	// Без этого вблизи полюсов прямые отрезки между точками «убегают» по долготе.
 	points = densifyZoneContour(points, densifyMaxLonGap)
 
-	segments := splitZoneAtAntimeridian(points)
-
-	// Для footprint, пересекающего полюс, замыкаем полигоны через край карты.
+	// Для footprint, охватывающего полюс, не делаем split-at-AM: иначе он
+	// бы разбивался на две узкие полосы у ±180°, а polar-замыкание frontend
+	// требует ОДНОГО сегмента, чтобы рассчитать нижнюю огибающую и закрыть
+	// полигон через верхний/нижний край карты.
 	centerLatDeg := lla.LatDeg()
 	rhoDeg := rho * Rad2Deg
-	segments = closePolarSegments(segments, centerLatDeg, rhoDeg)
+	isPolar := centerLatDeg+rhoDeg > 90.0 || centerLatDeg-rhoDeg < -90.0
+
+	var segments [][]ZonePoint
+	if isPolar {
+		segments = [][]ZonePoint{points}
+	} else {
+		segments = splitZoneAtAntimeridian(points)
+	}
 
 	return &VisibilityZone{
 		Segments:   segments,
@@ -373,12 +381,23 @@ func interpolateAntimeridianLat(p1, p2 ZonePoint) float64 {
 // а верхняя часть уходит за полюс. Добавляем точки по верхнему краю карты (lat=90°).
 //
 // Для South Pole (centerLat - radius < -90°): аналогично, добавляем lat=-90°.
+//
+// Линия вдоль полюса densify-ется шагом densifyMaxLonGap° (10°) — иначе на
+// карте со сдвинутым окном (`observerLon ≠ 0`) две точки `(±180°, ±90°)` дают
+// разные x в проекции, и closePath() рисует «парус» через всю карту. Densified
+// путь идёт линейно по lon (через 0°), что на canvas даёт гладкую полоску
+// вдоль верхнего/нижнего края.
 func closePolarSegments(segments [][]ZonePoint, centerLatDeg, radiusDeg float64) [][]ZonePoint {
 	crossesNorth := centerLatDeg+radiusDeg > 90.0
 	crossesSouth := centerLatDeg-radiusDeg < -90.0
 
 	if !crossesNorth && !crossesSouth {
 		return segments
+	}
+
+	polarLat := 90.0
+	if crossesSouth {
+		polarLat = -90.0
 	}
 
 	for i, seg := range segments {
@@ -397,22 +416,32 @@ func closePolarSegments(segments [][]ZonePoint, centerLatDeg, radiusDeg float64)
 			continue
 		}
 
-		if crossesNorth {
-			// Добавляем угловые точки через Северный полюс.
-			segments[i] = append(seg,
-				ZonePoint{Lon: last.Lon, Lat: 90.0},
-				ZonePoint{Lon: first.Lon, Lat: 90.0},
-			)
-		} else if crossesSouth {
-			// Добавляем угловые точки через Южный полюс.
-			segments[i] = append(seg,
-				ZonePoint{Lon: last.Lon, Lat: -90.0},
-				ZonePoint{Lon: first.Lon, Lat: -90.0},
-			)
-		}
+		segments[i] = appendPolarClosurePath(seg, last.Lon, first.Lon, polarLat, densifyMaxLonGap)
 	}
 
 	return segments
+}
+
+// appendPolarClosurePath добавляет densified-путь по полюсу от fromLon к toLon.
+// Сначала добавляется (fromLon, polarLat), затем промежуточные точки с шагом
+// step° (линейно по долготе, без перехода через антимеридиан), и в конце —
+// (toLon, polarLat). При fromLon == toLon добавляются только две концевые точки
+// (без промежуточных).
+func appendPolarClosurePath(seg []ZonePoint, fromLon, toLon, polarLat, step float64) []ZonePoint {
+	seg = append(seg, ZonePoint{Lon: fromLon, Lat: polarLat})
+
+	diff := toLon - fromLon
+	abs := math.Abs(diff)
+	if abs > step {
+		num := int(math.Ceil(abs / step))
+		for k := 1; k < num; k++ {
+			f := float64(k) / float64(num)
+			seg = append(seg, ZonePoint{Lon: fromLon + diff*f, Lat: polarLat})
+		}
+	}
+
+	seg = append(seg, ZonePoint{Lon: toLon, Lat: polarLat})
+	return seg
 }
 
 // normalizeLon нормализует долготу в диапазон (-π, +π].

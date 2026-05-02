@@ -54,7 +54,7 @@
     --map-grid-text:   #3a4858;
     /* Дубли для справки; canvas берёт rgba через themeRgba() */
     --map-footprint:        rgba(175, 48, 32, 0.88);
-    --map-footprint-fill:   rgba(175, 48, 32, 0.18);
+    --map-footprint-fill:   rgba(175, 48, 32, 0.23);
 
     /* Трассы: насыщенные для читаемости на светлом фоне */
     --orbit-future:  #00aa00;
@@ -96,7 +96,7 @@
     --selected-track:          #1a72b8;
     --selected-marker:         var(--selected-track);
     --selected-footprint:      rgba(26, 114, 184, 0.68);
-    --selected-footprint-fill: rgba(26, 114, 184, 0.22);
+    --selected-footprint-fill: rgba(26, 114, 184, 0.26);
 
     /* Наблюдатель: тёмно-зелёный — не спутник и не вода */
     --observer-marker:        #15803d;
