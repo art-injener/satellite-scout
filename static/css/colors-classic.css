@@ -140,8 +140,10 @@
     --sky-info-text:     #00d4aa;
     --sky-info-label:    #d0d8e0;
     --sky-time-text:     #00a8ff;
-    --sky-selected-track:  #b89a38;
-    --sky-selected-sat-label: #d8c878;
+    /* UX-COLORS-DARK-001: трасса выбранного КА в SkyView = трассе на карте (--selected-track).
+       Подпись остаётся нейтрально-белой: жёлтый текст на сине-сером поле SkyView режет глаза. */
+    --sky-selected-track:  var(--selected-track);
+    --sky-selected-sat-label: #ffffff;
     --sky-selected-marker: #2ecc71;
     --sky-canvas-text-stroke:   rgba(0, 0, 0, 0.88);
     --sky-sat-panel-line:       rgba(255, 255, 255, 0.32);
@@ -172,23 +174,27 @@
     /* ══════════════════════════════════════════════════════════════
        Спектр / водопад (canvas)
        ══════════════════════════════════════════════════════════════ */
+    /* Унифицированный «приборный» палитр спектра/водопада: одинаковый во всех
+       тёмных темах (UX-COLORS-INSTRUMENT-001). Светлый-серый каркас прибора +
+       slate-фон + видимая сетка. Внешняя обвязка `--spectrum-bg`/`--spectrum-text`
+       остаётся темо-зависимой, чтобы прибор аккуратно вписывался в панель. */
     --spectrum-bg:         #0a1018;
-    --spectrum-grid:       #2a3848;
-    --spectrum-plot-bg:    #0a1018;
-    --spectrum-instrument-bg: #0a1018;
+    --spectrum-grid:       #3a4550;
+    --spectrum-plot-bg:    #2a3440;
+    --spectrum-instrument-bg: #2a3440;
     --bp-overview-freq-scale-bg: var(--spectrum-instrument-bg);
-    --spectrum-plot-grid:  rgba(255, 255, 255, 0.09);
-    --spectrum-axis-text:  var(--text-muted);
-    --spectrum-trace:      #00ff80;
-    --spectrum-crosshair:  #ffd700;
-    --spectrum-peak-label: #ffd700;
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.14);
+    --spectrum-axis-text:  #e4e8ec;
+    --spectrum-trace:      #5ee878;
+    --spectrum-crosshair:  #ffcc66;
+    --spectrum-peak-label: #ffffff;
     --spectrum-text:       #8a9199;
     --spectrum-signal:     #00ff80;
     --spectrum-peak:       #ffd700;
     --spectrum-peak-dot:   #ff3333;
-    --waterfall-bg:        #141e28;
-    --waterfall-margin-bg: #000000;
-    --waterfall-cold-bg:   #000000;
+    --waterfall-bg:        #2a3440;
+    --waterfall-margin-bg: #2a3440;
+    --waterfall-cold-bg:   #242c38;
 
     --panel-header-title:     #b8c4d4;
     --sky-info-value:         #40c4ff;

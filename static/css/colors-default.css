@@ -70,18 +70,20 @@
        ══════════════════════════════════════════════════════════════ */
     --sat-marker:        #c8d0d8;
     --sat-glow:          #7ab8d0;
-    --sat-label:         #e0e8f0;
+    /* Подпись КА на карте — жёлтая, единая для всех тёмных тем (UX-COLORS-DARK-001). */
+    --sat-label:         #ffeb3b;
     --sat-label-stroke:  rgba(0, 0, 0, 0.85);
 
     /* Значок КА на карте (корпус + панели + тарелка): наблюдение vs выбранный в таблице */
     --map-icon-stroke:           rgba(10, 14, 20, 0.94);
     --map-icon-tracking-fill:    var(--accent-primary);
-    --map-icon-selected-fill:    var(--accent-warning);
+    /* Иконка selected (КА из таблицы) — амбер #ffb347, единый для тёмных тем. */
+    --map-icon-selected-fill:    #ffb347;
     --map-icon-neutral-fill:     #c8d0dc;
     /* Погасшие LED на карте (маркер КА) */
     --map-icon-led-off:          #5f6e80;
     --map-icon-boom-fill:        #8896a8;
-    --map-icon-logo-dots:        var(--accent-warning);
+    --map-icon-logo-dots:        #ffb347;
     --map-icon-flash-tracking:   #e8fff8;
     --map-icon-flash-selected:   #fff5e8;
 
@@ -147,9 +149,12 @@
     --sky-info-text:     #7ab8d0;
     --sky-info-label:    #d0d8e0;
     --sky-time-text:     #708898;
-    /* Выбранный в таблице КА (≠ наблюдаемому) — жёлтая трасса, как на карте */
-    --sky-selected-track:  #ffff00;
-    --sky-selected-sat-label: #d8c878;
+    /* Выбранный в таблице КА (≠ наблюдаемому): золотая трасса как в classic
+       (мягче на тёмном небе, чем чистый #ffff00). */
+    /* UX-COLORS-DARK-001: трасса выбранного КА в SkyView = трассе на карте (--selected-track).
+       Подпись остаётся нейтрально-белой: жёлтый текст на сине-сером поле SkyView режет глаза. */
+    --sky-selected-track:  var(--selected-track);
+    --sky-selected-sat-label: #ffffff;
     --sky-selected-marker: #50b868;
     /* Canvas SkyView: обводки подписей и иконки (skyview.js) */
     --sky-canvas-text-stroke:   rgba(0, 0, 0, 0.82);
@@ -180,23 +185,27 @@
     /* ══════════════════════════════════════════════════════════════
        Спектр / водопад (canvas в bottom-panel.js)
        ══════════════════════════════════════════════════════════════ */
+    /* Унифицированный «приборный» палитр спектра/водопада (UX-COLORS-INSTRUMENT-001):
+       одинаковый во всех тёмных темах. Slate-фон + видимая белая сетка + мягкий
+       зелёный трейс + тёплый жёлтый crosshair — спокойнее для глаз и без чёрного
+       «провала» по бокам waterfall. */
     --spectrum-bg:         #0c1420;
-    --spectrum-grid:       #2a3c4c;
-    --spectrum-plot-bg:    #0c1420;
-    --spectrum-instrument-bg: #0c1420;
+    --spectrum-grid:       #3a4550;
+    --spectrum-plot-bg:    #2a3440;
+    --spectrum-instrument-bg: #2a3440;
     --bp-overview-freq-scale-bg: var(--spectrum-instrument-bg);
-    --spectrum-plot-grid:  rgba(255, 255, 255, 0.08);
-    --spectrum-axis-text:  var(--text-muted);
-    --spectrum-trace:      #00ff80;
-    --spectrum-crosshair:  #ffd700;
-    --spectrum-peak-label: #ffd700;
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.14);
+    --spectrum-axis-text:  #e4e8ec;
+    --spectrum-trace:      #5ee878;
+    --spectrum-crosshair:  #ffcc66;
+    --spectrum-peak-label: #ffffff;
     --spectrum-text:       #708898;
     --spectrum-signal:     #d4b860;
     --spectrum-peak:       #f0e0a0;
     --spectrum-peak-dot:   #d05545;
-    --waterfall-bg:        #0c1420;
-    --waterfall-margin-bg: #000000;
-    --waterfall-cold-bg:   #000000;
+    --waterfall-bg:        #2a3440;
+    --waterfall-margin-bg: #2a3440;
+    --waterfall-cold-bg:   #242c38;
 
     /* Заголовки панелей, таблица пролётов, инфо Az/El */
     --panel-header-title:     #a8b4c4;

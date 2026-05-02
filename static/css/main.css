@@ -455,41 +455,65 @@ body {
     position: absolute;
     /* Ширина задаётся inline в CalloutRenderer (proc/cardW canvas-а, %),
        высота согласована с CalloutLayout.opts.cardHeight (logical px).
-       min/max — защитная сетка на случай некорректных значений из layout. */
-    min-width: 70px;
-    max-width: 160px;
-    height: 36px;
+       min/max — защитная сетка на случай некорректных значений из layout.
+       Размеры синхронизированы с DEFAULTS callouts.js (110×28 logical px). */
+    min-width: 50px;
+    max-width: 130px;
+    height: 28px;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     justify-content: center;
-    padding: 4px 8px 4px 11px;
-    border-radius: 6px;
+    padding: 1px 4px 1px 7px;
+    border-radius: 5px;
     background: var(--map-callout-bg);
     border: 1px solid var(--border-color);
     box-shadow:
         inset 3px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
-        0 2px 6px rgba(0, 0, 0, 0.25);
+        0 2px 5px rgba(0, 0, 0, 0.25);
     font-family: var(--font-mono);
-    line-height: 1.2;
+    line-height: 1.15;
     white-space: nowrap;
     overflow: hidden;
-    pointer-events: none;
-    will-change: left, top;
-    transition: left 0.25s ease, top 0.25s ease;
+    /* Кликабельные карточки — выбор спутника текущим (selected).
+       Контейнер `.map-callouts` остаётся `pointer-events: none`, чтобы
+       прозрачные участки между карточками пропускали события на canvas. */
+    pointer-events: auto;
+    cursor: pointer;
+    will-change: left, top, transform;
+    /* Якорь scale у tracked-карточки — со стороны примыкания хвоста.
+       Дефолт: accent слева → хвост слева → origin = left center. */
+    transform-origin: left center;
+    transition:
+        left 0.25s ease,
+        top 0.25s ease,
+        transform 0.18s ease,
+        filter 0.15s ease,
+        border-color 0.15s ease;
+}
+
+.map-sat-callout:hover {
+    /* Подсветка кликабельной карточки: рамка цветом КА + лёгкое свечение.
+       Не используем transform: scale, чтобы не «прыгать» при hover поверх
+       --tracked (там уже scale 1.18). */
+    filter: brightness(1.08);
+    border-color: var(--callout-accent, var(--sat-label, #ffeb3b));
 }
 
 .map-sat-callout--accent-right {
-    padding: 4px 11px 4px 8px;
+    padding: 1px 7px 1px 4px;
     box-shadow:
         inset -3px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
-        0 2px 6px rgba(0, 0, 0, 0.25);
+        0 2px 5px rgba(0, 0, 0, 0.25);
+    transform-origin: right center;
 }
 
-/* Карточка «главного» КА: плотнее фон, толще полоска, мягкое свечение цветом КА. */
+/* Карточка «главного» КА (selected/tracking): плотнее фон, толще полоска,
+   мягкое свечение цветом КА + увеличение 1.18× для выхода на первый план. */
 .map-sat-callout--tracked {
     z-index: 2;
     background: var(--map-callout-bg-tracked, var(--map-callout-bg));
+    transform: scale(1.18);
     box-shadow:
         inset 5px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
         0 0 12px color-mix(in srgb, var(--callout-accent, var(--sat-label, #ffeb3b)) 30%, transparent),
@@ -504,17 +528,26 @@ body {
 }
 
 .map-sat-callout__name {
-    font-size: 12px;
+    font-size: 11px;
     font-weight: 700;
     color: var(--map-callout-text);
     overflow: hidden;
     text-overflow: ellipsis;
 }
 
-.map-sat-callout__norad {
-    font-size: 10px;
+.map-sat-callout__sub {
+    font-size: 9px;
     font-weight: 500;
     color: var(--map-callout-text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* Карточка без alias — одностроечная: вторая строка скрыта в JS,
+   а вертикальный паддинг компенсируется так, чтобы имя было центрировано
+   в той же 30-px рамке (bend.y совпадает с центром карточки). */
+.map-sat-callout--single-line .map-sat-callout__name {
+    line-height: 1.2;
 }
 
 /* Отображаемый размер = 100% контейнера; буфер для HiDPI задаётся в JS */

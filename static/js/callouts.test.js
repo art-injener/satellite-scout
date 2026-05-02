@@ -713,6 +713,49 @@ test('ring: cluster near canvas edge — every card stays inside bounds', () => 
     }
 });
 
+test('ring: very wide cluster (zoom>1) — semi-axes are clamped, cards do not pin to canvas edges', () => {
+    // Сценарий: zoom>1, маркеры разошлись почти по всему canvas. Без клампа
+    // полуосей PCA-эллипс становится шире viewport, и buildRingPlacement
+    // прижимает все карточки к краям.
+    const opts = Object.assign({}, RING_OPTS, {
+        clusterDistance: Number.POSITIVE_INFINITY,
+    });
+    const layout = new CalloutLayout(opts);
+    const markers = [
+        { id: 1, x: 80,  y: 80  },
+        { id: 2, x: 940, y: 90  },
+        { id: 3, x: 100, y: 420 },
+        { id: 4, x: 920, y: 430 },
+        { id: 5, x: 512, y: 256 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    // Карточки укладываются в bounds (поведение buildRingPlacement не сломалось).
+    for (const r of res) {
+        const c = r.card;
+        assert.ok(c.x >= opts.boundsPadding && c.x + c.w <= BOUNDS.width  - opts.boundsPadding,
+            `card.x out of bounds: ${JSON.stringify(c)}`);
+        assert.ok(c.y >= opts.boundsPadding && c.y + c.h <= BOUNDS.height - opts.boundsPadding,
+            `card.y out of bounds: ${JSON.stringify(c)}`);
+    }
+    // Главный признак клампа полуосей: не все карточки прижаты к четырём
+    // краям canvas (как было раньше). Считаем «прижатой к краю» карточку,
+    // у которой расстояние от ближайшего края ≤ boundsPadding+1.
+    const eps = opts.boundsPadding + 1;
+    let pinned = 0;
+    for (const r of res) {
+        const c = r.card;
+        const distLeft   = c.x - opts.boundsPadding;
+        const distRight  = (BOUNDS.width  - opts.boundsPadding) - (c.x + c.w);
+        const distTop    = c.y - opts.boundsPadding;
+        const distBottom = (BOUNDS.height - opts.boundsPadding) - (c.y + c.h);
+        const minDist = Math.min(distLeft, distRight, distTop, distBottom);
+        if (minDist <= eps) { pinned++; }
+    }
+    assert.ok(pinned < markers.length,
+        `all ${markers.length} cards pinned to canvas edges — clamping ineffective ` +
+        `(pinned=${pinned})`);
+});
+
 test('ring: PCA does not degenerate on collinear markers (n=2)', () => {
     const layout = new CalloutLayout(RING_OPTS);
     // Две точки на одной горизонтали — главная ось ровно X, вторая ось вырождена.

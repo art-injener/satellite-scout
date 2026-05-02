@@ -64,23 +64,26 @@
        ══════════════════════════════════════════════════════════════ */
     --orbit-future:  #27ae60;
     --orbit-past:    #da4453;
-    --orbit-dots:    #f67400;
+    /* Минутные точки трассы — жёлтые, единые для всех тёмных тем (UX-COLORS-DARK-001). */
+    --orbit-dots:    #ffff00;
 
     /* ══════════════════════════════════════════════════════════════
        Маркер спутника
        ══════════════════════════════════════════════════════════════ */
     --sat-marker:        #e0e4e8;
     --sat-glow:          #3daee9;
-    --sat-label:         #ecf0f4;
+    /* Подпись КА на карте — жёлтая, единая для всех тёмных тем. */
+    --sat-label:         #ffeb3b;
     --sat-label-stroke:  rgba(0, 0, 0, 0.85);
 
     --map-icon-stroke:           rgba(20, 24, 30, 0.94);
     --map-icon-tracking-fill:    var(--accent-primary);
-    --map-icon-selected-fill:    var(--accent-warning);
+    /* Иконка selected — амбер #ffb347, единый для тёмных тем. */
+    --map-icon-selected-fill:    #ffb347;
     --map-icon-neutral-fill:     #c8ccd4;
     --map-icon-led-off:          #6a7686;
     --map-icon-boom-fill:        #889098;
-    --map-icon-logo-dots:        var(--accent-warning);
+    --map-icon-logo-dots:        #ffb347;
     --map-icon-flash-tracking:   #e8fff8;
     --map-icon-flash-selected:   #fff5e8;
 
@@ -94,7 +97,8 @@
     /* ══════════════════════════════════════════════════════════════
        Выбранный спутник (selected)
        ══════════════════════════════════════════════════════════════ */
-    --selected-track:          #f67400;
+    /* Трасса selected КА — жёлтая, единая для всех тёмных тем. */
+    --selected-track:          #ffff00;
     --selected-marker:         #27ae60;
     --selected-footprint:      rgba(61, 174, 233, 0.60);
     --selected-footprint-fill: rgba(61, 174, 233, 0.12);
@@ -143,8 +147,12 @@
     --sky-info-text:     #3daee9;
     --sky-info-label:    #ccd0d8;
     --sky-time-text:     #889098;
-    --sky-selected-track:  #f67400;
-    --sky-selected-sat-label: #f09040;
+    /* SkyView: трасса selected — золото classic (мягче на тёмном фоне).
+       Подпись selected — пастельное золото, единое для всех тёмных тем. */
+    /* UX-COLORS-DARK-001: трасса выбранного КА в SkyView = трассе на карте (--selected-track).
+       Подпись остаётся нейтрально-белой: жёлтый текст на сине-сером поле SkyView режет глаза. */
+    --sky-selected-track:  var(--selected-track);
+    --sky-selected-sat-label: #ffffff;
     --sky-selected-marker: #27ae60;
     --sky-canvas-text-stroke:   rgba(0, 0, 0, 0.78);
     --sky-sat-panel-line:       rgba(255, 255, 255, 0.28);
@@ -173,23 +181,27 @@
     /* ══════════════════════════════════════════════════════════════
        Спектр / водопад — тёмная приборная область (темнее панелей)
        ══════════════════════════════════════════════════════════════ */
+    /* Унифицированный «приборный» палитр спектра/водопада (UX-COLORS-INSTRUMENT-001):
+       одинаковый во всех тёмных темах. Slate-фон + видимая белая сетка + мягкий
+       зелёный трейс + тёплый жёлтый crosshair — спокойнее для глаз и без чёрного
+       «провала» по бокам waterfall. */
     --spectrum-bg:         #181c22;
-    --spectrum-grid:       #303840;
-    --spectrum-plot-bg:    #181c22;
-    --spectrum-instrument-bg: #181c22;
+    --spectrum-grid:       #3a4550;
+    --spectrum-plot-bg:    #2a3440;
+    --spectrum-instrument-bg: #2a3440;
     --bp-overview-freq-scale-bg: var(--spectrum-instrument-bg);
-    --spectrum-plot-grid:  rgba(255, 255, 255, 0.08);
-    --spectrum-axis-text:  var(--text-muted);
-    --spectrum-trace:      #00ff80;
-    --spectrum-crosshair:  #ffd700;
-    --spectrum-peak-label: #ffd700;
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.14);
+    --spectrum-axis-text:  #e4e8ec;
+    --spectrum-trace:      #5ee878;
+    --spectrum-crosshair:  #ffcc66;
+    --spectrum-peak-label: #ffffff;
     --spectrum-text:       #889098;
     --spectrum-signal:     #f0c040;
     --spectrum-peak:       #f0e0a0;
     --spectrum-peak-dot:   #da4453;
-    --waterfall-bg:        #181c22;
-    --waterfall-margin-bg: #0c1014;
-    --waterfall-cold-bg:   #0c1014;
+    --waterfall-bg:        #2a3440;
+    --waterfall-margin-bg: #2a3440;
+    --waterfall-cold-bg:   #242c38;
 
     /* Заголовки панелей, таблицы, инфо Az/El */
     --panel-header-title:     #a8b0b8;

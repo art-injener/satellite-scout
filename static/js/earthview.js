@@ -8,6 +8,19 @@
     const MAP_SAT_MARKER_HALF_PX = 28;
 
     /**
+     * Дискретные уровни масштабирования карты.
+     * 4 ступени под границы детализации векторных данных (50m / 10m).
+     */
+    const MAP_ZOOM_LEVELS = [1.0, 1.5, 2.5, 4.0];
+
+    /**
+     * Длительность phased-анимации по умолчанию (мс).
+     * При смене уровня zoom карта «перерисовывается заново» — на этом интервале
+     * береговые линии и границы РФ ведутся «карандашом» сегмент за сегментом.
+     */
+    const DEFAULT_ZOOM_ANIM_MS = 1500;
+
+    /**
      * Поворот маркера с бэкенда (map_marker_rot_deg) — предпочтительно.
      * Запасной вариант: локальный расчёт с учётом внутреннего rotate(45) в SVG.
      */
@@ -15,7 +28,7 @@
     const MAP_SAT_DEFAULT_ROT = 0;
 
     // Палитра вторичных спутников без включённой трассы: крупные маркеры + высокая яркость
-    // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте (UX-MAP-VIS-001).
+    // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте.
     // Используется как в _drawSecondaryMarker, так и в _collectCalloutMarkers.
     const SECONDARY_SAT_COLORS = [
         '#ffffff', '#f0fcff', '#e8ffff', '#fffef0',
@@ -61,7 +74,13 @@
             showRussiaBorders: true, // Границы РФ и подпись «Россия»
             showFootprint: true, // Круг видимости спутника
             trackMode: 'both', // 'line', 'dots', 'both'
-            trackDotInterval: 60000 // Интервал точек в мс (1 минута)
+            trackDotInterval: 60000, // Интервал точек в мс (1 минута)
+            // Стиль анимации zoom:
+            //   'phased'  — послойная векторная перерисовка с «карандашной» прорисовкой контуров (по умолчанию);
+            //   'instant' — без анимации, мгновенный переход.
+            animStyle: 'phased',
+            // Длительность phased-анимации (мс): за это время карта целиком прорисовывается заново.
+            zoomAnimDurationMs: DEFAULT_ZOOM_ANIM_MS
         }, options || {});
 
         this._reloadColorsFromCss();
@@ -76,9 +95,13 @@
         this.landData = null;
 
 
-        // Состояние карты
-        this.center = { lon: 0, lat: 0 }; // Центр карты
-        this.zoom = 1.0; // Масштаб (1.0 = вся карта)
+        // Состояние карты: центр всегда совпадает с наблюдателем после setObserver();
+        // до этого — (0,0). Pan не предусмотрен, центр меняется только через resetView/setObserver.
+        this.center = { lon: 0, lat: 0 };
+        this._zoomIdx = 0;
+        this.zoom = MAP_ZOOM_LEVELS[this._zoomIdx];
+        // Состояние phased-анимации: { startTs, fromIdx, toIdx, raf } или null.
+        this._zoomAnim = null;
 
         // Спутник под наблюдением (tracking): red/green + dots + footprint.
         this.satellite = {
@@ -123,6 +146,11 @@
         // Флаг готовности
         this.ready = false;
 
+        // Колбэк выбора спутника по клику на карточку выноски (selected).
+        // По умолчанию no-op; внешний код переопределяет через
+        // `earthView.onSatelliteClick = (noradId) => {...}`.
+        this.onSatelliteClick = function(_noradId) {};
+
         // Привязка обработчиков событий
         this._boundResize = this._onResize.bind(this);
         this._resizeObserver = null;
@@ -157,6 +185,24 @@
     // ========== Проекция координат ==========
 
     /**
+     * Эффективная широта центра проекции с учётом зажима (clamp).
+     *
+     * При zoom=1 карта всегда «в полный globe» по Y — центр Y фиксирован на экваторе.
+     * При zoom>1 центр Y берётся из наблюдателя (this.center.lat), но зажимается так,
+     * чтобы карта целиком закрывала canvas по высоте: |cy| ≤ 90·(1 − 1/zoom).
+     * Это убирает пустые поля сверху/снизу, когда наблюдатель близко к полюсу.
+     */
+    EarthView.prototype._effectiveCenterLat = function() {
+        const z = this.zoom || 1;
+        if (z <= 1) { return 0; }
+        const maxAbs = 90 * (1 - 1 / z);
+        const cy = (this.center && typeof this.center.lat === 'number') ? this.center.lat : 0;
+        if (cy > maxAbs) { return maxAbs; }
+        if (cy < -maxAbs) { return -maxAbs; }
+        return cy;
+    };
+
+    /**
      * Преобразование географических координат в координаты canvas
      * Equirectangular (Plate Carrée) проекция
      * @param {number} lon - Долгота (-180 до 180)
@@ -164,12 +210,20 @@
      * @returns {Object} {x, y} координаты на canvas
      */
     EarthView.prototype.project = function(lon, lat) {
-        // Нормализация долготы
-        while (lon > 180) { lon -= 360; }
-        while (lon < -180) { lon += 360; }
+        // Δlon относительно центра, нормализуем в [-180, 180)
+        let dLon = lon - this.center.lon;
+        while (dLon >= 180) { dLon -= 360; }
+        while (dLon < -180) { dLon += 360; }
 
-        const x = (lon + 180) / 360 * this.width;
-        const y = (90 - lat) / 180 * this.height;
+        const z = this.zoom || 1;
+        const x = (dLon / 360) * this.width * z + this.width / 2;
+
+        // По Y: на zoom=1 — весь мир (lat ∈ [-90, 90] → y ∈ [0, height]) с центром
+        // на экваторе. На zoom>1 — Y масштабируется так же, как X (сохраняем пропорции
+        // карты), и центрируется на широте наблюдателя c зажимом, чтобы карта всегда
+        // полностью закрывала canvas по высоте.
+        const cy = this._effectiveCenterLat();
+        const y = (this.height / 2) - ((lat - cy) / 90) * (this.height / 2) * z;
 
         return { x: x, y: y };
     };
@@ -181,9 +235,38 @@
      * @returns {Object} {lon, lat}
      */
     EarthView.prototype.unproject = function(x, y) {
-        const lon = (x / this.width) * 360 - 180;
-        const lat = 90 - (y / this.height) * 180;
+        const z = this.zoom || 1;
+        const dLon = ((x - this.width / 2) / (this.width * z)) * 360;
+        let lon = this.center.lon + dLon;
+        while (lon >= 180) { lon -= 360; }
+        while (lon < -180) { lon += 360; }
+        const cy = this._effectiveCenterLat();
+        const lat = cy + ((this.height / 2 - y) / (this.height / 2 * z)) * 90;
         return { lon: lon, lat: lat };
+    };
+
+    /**
+     * Порог для детекции «прыжка» через антимеридиан в полилиниях.
+     * При zoom>1 видимая ширина карты в пикселях растёт пропорционально zoom,
+     * поэтому фиксированный this.width/2 даёт ложные разрывы.
+     * @returns {number} половина «полной ширины» проекции в пикселях.
+     */
+    EarthView.prototype._antimeridianThreshold = function() {
+        return (this.width * (this.zoom || 1)) / 2;
+    };
+
+    /**
+     * Точка в видимой области canvas (с допуском padding для plotted-объектов
+     * за краями, например, иконок, центр которых вне viewport, но часть видна).
+     * @param {{x:number, y:number}} p — экранные координаты в physical px.
+     * @param {number} [padding=0] — допуск в physical px.
+     * @returns {boolean}
+     */
+    EarthView.prototype._isInViewport = function(p, padding) {
+        if (!p) { return false; }
+        const pad = padding || 0;
+        return p.x >= -pad && p.x <= this.width + pad &&
+               p.y >= -pad && p.y <= this.height + pad;
     };
 
     // ========== Загрузка данных ==========
@@ -327,12 +410,28 @@
     // ========== Отрисовка ==========
 
     /**
-     * Главная функция отрисовки
+     * Главная функция отрисовки.
+     * Если активна phased-анимация zoom — делегирует _drawPhased();
+     * иначе вызывает «статическое ядро» _drawStatic().
      */
     EarthView.prototype.draw = function() {
+        if (this._zoomAnim) {
+            this._drawPhased(this._now());
+            return;
+        }
+        this._drawStatic();
+    };
+
+    /**
+     * «Статическое ядро» отрисовки — все слои за один проход без защиты от
+     * phased-анимации. Используется как из публичной draw(), так и из
+     * _drawPhased на завершающих стадиях, чтобы корректно перепозиционировать
+     * DOM-маркеры и выноски без рекурсии.
+     * @private
+     */
+    EarthView.prototype._drawStatic = function() {
         const ctx = this.ctx;
 
-        // Очистка canvas
         ctx.fillStyle = this.colors.background;
         ctx.fillRect(0, 0, this.width, this.height);
 
@@ -414,42 +513,42 @@
     };
 
     /**
-     * Отрисовка координатной сетки
+     * Отрисовка координатной сетки.
+     * Меридианы — вертикальные линии на спроецированной X (отсекаем те, что вне канваса).
+     * Параллели — горизонтальные линии по Y, рисуем напрямую от x=0 до x=width:
+     * через project() рисовать нельзя, т.к. при сдвинутом центре `project(-180, lat).x`
+     * и `project(180, lat).x` после нормализации дают одну и ту же точку → линия длины 0.
      */
     EarthView.prototype._drawGrid = function() {
         const ctx = this.ctx;
         const step = this.options.gridStep;
+        const w = this.width;
+        const h = this.height;
 
-        // Вертикальные линии (меридианы)
+        // Меридианы (вертикали).
         for (let lon = -180; lon <= 180; lon += step) {
             const isMajor = (lon === 0 || lon === 180 || lon === -180);
+            const p = this.project(lon, 0);
+            if (p.x < 0 || p.x > w) { continue; }
             ctx.strokeStyle = isMajor ? this.colors.gridMajor : this.colors.grid;
-            ctx.lineWidth = isMajor ? 1 : 1;
-
-            const p1 = this.project(lon, 90);
-            const p2 = this.project(lon, -90);
-
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
+            ctx.moveTo(p.x, 0);
+            ctx.lineTo(p.x, h);
             ctx.stroke();
         }
 
-        // Горизонтальные линии (параллели)
+        // Параллели (горизонтали) — Y зависит только от lat, рисуем во всю ширину канваса.
         for (let lat = -90; lat <= 90; lat += step) {
             const isMajor = (lat === 0);
+            const p = this.project(0, lat);
             ctx.strokeStyle = isMajor ? this.colors.gridMajor : this.colors.grid;
-            ctx.lineWidth = isMajor ? 1 : 1;
-
-            const p1 = this.project(-180, lat);
-            const p2 = this.project(180, lat);
-
+            ctx.lineWidth = 1;
             ctx.beginPath();
-            ctx.moveTo(p1.x, p1.y);
-            ctx.lineTo(p2.x, p2.y);
+            ctx.moveTo(0, p.y);
+            ctx.lineTo(w, p.y);
             ctx.stroke();
         }
-
     };
 
     /**
@@ -462,12 +561,12 @@
         ctx.font = '11px monospace';
         ctx.fillStyle = this.colors.textGrid || this.colors.textSecondary;
 
-        // Подписи долготы (внизу)
+        // Подписи долготы (внизу) — только для меридианов, попадающих в видимую область.
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         for (let lon = -150; lon <= 180; lon += step) {
             const p = this.project(lon, -90);
-            // Формат как в STSPLUS: просто число
+            if (p.x < 0 || p.x > this.width) { continue; }
             const label = lon.toString();
             ctx.fillText(label, p.x, this.height - 14);
         }
@@ -478,7 +577,7 @@
         for (let lat = -80; lat <= 80; lat += 10) {
             if (lat === 0) { continue; }
             const p = this.project(-180, lat);
-            // Формат как в STSPLUS: число с минусом для южного полушария
+            if (p.y < 0 || p.y > this.height) { continue; }
             const label = lat.toString();
             ctx.fillText(label, 24, p.y);
         }
@@ -531,65 +630,116 @@
         const ctx = this.ctx;
         const w = this.width;
         const h = this.height;
+        const threshold = this._antimeridianThreshold();
 
-        // Определяем тип полигона: содержит ли он южный или северный полюс
+        // Определяем тип полигона: содержит ли он южный или северный полюс.
         let hasSouthPole = false, hasNorthPole = false;
         for (let i = 0; i < coords.length; i++) {
             if (coords[i][1] <= -89.5) { hasSouthPole = true; }
             if (coords[i][1] >= 89.5) { hasNorthPole = true; }
         }
 
-        ctx.beginPath();
-        let prevP = null;
-        let moved = false;
+        // ── Полярный полигон (Антарктида / Россия с границей через 180°): ────────
+        // обход антимеридиана через нижний/верхний край канваса, единый замкнутый путь.
+        if (hasSouthPole || hasNorthPole) {
+            ctx.beginPath();
+            let prevP = null;
+            let moved = false;
 
-        for (let i = 0; i < coords.length; i++) {
-            const lon = coords[i][0];
-            const lat = coords[i][1];
-            const p = this.project(lon, lat);
-            const px = Math.max(0, Math.min(w, p.x));
-            const py = Math.max(0, Math.min(h, p.y));
+            for (let i = 0; i < coords.length; i++) {
+                const p = this.project(coords[i][0], coords[i][1]);
+                const px = Math.max(0, Math.min(w, p.x));
+                const py = Math.max(0, Math.min(h, p.y));
 
-            if (prevP && Math.abs(p.x - prevP.x) > w / 2) {
-                // Пересечение антимеридиана
-                const goingRightToLeft = p.x < prevP.x;
-                const edgeX = goingRightToLeft ? w : 0;
-                const oppositeEdgeX = goingRightToLeft ? 0 : w;
-                const yPrev = Math.max(0, Math.min(h, prevP.y));
+                if (prevP && Math.abs(p.x - prevP.x) > threshold) {
+                    const goingRTL = p.x < prevP.x;
+                    const edgeX = goingRTL ? w : 0;
+                    const oppositeEdgeX = goingRTL ? 0 : w;
+                    const yPrev = Math.max(0, Math.min(h, prevP.y));
 
-                ctx.lineTo(edgeX, yPrev);
-
-                if (hasSouthPole) {
-                    // Антарктика: обходим через нижний край (южный полюс = y = h)
-                    ctx.lineTo(edgeX, h);
-                    ctx.lineTo(oppositeEdgeX, h);
-                } else if (hasNorthPole) {
-                    // Арктика: обходим через верхний край (северный полюс = y = 0)
-                    ctx.lineTo(edgeX, 0);
-                    ctx.lineTo(oppositeEdgeX, 0);
+                    ctx.lineTo(edgeX, yPrev);
+                    if (hasSouthPole) {
+                        ctx.lineTo(edgeX, h);
+                        ctx.lineTo(oppositeEdgeX, h);
+                    } else {
+                        ctx.lineTo(edgeX, 0);
+                        ctx.lineTo(oppositeEdgeX, 0);
+                    }
+                    ctx.lineTo(px, py);
+                    moved = true;
+                } else if (!moved) {
+                    ctx.moveTo(px, py);
+                    moved = true;
+                } else {
+                    ctx.lineTo(px, py);
                 }
-
-                ctx.lineTo(px, py);
-                moved = true;
-            } else if (!moved) {
-                ctx.moveTo(px, py);
-                moved = true;
-            } else {
-                ctx.lineTo(px, py);
+                prevP = p;
             }
-
-            prevP = p;
+            ctx.closePath();
+            ctx.fill();
+            return;
         }
 
-        // closePath замыкает путь прямо в начальную точку (moveTo)
-        ctx.closePath();
-        ctx.fill();
+        // ── Обычный (не-полярный) полигон: разбиваем по швам антимеридиана. ──────
+        // При сдвинутом center.lon шов проходит на lon = center.lon ± 180°. Если
+        // полигон пересекает шов, его нужно разделить на два «полу-полигона»,
+        // каждый замкнуть по краю канваса — иначе путь протягивается через всю карту.
+        const proj = new Array(coords.length);
+        for (let i = 0; i < coords.length; i++) {
+            proj[i] = this.project(coords[i][0], coords[i][1]);
+        }
+
+        const chunks = [];
+        let cur = [proj[0]];
+        for (let i = 1; i < proj.length; i++) {
+            const a = proj[i - 1];
+            const b = proj[i];
+            if (Math.abs(b.x - a.x) > threshold) {
+                // Завершаем текущий кусок выходом на ближний край канваса.
+                const goingRTL = b.x < a.x;
+                const exitX = goingRTL ? w : 0;
+                const enterX = goingRTL ? 0 : w;
+                cur.push({ x: exitX, y: a.y });
+                chunks.push(cur);
+                cur = [{ x: enterX, y: b.y }];
+            }
+            cur.push(b);
+        }
+        chunks.push(cur);
+
+        // Кольцо замкнуто, поэтому первый и последний куски лежат по одну сторону шва —
+        // склеиваем их обратно, чтобы заливка получилась цельной.
+        if (chunks.length >= 2) {
+            chunks[0] = chunks[chunks.length - 1].concat(chunks[0]);
+            chunks.pop();
+        }
+
+        for (let s = 0; s < chunks.length; s++) {
+            const c = chunks[s];
+            if (c.length < 3) { continue; }
+            ctx.beginPath();
+            const x0 = Math.max(0, Math.min(w, c[0].x));
+            const y0 = Math.max(0, Math.min(h, c[0].y));
+            ctx.moveTo(x0, y0);
+            for (let i = 1; i < c.length; i++) {
+                const px = Math.max(0, Math.min(w, c[i].x));
+                const py = Math.max(0, Math.min(h, c[i].y));
+                ctx.lineTo(px, py);
+            }
+            ctx.closePath();
+            ctx.fill();
+        }
     };
 
     /**
      * Отрисовка береговых линий
      */
-    EarthView.prototype._drawCoastlines = function() {
+    /**
+     * Отрисовка береговых линий.
+     * @param {number} [progress] — доля длины [0..1]. Если задан и < 1 — каждая
+     *   полилиния рисуется частично, от первой точки к последней (эффект «карандаша»).
+     */
+    EarthView.prototype._drawCoastlines = function(progress) {
         const ctx = this.ctx;
         const features = this.coastlineData.features;
 
@@ -601,10 +751,10 @@
             const geometry = feature.geometry;
 
             if (geometry.type === 'LineString') {
-                this._drawLineString(geometry.coordinates);
+                this._drawLineString(geometry.coordinates, progress);
             } else if (geometry.type === 'MultiLineString') {
                 for (let j = 0; j < geometry.coordinates.length; j++) {
-                    this._drawLineString(geometry.coordinates[j]);
+                    this._drawLineString(geometry.coordinates[j], progress);
                 }
             }
         }
@@ -619,8 +769,9 @@
         for (let i = 0; i < this.cities.length; i++) {
             const city = this.cities[i];
             const p = this.project(city.lon, city.lat);
+            // Отсекаем города вне видимой области: на zoom>1 их большинство.
+            if (!this._isInViewport(p, 80)) { continue; }
 
-            // Кружок с мягкой заливкой (маленький)
             ctx.beginPath();
             ctx.arc(p.x, p.y, 3, 0, Math.PI * 2);
             ctx.fillStyle = this.colors.cityMarker;
@@ -635,26 +786,49 @@
     };
 
     /**
-     * Отрисовка одной линии (LineString)
+     * Отрисовка одной линии (LineString).
      * @param {Array} coords - Массив координат [[lon, lat], ...]
+     * @param {number} [progress] - Доля длины полилинии для отрисовки [0..1].
+     *   Если не задан или ≥ 1 — рисуется вся полилиния (поведение по умолчанию).
+     *   Если < 1 — рисуется только начальная часть пропорционально progress; последний
+     *   сегмент при этом дорисовывается частично, давая эффект ведения «карандашом».
      */
-    EarthView.prototype._drawLineString = function(coords) {
+    EarthView.prototype._drawLineString = function(coords, progress) {
         if (!coords || coords.length < 2) { return; }
+
+        // Решаем, рисовать ли частично. usePartial=false — старое поведение.
+        const usePartial = (typeof progress === 'number' && progress >= 0 && progress < 1);
+        let pointsCount = coords.length;
+        let tailFrac = 0;
+
+        if (usePartial) {
+            // Прогресс трактуем как долю «пройденных сегментов» (N-1 сегментов всего).
+            const exact = (coords.length - 1) * progress;
+            const whole = Math.floor(exact);
+            tailFrac = exact - whole;
+            pointsCount = whole + 1; // сколько целых точек уже отрисовано
+            if (pointsCount < 1) { pointsCount = 1; }
+            if (pointsCount >= coords.length) {
+                pointsCount = coords.length;
+                tailFrac = 0;
+            }
+            if (pointsCount < 2 && tailFrac <= 0) { return; } // ещё нечего рисовать
+        }
 
         const ctx = this.ctx;
         ctx.beginPath();
 
+        const threshold = this._antimeridianThreshold();
         let prevP = null;
         let moved = false;
 
-        for (let i = 0; i < coords.length; i++) {
+        for (let i = 0; i < pointsCount; i++) {
             const lon = coords[i][0];
             const lat = coords[i][1];
             const p = this.project(lon, lat);
 
-            // Проверка на пересечение края карты (антимеридиан)
-            if (prevP && Math.abs(p.x - prevP.x) > this.width / 2) {
-                // Разрыв линии на антимеридиане
+            // Разрыв линии на антимеридиане.
+            if (prevP && Math.abs(p.x - prevP.x) > threshold) {
                 ctx.stroke();
                 ctx.beginPath();
                 moved = false;
@@ -670,13 +844,30 @@
             prevP = p;
         }
 
+        // «Кончик карандаша»: частичный сегмент к ближайшей не отрисованной точке.
+        if (usePartial && tailFrac > 0 && pointsCount < coords.length && prevP) {
+            const lonNext = coords[pointsCount][0];
+            const latNext = coords[pointsCount][1];
+            const pn = this.project(lonNext, latNext);
+            // Не рисуем «хвост» через антимеридиан — иначе линия растянется через всю карту.
+            if (Math.abs(pn.x - prevP.x) <= threshold) {
+                const ix = prevP.x + (pn.x - prevP.x) * tailFrac;
+                const iy = prevP.y + (pn.y - prevP.y) * tailFrac;
+                if (!moved) {
+                    ctx.moveTo(prevP.x, prevP.y);
+                }
+                ctx.lineTo(ix, iy);
+            }
+        }
+
         ctx.stroke();
     };
 
     /**
-     * Отрисовка границ РФ и подписи «Россия»
+     * Отрисовка границ РФ и подписи «Россия».
+     * @param {number} [progress] — доля длины [0..1] для phased-анимации.
      */
-    EarthView.prototype._drawRussiaBorders = function() {
+    EarthView.prototype._drawRussiaBorders = function(progress) {
         if (!this.russiaData || !this.russiaData.features || this.russiaData.features.length === 0) {
             return;
         }
@@ -691,12 +882,12 @@
             if (!geom || !geom.coordinates) { continue; }
 
             if (geom.type === 'Polygon') {
-                this._drawLineString(geom.coordinates[0]);
+                this._drawLineString(geom.coordinates[0], progress);
             } else if (geom.type === 'MultiPolygon') {
                 for (let p = 0; p < geom.coordinates.length; p++) {
                     const ring = geom.coordinates[p][0];
                     if (ring && ring.length >= 2) {
-                        this._drawLineString(ring);
+                        this._drawLineString(ring, progress);
                     }
                 }
             }
@@ -735,68 +926,92 @@
             return;
         }
 
-        if (track && track.past) {
-            for (let i = 0; i < track.past.length; i++) {
-                const seg = track.past[i];
-                if (seg && seg.length >= 2) {
+        // past и future уже разрезаны на бэке по антимеридиану через
+        // splitAtAntimeridian — рисуем каждый сегмент отдельно. Длительность
+        // покрытия (см. GenerateDefaultGroundTrack) подобрана так, чтобы трасса
+        // покрывала ровно 360° по долготе, поэтому на equirectangular-карте
+        // линия идёт от края до края без gap'ов.
+        //
+        // Чтобы между past и future не возникала «дыра» в районе текущей позиции
+        // КА (бэк делит сегменты по now без overlapping-точки), bridge'м
+        // дополняем последний past-сегмент первой точкой первого future-сегмента.
+        const pastSegs = (track && track.past) ? track.past : [];
+        const futureSegs = (track && track.future) ? track.future : [];
+        const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
+
+        if (Array.isArray(bridgedPast)) {
+            for (let s = 0; s < bridgedPast.length; s++) {
+                const seg = bridgedPast[s];
+                if (Array.isArray(seg) && seg.length >= 2) {
                     this._drawTrackSegment(seg, this.colors.orbitPast);
                 }
             }
         }
-        if (track && track.future) {
-            for (let j = 0; j < track.future.length; j++) {
-                const segF = track.future[j];
-                if (segF && segF.length >= 2) {
-                    this._drawTrackSegment(segF, this.colors.orbitFuture);
-                }
+        for (let s = 0; s < futureSegs.length; s++) {
+            const seg = futureSegs[s];
+            if (Array.isArray(seg) && seg.length >= 2) {
+                this._drawTrackSegment(seg, this.colors.orbitFuture);
             }
         }
     };
 
     /**
-     * Отрисовка сегмента орбиты
+     * Соединительный «мост» между past и future — возвращает копию массива past,
+     * у которого последний сегмент дополнен первой точкой первого future-сегмента.
+     * Сами входные массивы не мутируются.
+     * @param {Array<Array>} past — past-сегменты из бэкенда (или null/undefined).
+     * @param {Array<Array>} future — future-сегменты (или null/undefined).
+     * @returns {Array<Array>|null} модифицированный past или null/исходный, если соединять нечего.
+     * @private
+     */
+    EarthView.prototype._bridgePastFuture = function(past, future) {
+        if (!past || past.length === 0) { return past || null; }
+        if (!future || future.length === 0) { return past; }
+        const lastPastSeg = past[past.length - 1];
+        const firstFutureSeg = future[0];
+        if (!lastPastSeg || lastPastSeg.length === 0) { return past; }
+        if (!firstFutureSeg || firstFutureSeg.length === 0) { return past; }
+        const extended = lastPastSeg.slice();
+        extended.push(firstFutureSeg[0]);
+        const out = past.slice(0, past.length - 1);
+        out.push(extended);
+        return out;
+    };
+
+    /**
+     * Отрисовка одного сегмента орбиты — линия + опциональные точки-метки.
+     * Защита от ложных «склеек» через антимеридиан: если соседние спроецированные
+     * точки слишком далеко друг от друга по x (> _antimeridianThreshold), считаем
+     * это переходом через ±180° и начинаем новый sub-path (на бэке такие сегменты
+     * уже разрезаны splitAtAntimeridian, но dpr/zoom-аномалии страхуем).
      * @param {Array} points - Массив точек [{lon, lat, time} или {lon, lat, ts}]
      * @param {string} color - Цвет линии
      */
     EarthView.prototype._drawTrackSegment = function(points, color) {
+        if (!points || points.length < 2) { return; }
         const ctx = this.ctx;
         const mode = this.options.trackMode;
         const dotInterval = this.options.trackDotInterval;
 
-        // Отрисовка линии
         if (mode === 'line' || mode === 'both') {
             ctx.strokeStyle = color;
             ctx.lineWidth = this._mapTrackLineWidth;
+            ctx.setLineDash([]);
             ctx.beginPath();
-
+            const thresh = this._antimeridianThreshold();
             let prevP = null;
-            let moved = false;
-
-            for (let i = 0; i < points.length; i++) {
-                const pt = points[i];
-                const p = this.project(pt.lon, pt.lat);
-
-                // Проверка на пересечение антимеридиана
-                if (prevP && Math.abs(p.x - prevP.x) > this.width / 2) {
-                    ctx.stroke();
-                    ctx.beginPath();
-                    moved = false;
-                }
-
-                if (!moved) {
+            for (let k = 0; k < points.length; k++) {
+                const p = this.project(points[k].lon, points[k].lat);
+                if (k === 0 || (prevP && Math.abs(p.x - prevP.x) > thresh)) {
                     ctx.moveTo(p.x, p.y);
-                    moved = true;
                 } else {
                     ctx.lineTo(p.x, p.y);
                 }
-
                 prevP = p;
             }
-
             ctx.stroke();
         }
 
-        // Отрисовка точек (минутные метки)
         if (mode === 'dots' || mode === 'both') {
             ctx.fillStyle = this.colors.orbitDots;
             let lastDotTime = -Infinity;
@@ -879,7 +1094,7 @@
             const p0 = this.project(pos.lon, pos.lat);
             const p1 = this.project(pos.map_marker_fwd_lon, pos.map_marker_fwd_lat);
             const ddx = p1.x - p0.x;
-            if (Math.abs(ddx) > pw / 2) {
+            if (Math.abs(ddx) > this._antimeridianThreshold()) {
                 if (serverRot !== null) {
                     st.rotDeg += _shortestRotDeltaDeg(st.rotDeg, serverRot);
                     gotOrientation = true;
@@ -924,12 +1139,17 @@
             }
         }
 
+        // Скрываем DOM-маркер, если центр иконки вышел за пределы канваса.
+        // Иначе при zoom>1 маркер «прилипает» к краю и создаёт фантомного спутника.
+        // Допуск = MAP_SAT_MARKER_HALF_PX, чтобы иконка, чей центр чуть за краем,
+        // но половина которой видна в кадре, всё же отображалась.
+        const inView = this._isInViewport(p, MAP_SAT_MARKER_HALF_PX);
         const pctX = (p.x / pw) * 100;
         const pctY = (p.y / ph) * 100;
         const h = MAP_SAT_MARKER_HALF_PX;
         el.style.left = 'calc(' + pctX + '% - ' + h + 'px)';
         el.style.top = 'calc(' + pctY + '% - ' + h + 'px)';
-        el.style.display = st.orientReady ? 'block' : 'none';
+        el.style.display = (st.orientReady && inView) ? 'block' : 'none';
         const lbl = document.getElementById(labelId);
         if (lbl) {
             lbl.textContent = name ? _shortName(name) : '';
@@ -980,23 +1200,42 @@
         // полуширина 19 + 1 буфер → r=20.
         const ICON_R_MAIN = 18 * dpr;
         const ICON_R_SECONDARY = 20 * dpr;
-        // Подбор ширины карточки под содержимое (имя + #NORAD).
+        // Карта nid → alias из текущей группы (satellite_group_update от SSE).
+        // Используется для второй строки карточки (alias / второе имя КА).
+        const aliasMap = {};
+        if (sm && typeof sm.getSatelliteGroup === 'function') {
+            const grp = sm.getSatelliteGroup();
+            if (grp && Array.isArray(grp.satellites)) {
+                for (let i = 0; i < grp.satellites.length; i++) {
+                    const s = grp.satellites[i];
+                    if (s && s.norad_id != null && s.sat_alias) {
+                        aliasMap[s.norad_id] = s.sat_alias;
+                    }
+                }
+            }
+        }
+        const aliasOf = (nid) => {
+            if (nid == null) { return ''; }
+            const a = aliasMap[nid];
+            return a ? String(a) : '';
+        };
+        // Подбор ширины карточки под содержимое (имя + alias).
         // Возвращает значение в physical px (как и остальные размеры аллокатора).
-        // Шрифты подобраны под .map-sat-callout: имя 12px bold, NORAD 10px medium.
+        // Шрифты подобраны под .map-sat-callout: имя 11px bold, sub 9px medium.
         // monospace fallback близок по метрикам к --font-mono без чтения computed style.
-        const measure = (name, nid) => {
+        const measure = (name, alias) => {
             ctx.save();
-            ctx.font = 'bold 12px monospace';
+            ctx.font = 'bold 11px monospace';
             const wName = ctx.measureText(name || '').width;
-            ctx.font = '500 10px monospace';
-            const wNorad = ctx.measureText('#' + nid).width;
+            ctx.font = '500 9px monospace';
+            const wAlias = ctx.measureText(alias || '').width;
             ctx.restore();
-            // Горизонтальные паддинги карточки (4+8+11) + 2px бордер ≈ 22 logical px.
+            // Горизонтальные паддинги карточки (4+7) + 2px бордер ≈ 13 logical px.
             // Прибавляем небольшой буфер на разницу шрифтов и округление.
-            const innerPad = 24 * dpr;
-            const target = Math.max(wName, wNorad) + innerPad;
-            const minW = 70 * dpr;
-            const maxW = 160 * dpr;
+            const innerPad = 16 * dpr;
+            const target = Math.max(wName, wAlias) + innerPad;
+            const minW = 56 * dpr;
+            const maxW = 130 * dpr;
             return Math.round(Math.max(minW, Math.min(maxW, target)));
         };
 
@@ -1005,13 +1244,15 @@
         if (trkId && this.satellite.position) {
             const p = this.project(this.satellite.position.lon, this.satellite.position.lat);
             const name = this.satellite.name || '';
+            const alias = aliasOf(trkId);
             markers.push({
                 id: trkId,
                 x: p.x,
                 y: p.y,
                 color: this.colors.satLabel || '#ffeb3b',
                 name: name,
-                cardWidth: measure(name, trkId),
+                alias: alias,
+                cardWidth: measure(name, alias),
                 iconRadius: ICON_R_MAIN,
                 isTracked: isHighlight(trkId),
             });
@@ -1020,13 +1261,15 @@
         if (selId && selId !== trkId && this._selectedSatellite.position) {
             const p = this.project(this._selectedSatellite.position.lon, this._selectedSatellite.position.lat);
             const name = this._selectedSatellite.name || '';
+            const alias = aliasOf(selId);
             markers.push({
                 id: selId,
                 x: p.x,
                 y: p.y,
                 color: this.colors.mapIconSelectedFill || '#ffb347',
                 name: name,
-                cardWidth: measure(name, selId),
+                alias: alias,
+                cardWidth: measure(name, alias),
                 iconRadius: ICON_R_MAIN,
                 isTracked: isHighlight(selId),
             });
@@ -1041,13 +1284,15 @@
             const fallback = SECONDARY_SAT_COLORS[i % SECONDARY_SAT_COLORS.length];
             const c = sm ? (sm.getMarkerColor(nid) || fallback) : fallback;
             const name = sat.name || '';
+            const alias = aliasOf(nid);
             markers.push({
                 id: nid,
                 x: p.x,
                 y: p.y,
                 color: c,
                 name: name,
-                cardWidth: measure(name, nid),
+                alias: alias,
+                cardWidth: measure(name, alias),
                 iconRadius: ICON_R_SECONDARY,
                 isTracked: isHighlight(nid),
             });
@@ -1155,7 +1400,7 @@
             if (Array.isArray(track.past))   { Array.prototype.push.apply(polylines, track.past); }
             if (Array.isArray(track.future)) { Array.prototype.push.apply(polylines, track.future); }
         }
-        const halfW = this.width / 2;
+        const halfW = this._antimeridianThreshold();
         for (let i = 0; i < polylines.length; i++) {
             const poly = polylines[i];
             if (!poly || poly.length < 2) { continue; }
@@ -1204,7 +1449,7 @@
             const mid = markers[j].id;
             info[mid] = {
                 name: markers[j].name,
-                norad: mid,
+                alias: markers[j].alias || '',
                 tracked: !!markers[j].isTracked,
             };
         }
@@ -1217,8 +1462,10 @@
     EarthView.prototype._drawObserver = function() {
         const ctx = this.ctx;
         const p = this.project(this.observer.lon, this.observer.lat);
+        // Отсекаем наблюдателя вне видимой области: на zoom>1, если центр
+        // карты сместился (например, во время тестов с искусственным центром).
+        if (!this._isInViewport(p, 60)) { return; }
 
-        // Треугольник
         const size = 8;
         ctx.beginPath();
         ctx.moveTo(p.x, p.y - size); // вершина
@@ -1252,45 +1499,88 @@
      * Каждый сегмент рисуется как замкнутый контур с заливкой.
      */
     EarthView.prototype._drawVisibilityZone = function() {
-        const ctx = this.ctx;
         const segments = this.satellite.visibilityZone;
-
         if (!segments || segments.length === 0) { return; }
 
         const dpr = window.devicePixelRatio || 1;
+        const lineWidth = this._mapFootprintLineWidth * dpr;
+        this.ctx.setLineDash([]);
 
         for (let k = 0; k < segments.length; k++) {
-            const seg = segments[k];
-            if (!seg || seg.length < 3) { continue; }
-
-            // Проецируем точки сегмента
-            const projected = [];
-            for (let i = 0; i < seg.length; i++) {
-                projected.push(this.project(seg[i].lon, seg[i].lat));
-            }
-
-            // Заливка
-            ctx.beginPath();
-            ctx.moveTo(projected[0].x, projected[0].y);
-            for (let j = 1; j < projected.length; j++) {
-                ctx.lineTo(projected[j].x, projected[j].y);
-            }
-            ctx.closePath();
-            ctx.fillStyle = this.colors.footprintFill;
-            ctx.fill();
-
-            // Контур
-            ctx.strokeStyle = this.colors.footprint;
-            ctx.lineWidth = this._mapFootprintLineWidth * dpr;
-            ctx.setLineDash([]);
-            ctx.beginPath();
-            ctx.moveTo(projected[0].x, projected[0].y);
-            for (let m = 1; m < projected.length; m++) {
-                ctx.lineTo(projected[m].x, projected[m].y);
-            }
-            ctx.closePath();
-            ctx.stroke();
+            this._drawZoneRing(segments[k], this.colors.footprintFill, this.colors.footprint, lineWidth);
         }
+    };
+
+    /**
+     * Отрисовка кольца зоны видимости с корректной обработкой антимеридианного шва.
+     * Если кольцо целиком укладывается в видимую долготу — рисуем заливку и обводку
+     * замкнутым полигоном. Если кольцо пересекает шов (`center.lon ± 180°`) — рисуем
+     * только обводку, разбивая её на сегменты по швам, чтобы линия не «протянулась»
+     * горизонтально через всю карту.
+     * @param {Array<{lon:number,lat:number}>} pts — точки кольца.
+     * @param {string} fillStyle — стиль заливки (или null).
+     * @param {string} strokeStyle — стиль обводки.
+     * @param {number} lineWidth — толщина обводки (в physical px).
+     * @private
+     */
+    EarthView.prototype._drawZoneRing = function(pts, fillStyle, strokeStyle, lineWidth) {
+        if (!pts || pts.length < 3) { return; }
+
+        const ctx = this.ctx;
+        const threshold = this._antimeridianThreshold();
+        const proj = new Array(pts.length);
+        for (let i = 0; i < pts.length; i++) { proj[i] = this.project(pts[i].lon, pts[i].lat); }
+
+        // Считаем количество «прыжков» по антимеридиану.
+        let breaks = 0;
+        for (let i = 1; i < proj.length; i++) {
+            if (Math.abs(proj[i].x - proj[i - 1].x) > threshold) { breaks++; }
+        }
+
+        if (breaks === 0) {
+            // Сплошное кольцо без шва: заливка + обводка как раньше.
+            ctx.beginPath();
+            ctx.moveTo(proj[0].x, proj[0].y);
+            for (let i = 1; i < proj.length; i++) { ctx.lineTo(proj[i].x, proj[i].y); }
+            ctx.closePath();
+            if (fillStyle) { ctx.fillStyle = fillStyle; ctx.fill(); }
+            if (strokeStyle) {
+                ctx.strokeStyle = strokeStyle;
+                ctx.lineWidth = lineWidth;
+                ctx.stroke();
+            }
+            return;
+        }
+
+        // Кольцо пересекает шов: только обводка с разрывами на швах.
+        // Заливку делать корректно сложно (нужно полигон-cutting); отказ от неё
+        // визуально допустим — оператор видит обведённую границу зоны без артефакта.
+        if (!strokeStyle) { return; }
+        ctx.strokeStyle = strokeStyle;
+        ctx.lineWidth = lineWidth;
+        ctx.beginPath();
+        let moved = false;
+        let prev = null;
+        for (let i = 0; i < proj.length; i++) {
+            const p = proj[i];
+            if (prev && Math.abs(p.x - prev.x) > threshold) {
+                ctx.stroke();
+                ctx.beginPath();
+                moved = false;
+            }
+            if (!moved) { ctx.moveTo(p.x, p.y); moved = true; }
+            else { ctx.lineTo(p.x, p.y); }
+            prev = p;
+        }
+        // Замыкание кольца к первой точке только если это не вызовет нового шва.
+        if (proj.length > 0) {
+            const last = proj[proj.length - 1];
+            const first = proj[0];
+            if (Math.abs(first.x - last.x) <= threshold) {
+                ctx.lineTo(first.x, first.y);
+            }
+        }
+        ctx.stroke();
     };
 
     // ========== API методы ==========
@@ -1311,6 +1601,7 @@
             window.addEventListener('resize', this._boundResize);
         }
         this._initCallouts();
+        this._initZoomControls();
         return Promise.all([
             this.loadCoastlines(),
             this.loadLand(),
@@ -1319,6 +1610,45 @@
             self.draw();
             return self;
         });
+    };
+
+    /**
+     * Привязка DOM-кнопок масштабирования и двойного клика по канвасу.
+     * Безопасно работает, если кнопок нет на странице (пропускает шаги).
+     * @private
+     */
+    EarthView.prototype._initZoomControls = function() {
+        const self = this;
+        const btnIn = document.getElementById('map-zoom-in');
+        const btnOut = document.getElementById('map-zoom-out');
+        const btnReset = document.getElementById('map-zoom-reset');
+
+        if (btnIn) {
+            btnIn.addEventListener('click', function() { self.zoomIn(); });
+        }
+        if (btnOut) {
+            btnOut.addEventListener('click', function() { self.zoomOut(); });
+        }
+        if (btnReset) {
+            btnReset.addEventListener('click', function() { self.resetView(); });
+        }
+
+        // Колбэк синхронизации disabled-состояний на крайних уровнях.
+        this.onZoomChange = function(_zoom, idx, total) {
+            if (btnIn)  { btnIn.disabled  = (idx >= total - 1); }
+            if (btnOut) { btnOut.disabled = (idx <= 0); }
+        };
+        // Установить начальное состояние disabled.
+        this._notifyZoomChange();
+
+        // Двойной клик по канвасу — сброс масштаба.
+        if (this.canvas) {
+            this.canvas.addEventListener('dblclick', function(e) {
+                if (e.target === self.canvas) {
+                    self.resetView();
+                }
+            });
+        }
     };
 
     /**
@@ -1333,31 +1663,47 @@
             return;
         }
         const dpr = window.devicePixelRatio || 1;
-        // Размеры в physical px (canvas-координаты)
+        // Размеры карточек уменьшены, чтобы иконки КА не терялись на фоне
+        // плотной группы выносок (UX: карточки 110×30 logical px, шрифты 11/9).
+        // clusterDistance — конечный, чтобы при zoom>1 разлетающиеся маркеры
+        // образовывали отдельные мелкие кольца, а не один гигантский эллипс
+        // с карточками, прижатыми к краям canvas.
+        const clusterDistance = Math.min(this.width, this.height) * 0.4;
         this._calloutLayout = new window.CalloutLayout({
-            stemLength:    80 * dpr,
-            tailLength:    24 * dpr,
-            cardWidth:    140 * dpr,
-            cardHeight:    36 * dpr,
+            stemLength:    64 * dpr,
+            tailLength:    18 * dpr,
+            cardWidth:    110 * dpr,
+            cardHeight:    28 * dpr,
             minCardGap:     6 * dpr,
             boundsPadding:  8 * dpr,
-            // Размещение карточек на расширенном PCA-эллипсе всех КА в кадре:
-            // иконки и трассы остаются неперекрытыми, карточки уходят в стороны.
-            // Единый эллипс на все маркеры — даже если tracked немного оторван
-            // от плотной группы, он гарантированно остаётся внутри кольца.
+            // Размещение карточек на расширенном PCA-эллипсе кластера КА.
+            // При zoom>1 разрозненные группы получают свои отдельные кольца
+            // (благодаря конечному clusterDistance); полуоси кольца дополнительно
+            // ограничиваются размером canvas внутри `_layoutRing` — карточки
+            // никогда не уходят прижатыми к краям при широко расходящихся
+            // маркерах.
             groupingMode: 'ring',
-            ringGap:       70 * dpr,
-            clusterDistance: Number.POSITIVE_INFINITY,
+            ringGap:       60 * dpr,
+            clusterDistance: clusterDistance,
             // Зазор от запретных трасс (selected оранжевая, tracking синяя):
             // карточки уводятся от линии, чтобы не «прилипать» к ней визуально.
             forbiddenPadding: 5 * dpr,
         });
         const container = document.getElementById('map-callouts');
         if (container) {
+            const self = this;
             this._calloutRenderer = new window.CalloutRenderer(container, {
                 lineWidth: 1.5,
                 bendDotRadius: 2.5,
                 fallbackColor: this.colors.satLabel || '#ffeb3b',
+                // Клик по карточке выноски → выбор спутника текущим (selected).
+                // Делегирование наружу: внешний код может переопределить
+                // `earthView.onSatelliteClick = (noradId) => {...}`.
+                onCardClick: function(noradId) {
+                    if (typeof self.onSatelliteClick === 'function') {
+                        try { self.onSatelliteClick(noradId); } catch (e) { /* swallow */ }
+                    }
+                },
             });
         } else {
             this._calloutRenderer = null;
@@ -1469,6 +1815,267 @@
      */
     EarthView.prototype.setObserver = function(lon, lat, name) {
         this.observer = { lon: lon, lat: lat, name: name || '' };
+        // Центр карты всегда «прилипает» к наблюдателю.
+        this._syncCenterToObserver();
+    };
+
+    // ========== Управление масштабом карты ==========
+
+    /**
+     * Синхронизирует центр карты с позицией наблюдателя.
+     * Если наблюдатель не задан — центр сбрасывается в (0, 0).
+     * @private
+     */
+    EarthView.prototype._syncCenterToObserver = function() {
+        if (this.observer && typeof this.observer.lon === 'number' && typeof this.observer.lat === 'number') {
+            this.center = { lon: this.observer.lon, lat: this.observer.lat };
+        } else {
+            this.center = { lon: 0, lat: 0 };
+        }
+    };
+
+    /**
+     * Установить уровень масштабирования по индексу LEVELS.
+     * Запускает phased-анимацию (R4), если animStyle === 'phased'.
+     * @param {number} idx - Индекс в массиве MAP_ZOOM_LEVELS.
+     * @returns {boolean} true, если уровень изменился.
+     */
+    EarthView.prototype.setZoomLevel = function(idx) {
+        const clamped = Math.max(0, Math.min(MAP_ZOOM_LEVELS.length - 1, idx | 0));
+        if (clamped === this._zoomIdx) {
+            return false;
+        }
+        const fromIdx = this._zoomIdx;
+        this._zoomIdx = clamped;
+        this.zoom = MAP_ZOOM_LEVELS[clamped];
+        if (this.options.animStyle === 'phased') {
+            this._startZoomAnim(fromIdx, clamped);
+        } else {
+            this._zoomAnim = null;
+            this.draw();
+        }
+        this._notifyZoomChange();
+        return true;
+    };
+
+    /** Текущий уровень zoom (множитель). */
+    EarthView.prototype.getZoom = function() {
+        return this.zoom;
+    };
+
+    /** Индекс текущего уровня zoom в MAP_ZOOM_LEVELS. */
+    EarthView.prototype.getZoomLevel = function() {
+        return this._zoomIdx;
+    };
+
+    /** Увеличить масштаб на одну ступень. */
+    EarthView.prototype.zoomIn = function() {
+        return this.setZoomLevel(this._zoomIdx + 1);
+    };
+
+    /** Уменьшить масштаб на одну ступень. */
+    EarthView.prototype.zoomOut = function() {
+        return this.setZoomLevel(this._zoomIdx - 1);
+    };
+
+    /**
+     * Сбросить масштаб к 1.0 и центр — на наблюдателя (или (0,0) при отсутствии).
+     */
+    EarthView.prototype.resetView = function() {
+        this._syncCenterToObserver();
+        return this.setZoomLevel(0);
+    };
+
+    /**
+     * Колбэк для UI-кнопок (включить/отключить + / − на крайних уровнях).
+     * Можно переопределить снаружи: earthView.onZoomChange = function(level, idx) {…}.
+     * @private
+     */
+    EarthView.prototype._notifyZoomChange = function() {
+        if (typeof this.onZoomChange === 'function') {
+            try {
+                this.onZoomChange(this.zoom, this._zoomIdx, MAP_ZOOM_LEVELS.length);
+            } catch (e) {
+                // eslint-disable-next-line no-console
+                console.warn('EarthView.onZoomChange handler error:', e);
+            }
+        }
+    };
+
+    /**
+     * Стадии phased-анимации zoom — задаются в долях от полной длительности
+     * (`options.zoomAnimDurationMs`). Стадия с `endFrac > startFrac` имеет
+     * собственный прогресс [0..1], который передаётся в соответствующий слой;
+     * стадия с `endFrac === startFrac` — мгновенное появление слоя.
+     *
+     * Дизайн раскладки (DOS-bootup эстетика):
+     *   0%        — очистка холста;
+     *   5%        — появляется сетка координат;
+     *   5 → 75%   — «карандашная» прорисовка береговых линий и границ РФ;
+     *   78%       — появляется заливка континентов (поверх неё контур уже полный);
+     *   85%       — появляются города и наблюдатель;
+     *   100%      — анимация заканчивается, рисуется полный финальный кадр.
+     *
+     * В каждом кадре отрисовка идёт строго в одном проходе и в порядке слоёв
+     * (background → grid → land(fill) → coast(stroke) → observer), без двойных
+     * перерисовок одного и того же слоя.
+     * @private
+     */
+    EarthView.PHASED_STAGES = [
+        { key: 'clear',    startFrac: 0.00, endFrac: 0.00 },
+        { key: 'grid',     startFrac: 0.05, endFrac: 0.05 },
+        { key: 'coast',    startFrac: 0.05, endFrac: 0.75 },
+        { key: 'land',     startFrac: 0.78, endFrac: 0.78 },
+        { key: 'observer', startFrac: 0.85, endFrac: 0.85 },
+        { key: 'dynamic',  startFrac: 1.00, endFrac: 1.00 }
+    ];
+
+    /** Текущее время (с поддержкой замены в тестах). @private */
+    EarthView.prototype._now = function() {
+        return (typeof performance !== 'undefined' && performance.now)
+            ? performance.now()
+            : Date.now();
+    };
+
+    /**
+     * Запуск phased-анимации zoom.
+     * За время `options.zoomAnimDurationMs` карта перерисовывается заново:
+     * сетка → береговые контуры (карандашом) → заливка суши → города → финальный кадр.
+     * @param {number} fromIdx — предыдущий индекс уровня (для логов/расширения).
+     * @param {number} toIdx — целевой индекс уровня.
+     * @private
+     */
+    EarthView.prototype._startZoomAnim = function(fromIdx, toIdx) {
+        const self = this;
+        // Прерываем предыдущую анимацию, если она ещё крутится.
+        if (this._zoomAnim && this._zoomAnim.raf && typeof cancelAnimationFrame !== 'undefined') {
+            cancelAnimationFrame(this._zoomAnim.raf);
+        }
+        this._zoomAnim = {
+            startTs: this._now(),
+            fromIdx: fromIdx,
+            toIdx: toIdx,
+            raf: null
+        };
+        const tick = function() {
+            if (!self._zoomAnim) { return; }
+            const now = self._now();
+            self._drawPhased(now);
+            // Если ещё в анимации — следующий кадр.
+            if (self._zoomAnim) {
+                if (typeof requestAnimationFrame !== 'undefined') {
+                    self._zoomAnim.raf = requestAnimationFrame(tick);
+                } else {
+                    self._zoomAnim.raf = setTimeout(tick, 16);
+                }
+            }
+        };
+        if (typeof requestAnimationFrame !== 'undefined') {
+            this._zoomAnim.raf = requestAnimationFrame(tick);
+        } else {
+            this._zoomAnim.raf = setTimeout(tick, 16);
+        }
+    };
+
+    /**
+     * Послойная отрисовка одного кадра анимации zoom.
+     *
+     * До достижения стадии `observer` рисуется только статическая часть карты:
+     * background → grid → land(fill) → coast(stroke, прогресс «карандашом»).
+     * Динамические DOM-маркеры (selected/tracking) и DOM-карточки выносок при этом
+     * скрыты, чтобы не висеть на старых пиксельных координатах прошлого зума.
+     *
+     * С достижения `observer` (≥85%) выполняется полная `draw()` каждый кадр —
+     * это естественным образом перепозиционирует все DOM-маркеры и выноски под
+     * актуальную проекцию.
+     *
+     * @param {number} now — текущая отметка времени.
+     * @private
+     */
+    EarthView.prototype._drawPhased = function(now) {
+        const anim = this._zoomAnim;
+        if (!anim) {
+            // Защита от гонок: если анимация была сброшена снаружи — статический кадр.
+            this.draw();
+            return;
+        }
+        const dur = Math.max(1, this.options.zoomAnimDurationMs || DEFAULT_ZOOM_ANIM_MS);
+        const elapsed = now - anim.startTs;
+        const frac = elapsed / dur;
+        const stages = EarthView.PHASED_STAGES;
+
+        // Найти стадию по ключу.
+        let stageByKey = {};
+        for (let i = 0; i < stages.length; i++) { stageByKey[stages[i].key] = stages[i]; }
+
+        const reached = function(key) {
+            const s = stageByKey[key];
+            return s ? frac >= s.startFrac : false;
+        };
+        const stageProgress = function(key) {
+            const s = stageByKey[key];
+            if (!s) { return 0; }
+            if (s.endFrac <= s.startFrac) { return frac >= s.startFrac ? 1 : 0; }
+            const p = (frac - s.startFrac) / (s.endFrac - s.startFrac);
+            return p < 0 ? 0 : (p > 1 ? 1 : p);
+        };
+
+        // С момента, когда пора рисовать наблюдателя/города, делегируем полной
+        // отрисовке (через ядро _drawStatic, чтобы избежать рекурсии через draw):
+        // это корректно позиционирует DOM-маркеры selected/tracking и DOM-карточки
+        // выносок под актуальную проекцию (текущий zoom/center).
+        if (reached('observer')) {
+            this._setCalloutsLayerVisible(true);
+            this._drawStatic();
+            if (frac >= 1) { this._zoomAnim = null; }
+            return;
+        }
+
+        // Иначе — phased «отрисовка карты»: чистим холст и рисуем статические слои.
+        const ctx = this.ctx;
+        ctx.fillStyle = this.colors.background;
+        ctx.fillRect(0, 0, this.width, this.height);
+
+        if (reached('grid') && this.options.showGrid) {
+            this._drawGrid();
+        }
+        // Заливка материков появляется одним кадром после прорисовки контуров «карандашом».
+        // Рисуем её ДО stroke, чтобы контур ложился поверх и не перекрывался.
+        if (reached('land') && this.options.showLandFill && this.landData && this.landData.features) {
+            this._drawLand();
+        }
+        if (reached('coast')) {
+            const cp = stageProgress('coast');
+            if (cp > 0) {
+                if (this.options.showCoastlines && this.coastlineData) {
+                    this._drawCoastlines(cp);
+                }
+                if (this.options.showRussiaBorders && this.russiaData) {
+                    this._drawRussiaBorders(cp);
+                }
+            }
+        }
+
+        // Прячем DOM-маркеры selected/tracking и DOM-карточки выносок, чтобы они
+        // не висели на старых пиксельных координатах. На стадии observer они
+        // вернутся через draw().
+        this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label', null, '', 'tracking', null);
+        this._positionDomMarker('map-sat-selected', 'map-sat-selected-label', null, '', 'selected', null);
+        this._setCalloutsLayerVisible(false);
+    };
+
+    /**
+     * Управление видимостью контейнера DOM-карточек выносок (#map-callouts).
+     * Используется во время phased-анимации, чтобы карточки не висели на старых
+     * пиксельных координатах при перерисовке карты.
+     * @param {boolean} visible
+     * @private
+     */
+    EarthView.prototype._setCalloutsLayerVisible = function(visible) {
+        if (typeof document === 'undefined') { return; }
+        const layer = document.getElementById('map-callouts');
+        if (!layer) { return; }
+        layer.style.visibility = visible ? '' : 'hidden';
     };
 
     /**
@@ -1542,32 +2149,39 @@
         ctx.lineWidth = 2 * dpr;
         ctx.setLineDash([]);
 
-        let segments = [];
-        if (track && typeof track === 'object' && !Array.isArray(track)) {
-            if (Array.isArray(track.past)) { segments = segments.concat(track.past); }
-            if (Array.isArray(track.future)) { segments = segments.concat(track.future); }
-        } else if (Array.isArray(track)) {
-            segments = [track];
-        }
-
-        for (let s = 0; s < segments.length; s++) {
-            const seg = segments[s];
-            if (!seg || seg.length < 2) { continue; }
+        // Сегменты уже разрезаны на бэке по антимеридиану. Bridge'м past↔future,
+        // чтобы не было «дыры» в районе текущей позиции КА.
+        const drawSeg = function(self, seg) {
+            if (!Array.isArray(seg) || seg.length < 2) { return; }
             ctx.beginPath();
+            const thresh = self._antimeridianThreshold();
             let prevP = null;
-            let moved = false;
             for (let k = 0; k < seg.length; k++) {
-                const pt = this.project(seg[k].lon, seg[k].lat);
-                if (prevP && Math.abs(pt.x - prevP.x) > this.width / 2) {
-                    ctx.stroke();
-                    ctx.beginPath();
-                    moved = false;
+                const p = self.project(seg[k].lon, seg[k].lat);
+                if (k === 0 || (prevP && Math.abs(p.x - prevP.x) > thresh)) {
+                    ctx.moveTo(p.x, p.y);
+                } else {
+                    ctx.lineTo(p.x, p.y);
                 }
-                if (!moved) { ctx.moveTo(pt.x, pt.y); moved = true; }
-                else { ctx.lineTo(pt.x, pt.y); }
-                prevP = pt;
+                prevP = p;
             }
             ctx.stroke();
+        };
+
+        if (track && typeof track === 'object' && !Array.isArray(track)) {
+            const pastSegs = Array.isArray(track.past) ? track.past : [];
+            const futureSegs = Array.isArray(track.future) ? track.future : [];
+            const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
+            if (Array.isArray(bridgedPast)) {
+                for (let s = 0; s < bridgedPast.length; s++) {
+                    drawSeg(this, bridgedPast[s]);
+                }
+            }
+            for (let s = 0; s < futureSegs.length; s++) {
+                drawSeg(this, futureSegs[s]);
+            }
+        } else if (Array.isArray(track)) {
+            drawSeg(this, track);
         }
         ctx.setLineDash([]);
     };
@@ -1580,29 +2194,13 @@
         const segments = this._selectedSatellite.visibilityZone;
         if (!segments || segments.length === 0) { return; }
 
-        const ctx = this.ctx;
         const dpr = window.devicePixelRatio || 1;
         const fillColor = this.colors.selectedFootprintFill || 'rgba(93, 173, 226, 0.12)';
         const strokeColor = this.colors.selectedFootprint || 'rgba(93, 173, 226, 0.6)';
+        const lineWidth = this._mapFootprintLineWidth * dpr;
 
         for (let k = 0; k < segments.length; k++) {
-            const seg = segments[k];
-            if (!seg || seg.length < 3) { continue; }
-            const projected = [];
-            for (let i = 0; i < seg.length; i++) {
-                projected.push(this.project(seg[i].lon, seg[i].lat));
-            }
-            ctx.beginPath();
-            ctx.moveTo(projected[0].x, projected[0].y);
-            for (let j = 1; j < projected.length; j++) {
-                ctx.lineTo(projected[j].x, projected[j].y);
-            }
-            ctx.closePath();
-            ctx.fillStyle = fillColor;
-            ctx.fill();
-            ctx.strokeStyle = strokeColor;
-            ctx.lineWidth = this._mapFootprintLineWidth * dpr;
-            ctx.stroke();
+            this._drawZoneRing(segments[k], fillColor, strokeColor, lineWidth);
         }
     };
 
@@ -1709,21 +2307,37 @@
             : Math.max(1.5, this._mapTrackLineWidth);
         ctx.lineWidth = lw * dpr;
 
-        let segments = [];
-        if (Array.isArray(track.future)) { segments = segments.concat(track.future); }
-        if (Array.isArray(track.past)) { segments = segments.concat(track.past); }
-
-        for (let s = 0; s < segments.length; s++) {
-            const seg = segments[s];
-            if (!seg || seg.length < 2) { continue; }
+        // Каждый сегмент рисуется отдельным sub-path (бэк уже разрезал по
+        // антимеридиану через splitAtAntimeridian); bridge'м past↔future для
+        // закрытия gap'a в районе текущей позиции КА.
+        const self = this;
+        const drawSeg = function(seg) {
+            if (!Array.isArray(seg) || seg.length < 2) { return; }
             ctx.beginPath();
-            const first = this.project(seg[0].lon, seg[0].lat);
-            ctx.moveTo(first.x, first.y);
-            for (let k = 1; k < seg.length; k++) {
-                const pt = this.project(seg[k].lon, seg[k].lat);
-                ctx.lineTo(pt.x, pt.y);
+            const thresh = self._antimeridianThreshold();
+            let prevP = null;
+            for (let k = 0; k < seg.length; k++) {
+                const p = self.project(seg[k].lon, seg[k].lat);
+                if (k === 0 || (prevP && Math.abs(p.x - prevP.x) > thresh)) {
+                    ctx.moveTo(p.x, p.y);
+                } else {
+                    ctx.lineTo(p.x, p.y);
+                }
+                prevP = p;
             }
             ctx.stroke();
+        };
+
+        const pastSegs = Array.isArray(track.past) ? track.past : [];
+        const futureSegs = Array.isArray(track.future) ? track.future : [];
+        const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
+        if (Array.isArray(bridgedPast)) {
+            for (let s = 0; s < bridgedPast.length; s++) {
+                drawSeg(bridgedPast[s]);
+            }
+        }
+        for (let s = 0; s < futureSegs.length; s++) {
+            drawSeg(futureSegs[s]);
         }
         ctx.setLineDash([]);
     };
@@ -1870,5 +2484,11 @@
 
     // Экспорт
     window.EarthView = EarthView;
+    window.MAP_ZOOM_LEVELS = MAP_ZOOM_LEVELS;
+
+    // CommonJS-экспорт для node-тестов.
+    if (typeof module !== 'undefined' && module.exports) {
+        module.exports = { EarthView: EarthView, MAP_ZOOM_LEVELS: MAP_ZOOM_LEVELS };
+    }
 
 })();

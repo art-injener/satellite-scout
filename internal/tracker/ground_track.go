@@ -134,34 +134,319 @@ func GenerateGroundTrack(tle *TLE, start, end, now time.Time, step time.Duration
 	}, nil
 }
 
-// Периоды орбиты для автодиапазона наземной трассы: сколько витков назад и вперёд от "сейчас".
-// Дробные значения допустимы, например 0.5 — полвитка.
-const (
-	defaultTrackPeriodsBack  = 0.3
-	defaultTrackPeriodsAhead = 0.7
-)
-
 // DefaultGroundTrackStep — шаг дискретизации наземной трассы в GenerateDefaultGroundTrack.
 // Должен совпадать с шагом второй пропагации для azimuth маркера на карте (см. SatelliteTrackingService),
 // иначе угол иконки расходится с отрезками полилинии на canvas.
 const DefaultGroundTrackStep = 30 * time.Second
 
-// GenerateDefaultGroundTrack генерирует трассу орбиты с автодиапазоном:
-// defaultTrackPeriodsBack периодов назад + defaultTrackPeriodsAhead периодов вперёд, шаг 30 секунд.
+// Длительность звёздных суток в минутах — за это время Земля делает полный
+// оборот относительно инерциальной системы отсчёта. Используется для расчёта
+// суточного смещения наземной трассы к западу: за один орбитальный период
+// Земля поворачивается на 360° × period / siderealDayMinutes градусов к
+// востоку, что сдвигает подспутниковую точку к западу.
+const siderealDayMinutes = 1436.0681
+
+// Запас покрытия по долготе сверх 360° — гарантирует отсутствие «дыры» на карте
+// при дискретном шаге пропагации (~3.7°/30с для LEO).
+const groundTrackCoverageOverlap = 1.04
+
+// GenerateDefaultGroundTrack генерирует трассу орбиты с автодиапазоном по времени,
+// рассчитанным так, чтобы трасса покрывала ровно 360° по долготе (полный обход карты)
+// без избыточности.
+//
+// За один орбитальный период `T` спутник совершает полный виток в инерциальной
+// системе отсчёта (360° по долготе), но Земля за это время поворачивается на
+// 360° × T / 1436.07 минут к востоку, смещая подспутниковую точку к западу.
+// Соответственно наземная трасса покрывает не полные 360°, а (360° − westingDeg).
+//
+// Чтобы трасса покрыла полные 360° по долготе, пропагируем
+//
+//	coverageMin = T × 360° / (360° − westingDeg) × overlap
+//
+// где overlap = 1.04 даёт ~4% запаса для гарантированного отсутствия «дыр» при
+// дискретном шаге 30 с (один шаг ≈ 3.7° для LEO).
+//
+// Для обратной орбиты (наклонение > 90°) westingDeg отрицателен → coverageMin
+// уменьшается. Для квази-геостационарных орбит (период близок к звёздным суткам)
+// знаменатель стремится к нулю — фолбек: coverageMin = T × 1.05 (пять процентов запаса).
 func GenerateDefaultGroundTrack(tle *TLE, now time.Time) (*GroundTrack, error) {
 	if tle == nil {
 		return nil, ErrNilTLEForTrack
 	}
 
-	period := time.Duration(tle.OrbitalPeriod() * float64(time.Minute))
-	if period <= 0 {
-		return nil, fmt.Errorf("%w: orbital period %.2f min", ErrInvalidRange, tle.OrbitalPeriod())
+	periodMin := tle.OrbitalPeriod()
+	if periodMin <= 0 {
+		return nil, fmt.Errorf("%w: orbital period %.2f min", ErrInvalidRange, periodMin)
 	}
 
-	start := now.Add(-time.Duration(float64(period) * defaultTrackPeriodsBack))
-	end := now.Add(time.Duration(float64(period) * defaultTrackPeriodsAhead))
+	// Westing per orbital period в градусах. Положительный для prograde, отрицательный
+	// для retrograde (но retrograde встречается редко и SGP4 всё равно даёт правильный
+	// знак mean motion; формула универсальна).
+	westingDeg := 360.0 * periodMin / siderealDayMinutes
+	denom := 360.0 - westingDeg
+
+	// Квази-GEO: westingDeg близок к 360° → знаменатель вырождается. Берём один период
+	// с небольшим запасом — для GEO трасса всё равно почти точка, длина не критична.
+	coverageMin := periodMin * 1.05
+	if denom > 1.0 {
+		coverageMin = periodMin * 360.0 / denom * groundTrackCoverageOverlap
+	}
+
+	coverage := time.Duration(coverageMin * float64(time.Minute))
+	half := coverage / 2
+
+	start := now.Add(-half)
+	end := now.Add(half)
 
 	return GenerateGroundTrack(tle, start, end, now, DefaultGroundTrackStep)
+}
+
+// Параметры алгоритма «трасса по окну долготы».
+const (
+	// Широта, выше которой считаем точку «околополюсной»: при пересечении полюса
+	// долгота скачкообразно меняется на ~180° (артефакт equirectangular-проекции),
+	// для накопления continuous lon такие шаги пропускаются.
+	polepassLatDeg = 85.0
+	// Time-fallback на каждое направление: даём 1.07 орбитального периода —
+	// этого достаточно, чтобы пройти ровно 360° по continuous lon (один виток ≈
+	// 360°−westingDeg ≈ 336°, плюс 7% запаса). Если sat смещён от observer на ±α°
+	// (внутри окна), forward direction должен пройти (180°−α) до правой границы,
+	// backward (180°+α) до левой; max = 360°−ε ≈ один виток. Для polar один
+	// виток покрывает 360° за один период (lon-clip не срабатывает из-за
+	// polepass'ов, но time-fallback останавливает в нужный момент).
+	timeFallbackHalfPeriodFraction = 1.07
+	// Защита от GEO/HEO: continuous lon почти не меняется, время-fallback может
+	// дать тысячи точек за 1.07 виток sidereal day. Жёсткий лимит на число точек
+	// в каждом направлении — 800 (≈ 400 минут × 30 с шага).
+	maxPointsPerSide = 800
+	// Микросдвиг от номинальной границы окна (0.01°), чтобы граничная точка
+	// проектировалась на нужную сторону canvas: lon = ±180° от observerLon —
+	// это один и тот же меридиан, project() выбирает левую сторону. Сдвиг на
+	// ε внутрь окна делает выбор стороны однозначным (визуально незаметно).
+	lonWindowBoundaryEpsilonDeg = 0.01
+)
+
+// GenerateGroundTrackByLonWindow генерирует наземную трассу так, чтобы она ровно
+// укладывалась в видимое окно карты по долготе с центром в observerLon (станция
+// наблюдения = центр карты).
+//
+// Алгоритм (4 этапа):
+//
+//  1. Текущая позиция КА в момент now → (satLon, satLat). Привязываем satLon к
+//     окну [observerLon−180°, observerLon+180°] кратным сдвигом на ±360°.
+//  2. Окно зафиксировано: leftBound = observerLon−180°, rightBound = observerLon+180°.
+//  3. Пропагируем итеративно вперёд и назад от now с шагом step, накапливая
+//     «continuous» longitude (delta между соседними точками; при |lat|>85°
+//     polepass-фильтр пропускает шаг — там lon скачет на ~180° из-за артефакта
+//     equirectangular-проекции, не реального westing).
+//  4. Стопаем по двум критериям (что наступит раньше):
+//     – continuous lon вышел за границу окна → линейная интерполяция точно до
+//     границы (lon-clip с интерполяцией). Это даёт «сплошную линию от края до
+//     края карты» для LEO/MEO non-polar.
+//     – |t−now| > period × timeFallbackHalfPeriodFraction → time-clip-fallback.
+//     Защита для polar (continuous lon растёт медленно из-за polepass) и HEO
+//     (continuous lon разворачивается, не достигает границы).
+//
+// Граничная точка получает lon = observerLon ± (180° − ε); ε = 0.01°
+// гарантирует однозначную проекцию на правый/левый край canvas (избегаем
+// double-mapping антимеридиана окна).
+//
+// Дальше — стандартное splitAtAntimeridian (гринвич-антимеридиан) и splitPastFuture.
+func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64, step time.Duration) (*GroundTrack, error) {
+	if tle == nil {
+		return nil, ErrNilTLEForTrack
+	}
+	if step <= 0 {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidStep, step)
+	}
+
+	prop, err := NewPropagator(tle)
+	if err != nil {
+		return nil, fmt.Errorf("creating propagator: %w", err)
+	}
+
+	// Этап 1: текущая позиция КА.
+	nowEci, err := prop.Propagate(now)
+	if err != nil {
+		return nil, fmt.Errorf("propagating at now: %w", err)
+	}
+	nowLla := ECEFToLLA(ECIToECEF(nowEci))
+	satLonRaw := nowLla.LonDeg()
+	satLat := nowLla.LatDeg()
+
+	// Этап 2: привязка к окну (в continuous lon, может выйти за [-180, 180)).
+	satLonAnchor := satLonRaw
+	for satLonAnchor < observerLon-180.0 {
+		satLonAnchor += 360.0
+	}
+	for satLonAnchor >= observerLon+180.0 {
+		satLonAnchor -= 360.0
+	}
+
+	// Time-fallback (страховка для polar/HEO/GEO).
+	periodMin := tle.OrbitalPeriod()
+	if periodMin <= 0 {
+		periodMin = 90.0
+	}
+	timeFallback := time.Duration(periodMin * timeFallbackHalfPeriodFraction * float64(time.Minute))
+
+	nowMs := now.UnixMilli()
+	nowPoint := TrackPoint{Lon: satLonRaw, Lat: satLat, TS: nowMs}
+
+	// Границы окна по continuous lon (с микросдвигом ε внутрь, чтобы граничные
+	// точки однозначно проектировались на нужный край canvas, см. doc выше).
+	leftBound := observerLon - 180.0 + lonWindowBoundaryEpsilonDeg
+	rightBound := observerLon + 180.0 - lonWindowBoundaryEpsilonDeg
+
+	// normalizeLonRaw: continuous lon → raw lon ∈ [-180, 180).
+	normalizeLonRaw := func(lon float64) float64 {
+		y := math.Mod(lon+180.0, 360.0)
+		if y < 0 {
+			y += 360.0
+		}
+		return y - 180.0
+	}
+
+	// Утилита: останавливаемся при пересечении любой границы окна. Возвращает
+	// (target_continuous_lon, true) если на этом шаге пересечена граница, иначе
+	// (0, false). Полу-окна определяются от observerLon, не от sat — это даёт
+	// покрытие по всему окну карты независимо от положения КА в нём.
+	clipBoundary := func(prevCont, newCont float64) (float64, bool) {
+		if newCont >= rightBound && prevCont < rightBound {
+			return rightBound, true
+		}
+		if newCont <= leftBound && prevCont > leftBound {
+			return leftBound, true
+		}
+		return 0, false
+	}
+
+	// Этап 3+4 forward: пропагация в будущее с lon-clip + time-fallback.
+	futurePoints := []TrackPoint{nowPoint}
+	contLonF, prevRawLonF, prevLatF, prevTsF := satLonAnchor, satLonRaw, satLat, nowMs
+	for i := 1; i <= maxPointsPerSide; i++ {
+		dt := time.Duration(i) * step
+		if dt > timeFallback {
+			break
+		}
+		t := now.Add(dt)
+		eci, errProp := prop.Propagate(t)
+		if errProp != nil {
+			break
+		}
+		lla := ECEFToLLA(ECIToECEF(eci))
+		rawLon, rawLat, currTs := lla.LonDeg(), lla.LatDeg(), t.UnixMilli()
+
+		isPolepass := math.Abs(rawLat) > polepassLatDeg || math.Abs(prevLatF) > polepassLatDeg
+		var delta float64
+		if !isPolepass {
+			delta = rawLon - prevRawLonF
+			for delta > 180 {
+				delta -= 360
+			}
+			for delta < -180 {
+				delta += 360
+			}
+		}
+		newContLonF := contLonF + delta
+
+		// Lon-clip: пересечение границы окна → линейная интерполяция к ней.
+		if !isPolepass && delta != 0 {
+			if targetCont, crossed := clipBoundary(contLonF, newContLonF); crossed {
+				ratio := (targetCont - contLonF) / delta
+				if ratio > 1 {
+					ratio = 1
+				} else if ratio < 0 {
+					ratio = 0
+				}
+				bLon := normalizeLonRaw(targetCont)
+				bLat := prevLatF + (rawLat-prevLatF)*ratio
+				bTs := prevTsF + int64(float64(currTs-prevTsF)*ratio)
+				futurePoints = append(futurePoints, TrackPoint{Lon: bLon, Lat: bLat, TS: bTs})
+				break
+			}
+		}
+
+		contLonF, prevRawLonF, prevLatF, prevTsF = newContLonF, rawLon, rawLat, currTs
+		futurePoints = append(futurePoints, TrackPoint{Lon: rawLon, Lat: rawLat, TS: currTs})
+	}
+
+	// Этап 3+4 backward: симметрично, в прошлое. Точки собираются в обратном
+	// порядке времени (now → t-N), затем разворачиваем.
+	pastPointsRev := []TrackPoint{}
+	contLonB, prevRawLonB, prevLatB, prevTsB := satLonAnchor, satLonRaw, satLat, nowMs
+	for i := 1; i <= maxPointsPerSide; i++ {
+		dt := time.Duration(i) * step
+		if dt > timeFallback {
+			break
+		}
+		t := now.Add(-dt)
+		eci, errProp := prop.Propagate(t)
+		if errProp != nil {
+			break
+		}
+		lla := ECEFToLLA(ECIToECEF(eci))
+		rawLon, rawLat, currTs := lla.LonDeg(), lla.LatDeg(), t.UnixMilli()
+
+		isPolepass := math.Abs(rawLat) > polepassLatDeg || math.Abs(prevLatB) > polepassLatDeg
+		var delta float64
+		if !isPolepass {
+			delta = rawLon - prevRawLonB
+			for delta > 180 {
+				delta -= 360
+			}
+			for delta < -180 {
+				delta += 360
+			}
+		}
+		newContLonB := contLonB + delta
+
+		if !isPolepass && delta != 0 {
+			if targetCont, crossed := clipBoundary(contLonB, newContLonB); crossed {
+				ratio := (targetCont - contLonB) / delta
+				if ratio > 1 {
+					ratio = 1
+				} else if ratio < 0 {
+					ratio = 0
+				}
+				bLon := normalizeLonRaw(targetCont)
+				bLat := prevLatB + (rawLat-prevLatB)*ratio
+				bTs := prevTsB + int64(float64(currTs-prevTsB)*ratio)
+				pastPointsRev = append(pastPointsRev, TrackPoint{Lon: bLon, Lat: bLat, TS: bTs})
+				break
+			}
+		}
+
+		contLonB, prevRawLonB, prevLatB, prevTsB = newContLonB, rawLon, rawLat, currTs
+		pastPointsRev = append(pastPointsRev, TrackPoint{Lon: rawLon, Lat: rawLat, TS: currTs})
+	}
+
+	// past собран в обратном порядке времени — переворачиваем.
+	pastPoints := make([]TrackPoint, len(pastPointsRev))
+	for i, p := range pastPointsRev {
+		pastPoints[len(pastPointsRev)-1-i] = p
+	}
+
+	// Объединяем в одну time-ordered последовательность.
+	allPoints := make([]TrackPoint, 0, len(pastPoints)+len(futurePoints))
+	allPoints = append(allPoints, pastPoints...)
+	allPoints = append(allPoints, futurePoints...)
+	if len(allPoints) == 0 {
+		return &GroundTrack{NoradID: tle.NoradID}, nil
+	}
+
+	// ВАЖНО: НЕ вызываем splitAtAntimeridian — он режет по lon=±180° (гринвич-AM),
+	// что для observerLon ≠ 0 даёт разрыв в середине canvas (точка lon=180 при
+	// center=observerLon проектируется в x ≈ (180−observerLon)/360 × w + w/2 —
+	// не на край!). По построению трасса этой функции не пересекает антимеридиан
+	// окна (= observerLon ± 180°), её raw lon-точки могут «прыгнуть» через ±180°
+	// в середине окна, но пиксельный шаг при этом мал (≈ 1 шаг ECEF lon × scale)
+	// и линия рисуется сплошной. Если же center = 0 (observerLon = 0), то
+	// boundary совпадают с гринвич-AM, и фронтовая проверка `_antimeridianThreshold`
+	// (разрыв > w/2 на canvas) корректно разделит концы трассы на разные сегменты.
+	past, future := splitPastFuture([][]TrackPoint{allPoints}, nowMs)
+
+	return &GroundTrack{Past: past, Future: future, NoradID: tle.NoradID}, nil
 }
 
 // generateTrackPoints генерирует массив точек TrackPoint для заданного временного интервала.

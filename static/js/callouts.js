@@ -41,12 +41,14 @@ const SECTORS = [
 ];
 
 const DEFAULTS = {
-    // Длина диагонального стержня (px) — обеспечивает разнесение steep/shallow
-    stemLength: 80,
+    // Длина диагонального стержня (px) — обеспечивает разнесение steep/shallow.
+    // Подобрана под уменьшенную карточку (cardHeight=30) так, чтобы крутой
+    // (~80°) и пологий (~20°) стержни не давали наложения по Y.
+    stemLength: 64,
     // Длина горизонтального хвоста (px)
-    tailLength: 24,
-    cardWidth: 140,
-    cardHeight: 36,
+    tailLength: 18,
+    cardWidth: 110,
+    cardHeight: 28,
     // Минимальный зазор между карточками
     minCardGap: 6,
     // Отступ от края canvas
@@ -659,8 +661,28 @@ class CalloutLayout {
         for (let gi = 0; gi < groups.length; gi++) {
             const indices = groups[gi];
             const ellipse = pcaEllipse(markers, indices);
-            const a2 = Math.max(ellipse.a, 1) + opts.ringGap;
-            const b2 = Math.max(ellipse.b, 1) + opts.ringGap;
+            // Базовые полуоси кольца: PCA-эллипс + ringGap.
+            let a2 = Math.max(ellipse.a, 1) + opts.ringGap;
+            let b2 = Math.max(ellipse.b, 1) + opts.ringGap;
+
+            // Клампим полуоси под размер canvas: при zoom>1 кластер маркеров
+            // может расходиться шире viewport, и расширенный эллипс уходит
+            // за края — buildRingPlacement тогда лепит все карточки на
+            // боундари и они «прилипают к краям». Ограничиваем эллипс
+            // максимально возможной зоной с учётом cardWidth/cardHeight, чтобы
+            // карточки оставались компактным кольцом вокруг центра кластера.
+            const cardW = maxCardWidth(markers, indices, opts.cardWidth);
+            const pad = opts.boundsPadding;
+            const aMaxByBounds = Math.max(
+                1,
+                bounds.width / 2 - cardW / 2 - opts.tailLength - pad
+            );
+            const bMaxByBounds = Math.max(
+                1,
+                bounds.height / 2 - opts.cardHeight / 2 - pad
+            );
+            if (a2 > aMaxByBounds) { a2 = aMaxByBounds; }
+            if (b2 > bMaxByBounds) { b2 = bMaxByBounds; }
 
             // Углы маркеров в локальной системе (u, v) главных осей эллипса.
             const slots = [];
@@ -834,8 +856,9 @@ class CalloutLayout {
 
 // ─────────────────────────────────────────────────────────────────────────
 // CalloutRenderer — отрисовка результата CalloutLayout на canvas + DOM.
-// Линия (стержень + хвост) рисуется на canvas; карточка с именем и NORAD ID
-// — DOM-элемент `.map-sat-callout`, позиционируется в процентах от контейнера.
+// Линия (стержень + хвост) рисуется на canvas; карточка с именем КА и
+// дополнительной строкой (alias / второе имя) — DOM-элемент
+// `.map-sat-callout`, позиционируется в процентах от контейнера.
 // ─────────────────────────────────────────────────────────────────────────
 
 const RENDERER_DEFAULTS = {
@@ -849,11 +872,38 @@ class CalloutRenderer {
      * @param {HTMLElement} container — контейнер пула DOM-карточек
      *                                  (обычно .map-callouts внутри .earth-view-container).
      * @param {Object} [options]
+     * @param {Function} [options.onCardClick] — колбэк `(noradId:number) => void`,
+     *   вызывается при клике по карточке. Регистрируется как делегированный
+     *   слушатель `click` на контейнере (один listener на пул карточек).
      */
     constructor(container, options) {
         this.container = container;
         this.opts = Object.assign({}, RENDERER_DEFAULTS, options || {});
-        this._cards = new Map(); // id → { el, nameEl, noradEl }
+        this._cards = new Map(); // id → { el, nameEl, subEl }
+        this._onCardClick = (this.opts && typeof this.opts.onCardClick === 'function')
+            ? this.opts.onCardClick : null;
+        this._cardClickHandler = null;
+        if (this._onCardClick && this.container && typeof this.container.addEventListener === 'function') {
+            const self = this;
+            this._cardClickHandler = function(ev) {
+                // Делегирование: ищем ближайший родитель с классом map-sat-callout.
+                // Это даёт O(1) при добавлении/удалении карточек (один listener на пул).
+                let el = ev.target;
+                while (el && el !== self.container) {
+                    if (el.classList && el.classList.contains('map-sat-callout')) {
+                        const nidStr = el.dataset && el.dataset.noradId;
+                        const nid = nidStr ? parseInt(nidStr, 10) : NaN;
+                        if (isFinite(nid)) {
+                            ev.stopPropagation();
+                            try { self._onCardClick(nid); } catch (e) { /* swallow */ }
+                        }
+                        return;
+                    }
+                    el = el.parentNode;
+                }
+            };
+            this.container.addEventListener('click', this._cardClickHandler);
+        }
     }
 
     /**
@@ -942,11 +992,14 @@ class CalloutRenderer {
         el.className = 'map-sat-callout';
         const nameEl = document.createElement('strong');
         nameEl.className = 'map-sat-callout__name';
-        const noradEl = document.createElement('span');
-        noradEl.className = 'map-sat-callout__norad';
+        // Вторая строка карточки: alias / второе имя КА. При отсутствии
+        // alias DOM-узел остаётся, но скрывается через display: none —
+        // карточка визуально становится одностроечной.
+        const subEl = document.createElement('span');
+        subEl.className = 'map-sat-callout__sub';
         el.appendChild(nameEl);
-        el.appendChild(noradEl);
-        return { el: el, nameEl: nameEl, noradEl: noradEl };
+        el.appendChild(subEl);
+        return { el: el, nameEl: nameEl, subEl: subEl };
     }
 
     _updateCard(entry, lt, canvasSize, info) {
@@ -955,6 +1008,13 @@ class CalloutRenderer {
         // Ширина в %: и lt.card.w, и canvasSize.width — в одних и тех же единицах
         // (physical px), поэтому процент корректен на любом dpr.
         const pctW = (lt.card.w / canvasSize.width) * 100;
+        // NORAD ID для делегированного click-обработчика (выбор спутника).
+        if (lt && lt.id != null) {
+            const idStr = String(lt.id);
+            if (entry.el.dataset && entry.el.dataset.noradId !== idStr) {
+                entry.el.dataset.noradId = idStr;
+            }
+        }
         entry.el.style.left = pctX + '%';
         entry.el.style.top = pctY + '%';
         entry.el.style.width = pctW + '%';
@@ -968,7 +1028,12 @@ class CalloutRenderer {
         entry.el.classList.toggle('map-sat-callout--tracked', !!(info && info.tracked));
         if (info) {
             entry.nameEl.textContent = info.name || '';
-            entry.noradEl.textContent = info.norad ? '#' + info.norad : '';
+            const aliasText = (info && info.alias) ? String(info.alias) : '';
+            entry.subEl.textContent = aliasText;
+            // Нет alias — скрываем вторую строку, чтобы карточка была
+            // визуально одностроечной (без пустой строки под именем).
+            entry.subEl.style.display = aliasText ? '' : 'none';
+            entry.el.classList.toggle('map-sat-callout--single-line', !aliasText);
         }
     }
 }

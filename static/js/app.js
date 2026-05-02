@@ -673,6 +673,24 @@
         const earthCanvas = document.getElementById('earth-view');
         if (earthCanvas && window.EarthView) {
             window.earthView = new window.EarthView(earthCanvas);
+            // Клик по карточке выноски → выбор спутника текущим (selected).
+            // Имя берём сначала из state-manager, иначе из текущей группы пролётов.
+            // manual=true — чтобы автоматический satellite_group_update не перебивал
+            // ручной выбор пользователя (тот же контракт, что у клика по таблице).
+            window.earthView.onSatelliteClick = function(noradId) {
+                const sm = window._stateManager;
+                if (!sm || typeof sm.setSelectedSatellite !== 'function') { return; }
+                const state = (typeof sm.getState === 'function') ? sm.getState(noradId) : null;
+                let name = (state && state.name) ? state.name : '';
+                if (!name && typeof sm.getSatelliteGroup === 'function') {
+                    const grp = sm.getSatelliteGroup();
+                    if (grp && Array.isArray(grp.satellites)) {
+                        const s = grp.satellites.find(function(x) { return x.norad_id === noradId; });
+                        if (s && s.sat_name) { name = s.sat_name; }
+                    }
+                }
+                sm.setSelectedSatellite(noradId, name, true);
+            };
             window.earthView.init().then(function() {
                 // Загрузка координат наблюдателя из конфигурации сервера
                 return fetch('/api/config').then(function(resp) { return resp.json(); });

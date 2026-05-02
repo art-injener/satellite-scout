@@ -8,32 +8,13 @@
     // Общие утилиты
     // ════════════════════════════════════════════════════════════════════════
 
-    // Горячая палитра: 0→чёрный → синий → зелёный → жёлтый → красный → белый
-    function hotColorFull(v) {
-        v = Math.max(0, Math.min(1, v));
-        let r, g, b;
-        if (v < 0.2) {
-            r = 0; g = 0; b = Math.round(v / 0.2 * 180);
-        } else if (v < 0.4) {
-            const t1 = (v - 0.2) / 0.2;
-            r = 0; g = Math.round(t1 * 255); b = Math.round((1 - t1) * 180);
-        } else if (v < 0.6) {
-            const t2 = (v - 0.4) / 0.2;
-            r = Math.round(t2 * 255); g = 255; b = 0;
-        } else if (v < 0.8) {
-            const t3 = (v - 0.6) / 0.2;
-            r = 255; g = Math.round((1 - t3) * 255); b = 0;
-        } else {
-            const t4 = (v - 0.8) / 0.2;
-            r = 255; g = Math.round(t4 * 255); b = Math.round(t4 * 255);
-        }
-        return [r, g, b];
-    }
-
     /**
-     * Приглушённая палитра водопада для светлой темы (меньше неона, комфортнее глазу).
+     * Единая приглушённая палитра водопада (UX-COLORS-INSTRUMENT-001).
+     * От тёмного слейта (#242c34, согласован с --waterfall-cold-bg) через
+     * глубокий синий → зелёный → янтарный → персиковый.
+     * Применяется во всех темах для единообразия и комфорта глаз.
      */
-    function hotColorLight(v) {
+    function hotColorMuted(v) {
         v = Math.max(0, Math.min(1, v));
         let r; let g; let b;
         if (v < 0.22) {
@@ -66,10 +47,7 @@
     }
 
     function hotColor(v) {
-        if (typeof window.getThemeId === 'function' && window.getThemeId() === 'light') {
-            return hotColorLight(v);
-        }
-        return hotColorFull(v);
+        return hotColorMuted(v);
     }
 
     /** RGB из CSS-переменной вида #rrggbb (водопад, поля canvas). */
@@ -958,6 +936,20 @@
                     current: deviceSel && deviceSel.value,
                 });
             });
+        }
+
+        // Привязка футер-индикатора `#sf-sdr` к текущему выбору устройства.
+        // Live-биндинг: меняется сразу при выборе в dropdown (не ждём «Установить»).
+        const syncFooterSDR = function() {
+            const footer = document.getElementById('sf-sdr');
+            if (!footer || !deviceSel) { return; }
+            const opt = deviceSel.options[deviceSel.selectedIndex];
+            const txt = opt && opt.textContent ? opt.textContent.trim() : '---';
+            footer.textContent = 'SDR: ' + txt;
+        };
+        if (deviceSel) {
+            syncFooterSDR();
+            deviceSel.addEventListener('change', syncFooterSDR);
         }
 
         const startBtn = document.getElementById('sdr-start');

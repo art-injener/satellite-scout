@@ -447,6 +447,535 @@ func TestGenerateDefaultGroundTrack_Nil(t *testing.T) {
 	}
 }
 
+// --- Генерация трассы по окну долготы ---
+
+// continuousLonSpan восстанавливает суммарный «развёрнутый» пролёт по долготе
+// для упорядоченной по времени последовательности точек, где Lon ∈ [-180, 180).
+// Учитывает «полюсные прыжки» (|lat| > 85°): при пролёте через полюс долгота
+// скачкообразно меняется на ~180° (артефакт equirectangular-проекции, не реальный
+// дрейф) — такие шаги пропускаются для корректного подсчёта продвижения по долготе.
+func continuousLonSpan(points []TrackPoint) float64 {
+	if len(points) < 2 {
+		return 0
+	}
+	prev := points[0].Lon
+	prevLat := points[0].Lat
+	cont := points[0].Lon
+	minC, maxC := cont, cont
+	const polepass = 85.0
+	for i := 1; i < len(points); i++ {
+		raw := points[i].Lon
+		lat := points[i].Lat
+		isPole := math.Abs(lat) > polepass || math.Abs(prevLat) > polepass
+		if !isPole {
+			delta := raw - prev
+			for delta > 180 {
+				delta -= 360
+			}
+			for delta < -180 {
+				delta += 360
+			}
+			cont += delta
+			if cont < minC {
+				minC = cont
+			}
+			if cont > maxC {
+				maxC = cont
+			}
+		}
+		prev = raw
+		prevLat = lat
+	}
+	return maxC - minC
+}
+
+// TestGenerateGroundTrackByLonWindow_LEO_FullCoverage — для LEO (МКС) при
+// observerLon=0 трасса должна покрывать ровно 360° по continuous lon (полное
+// окно карты, ~360° − 2ε из-за boundary epsilon).
+func TestGenerateGroundTrackByLonWindow_LEO_FullCoverage(t *testing.T) {
+	tle := parseTestTLE(t, gtISSLines)
+	now := tle.Epoch
+
+	gt, err := GenerateGroundTrackByLonWindow(tle, now, 0.0, DefaultGroundTrackStep)
+	if err != nil {
+		t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+	}
+
+	span := continuousLonSpan(gt.Points())
+	// Ожидаем ровно 360° − 2ε (по 0.01° с каждой стороны), допуск ±2° (дискретизация).
+	if span < 358.0 || span > 360.5 {
+		t.Errorf("LEO span = %.2f°, expected ~360° (358..360.5)", span)
+	}
+}
+
+// continuousLonsFromAnchor восстанавливает continuous lon относительно точки-якоря
+// (точка с TS == anchorMs или ближайшая к нему). Возвращает массив cont-lon
+// (anchor имеет cont = 0). Обработка polepass'ов как в continuousLonSpan.
+func continuousLonsFromAnchor(points []TrackPoint, anchorMs int64) []float64 {
+	if len(points) == 0 {
+		return nil
+	}
+	const polepass = 85.0
+	out := make([]float64, len(points))
+	out[0] = 0
+	prev, prevLat := points[0].Lon, points[0].Lat
+	cont := 0.0
+	for i := 1; i < len(points); i++ {
+		raw, lat := points[i].Lon, points[i].Lat
+		if math.Abs(lat) <= polepass && math.Abs(prevLat) <= polepass {
+			d := raw - prev
+			for d > 180 {
+				d -= 360
+			}
+			for d < -180 {
+				d += 360
+			}
+			cont += d
+		}
+		out[i] = cont
+		prev, prevLat = raw, lat
+	}
+	// Находим anchor (точку с минимальным |TS - anchorMs|), сдвигаем массив так,
+	// чтобы её cont = 0.
+	abs64 := func(v int64) int64 {
+		if v < 0 {
+			return -v
+		}
+		return v
+	}
+	bestIdx := 0
+	bestDiff := abs64(points[0].TS - anchorMs)
+	for i := 1; i < len(points); i++ {
+		d := abs64(points[i].TS - anchorMs)
+		if d < bestDiff {
+			bestDiff = d
+			bestIdx = i
+		}
+	}
+	shift := out[bestIdx]
+	for i := range out {
+		out[i] -= shift
+	}
+	return out
+}
+
+// TestGenerateGroundTrackByLonWindow_LEO_OffsetObserver — observerLon=39° (Москва):
+// окно [observerLon-180°, observerLon+180°] = [-141°, +219°] по continuous lon,
+// первая точка near leftBound, последняя — near rightBound.
+func TestGenerateGroundTrackByLonWindow_LEO_OffsetObserver(t *testing.T) {
+	tle := parseTestTLE(t, gtISSLines)
+	now := tle.Epoch
+	const observerLon = 39.0
+
+	gt, err := GenerateGroundTrackByLonWindow(tle, now, observerLon, DefaultGroundTrackStep)
+	if err != nil {
+		t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+	}
+
+	all := gt.Points()
+	if len(all) < 2 {
+		t.Fatalf("expected ≥ 2 points, got %d", len(all))
+	}
+
+	span := continuousLonSpan(all)
+	if span < 358.0 || span > 360.5 {
+		t.Errorf("LEO offset observer span = %.2f°, expected ~360°", span)
+	}
+
+	// Все точки в окне [observerLon−180°, observerLon+180°] по continuous lon
+	// (anchor — точка с TS=nowMs, она имеет cont=0; «window-relative cont» = anchor + (sat_lon_now − observerLon)).
+	// Проверяем span ≈ 360°: достаточно для гарантии что точки в окне.
+	conts := continuousLonsFromAnchor(all, now.UnixMilli())
+	minC, maxC := conts[0], conts[0]
+	for _, c := range conts {
+		if c < minC {
+			minC = c
+		}
+		if c > maxC {
+			maxC = c
+		}
+	}
+	// Допуск 0.6° = ε + дискретизация на двух крайних шагах.
+	const tol = 0.6
+	if maxC-minC < 358.0 || maxC-minC > 360.0+tol {
+		t.Errorf("span (max-min) cont = %.3f°, expected ~360° (358..%.2f)", maxC-minC, 360.0+tol)
+	}
+}
+
+// TestGenerateGroundTrackByLonWindow_Polar_TimeFallback — polar TLE: lon-clip
+// не сработает (continuous lon растёт медленно из-за polepass), но time-fallback
+// гарантирует остановку в пределах period × 1.07 в каждую сторону.
+func TestGenerateGroundTrackByLonWindow_Polar_TimeFallback(t *testing.T) {
+	tle := parseTestTLE(t, gtPolarLines)
+	now := tle.Epoch
+	periodMin := tle.OrbitalPeriod()
+	maxHalfMs := int64(periodMin * timeFallbackHalfPeriodFraction * 60 * 1000)
+	nowMs := now.UnixMilli()
+
+	gt, err := GenerateGroundTrackByLonWindow(tle, now, 0.0, DefaultGroundTrackStep)
+	if err != nil {
+		t.Fatalf("GenerateGroundTrackByLonWindow failed (polar): %v", err)
+	}
+
+	for i, seg := range gt.Past {
+		for j, p := range seg {
+			deltaMs := nowMs - p.TS
+			if deltaMs < 0 || deltaMs > maxHalfMs+int64(DefaultGroundTrackStep/time.Millisecond) {
+				t.Errorf("polar past[%d][%d] dt=%dms exceeds time-fallback %dms",
+					i, j, deltaMs, maxHalfMs)
+			}
+		}
+	}
+	for i, seg := range gt.Future {
+		for j, p := range seg {
+			deltaMs := p.TS - nowMs
+			if deltaMs < 0 || deltaMs > maxHalfMs+int64(DefaultGroundTrackStep/time.Millisecond) {
+				t.Errorf("polar future[%d][%d] dt=%dms exceeds time-fallback %dms",
+					i, j, deltaMs, maxHalfMs)
+			}
+		}
+	}
+}
+
+// TestGenerateGroundTrackByLonWindow_GEO_PointsLimit — GEO: continuous lon почти
+// не меняется, lon-clip не срабатывает; должен ограничить maxPointsPerSide.
+func TestGenerateGroundTrackByLonWindow_GEO_PointsLimit(t *testing.T) {
+	tle := parseTestTLE(t, gtGEOLines)
+	now := tle.Epoch
+
+	gt, err := GenerateGroundTrackByLonWindow(tle, now, 0.0, DefaultGroundTrackStep)
+	if err != nil {
+		t.Fatalf("GenerateGroundTrackByLonWindow failed (GEO): %v", err)
+	}
+
+	// Per-side limit = maxPointsPerSide; total ≤ 2 × (maxPointsPerSide+1) с учётом
+	// nowPoint и возможной boundary-точки.
+	total := gt.TotalPoints()
+	if total > 2*(maxPointsPerSide+2) {
+		t.Errorf("GEO total points = %d, expected ≤ %d (maxPointsPerSide × 2)",
+			total, 2*(maxPointsPerSide+2))
+	}
+}
+
+func TestGenerateGroundTrackByLonWindow_Nil(t *testing.T) {
+	_, err := GenerateGroundTrackByLonWindow(nil, time.Now(), 0.0, DefaultGroundTrackStep)
+	if err == nil {
+		t.Error("expected error for nil TLE")
+	}
+}
+
+func TestGenerateGroundTrackByLonWindow_InvalidStep(t *testing.T) {
+	tle := parseTestTLE(t, gtISSLines)
+	_, err := GenerateGroundTrackByLonWindow(tle, tle.Epoch, 0.0, 0)
+	if err == nil {
+		t.Error("expected error for zero step")
+	}
+}
+
+// TestGenerateGroundTrackByLonWindow_PastFutureSplit — точки делятся по now.
+func TestGenerateGroundTrackByLonWindow_PastFutureSplit(t *testing.T) {
+	tle := parseTestTLE(t, gtISSLines)
+	now := tle.Epoch
+	nowMs := now.UnixMilli()
+
+	gt, err := GenerateGroundTrackByLonWindow(tle, now, 0.0, DefaultGroundTrackStep)
+	if err != nil {
+		t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+	}
+
+	for i, seg := range gt.Past {
+		for j, p := range seg {
+			if p.TS >= nowMs {
+				t.Errorf("past[%d][%d] TS=%d >= now=%d", i, j, p.TS, nowMs)
+			}
+		}
+	}
+	for i, seg := range gt.Future {
+		for j, p := range seg {
+			if p.TS < nowMs {
+				t.Errorf("future[%d][%d] TS=%d < now=%d", i, j, p.TS, nowMs)
+			}
+		}
+	}
+}
+
+// TestGenerateGroundTrackByLonWindow_BoundaryPoints — первая и последняя точки
+// должны лежать близко к границам окна [observerLon−180°, observerLon+180°]
+// по continuous lon. Окно — общее для всех KA (центр карты = observer), не
+// симметричное относительно sat. Проверяем что суммарный span ≈ 360° и first
+// и last на разных сторонах от sat.
+func TestGenerateGroundTrackByLonWindow_BoundaryPoints(t *testing.T) {
+	tle := parseTestTLE(t, gtISSLines)
+	now := tle.Epoch
+	const observerLon = 0.0
+
+	gt, err := GenerateGroundTrackByLonWindow(tle, now, observerLon, DefaultGroundTrackStep)
+	if err != nil {
+		t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+	}
+
+	all := gt.Points()
+	if len(all) < 4 {
+		t.Fatalf("expected ≥ 4 points, got %d", len(all))
+	}
+
+	conts := continuousLonsFromAnchor(all, now.UnixMilli())
+	first := conts[0]
+	last := conts[len(conts)-1]
+
+	// first и last должны быть на ПРОТИВОПОЛОЖНЫХ сторонах от anchor (одна < 0, другая > 0).
+	if first*last > 0 {
+		t.Errorf("first (%.2f) и last (%.2f) с одной стороны от anchor — ожидалось разные", first, last)
+	}
+
+	// Суммарный span (last - first) ≈ 360° с допуском ε + дискретизация.
+	span := math.Abs(last - first)
+	const tol = 0.6
+	if span < 358.0 || span > 360.0+tol {
+		t.Errorf("span first→last = %.3f°, expected ~360° (358..%.2f)", span, 360.0+tol)
+	}
+}
+
+// --- Полный мат-симулятор фронтового project() ---
+
+// projectXSim воспроизводит логику EarthView.project() для x-координаты с
+// нормализацией dLon в [-180, 180). Используется в тестах чтобы проверить, на
+// каком пикселе canvas окажется граничная точка трассы.
+func projectXSim(lon, centerLon, width, zoom float64) float64 {
+	if zoom == 0 {
+		zoom = 1
+	}
+	dLon := lon - centerLon
+	for dLon >= 180 {
+		dLon -= 360
+	}
+	for dLon < -180 {
+		dLon += 360
+	}
+	return (dLon/360.0)*width*zoom + width/2.0
+}
+
+// --- Табличные тесты для разных точек мира ---
+
+// observerCases — представительный набор станций по всему миру для проверки
+// что трасса корректна при любом observerLon.
+var observerCases = []struct {
+	name        string
+	observerLon float64
+}{
+	{"Гринвич (0°)", 0.0},
+	{"Лондон (0°W)", -0.13},
+	{"Москва (37.6°E)", 37.6},
+	{"Ростов-на-Дону (39.79°E)", 39.79},
+	{"Дубай (55.3°E)", 55.3},
+	{"Дели (77.2°E)", 77.2},
+	{"Пекин (116.4°E)", 116.4},
+	{"Токио (139.7°E)", 139.7},
+	{"Сидней (151.2°E)", 151.2},
+	{"Антимеридиан (180°)", 180.0},
+	{"Антимеридиан (-180°)", -180.0},
+	{"Сан-Франциско (-122.4°)", -122.4},
+	{"Нью-Йорк (-74°)", -74.0},
+	{"Рио (-43.2°)", -43.2},
+}
+
+// TestGenerateGroundTrackByLonWindow_AllObservers_LEO — для LEO (МКС) трасса
+// должна правильно покрывать окно карты при ЛЮБОМ observerLon.
+//
+// Проверки:
+//  1. span continuous lon ≈ 360° (полное покрытие окна).
+//  2. first и last точки трассы (по time) на противоположных сторонах от sat_now.
+//  3. boundary-точки проектируются ровно на края canvas (через симулятор project()).
+//  4. past содержит только TS<now, future — TS≥now.
+func TestGenerateGroundTrackByLonWindow_AllObservers_LEO(t *testing.T) {
+	tle := parseTestTLE(t, gtISSLines)
+	now := tle.Epoch
+	nowMs := now.UnixMilli()
+	const canvasWidth = 1024.0
+
+	for _, tc := range observerCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gt, err := GenerateGroundTrackByLonWindow(tle, now, tc.observerLon, DefaultGroundTrackStep)
+			if err != nil {
+				t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+			}
+
+			all := gt.Points()
+			if len(all) < 4 {
+				t.Fatalf("expected ≥ 4 points, got %d", len(all))
+			}
+
+			// 1. span ≈ 360°.
+			span := continuousLonSpan(all)
+			if span < 358.0 || span > 360.6 {
+				t.Errorf("span = %.3f°, expected 358..360.6°", span)
+			}
+
+			// 2. first и last на противоположных сторонах от anchor (sat_now).
+			conts := continuousLonsFromAnchor(all, nowMs)
+			first, last := conts[0], conts[len(conts)-1]
+			if first*last > 0 {
+				t.Errorf("first cont=%.2f и last cont=%.2f с одной стороны от sat_now", first, last)
+			}
+
+			// 3. Boundary-точки на краях canvas (по проекции через project с center=observerLon).
+			firstP := all[0]
+			lastP := all[len(all)-1]
+			xFirst := projectXSim(firstP.Lon, tc.observerLon, canvasWidth, 1.0)
+			xLast := projectXSim(lastP.Lon, tc.observerLon, canvasWidth, 1.0)
+			// Boundary должна быть очень близко (≤ 1px) к 0 или canvasWidth.
+			isOnEdge := func(x float64) bool {
+				return x <= 1.0 || x >= canvasWidth-1.0
+			}
+			if !isOnEdge(xFirst) {
+				t.Errorf("first point lon=%.3f → x=%.2f (canvas %.0f), expected на краю (≤1 или ≥%.0f)",
+					firstP.Lon, xFirst, canvasWidth, canvasWidth-1)
+			}
+			if !isOnEdge(xLast) {
+				t.Errorf("last point lon=%.3f → x=%.2f (canvas %.0f), expected на краю",
+					lastP.Lon, xLast, canvasWidth)
+			}
+			// Они должны быть на РАЗНЫХ краях.
+			firstOnLeft := xFirst <= 1.0
+			lastOnLeft := xLast <= 1.0
+			if firstOnLeft == lastOnLeft {
+				t.Errorf("first (x=%.2f) и last (x=%.2f) на одном крае canvas — ожидалось на разных",
+					xFirst, xLast)
+			}
+
+			// 4. past — TS<now, future — TS≥now.
+			for _, seg := range gt.Past {
+				for _, p := range seg {
+					if p.TS >= nowMs {
+						t.Errorf("past point TS=%d ≥ now=%d", p.TS, nowMs)
+					}
+				}
+			}
+			for _, seg := range gt.Future {
+				for _, p := range seg {
+					if p.TS < nowMs {
+						t.Errorf("future point TS=%d < now=%d", p.TS, nowMs)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestGenerateGroundTrackByLonWindow_AllObservers_Polar — для полярного TLE
+// (наклонение ~98°) наземная трасса пересекает полюса, и из-за polepass-фильтра
+// continuous lon за один период покрывает не 360°, а ~90° + westingDeg.
+// Поэтому здесь проверяем только консистентность данных и ограничения
+// time-fallback (lon-clip не должен пропустить экстремальное переполнение).
+func TestGenerateGroundTrackByLonWindow_AllObservers_Polar(t *testing.T) {
+	tle := parseTestTLE(t, gtPolarLines)
+	now := tle.Epoch
+	nowMs := now.UnixMilli()
+	maxHalfMs := int64(tle.OrbitalPeriod() * timeFallbackHalfPeriodFraction * 60 * 1000)
+
+	for _, tc := range observerCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gt, err := GenerateGroundTrackByLonWindow(tle, now, tc.observerLon, DefaultGroundTrackStep)
+			if err != nil {
+				t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+			}
+
+			all := gt.Points()
+			if len(all) < 4 {
+				t.Fatalf("expected ≥ 4 points (polar), got %d", len(all))
+			}
+
+			// Все точки должны лежать в диапазоне [now-1.07period, now+1.07period]
+			// (защита от выхода за time-fallback).
+			tolMs := int64(DefaultGroundTrackStep / time.Millisecond)
+			for _, seg := range gt.Past {
+				for _, p := range seg {
+					if nowMs-p.TS > maxHalfMs+tolMs {
+						t.Errorf("polar past TS=%d — diff %dms > maxHalf %dms",
+							p.TS, nowMs-p.TS, maxHalfMs)
+					}
+				}
+			}
+			for _, seg := range gt.Future {
+				for _, p := range seg {
+					if p.TS-nowMs > maxHalfMs+tolMs {
+						t.Errorf("polar future TS=%d — diff %dms > maxHalf %dms",
+							p.TS, p.TS-nowMs, maxHalfMs)
+					}
+				}
+			}
+
+			// Continuous lon span должен быть ≥ 90° (хотя бы половина витка
+			// между полюсами) — иначе трасса будет совсем короткой.
+			span := continuousLonSpan(all)
+			if span < 90.0 {
+				t.Errorf("polar continuous lon span = %.2f° < 90° — слишком короткая трасса", span)
+			}
+
+			// past — TS<now, future — TS≥now (та же инвариантность что и для LEO).
+			for _, seg := range gt.Past {
+				for _, p := range seg {
+					if p.TS >= nowMs {
+						t.Errorf("polar past point TS=%d ≥ now=%d", p.TS, nowMs)
+					}
+				}
+			}
+			for _, seg := range gt.Future {
+				for _, p := range seg {
+					if p.TS < nowMs {
+						t.Errorf("polar future point TS=%d < now=%d", p.TS, nowMs)
+					}
+				}
+			}
+		})
+	}
+}
+
+// TestGenerateGroundTrackByLonWindow_AllObservers_GEO — для GEO трасса не
+// должна разрастаться до тысяч точек: maxPointsPerSide ограничивает.
+func TestGenerateGroundTrackByLonWindow_AllObservers_GEO(t *testing.T) {
+	tle := parseTestTLE(t, gtGEOLines)
+	now := tle.Epoch
+
+	for _, tc := range observerCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gt, err := GenerateGroundTrackByLonWindow(tle, now, tc.observerLon, DefaultGroundTrackStep)
+			if err != nil {
+				t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+			}
+
+			total := gt.TotalPoints()
+			if total > 2*(maxPointsPerSide+2) {
+				t.Errorf("GEO total points = %d > limit %d", total, 2*(maxPointsPerSide+2))
+			}
+		})
+	}
+}
+
+// TestGenerateGroundTrackByLonWindow_NoExcessiveOrbits_LEO — span НЕ должен
+// существенно превышать 360°: алгоритм не должен рисовать «полтора витка»
+// (это и было исходной проблемой избыточности).
+func TestGenerateGroundTrackByLonWindow_NoExcessiveOrbits_LEO(t *testing.T) {
+	tle := parseTestTLE(t, gtISSLines)
+	now := tle.Epoch
+
+	for _, tc := range observerCases {
+		t.Run(tc.name, func(t *testing.T) {
+			gt, err := GenerateGroundTrackByLonWindow(tle, now, tc.observerLon, DefaultGroundTrackStep)
+			if err != nil {
+				t.Fatalf("GenerateGroundTrackByLonWindow failed: %v", err)
+			}
+
+			span := continuousLonSpan(gt.Points())
+			// Жёсткий потолок 365° — даже с дискретизацией и ε не должны
+			// превышать. Если алгоритм рисует полтора витка, span будет ~540°.
+			if span > 365.0 {
+				t.Errorf("span = %.2f° > 365° — алгоритм рисует лишний виток", span)
+			}
+		})
+	}
+}
+
 // --- Вспомогательные ---
 
 func TestGroundTrack_Points(t *testing.T) {

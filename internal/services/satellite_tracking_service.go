@@ -81,7 +81,7 @@ type positionData struct {
 	El             float64                 `json:"el"`
 	Range          float64                 `json:"range"`
 	VisibilityZone *tracker.VisibilityZone `json:"visibility_zone,omitempty"`
-	// Вторая точка подспутниковой треки (now + шаг трека) — клиент считает угол через project().
+	// Вторая точка подспутниковой трассы (now + шаг трассы) — клиент считает угол через project().
 	MapMarkerFwdLon *float64 `json:"map_marker_fwd_lon,omitempty"`
 	MapMarkerFwdLat *float64 `json:"map_marker_fwd_lat,omitempty"`
 	// Запасной угол при скачке долготы между точками на canvas (хорда в lat/lon, как трек).
@@ -750,7 +750,15 @@ func (s *SatelliteTrackingService) computeAndBroadcastState(refreshTracks bool) 
 				continue
 			}
 
-			track, err := tracker.GenerateDefaultGroundTrack(tle, now)
+			// Трасса генерируется ровно по окну карты с центром в долготе станции:
+			// от observerLon−180° до observerLon+180° по continuous lon. См. doc у
+			// GenerateGroundTrackByLonWindow — устраняет «избыточность» (несколько
+			// витков на карте) и «обрывы» в середине, даёт сплошную линию от края до края.
+			obsLon := 0.0
+			if s.observer != nil {
+				obsLon = s.observer.Lon
+			}
+			track, err := tracker.GenerateGroundTrackByLonWindow(tle, now, obsLon, tracker.DefaultGroundTrackStep)
 			if err != nil {
 				slog.Debug("failed to generate ground track",
 					"norad_id", sat.noradID,

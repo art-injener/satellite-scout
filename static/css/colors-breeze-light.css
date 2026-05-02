@@ -194,15 +194,18 @@
     --ind-out-of-view:    rgba(218, 68, 83, 0.50);
 
     /* ══════════════════════════════════════════════════════════════
-       Спектр / водопад — тёмные приборные вставки
+       Спектр / водопад — единый «приборный» палитр (UX-COLORS-INSTRUMENT-001).
+       Идентично всем остальным темам (темо-зависимы только --spectrum-bg
+       и --spectrum-text, остальное унифицировано: slate-фон, видимая сетка,
+       мягкий зелёный трейс, тёплый жёлтый crosshair).
        ══════════════════════════════════════════════════════════════ */
     --spectrum-bg:         #eff0f1;
     --spectrum-grid:       #3a4550;
     --spectrum-plot-bg:    #2a3440;
     --spectrum-instrument-bg: #2a3440;
     --bp-overview-freq-scale-bg: var(--bg-tertiary);
-    --spectrum-plot-grid:  rgba(255, 255, 255, 0.12);
-    --spectrum-axis-text:  #e0e2e4;
+    --spectrum-plot-grid:  rgba(255, 255, 255, 0.14);
+    --spectrum-axis-text:  #e4e8ec;
     --spectrum-trace:      #5ee878;
     --spectrum-crosshair:  #ffcc66;
     --spectrum-peak-label: #ffffff;

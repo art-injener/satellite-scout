@@ -168,11 +168,13 @@
     --ind-satellite-marker: var(--selected-marker);
     --ind-out-of-view:    rgba(200, 50, 50, 0.5);
 
-    /* Спектр: обрамление в тон холста; прибор — тёмный */
+    /* Спектр / водопад — единый «приборный» палитр (UX-COLORS-INSTRUMENT-001).
+       Идентично всем остальным темам (темо-зависимы только --spectrum-bg
+       и --spectrum-text, остальное унифицировано: slate-фон, видимая сетка,
+       мягкий зелёный трейс, тёплый жёлтый crosshair). */
     --spectrum-bg:         #ccd0d8;
     --spectrum-grid:       #3a4550;
     --spectrum-plot-bg:    #2a3440;
-    /* Обзор: контейнеры FFT/водопада = тот же тон, что и canvas */
     --spectrum-instrument-bg: #2a3440;
     /* Полоска шкалы частот между FFT и водопадом — как остров UI, не приборный фон */
     --bp-overview-freq-scale-bg: var(--bg-tertiary);

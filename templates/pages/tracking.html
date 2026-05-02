@@ -205,6 +205,13 @@
             </div>
             <!-- Кнопка восстановления overlay (видна, когда панель закрыта вручную) -->
             <button type="button" class="overlay-panel__restore" id="overlay-panel-restore" title="Показать параметры КА">КА</button>
+
+            <!-- Контролы масштабирования карты (MAP-ZOOM-001): + / ⌂ / − -->
+            <div class="map-zoom-controls" id="map-zoom-controls" role="group" aria-label="Масштаб карты">
+                <button type="button" class="map-zoom-btn map-zoom-btn--in" id="map-zoom-in" title="Увеличить масштаб" aria-label="Увеличить масштаб">+</button>
+                <button type="button" class="map-zoom-btn map-zoom-btn--reset" id="map-zoom-reset" title="Сбросить масштаб" aria-label="Сбросить масштаб">⌂</button>
+                <button type="button" class="map-zoom-btn map-zoom-btn--out" id="map-zoom-out" title="Уменьшить масштаб" aria-label="Уменьшить масштаб">−</button>
+            </div>
         </div>
     </section>
 </div>
@@ -404,7 +411,7 @@
                         <div class="bp-sdr-device-row">
                             <select id="sdr-device" class="bp-input bp-input--device" name="sdr-device">
                                 <option value="none">Нет устройства</option>
-                                <option value="simulation" selected>Имитация</option>
+                                <option value="simulation" selected>Имитатор SDR</option>
                             </select>
                             <button type="button" class="bp-sdr-device-refresh" id="sdr-device-refresh" title="Обновить список устройств" aria-label="Обновить список устройств">
                                 <svg class="bp-sdr-device-refresh__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
