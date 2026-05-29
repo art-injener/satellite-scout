@@ -550,6 +550,55 @@ body {
     line-height: 1.2;
 }
 
+/* Стековая карточка (co-located КА): авто-высота вместо фиксированной,
+   каждая строка — одно имя КА. Порядок стабильный (NORAD ↑). */
+.map-sat-callout--stacked {
+    height: auto;
+    max-height: none;
+    padding: 3px 4px 3px 7px;
+}
+.map-sat-callout--stacked.map-sat-callout--accent-right {
+    padding: 3px 7px 3px 4px;
+}
+.map-sat-callout--stacked .map-sat-callout__name {
+    font-size: 10px;
+    line-height: 1.4;
+    cursor: pointer;
+}
+.map-sat-callout--stacked .map-sat-callout__name:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+}
+.map-sat-callout__stack-row {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    line-height: 1.4;
+    color: var(--map-callout-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    cursor: pointer;
+}
+.map-sat-callout__stack-row:hover {
+    color: #fff;
+    background: rgba(255,255,255,0.08);
+}
+.map-sat-callout__stack-more {
+    display: block;
+    font-family: var(--font-mono);
+    font-size: 9px;
+    line-height: 1.4;
+    color: rgba(255,255,255,0.5);
+    cursor: pointer;
+    white-space: nowrap;
+    margin-top: 1px;
+}
+.map-sat-callout__stack-more:hover {
+    color: rgba(255,255,255,0.85);
+}
+
 /* Отображаемый размер = 100% контейнера; буфер для HiDPI задаётся в JS */
 .earth-view-container canvas {
     width: 100%;

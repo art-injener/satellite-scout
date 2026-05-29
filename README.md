@@ -200,6 +200,5 @@ cp .env.example .env
 
 ## Лицензия
 
-MIT
-
+**GPL-3.0-or-later** (см. [`LICENSE`](LICENSE)).
 

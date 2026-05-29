@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
@@ -14,16 +15,23 @@ const (
 	defaultObserverAlt = 70.0
 
 	// Имена переменных окружения.
-	envPort        = "PORT"
-	envObserverLat = "OBSERVER_LAT"
-	envObserverLon = "OBSERVER_LON"
-	envObserverAlt = "OBSERVER_ALT"
-	envDevMode     = "DEV_MODE"
-	envTLECacheDir = "TLE_CACHE_DIR"
-	envTheme       = "THEME"
+	envPort            = "PORT"
+	envObserverLat     = "OBSERVER_LAT"
+	envObserverLon     = "OBSERVER_LON"
+	envObserverAlt     = "OBSERVER_ALT"
+	envDevMode         = "DEV_MODE"
+	envTLECacheDir     = "TLE_CACHE_DIR"
+	envTheme           = "THEME"
+	envSatNOGSEnabled  = "SATNOGS_ENABLED"
+	envSatNOGSCacheTTL = "SATNOGS_CACHE_TTL"
 
 	// Тема по умолчанию — Operations Center.
 	defaultTheme = "default"
+
+	// SatNOGS-интеграция включена по умолчанию: данные публичные, без аутентификации,
+	// один HTTP-запрос на NORAD раз в сутки.
+	defaultSatNOGSEnabled  = true
+	defaultSatNOGSCacheTTL = 24 * time.Hour
 )
 
 // Config содержит конфигурацию приложения.
@@ -46,6 +54,14 @@ type Config struct {
 	// Цветовая тема UI: default, classic, light, breeze, breeze-steel, breeze-dark.
 	// Стартовый файл static/css/colors-{Theme}.css; в браузере тему можно сменить (localStorage ss-ui-theme).
 	Theme string
+
+	// SatNOGSEnabled включает интеграцию с SatNOGS DB (частоты/модуляция передатчиков).
+	// При false сервис не создаётся, в SSE-событиях нет полей freq_mhz/modulation,
+	// в UI отображается «—».
+	SatNOGSEnabled bool
+
+	// SatNOGSCacheTTL — время жизни записи в кеше передатчиков SatNOGS.
+	SatNOGSCacheTTL time.Duration
 }
 
 // Load возвращает конфигурацию из переменных окружения с значениями по умолчанию.
@@ -56,13 +72,15 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		Port:        getEnv(envPort, "8080"),
-		DevMode:     getEnvBool(envDevMode, true),
-		ObserverLat: getEnvFloat(envObserverLat, defaultObserverLat),
-		ObserverLon: getEnvFloat(envObserverLon, defaultObserverLon),
-		ObserverAlt: getEnvFloat(envObserverAlt, defaultObserverAlt),
-		TLE:         tleCfg,
-		Theme:       getEnv(envTheme, defaultTheme),
+		Port:            getEnv(envPort, "8080"),
+		DevMode:         getEnvBool(envDevMode, true),
+		ObserverLat:     getEnvFloat(envObserverLat, defaultObserverLat),
+		ObserverLon:     getEnvFloat(envObserverLon, defaultObserverLon),
+		ObserverAlt:     getEnvFloat(envObserverAlt, defaultObserverAlt),
+		TLE:             tleCfg,
+		Theme:           getEnv(envTheme, defaultTheme),
+		SatNOGSEnabled:  getEnvBool(envSatNOGSEnabled, defaultSatNOGSEnabled),
+		SatNOGSCacheTTL: getEnvDuration(envSatNOGSCacheTTL, defaultSatNOGSCacheTTL),
 	}
 	return cfg
 }
@@ -92,6 +110,17 @@ func getEnvFloat(key string, defaultVal float64) float64 {
 	if val := os.Getenv(key); val != "" {
 		if f, err := strconv.ParseFloat(val, 64); err == nil {
 			return f
+		}
+	}
+	return defaultVal
+}
+
+// getEnvDuration читает значение времени из переменной окружения в формате time.Duration
+// (примеры: "24h", "30m", "1h30m"). Невалидное значение → defaultVal.
+func getEnvDuration(key string, defaultVal time.Duration) time.Duration {
+	if val := os.Getenv(key); val != "" {
+		if d, err := time.ParseDuration(val); err == nil && d > 0 {
+			return d
 		}
 	}
 	return defaultVal

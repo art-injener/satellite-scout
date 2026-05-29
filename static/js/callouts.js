@@ -69,9 +69,19 @@ const DEFAULTS = {
     // Визуальный зазор от запретных сегментов трасс (px) при пост-проходе обхода.
     forbiddenPadding: 5,
     // Максимум угловых проб при обходе запретных сегментов (шаг 5°, итого до 360°).
-    forbiddenMaxSteps: 36,
+    forbiddenMaxSteps: 72,
     // Шаг угловой пробы при обходе запретных сегментов (рад).
     forbiddenStepRad: 5 * Math.PI / 180,
+    // Порог стекинга co-located КА (px). Маркеры ближе этого расстояния
+    // объединяются в одну «стопку» — одна карточка с несколькими строками.
+    // Отдельно от clusterDistance (PCA-эллипс): стек — это «одна точка»,
+    // кластер — «группа близких точек, но различимых на экране».
+    stackDistance: 15,
+    // Высота одной строки в стековой карточке (px). Между строками нет gap —
+    // они разделены визуально только фоновым цветом / цветным маркером строки.
+    stackLineHeight: 18,
+    // Максимум видимых строк в свёрнутом стеке. Остальные скрыты за "...+N ещё".
+    stackMaxVisible: 4,
 };
 
 /**
@@ -302,6 +312,8 @@ function distributeAnglesAround(slots, minStep) {
 function buildRingPlacement(theta, ellipse, a2, b2, marker, opts, bounds) {
     const cardW = (typeof marker.cardWidth === 'number' && isFinite(marker.cardWidth))
         ? marker.cardWidth : opts.cardWidth;
+    const cardH = (typeof marker.cardHeight === 'number' && isFinite(marker.cardHeight))
+        ? marker.cardHeight : opts.cardHeight;
     const uOut = a2 * Math.cos(theta);
     const vOut = b2 * Math.sin(theta);
     const ax = ellipse.cx + ellipse.cosPhi * uOut - ellipse.sinPhi * vOut;
@@ -312,19 +324,19 @@ function buildRingPlacement(theta, ellipse, a2, b2, marker, opts, bounds) {
         tailSign = (Math.cos(theta) >= 0) ? +1 : -1;
     }
     let cardX = (tailSign > 0) ? ax + opts.tailLength : ax - opts.tailLength - cardW;
-    let cardY = ay - opts.cardHeight / 2;
+    let cardY = ay - cardH / 2;
 
     const pad = opts.boundsPadding;
     const maxX = bounds.width - cardW - pad;
-    const maxY = bounds.height - opts.cardHeight - pad;
+    const maxY = bounds.height - cardH - pad;
     if (cardX < pad) { cardX = pad; }
     else if (cardX > maxX) { cardX = maxX; }
     if (cardY < pad) { cardY = pad; }
     else if (cardY > maxY) { cardY = maxY; }
 
     return {
-        bend: { x: ax, y: cardY + opts.cardHeight / 2 },
-        card: { x: cardX, y: cardY, w: cardW, h: opts.cardHeight },
+        bend: { x: ax, y: cardY + cardH / 2 },
+        card: { x: cardX, y: cardY, w: cardW, h: cardH },
     };
 }
 
@@ -366,6 +378,202 @@ function countCardCrossings(card, padding, segments) {
         }
     }
     return count;
+}
+
+/**
+ * Возвращает 2 отрезка leader-линии placement'а: stem (marker → bend) и
+ * tail (bend → tailEnd). tailEnd — «дальняя» от bend сторона карточки
+ * (та, к которой примыкает хвост).
+ *
+ * Используется проверками пересечений leader vs запретные трассы и leader
+ * vs чужие линии выносок.
+ */
+function leaderSegmentsOf(marker, placement) {
+    const card = placement.card;
+    const bend = placement.bend;
+    const tailX = (card.x > bend.x) ? card.x : (card.x + card.w);
+    return [
+        { x1: marker.x, y1: marker.y, x2: bend.x,  y2: bend.y },
+        { x1: bend.x,    y1: bend.y,   x2: tailX,  y2: bend.y },
+    ];
+}
+
+/**
+ * Пересекает ли хотя бы один отрезок leader-линии (stem/tail) любой из
+ * заданных запретных сегментов? Быстрее, чем считать все пересечения, —
+ * достаточно одного, чтобы забраковать кандидата.
+ */
+function leaderHitsAnySegment(leaderSegs, segments) {
+    for (let i = 0; i < leaderSegs.length; i++) {
+        const L = leaderSegs[i];
+        const l1 = { x: L.x1, y: L.y1 };
+        const l2 = { x: L.x2, y: L.y2 };
+        for (let j = 0; j < segments.length; j++) {
+            const S = segments[j];
+            const lxMin = (L.x1 < L.x2) ? L.x1 : L.x2;
+            const lxMax = (L.x1 < L.x2) ? L.x2 : L.x1;
+            const lyMin = (L.y1 < L.y2) ? L.y1 : L.y2;
+            const lyMax = (L.y1 < L.y2) ? L.y2 : L.y1;
+            const sxMin = (S.x1 < S.x2) ? S.x1 : S.x2;
+            const sxMax = (S.x1 < S.x2) ? S.x2 : S.x1;
+            const syMin = (S.y1 < S.y2) ? S.y1 : S.y2;
+            const syMax = (S.y1 < S.y2) ? S.y2 : S.y1;
+            if (lxMax < sxMin || sxMax < lxMin || lyMax < syMin || syMax < lyMin) { continue; }
+            if (segmentsIntersect(l1, l2, { x: S.x1, y: S.y1 }, { x: S.x2, y: S.y2 })) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+/**
+ * Подсчёт пересечений ТОЛЬКО leader-линии (stem + tail) с запретными
+ * сегментами. bbox карточки здесь НЕ учитывается — card-пересечения
+ * считаются отдельно через `countCardCrossings`, чтобы Phase A/B мог
+ * применять лексикографический порядок «сначала card, потом leader».
+ */
+function countLeaderOnlyCrossings(marker, placement, segments) {
+    if (!segments || segments.length === 0) { return 0; }
+    const leaderSegs = leaderSegmentsOf(marker, placement);
+    let n = 0;
+    for (let i = 0; i < leaderSegs.length; i++) {
+        const L = leaderSegs[i];
+        const l1 = { x: L.x1, y: L.y1 };
+        const l2 = { x: L.x2, y: L.y2 };
+        for (let j = 0; j < segments.length; j++) {
+            const S = segments[j];
+            const lxMin = (L.x1 < L.x2) ? L.x1 : L.x2;
+            const lxMax = (L.x1 < L.x2) ? L.x2 : L.x1;
+            const lyMin = (L.y1 < L.y2) ? L.y1 : L.y2;
+            const lyMax = (L.y1 < L.y2) ? L.y2 : L.y1;
+            const sxMin = (S.x1 < S.x2) ? S.x1 : S.x2;
+            const sxMax = (S.x1 < S.x2) ? S.x2 : S.x1;
+            const syMin = (S.y1 < S.y2) ? S.y1 : S.y2;
+            const syMax = (S.y1 < S.y2) ? S.y2 : S.y1;
+            if (lxMax < sxMin || sxMax < lxMin || lyMax < syMin || syMax < lyMin) { continue; }
+            if (segmentsIntersect(l1, l2, { x: S.x1, y: S.y1 }, { x: S.x2, y: S.y2 })) {
+                n++;
+            }
+        }
+    }
+    return n;
+}
+
+/**
+ * Лексикографическая «стоимость» размещения относительно запретных трасс:
+ * `[cardHits, leaderHits]`. Phase A/B сравнивают кандидатов пары —
+ * сначала по cardHits, затем по leaderHits. Это гарантирует, что:
+ *   1. Если есть угол, где карточка не перекрывает трассу вообще,
+ *      алгоритм выберет именно его (не «сдвинет» карточку под трассу ради
+ *      устранения leader-пересечения).
+ *   2. Среди углов с равным числом card-пересечений выбирается тот, где
+ *      leader-линия пересекает меньше трасс.
+ */
+/**
+ * Подсчитывает число препятствий-AABB (`obstacles`), чьи bbox-ы пересекаются
+ * с карточкой `card`. «Собственная» иконка маркера, чей bbox содержит точку
+ * `(marker.x, marker.y)`, исключается: иначе карточка собственного КА
+ * считалась бы перекрывающей свою же иконку и алгоритм бы её «отгонял».
+ *
+ * `obstacles` — массив `{x, y, w, h}` (иконки чужих КА, подписи городов,
+ * метка observer). Зазор между карточкой и препятствием не задаём (gap=0):
+ * соприкосновение допустимо, важно лишь не накладываться.
+ */
+function countCardObstacleHits(card, obstacles, marker) {
+    if (!obstacles || obstacles.length === 0) { return 0; }
+    let n = 0;
+    for (let i = 0; i < obstacles.length; i++) {
+        const ob = obstacles[i];
+        if (marker &&
+            marker.x >= ob.x && marker.x <= ob.x + ob.w &&
+            marker.y >= ob.y && marker.y <= ob.y + ob.h) {
+            continue;
+        }
+        if (bboxOverlap(card, ob, 0)) { n++; }
+    }
+    return n;
+}
+
+/**
+ * Подсчёт числа препятствий, чьи bbox пересекает хотя бы один из отрезков
+ * leader-линии (stem + tail). Собственная иконка маркера (bbox содержит
+ * точку маркера) исключается — без этого leader всегда начинается из своей
+ * же иконки и мы бы считали +1 для каждого размещения.
+ */
+function countLeaderObstacleHits(marker, placement, obstacles) {
+    if (!obstacles || obstacles.length === 0) { return 0; }
+    const segs = leaderSegmentsOf(marker, placement);
+    let n = 0;
+    for (let i = 0; i < obstacles.length; i++) {
+        const ob = obstacles[i];
+        if (marker &&
+            marker.x >= ob.x && marker.x <= ob.x + ob.w &&
+            marker.y >= ob.y && marker.y <= ob.y + ob.h) {
+            continue;
+        }
+        const ox1 = ob.x;
+        const oy1 = ob.y;
+        const ox2 = ob.x + ob.w;
+        const oy2 = ob.y + ob.h;
+        let hit = false;
+        for (let si = 0; si < segs.length && !hit; si++) {
+            const L = segs[si];
+            const lxMin = (L.x1 < L.x2) ? L.x1 : L.x2;
+            const lxMax = (L.x1 < L.x2) ? L.x2 : L.x1;
+            const lyMin = (L.y1 < L.y2) ? L.y1 : L.y2;
+            const lyMax = (L.y1 < L.y2) ? L.y2 : L.y1;
+            if (lxMax < ox1 || lxMin > ox2 || lyMax < oy1 || lyMin > oy2) { continue; }
+            const l1 = { x: L.x1, y: L.y1 };
+            const l2 = { x: L.x2, y: L.y2 };
+            if (segmentsIntersect(l1, l2, { x: ox1, y: oy1 }, { x: ox2, y: oy1 }) ||
+                segmentsIntersect(l1, l2, { x: ox2, y: oy1 }, { x: ox2, y: oy2 }) ||
+                segmentsIntersect(l1, l2, { x: ox2, y: oy2 }, { x: ox1, y: oy2 }) ||
+                segmentsIntersect(l1, l2, { x: ox1, y: oy2 }, { x: ox1, y: oy1 })) {
+                hit = true;
+            }
+            if (!hit) {
+                if (L.x1 >= ox1 && L.x1 <= ox2 && L.y1 >= oy1 && L.y1 <= oy2) { hit = true; }
+                if (!hit && L.x2 >= ox1 && L.x2 <= ox2 && L.y2 >= oy1 && L.y2 <= oy2) { hit = true; }
+            }
+        }
+        if (hit) { n++; }
+    }
+    return n;
+}
+
+/**
+ * Лексикографическая стоимость кандидата размещения карточки в ring-режиме.
+ * Возвращает `[cardIconHits, leaderIconHits, cardTrackHits, leaderTrackHits]`:
+ *
+ *   1. cardIconHits   — card-bbox перекрывает иконку/подпись. Наивысший приоритет.
+ *   2. leaderIconHits — leader-линия (stem+tail) пересекает bbox иконки/подписи.
+ *   3. cardTrackHits  — card-bbox перекрывает запретную трассу.
+ *   4. leaderTrackHits — leader-линия пересекает запретную трассу.
+ *
+ * Порядок: иконки > трассы; card-bbox > leader.
+ */
+function leaderLexCost(marker, placement, padding, segments, obstacles) {
+    return [
+        countCardObstacleHits(placement.card, obstacles, marker),
+        countLeaderObstacleHits(marker, placement, obstacles),
+        countCardCrossings(placement.card, padding, segments),
+        countLeaderOnlyCrossings(marker, placement, segments),
+    ];
+}
+
+/**
+ * Сравнение двух lex-стоимостей произвольной длины. Возвращает −1, 0, +1.
+ * При разной длине лишние компоненты считаются равными нулю.
+ */
+function lexCompare(a, b) {
+    const n = (a.length > b.length) ? a.length : b.length;
+    for (let i = 0; i < n; i++) {
+        const ai = (i < a.length) ? a[i] : 0;
+        const bi = (i < b.length) ? b[i] : 0;
+        if (ai !== bi) { return ai < bi ? -1 : +1; }
+    }
+    return 0;
 }
 
 /**
@@ -656,21 +864,80 @@ class CalloutLayout {
         const result = new Array(markers.length);
         if (markers.length === 0) { return result; }
         const segments = forbiddenSegments || [];
+        const stackDist = opts.stackDistance;
+        const stackLineH = opts.stackLineHeight;
 
         const groups = clusterMarkers(markers, opts.clusterDistance);
         for (let gi = 0; gi < groups.length; gi++) {
             const indices = groups[gi];
+
+            // ── Стекинг co-located маркеров ──────────────────────────────
+            // Маркеры ближе stackDistance px объединяются в один слот-стопку.
+            // Одна карточка с несколькими строками вместо N скачущих карточек.
+            const stacks = clusterMarkers(markers, stackDist);
+            // Оставляем только стеки, целиком принадлежащие текущему PCA-кластеру.
+            const indicesSet = new Set(indices);
+            const stacksInGroup = [];
+            for (let si = 0; si < stacks.length; si++) {
+                const st = stacks[si];
+                if (st.length === 0) { continue; }
+                if (!indicesSet.has(st[0])) { continue; }
+                let allIn = true;
+                for (let sj = 0; sj < st.length; sj++) {
+                    if (!indicesSet.has(st[sj])) { allIn = false; break; }
+                }
+                if (allIn) { stacksInGroup.push(st); }
+            }
+
+            // Для каждого стека формируем «виртуальный маркер» (centroid, max width,
+            // увеличенный cardHeight). Порядок id — по возрастанию NORAD (стабильный).
+            const virtualMarkers = [];
+            const stackMeta = [];  // параллельный массив: info о стеке
+            for (let si = 0; si < stacksInGroup.length; si++) {
+                const memberIndices = stacksInGroup[si];
+                // Стабильная сортировка по NORAD ID
+                memberIndices.sort((a, b) => {
+                    const idA = markers[a].id;
+                    const idB = markers[b].id;
+                    return (idA < idB) ? -1 : (idA > idB) ? 1 : 0;
+                });
+                let cx = 0, cy = 0, maxW = 0, maxR = 0;
+                const ids = [];
+                for (let mi = 0; mi < memberIndices.length; mi++) {
+                    const m = markers[memberIndices[mi]];
+                    cx += m.x;
+                    cy += m.y;
+                    ids.push(m.id);
+                    const w = (typeof m.cardWidth === 'number' && isFinite(m.cardWidth))
+                        ? m.cardWidth : opts.cardWidth;
+                    if (w > maxW) { maxW = w; }
+                    const r = (typeof m.iconRadius === 'number') ? m.iconRadius : 0;
+                    if (r > maxR) { maxR = r; }
+                }
+                cx /= memberIndices.length;
+                cy /= memberIndices.length;
+                const n = memberIndices.length;
+                const maxVis = opts.stackMaxVisible || 4;
+                const visRows = (n > maxVis) ? (maxVis + 1) : n;
+                const h = (n > 1) ? (visRows * stackLineH + 4) : opts.cardHeight;
+                virtualMarkers.push({
+                    id: ids[0],
+                    x: cx,
+                    y: cy,
+                    cardWidth: maxW,
+                    cardHeight: h,
+                    iconRadius: maxR,
+                    color: markers[memberIndices[0]].color,
+                    _stackIds: ids,
+                    _memberIndices: memberIndices,
+                });
+                stackMeta.push({ ids: ids, memberIndices: memberIndices, h: h });
+            }
+
             const ellipse = pcaEllipse(markers, indices);
-            // Базовые полуоси кольца: PCA-эллипс + ringGap.
             let a2 = Math.max(ellipse.a, 1) + opts.ringGap;
             let b2 = Math.max(ellipse.b, 1) + opts.ringGap;
 
-            // Клампим полуоси под размер canvas: при zoom>1 кластер маркеров
-            // может расходиться шире viewport, и расширенный эллипс уходит
-            // за края — buildRingPlacement тогда лепит все карточки на
-            // боундари и они «прилипают к краям». Ограничиваем эллипс
-            // максимально возможной зоной с учётом cardWidth/cardHeight, чтобы
-            // карточки оставались компактным кольцом вокруг центра кластера.
             const cardW = maxCardWidth(markers, indices, opts.cardWidth);
             const pad = opts.boundsPadding;
             const aMaxByBounds = Math.max(
@@ -684,28 +951,25 @@ class CalloutLayout {
             if (a2 > aMaxByBounds) { a2 = aMaxByBounds; }
             if (b2 > bMaxByBounds) { b2 = bMaxByBounds; }
 
-            // Углы маркеров в локальной системе (u, v) главных осей эллипса.
+            // Углы виртуальных маркеров (по одному на стек).
             const slots = [];
-            for (let k = 0; k < indices.length; k++) {
-                const idx = indices[k];
-                const m = markers[idx];
-                const dx = m.x - ellipse.cx;
-                const dy = m.y - ellipse.cy;
+            for (let k = 0; k < virtualMarkers.length; k++) {
+                const vm = virtualMarkers[k];
+                const dx = vm.x - ellipse.cx;
+                const dy = vm.y - ellipse.cy;
                 const u = ellipse.cosPhi * dx + ellipse.sinPhi * dy;
                 const v = -ellipse.sinPhi * dx + ellipse.cosPhi * dy;
                 let theta = Math.atan2(v, u);
                 if (!isFinite(theta)) { theta = 0; }
-                slots.push({ idx, theta });
+                slots.push({ idx: k, theta });
             }
 
-            // Минимальный угловой шаг между карточками: оценка по высоте
-            // карточки относительно эффективного радиуса эллипса.
-            // Для одиночной карточки в кластере шаг не нужен.
             if (slots.length > 1) {
-                const cardW = maxCardWidth(markers, indices, opts.cardWidth);
+                const cardWSlot = maxCardWidth(virtualMarkers, slots.map(s => s.idx), opts.cardWidth);
                 const Reff = Math.max((a2 + b2) / 2, 1);
-                const angleByH = (opts.cardHeight + opts.minCardGap) / Reff;
-                const angleByW = cardW / (2 * Reff);
+                const maxH = virtualMarkers.reduce((m, v) => Math.max(m, v.cardHeight), opts.cardHeight);
+                const angleByH = (maxH + opts.minCardGap) / Reff;
+                const angleByW = cardWSlot / (2 * Reff);
                 const minStep = Math.min(
                     2 * Math.PI / slots.length,
                     Math.max(angleByH, angleByW)
@@ -714,40 +978,167 @@ class CalloutLayout {
                 distributeAnglesAround(slots, minStep);
             }
 
-            // Первичное размещение всех слотов кластера.
             const placements = new Array(slots.length);
             for (let k = 0; k < slots.length; k++) {
                 placements[k] = buildRingPlacement(
                     slots[k].theta, ellipse, a2, b2,
-                    markers[slots[k].idx], opts, bounds
+                    virtualMarkers[slots[k].idx], opts, bounds
                 );
             }
 
-            // Пост-проход: уводим карточки от запретных отрезков (трасс).
-            if (segments.length > 0) {
+            if (segments.length > 0 || obstaclesArr.length > 0) {
                 this._avoidForbiddenSegments(
                     slots, placements, ellipse, a2, b2,
-                    markers, bounds, segments
+                    virtualMarkers, bounds, segments, obstaclesArr
                 );
             }
 
-            for (let k = 0; k < slots.length; k++) {
-                const slot = slots[k];
-                const m = markers[slot.idx];
-                const placement = placements[k];
-
-                const markerOut = { x: m.x, y: m.y };
-                if (typeof m.cardWidth === 'number' && isFinite(m.cardWidth)) {
-                    markerOut.cardWidth = m.cardWidth;
+            // Пост-проход: θ-swap для устранения пересечений leader-линий.
+            // Phase A/B может нарушить исходный циклический порядок θ (из-за
+            // обхода трасс/иконок) — две соседние карточки «перехлёстывают» stem'ы.
+            // Свап θ между ними убирает X-образное пересечение.
+            // Приоритеты: leaders > icons > tracks (track допустимо ухудшить ради leaders).
+            if (this.opts.resolveCrossings !== false && slots.length > 1) {
+                const swapPasses = 4;
+                for (let pass = 0; pass < swapPasses; pass++) {
+                    let swapped = false;
+                    for (let a = 0; a < slots.length; a++) {
+                        for (let b = a + 1; b < slots.length; b++) {
+                            const ma = virtualMarkers[slots[a].idx];
+                            const mb = virtualMarkers[slots[b].idx];
+                            const pa = placements[a];
+                            const pb = placements[b];
+                            if (!leadersIntersect(
+                                { marker: ma, bend: pa.bend, card: pa.card },
+                                { marker: mb, bend: pb.bend, card: pb.card }
+                            )) { continue; }
+                            // Попробовать свап θ
+                            const tA = slots[a].theta;
+                            const tB = slots[b].theta;
+                            const candA = buildRingPlacement(tB, ellipse, a2, b2, ma, opts, bounds);
+                            const candB = buildRingPlacement(tA, ellipse, a2, b2, mb, opts, bounds);
+                            // Проверка: свап не создаёт новые X-пересечения
+                            const ltA = { marker: ma, bend: candA.bend, card: candA.card };
+                            const ltB = { marker: mb, bend: candB.bend, card: candB.card };
+                            if (leadersIntersect(ltA, ltB)) { continue; }
+                            // Проверка: не создаёт пересечения с другими leader'ами
+                            let newXCount = 0;
+                            let oldXCount = 0;
+                            for (let c = 0; c < slots.length; c++) {
+                                if (c === a || c === b) { continue; }
+                                const mc = virtualMarkers[slots[c].idx];
+                                const pc = placements[c];
+                                const ltC = { marker: mc, bend: pc.bend, card: pc.card };
+                                const ltOldA = { marker: ma, bend: pa.bend, card: pa.card };
+                                const ltOldB = { marker: mb, bend: pb.bend, card: pb.card };
+                                if (leadersIntersect(ltOldA, ltC)) { oldXCount++; }
+                                if (leadersIntersect(ltOldB, ltC)) { oldXCount++; }
+                                if (leadersIntersect(ltA, ltC)) { newXCount++; }
+                                if (leadersIntersect(ltB, ltC)) { newXCount++; }
+                            }
+                            // Суммарно пересечений должно стать не больше
+                            // (пара a-b: 1→0, остальные: net gain ≤ 0)
+                            if (newXCount > oldXCount) { continue; }
+                            // Проверка: свап не ухудшает пересечение с иконками
+                            const oldIcons = countCardObstacleHits(pa.card, obstaclesArr, ma)
+                                           + countCardObstacleHits(pb.card, obstaclesArr, mb);
+                            const newIcons = countCardObstacleHits(candA.card, obstaclesArr, ma)
+                                           + countCardObstacleHits(candB.card, obstaclesArr, mb);
+                            if (newIcons > oldIcons) { continue; }
+                            // Track crossings: не создавать новые (из 0→>0 запрещено)
+                            const swPad = opts.forbiddenPadding != null ? opts.forbiddenPadding : 5;
+                            const oldTrk = countCardCrossings(pa.card, swPad, segments)
+                                         + countCardCrossings(pb.card, swPad, segments);
+                            const newTrk = countCardCrossings(candA.card, swPad, segments)
+                                         + countCardCrossings(candB.card, swPad, segments);
+                            if (oldTrk === 0 && newTrk > 0) { continue; }
+                            // Свап принят (leader-crossings уменьшаются)
+                            slots[a].theta = tB;
+                            slots[b].theta = tA;
+                            placements[a] = candA;
+                            placements[b] = candB;
+                            swapped = true;
+                        }
+                    }
+                    if (!swapped) { break; }
                 }
-                result[slot.idx] = {
-                    id: m.id,
-                    color: (m.color !== undefined ? m.color : null),
+            }
+
+            // Пост-проход 2: swap для card-to-card overlaps.
+            // Если две карточки перекрываются bbox'ами и обмен θ устраняет
+            // или уменьшает перекрытие (не ухудшая tracks/icons) — принять.
+            if (slots.length > 1) {
+                const gap = opts.minCardGap || 4;
+                for (let pass = 0; pass < 4; pass++) {
+                    let didSwap = false;
+                    for (let a = 0; a < slots.length; a++) {
+                        for (let b = a + 1; b < slots.length; b++) {
+                            const pa = placements[a];
+                            const pb = placements[b];
+                            if (!bboxOverlap(pa.card, pb.card, gap)) { continue; }
+                            const ma = virtualMarkers[slots[a].idx];
+                            const mb = virtualMarkers[slots[b].idx];
+                            const tA = slots[a].theta;
+                            const tB = slots[b].theta;
+                            const candA = buildRingPlacement(tB, ellipse, a2, b2, ma, opts, bounds);
+                            const candB = buildRingPlacement(tA, ellipse, a2, b2, mb, opts, bounds);
+                            if (bboxOverlap(candA.card, candB.card, gap)) { continue; }
+                            // Не ухудшает tracks
+                            const swPad2 = opts.forbiddenPadding != null ? opts.forbiddenPadding : 5;
+                            const oT = countCardCrossings(pa.card, swPad2, segments)
+                                     + countCardCrossings(pb.card, swPad2, segments);
+                            const nT = countCardCrossings(candA.card, swPad2, segments)
+                                     + countCardCrossings(candB.card, swPad2, segments);
+                            if (nT > oT) { continue; }
+                            // Не ухудшает icons
+                            const oI = countCardObstacleHits(pa.card, obstaclesArr, ma)
+                                     + countCardObstacleHits(pb.card, obstaclesArr, mb);
+                            const nI = countCardObstacleHits(candA.card, obstaclesArr, ma)
+                                     + countCardObstacleHits(candB.card, obstaclesArr, mb);
+                            if (nI > oI) { continue; }
+                            // Не создаёт новые leader-crossings
+                            if (leadersIntersect(
+                                { marker: ma, bend: candA.bend, card: candA.card },
+                                { marker: mb, bend: candB.bend, card: candB.card }
+                            )) { continue; }
+                            slots[a].theta = tB;
+                            slots[b].theta = tA;
+                            placements[a] = candA;
+                            placements[b] = candB;
+                            didSwap = true;
+                        }
+                    }
+                    if (!didSwap) { break; }
+                }
+            }
+
+            // Записываем результат: для первого id стека — полный layout,
+            // для остальных — null (renderer будет пропускать).
+            for (let k = 0; k < slots.length; k++) {
+                const si = slots[k].idx;
+                const vm = virtualMarkers[si];
+                const placement = placements[k];
+                const meta = stackMeta[si];
+
+                const markerOut = { x: vm.x, y: vm.y };
+                if (typeof vm.cardWidth === 'number' && isFinite(vm.cardWidth)) {
+                    markerOut.cardWidth = vm.cardWidth;
+                }
+                // Записываем layout по индексу первого маркера в стеке.
+                const primaryIdx = meta.memberIndices[0];
+                result[primaryIdx] = {
+                    id: vm.id,
+                    color: vm.color,
                     marker: markerOut,
                     bend: placement.bend,
                     card: placement.card,
                     sector: 'ring',
+                    stacked: (meta.ids.length > 1) ? meta.ids : undefined,
                 };
+                // Поглощённые маркеры → null (не рисуются отдельно).
+                for (let mi = 1; mi < meta.memberIndices.length; mi++) {
+                    result[meta.memberIndices[mi]] = null;
+                }
             }
         }
 
@@ -773,35 +1164,42 @@ class CalloutLayout {
      *
      * @private
      */
-    _avoidForbiddenSegments(slots, placements, ellipse, a2, b2, markers, bounds, segments) {
+    _avoidForbiddenSegments(slots, placements, ellipse, a2, b2, markers, bounds, segments, obstacles) {
         const opts = this.opts;
         const padding = opts.forbiddenPadding;
         const stepRad = opts.forbiddenStepRad;
         const maxSteps = opts.forbiddenMaxSteps;
         const gap = opts.minCardGap;
+        const obs = obstacles || [];
 
         // Phase A — поиск идеальных углов: для каждого слота независимо
-        // (без оглядки на чужие карточки) находим θ с минимумом пересечений
-        // запретных отрезков. Запоминаем достигнутый «таргет» — он станет
-        // якорем для Phase B (карточка не должна сильно ухудшить свой счётчик
-        // при разводе коллизий).
-        const targetCnt = new Array(slots.length);
+        // (без оглядки на чужие карточки) находим θ с минимальной лекси-
+        // стоимостью `[iconHits, cardHits, leaderHits]`. Приоритеты:
+        //   1) iconHits  — карточка не должна перекрывать иконку/подпись
+        //                  (самый раздражающий артефакт UI);
+        //   2) cardHits  — bbox карточки не должен скрывать трассу;
+        //   3) leaderHits — leader-линия не должна пересекать трассу.
+        const targetCost = new Array(slots.length);
         for (let i = 0; i < slots.length; i++) {
             const m = markers[slots[i].idx];
             let bestTheta = slots[i].theta;
-            let bestCount = countCardCrossings(placements[i].card, padding, segments);
-            if (bestCount > 0) {
+            let bestCost = leaderLexCost(m, placements[i], padding, segments, obs);
+            const isClean = function(c) {
+                for (let ci = 0; ci < c.length; ci++) { if (c[ci] !== 0) { return false; } }
+                return true;
+            };
+            if (!isClean(bestCost)) {
                 for (let k = 1; k <= maxSteps; k++) {
                     let foundClean = false;
                     for (let s = 0; s < 2; s++) {
                         const sign = (s === 0) ? +1 : -1;
                         const t = slots[i].theta + sign * k * stepRad;
                         const cand = buildRingPlacement(t, ellipse, a2, b2, m, opts, bounds);
-                        const cnt = countCardCrossings(cand.card, padding, segments);
-                        if (cnt < bestCount) {
+                        const cost = leaderLexCost(m, cand, padding, segments, obs);
+                        if (lexCompare(cost, bestCost) < 0) {
                             bestTheta = t;
-                            bestCount = cnt;
-                            if (cnt === 0) { foundClean = true; break; }
+                            bestCost = cost;
+                            if (isClean(cost)) { foundClean = true; break; }
                         }
                     }
                     if (foundClean) { break; }
@@ -811,16 +1209,17 @@ class CalloutLayout {
             placements[i] = buildRingPlacement(
                 bestTheta, ellipse, a2, b2, m, opts, bounds
             );
-            targetCnt[i] = bestCount;
+            targetCost[i] = bestCost;
         }
 
         // Phase B — жадный развод коллизий. Для каждой пары накладывающихся
         // карточек ищем ближайший θ для одной из них:
         //   — без коллизий с другими карточками;
-        //   — счётчик пересечений с трассами не превышает targetCnt[i] + tolerance.
-        // С каждым проходом tolerance растёт (0 → 1 → 2 → …), что гарантирует
-        // сходимость даже при «тесном коридоре».
-        const maxResolvePasses = 8;
+        //   — лекси-стоимость относительно трасс/иконок не превышает
+        //     targetCost[i] поэлементно с tolerance на leaderHits.
+        // С каждым проходом tolerance растёт, что гарантирует сходимость
+        // даже при «тесном коридоре».
+        const maxResolvePasses = 12;
         for (let pass = 0; pass < maxResolvePasses; pass++) {
             const tolerance = pass;
             let moved = false;
@@ -838,8 +1237,18 @@ class CalloutLayout {
                         if (cardCollidesWithOthers(cand.card, placements, i, gap)) {
                             continue;
                         }
-                        const cnt = countCardCrossings(cand.card, padding, segments);
-                        if (cnt <= targetCnt[i] + tolerance) {
+                        // Lex-budget: cardIconHits и leaderIconHits НЕ ухудшаем
+                        // (карточка/leader не должны налезать на иконку ради
+                        // развода коллизий); cardTrackHits — тоже строго;
+                        // leaderTrackHits — с tolerance по проходам.
+                        const cost = leaderLexCost(m, cand, padding, segments, obs);
+                        const t0 = targetCost[i];
+                        const withinBudget =
+                            cost[0] <= t0[0] &&
+                            cost[1] <= t0[1] &&
+                            cost[2] <= t0[2] &&
+                            cost[3] <= t0[3] + tolerance;
+                        if (withinBudget) {
                             slots[i].theta = t;
                             placements[i] = cand;
                             resolved = true;
@@ -852,6 +1261,7 @@ class CalloutLayout {
             if (!moved) { break; }
         }
     }
+
 }
 
 // ─────────────────────────────────────────────────────────────────────────
@@ -887,8 +1297,16 @@ class CalloutRenderer {
             const self = this;
             this._cardClickHandler = function(ev) {
                 // Делегирование: ищем ближайший родитель с классом map-sat-callout.
-                // Это даёт O(1) при добавлении/удалении карточек (один listener на пул).
                 let el = ev.target;
+                // Если кликнута строка стека — берём её data-sat-id
+                if (el.dataset && el.dataset.satId) {
+                    const satId = parseInt(el.dataset.satId, 10);
+                    if (isFinite(satId)) {
+                        ev.stopPropagation();
+                        try { self._onCardClick(satId); } catch (e) { /* swallow */ }
+                        return;
+                    }
+                }
                 while (el && el !== self.container) {
                     if (el.classList && el.classList.contains('map-sat-callout')) {
                         const nidStr = el.dataset && el.dataset.noradId;
@@ -923,9 +1341,9 @@ class CalloutRenderer {
         ctx.lineWidth = this.opts.lineWidth * ratio;
         for (let i = 0; i < layouts.length; i++) {
             const lt = layouts[i];
+            if (!lt) { continue; }
             const color = lt.color || this.opts.fallbackColor;
             ctx.strokeStyle = color;
-            // Хвост заходит в ближайшую к bend сторону карточки
             const tailEndX = (lt.card.x > lt.bend.x)
                 ? lt.card.x
                 : (lt.card.x + lt.card.w);
@@ -950,6 +1368,7 @@ class CalloutRenderer {
         const seen = new Set();
         for (let i = 0; i < layouts.length; i++) {
             const lt = layouts[i];
+            if (!lt) { continue; }
             seen.add(lt.id);
             let entry = this._cards.get(lt.id);
             if (!entry) {
@@ -957,7 +1376,7 @@ class CalloutRenderer {
                 this.container.appendChild(entry.el);
                 this._cards.set(lt.id, entry);
             }
-            this._updateCard(entry, lt, canvasSize, (info && info[lt.id]) || null);
+            this._updateCard(entry, lt, canvasSize, info);
         }
         // Удаляем устаревшие
         const ids = Array.from(this._cards.keys());
@@ -1005,10 +1424,8 @@ class CalloutRenderer {
     _updateCard(entry, lt, canvasSize, info) {
         const pctX = (lt.card.x / canvasSize.width) * 100;
         const pctY = (lt.card.y / canvasSize.height) * 100;
-        // Ширина в %: и lt.card.w, и canvasSize.width — в одних и тех же единицах
-        // (physical px), поэтому процент корректен на любом dpr.
         const pctW = (lt.card.w / canvasSize.width) * 100;
-        // NORAD ID для делегированного click-обработчика (выбор спутника).
+        // NORAD ID для делегированного click-обработчика: при стеке — первый КА.
         if (lt && lt.id != null) {
             const idStr = String(lt.id);
             if (entry.el.dataset && entry.el.dataset.noradId !== idStr) {
@@ -1020,20 +1437,114 @@ class CalloutRenderer {
         entry.el.style.width = pctW + '%';
         const accent = lt.color || this.opts.fallbackColor;
         entry.el.style.setProperty('--callout-accent', accent);
-        // Цветная полоска — на стороне, в которую заходит хвост:
-        // card.x > bend.x → хвост слева, полоска слева (default).
-        // card.x ≤ bend.x → хвост справа, полоска справа.
         const accentLeft = lt.card.x > lt.bend.x;
         entry.el.classList.toggle('map-sat-callout--accent-right', !accentLeft);
-        entry.el.classList.toggle('map-sat-callout--tracked', !!(info && info.tracked));
-        if (info) {
-            entry.nameEl.textContent = info.name || '';
-            const aliasText = (info && info.alias) ? String(info.alias) : '';
-            entry.subEl.textContent = aliasText;
-            // Нет alias — скрываем вторую строку, чтобы карточка была
-            // визуально одностроечной (без пустой строки под именем).
-            entry.subEl.style.display = aliasText ? '' : 'none';
-            entry.el.classList.toggle('map-sat-callout--single-line', !aliasText);
+
+        // Стековая карточка: несколько строк (имён КА).
+        const stacked = lt.stacked;
+        if (stacked && stacked.length > 1 && info) {
+            entry.el.classList.add('map-sat-callout--stacked');
+            entry.el.classList.remove('map-sat-callout--single-line');
+            // Проверяем tracked — хотя бы один КА в стеке tracked
+            let anyTracked = false;
+            for (let si = 0; si < stacked.length; si++) {
+                const inf = info[stacked[si]];
+                if (inf && inf.tracked) { anyTracked = true; break; }
+            }
+            entry.el.classList.toggle('map-sat-callout--tracked', anyTracked);
+
+            const maxVis = this.opts.stackMaxVisible || 4;
+            const isExpanded = !!entry.expanded;
+            const totalRows = stacked.length;
+            const showAll = isExpanded || totalRows <= maxVis;
+            const visibleCount = showAll ? totalRows : maxVis;
+
+            // Формируем DOM-содержимое: стабильный порядок по id (уже отсортирован).
+            if (!entry.extraRows) { entry.extraRows = []; }
+
+            // Первая строка
+            const info0 = info[stacked[0]];
+            entry.nameEl.textContent = (info0 && info0.name) || '';
+            entry.nameEl.dataset.satId = String(stacked[0]);
+            entry.subEl.style.display = 'none';
+
+            // Все дополнительные строки (создаём DOM-элементы для полного стека)
+            while (entry.extraRows.length < totalRows - 1) {
+                const rowEl = document.createElement('span');
+                rowEl.className = 'map-sat-callout__stack-row';
+                entry.el.appendChild(rowEl);
+                entry.extraRows.push(rowEl);
+            }
+            for (let ri = 0; ri < totalRows - 1; ri++) {
+                const inf = info[stacked[ri + 1]];
+                entry.extraRows[ri].textContent = (inf && inf.name) || '';
+                entry.extraRows[ri].dataset.satId = String(stacked[ri + 1]);
+                // Видимость: показать первые (visibleCount-1), остальные скрыть
+                entry.extraRows[ri].style.display = (ri < visibleCount - 1) ? '' : 'none';
+            }
+            // Скрываем лишние строки (если стек уменьшился)
+            for (let ri = totalRows - 1; ri < entry.extraRows.length; ri++) {
+                if (entry.extraRows[ri] !== entry.moreEl) {
+                    entry.extraRows[ri].style.display = 'none';
+                }
+            }
+
+            // Строка "...+N ещё" (или скрыть если развёрнуто/не нужно)
+            if (totalRows > maxVis) {
+                if (!entry.moreEl) {
+                    entry.moreEl = document.createElement('span');
+                    entry.moreEl.className = 'map-sat-callout__stack-more';
+                    entry.moreEl.addEventListener('click', function(e) {
+                        e.stopPropagation();
+                        entry.expanded = !entry.expanded;
+                        entry.el.classList.toggle('map-sat-callout--expanded', entry.expanded);
+                        // Показать/скрыть строки inline без ожидания layout-цикла.
+                        var allRows = entry.el.querySelectorAll('.map-sat-callout__stack-row');
+                        var max = entry.expanded ? allRows.length : (maxVis - 1);
+                        for (var r = 0; r < allRows.length; r++) {
+                            allRows[r].style.display = (r < max) ? '' : 'none';
+                        }
+                        if (entry.expanded) {
+                            entry.moreEl.textContent = '\u25B2 свернуть';
+                        } else {
+                            var hid = allRows.length - (maxVis - 1);
+                            entry.moreEl.textContent = '...+' + hid + ' ещё';
+                        }
+                    });
+                    entry.el.appendChild(entry.moreEl);
+                }
+                if (showAll) {
+                    entry.moreEl.textContent = '\u25B2 свернуть';
+                    entry.moreEl.style.display = '';
+                } else {
+                    const hidden = totalRows - maxVis;
+                    entry.moreEl.textContent = '...+' + hidden + ' ещё';
+                    entry.moreEl.style.display = '';
+                }
+            } else if (entry.moreEl) {
+                entry.moreEl.style.display = 'none';
+            }
+
+            // Клик по строке → select этого спутника
+            entry.el.classList.toggle('map-sat-callout--expanded', isExpanded);
+        } else {
+            // Одиночная карточка
+            entry.el.classList.remove('map-sat-callout--stacked');
+            const singleInfo = (info && lt.id != null) ? info[lt.id] : null;
+            entry.el.classList.toggle('map-sat-callout--tracked', !!(singleInfo && singleInfo.tracked));
+            if (singleInfo) {
+                entry.nameEl.textContent = singleInfo.name || '';
+                const aliasText = singleInfo.alias ? String(singleInfo.alias) : '';
+                entry.subEl.textContent = aliasText;
+                entry.subEl.style.display = aliasText ? '' : 'none';
+                entry.el.classList.toggle('map-sat-callout--single-line', !aliasText);
+            }
+            // Скрываем экстра-строки, если были
+            if (entry.extraRows) {
+                for (let ri = 0; ri < entry.extraRows.length; ri++) {
+                    entry.extraRows[ri].style.display = 'none';
+                }
+            }
         }
     }
 }
@@ -1090,6 +1601,7 @@ if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no
         computeGeometry,
         segmentsIntersect,
         leadersIntersect,
+        bboxOverlap,
     };
 }
 

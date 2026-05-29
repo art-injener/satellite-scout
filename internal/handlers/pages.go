@@ -100,11 +100,6 @@ func (h *PageHandler) Receiver(w http.ResponseWriter, r *http.Request) {
 	h.render(w, h.pageData("Приёмник - Satellite Scout", "receiver", r))
 }
 
-// Passes рендерит страницу пролётов (вкладка 2).
-func (h *PageHandler) Passes(w http.ResponseWriter, r *http.Request) {
-	h.render(w, h.pageData("План сеансов - Satellite Scout", "passes", r))
-}
-
 // Simulation рендерит страницу имитации (вкладка 4).
 func (h *PageHandler) Simulation(w http.ResponseWriter, r *http.Request) {
 	h.render(w, h.pageData("Имитация - Satellite Scout", "simulation", r))

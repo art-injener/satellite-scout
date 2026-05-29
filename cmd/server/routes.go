@@ -7,16 +7,17 @@ import (
 
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
-	"github.com/art-injener/satellite-scout/internal/services"
+	"github.com/art-injener/satellite-scout/internal/satnogs"
 )
 
 // setupRoutes регистрирует все HTTP-маршруты приложения.
+// satnogsService может быть nil — в этом случае REST-маршрут /api/satnogs/* не регистрируется.
 func setupRoutes(
 	mux *http.ServeMux,
 	cfg *config.Config,
 	sseHub *handlers.SSEHub,
-	passService *services.PassService,
 	trackingService handlers.TrackingServiceInterface,
+	satnogsService *satnogs.Service,
 	templatesFS fs.FS,
 	staticFS fs.FS,
 ) {
@@ -28,7 +29,6 @@ func setupRoutes(
 	}
 
 	apiHandler := handlers.NewAPIHandler(cfg)
-	passHandler := handlers.NewPassHandler(passService)
 	trackingHandler := handlers.NewTrackingHandler(trackingService)
 
 	// Статические файлы.
@@ -37,7 +37,6 @@ func setupRoutes(
 	// Маршруты страниц.
 	mux.HandleFunc("GET /", pageHandler.Index)
 	mux.HandleFunc("GET /tracking", pageHandler.Tracking)
-	mux.HandleFunc("GET /passes", pageHandler.Passes)
 	mux.HandleFunc("GET /receiver", pageHandler.Receiver)
 	mux.HandleFunc("GET /simulation", pageHandler.Simulation)
 
@@ -45,23 +44,18 @@ func setupRoutes(
 	mux.HandleFunc("GET /api/health", apiHandler.HealthCheck)
 	mux.HandleFunc("GET /api/config", apiHandler.GetConfig)
 
-	// API пролётов.
-	mux.HandleFunc("GET /api/passes", passHandler.GetPasses)
-
 	// API управления наблюдением (tracking).
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
+
+	// API SatNOGS (полный список передатчиков по NORAD ID — для будущего dropdown).
+	if satnogsService != nil {
+		satnogsHandler := handlers.NewSatNOGSHandler(satnogsService)
+		mux.HandleFunc("GET /api/satnogs/transmitters/{norad}", satnogsHandler.GetTransmitters)
+	}
 
 	// SSE endpoint — EventSource-совместимый поток данных.
 	// WriteTimeout для SSE-соединений отключается per-connection в ServeHTTP.
 	mux.Handle("GET /api/sse", sseHub)
 
-	// Частичные шаблоны (HTMX).
-	mux.HandleFunc("GET /partials/passes", func(w http.ResponseWriter, r *http.Request) {
-		// TODO: реализовать частичный шаблон расписания сеансов наблюдения
-		w.Header().Set("Content-Type", "text/html")
-		if _, writeErr := w.Write([]byte(`<p class="empty-state">Нет запланированных пролётов</p>`)); writeErr != nil {
-			slog.Error("failed to write response", "error", writeErr)
-		}
-	})
 }

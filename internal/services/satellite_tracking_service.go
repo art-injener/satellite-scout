@@ -62,6 +62,13 @@ type groupSatInfo struct {
 	// Снимок столбцов «Длит.» / «До AOS» на момент рассылки.
 	UIColDuration string `json:"ui_col_duration"`
 	UIColUntil    string `json:"ui_col_until"`
+	// Траектория пролёта на небесной сфере (az/el/time) для отрисовки SkyView.
+	SkyPath []tracker.AzElPoint `json:"sky_path,omitempty"`
+	// Радиочастотные характеристики из SatNOGS (опционально, только при доступности данных).
+	// FreqMHz — нижний край downlink в формате "145.825".
+	// Modulation — короткая подпись для UI: "FM" или "AFSK 1200".
+	FreqMHz    string `json:"freq_mhz,omitempty"`
+	Modulation string `json:"modulation,omitempty"`
 }
 
 // groupTimeWin — временное окно группы для SSE-события.
@@ -101,6 +108,20 @@ type satelliteChangeEvent struct {
 // PassProvider — интерфейс для получения пролётов (избегаем циклической зависимости).
 type PassProvider interface {
 	GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.Pass, error)
+}
+
+// TransmitterInfo — узкая выжимка для UI, не зависящая от пакета satnogs.
+// Поля совпадают с satnogs.TransmitterSummary — sat-tracking использует только их.
+type TransmitterInfo struct {
+	FreqMHz    string
+	Modulation string
+}
+
+// TransmitterProvider — источник данных о передатчиках (SatNOGS или мок в тестах).
+// Интерфейс намеренно узкий, чтобы не тащить пакет satnogs в services.
+type TransmitterProvider interface {
+	GetPrimaryTransmitter(noradID int) *TransmitterInfo
+	RequestFetch(noradIDs []int)
 }
 
 // SatelliteNotFoundError — спутник не найден в TLEStore.
@@ -161,6 +182,9 @@ type SatelliteTrackingService struct {
 	currentNoradID  int           // NORAD ID текущего primary спутника.
 	autoTrackActive bool          // Флаг активности авто-трекинга (скользящее окно).
 	manualSelection *int          // Ручной выбор: primary (legacy, для авто-трекинга).
+
+	// Источник данных о передатчиках (частота/модуляция). Опционально, nil = выключено.
+	transmitterProvider TransmitterProvider
 
 	// Per-client состояние наблюдения
 	clientState *ClientStateStore
@@ -254,6 +278,14 @@ func (s *SatelliteTrackingService) SetPassProvider(provider PassProvider) {
 	s.mu.Unlock()
 
 	slog.Info("group tracking enabled", "window_forward", s.windowForward)
+}
+
+// SetTransmitterProvider устанавливает источник данных о передатчиках (SatNOGS).
+// Опционально: можно вызывать или не вызывать в зависимости от config.SatNOGSEnabled.
+func (s *SatelliteTrackingService) SetTransmitterProvider(provider TransmitterProvider) {
+	s.mu.Lock()
+	s.transmitterProvider = provider
+	s.mu.Unlock()
 }
 
 // Run запускает основной цикл отслеживания спутников.
@@ -637,10 +669,27 @@ func (s *SatelliteTrackingService) ResetManualSelection(clientID string) {
 
 // broadcastGroupUpdate отправляет SSE-событие satellite_group_update.
 func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGroup, now time.Time, trackingID int) {
+	// Снимок провайдера передатчиков под RLock — поле выставляется один раз при старте,
+	// но если когда-то будем менять в рантайме, это уже потокобезопасно.
+	s.mu.RLock()
+	txProvider := s.transmitterProvider
+	s.mu.RUnlock()
+
+	// Триггерим background-prefetch SatNOGS для всех NORAD группы.
+	// Не блокирует: если данных нет — поля FreqMHz/Modulation будут пустыми,
+	// при следующем group_update (~5с) подтянутся из кеша.
+	if txProvider != nil && len(group.Satellites) > 0 {
+		ids := make([]int, len(group.Satellites))
+		for i, sat := range group.Satellites {
+			ids[i] = sat.NoradID
+		}
+		txProvider.RequestFetch(ids)
+	}
+
 	sats := make([]groupSatInfo, len(group.Satellites))
 	for i, sat := range group.Satellites {
 		uiDur, uiUntil := FormatSessionTableColumns(sat.Pass.AOS, sat.Pass.LOS, now.UTC())
-		sats[i] = groupSatInfo{
+		info := groupSatInfo{
 			NoradID:       sat.NoradID,
 			SatName:       sat.SatName,
 			SatAlias:      sat.Pass.SatAlias,
@@ -650,7 +699,15 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 			IsVisible:     sat.IsVisible,
 			UIColDuration: uiDur,
 			UIColUntil:    uiUntil,
+			SkyPath:       sat.Pass.SkyPath,
 		}
+		if txProvider != nil {
+			if tx := txProvider.GetPrimaryTransmitter(sat.NoradID); tx != nil {
+				info.FreqMHz = tx.FreqMHz
+				info.Modulation = tx.Modulation
+			}
+		}
+		sats[i] = info
 	}
 
 	event := satelliteGroupUpdate{

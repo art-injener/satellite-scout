@@ -210,6 +210,16 @@
             const trackCls = 'pc-track-cell' + (trackVisible ? ' pc-track-cell--on' : ' pc-track-cell--off');
             const trackIcon = trackVisible ? eyeVisibleSvg(markerColor) : eyeHiddenSvg(markerColor);
 
+            // Частота и модуляция приходят из SatNOGS (поля freq_mhz / modulation в satellite_group_update).
+            // Если данных нет — заглушка «—»; ячейка с данными подсвечивается классом pc-freq-cell--has-data.
+            const freqVal = sat.freq_mhz ? this._escapeHtml(sat.freq_mhz) : '\u2014';
+            const freqMod = sat.modulation ? this._escapeHtml(sat.modulation) : '\u2014';
+            const hasFreq = Boolean(sat.freq_mhz);
+            const freqCellCls = 'pc-freq-cell' + (hasFreq ? ' pc-freq-cell--has-data' : '');
+            const freqTitle = hasFreq
+                ? (sat.freq_mhz + ' MHz' + (sat.modulation ? ' · ' + sat.modulation : '') + ' (SatNOGS)')
+                : 'Данные SatNOGS недоступны';
+
             html += '<tr class="' + cls + '" data-norad="' + sat.norad_id + '"' +
                 ' data-aos="' + sat.aos + '" data-los="' + sat.los + '" data-dur="' + sat.duration + '">' +
                 '<td class="' + trackCls + '" data-track-toggle="' + sat.norad_id + '"' +
@@ -226,9 +236,9 @@
                     '<div class="pc-azel-el">' + azel.el + '</div>' +
                 '</td>' +
                 '<td class="pc-col3-cell">' + col3 + '</td>' +
-                '<td class="pc-freq-cell">' +
-                    '<div class="pc-freq-val">\u2014</div>' +
-                    '<div class="pc-freq-mod">\u2014</div>' +
+                '<td class="' + freqCellCls + '" title="' + this._escapeHtml(freqTitle) + '">' +
+                    '<div class="pc-freq-val">' + freqVal + '</div>' +
+                    '<div class="pc-freq-mod">' + freqMod + '</div>' +
                 '</td>' +
                 '</tr>';
         }

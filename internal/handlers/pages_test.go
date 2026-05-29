@@ -105,26 +105,6 @@ func TestPageHandler_Receiver(t *testing.T) {
 	}
 }
 
-func TestPageHandler_Passes(t *testing.T) {
-	fsys := setupTestFS()
-	handler, err := NewPageHandler(fsys, false, "default")
-	if err != nil {
-		t.Fatalf("NewPageHandler failed: %v", err)
-	}
-
-	req := httptest.NewRequest(http.MethodGet, "/passes", nil)
-	w := httptest.NewRecorder()
-
-	handler.Passes(w, req)
-
-	resp := w.Result()
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		t.Errorf("Expected status 200, got %d", resp.StatusCode)
-	}
-}
-
 func TestPageHandler_Simulation(t *testing.T) {
 	fsys := setupTestFS()
 	handler, err := NewPageHandler(fsys, false, "default")
@@ -199,7 +179,6 @@ func setupTestFS() fstest.MapFS {
 		},
 		"pages/tracking.html":   &fstest.MapFile{Data: []byte(`{{define "tracking"}}tracking{{end}}`)},
 		"pages/receiver.html":   &fstest.MapFile{Data: []byte(`{{define "receiver"}}receiver{{end}}`)},
-		"pages/passes.html":     &fstest.MapFile{Data: []byte(`{{define "passes"}}passes{{end}}`)},
 		"pages/simulation.html": &fstest.MapFile{Data: []byte(`{{define "simulation"}}simulation{{end}}`)},
 	}
 }

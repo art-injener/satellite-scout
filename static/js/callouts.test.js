@@ -10,6 +10,7 @@ const {
     computeGeometry,
     segmentsIntersect,
     leadersIntersect,
+    bboxOverlap,
 } = require('./callouts.js');
 
 // ── Утилиты тестов ─────────────────────────────────────────
@@ -693,14 +694,15 @@ test('ring: two distant markers form two separate clusters (cards on opposite si
 
 test('ring: cluster near canvas edge — every card stays inside bounds', () => {
     const layout = new CalloutLayout(RING_OPTS);
-    // Кластер прижат к правому краю canvas
+    // Кластер прижат к правому краю canvas (расстояния > stackDistance=12)
     const markers = [
         { id: 1, x: 1000, y: 250 },
-        { id: 2, x: 1010, y: 260 },
-        { id: 3, x: 1005, y: 240 },
+        { id: 2, x: 1020, y: 268 },
+        { id: 3, x: 980,  y: 235 },
     ];
     const res = layout.layout(markers, [], BOUNDS);
     for (const r of res) {
+        if (!r) { continue; }
         const c = r.card;
         assert.ok(c.x >= RING_OPTS.boundsPadding,
             `card.x=${c.x} crossed left bound`);
@@ -773,7 +775,7 @@ test('ring: PCA does not degenerate on collinear markers (n=2)', () => {
     }
 });
 
-test('ring: PCA does not degenerate on coincident markers', () => {
+test('ring: PCA does not degenerate on coincident markers (stacked into one card)', () => {
     const layout = new CalloutLayout(RING_OPTS);
     const markers = [
         { id: 1, x: 512, y: 256 },
@@ -781,17 +783,16 @@ test('ring: PCA does not degenerate on coincident markers', () => {
         { id: 3, x: 512, y: 256 },
     ];
     const res = layout.layout(markers, [], BOUNDS);
-    for (const r of res) {
-        assert.ok(isFinite(r.bend.x) && isFinite(r.bend.y));
-        assert.ok(isFinite(r.card.x) && isFinite(r.card.y));
-    }
-    // И карточки должны не накладываться (раздвинулись по углу)
-    for (let i = 0; i < res.length; i++) {
-        for (let j = i + 1; j < res.length; j++) {
-            assert.ok(!overlap(bbox(res[i].card), bbox(res[j].card)),
-                `coincident markers: cards ${i} and ${j} overlap`);
-        }
-    }
+    // Совпадающие маркеры объединяются в один стек — одна карточка.
+    const nonNull = res.filter(r => r !== null);
+    assert.strictEqual(nonNull.length, 1, 'coincident markers must produce exactly 1 stacked card');
+    const r = nonNull[0];
+    assert.ok(isFinite(r.bend.x) && isFinite(r.bend.y));
+    assert.ok(isFinite(r.card.x) && isFinite(r.card.y));
+    assert.ok(Array.isArray(r.stacked), 'stacked card must have stacked array');
+    assert.strictEqual(r.stacked.length, 3, 'stacked array must contain all 3 ids');
+    // Порядок стабильный (по возрастанию NORAD ID)
+    assert.deepStrictEqual(r.stacked, [1, 2, 3]);
 });
 
 test('ring: tail is horizontal (bend.y matches card vertical center)', () => {
@@ -1018,6 +1019,553 @@ test('ring: per-marker cardWidth is preserved in result', () => {
     assert.strictEqual(widthById[2], 120);
     assert.strictEqual(widthById[3], 80);
     assert.strictEqual(widthById[4], 120);
+});
+
+// ── Ring layout: leader-линия (stem + tail) vs forbidden tracks ───────────
+//
+// Шаг 1: расширение проверки пересечений. Раньше `countCardCrossings` считал
+// только пересечения bbox карточки с запретными трассами. На плотных кадрах
+// это приводило к тому, что сама карточка стояла «чисто», но её leader-линия
+// (диагональный stem + горизонтальный tail) шла сквозь жёлтую/синюю трассу.
+// Теперь учитываем пересечения всей leader-линии.
+
+console.log('\nCallouts: ring layout — leader line (stem + tail) vs tracks');
+
+/** Извлекает конечную точку хвоста leader-линии из layout-объекта. */
+function tailEndOfLayout(lt) {
+    const x = (lt.card.x > lt.bend.x) ? lt.card.x : (lt.card.x + lt.card.w);
+    return { x: x, y: lt.bend.y };
+}
+
+/** Пересекает ли leader-линия (stem + tail) заданный запретный отрезок? */
+function leaderHitsSegment(lt, seg) {
+    const a1 = { x: seg.x1, y: seg.y1 };
+    const a2 = { x: seg.x2, y: seg.y2 };
+    const tail = tailEndOfLayout(lt);
+    return segmentsIntersect(lt.marker, lt.bend, a1, a2) ||
+           segmentsIntersect(lt.bend, tail,      a1, a2);
+}
+
+/** Суммарное число пересечений (card bbox + stem + tail) с сегментами. */
+function countLeaderTrackHits(lt, padding, segments) {
+    let n = countCardCrossings(lt.card, padding, segments);
+    for (const s of segments) {
+        if (leaderHitsSegment(lt, s)) { n++; }
+    }
+    return n;
+}
+
+test('ring: stem does not cross a horizontal track above the cluster', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    // Маркеры «крест» вокруг центра: самый верхний — (512, 228).
+    // Горизонтальная трасса y=200 проходит выше всех маркеров; карточка
+    // верхнего маркера в старом алгоритме встанет на y<200 (bbox не
+    // пересекает y=200), а stem от (512,228) к bend(~512,~100) пробьёт трассу.
+    const markers = [
+        { id: 1, x: 540, y: 256 },
+        { id: 2, x: 484, y: 256 },
+        { id: 3, x: 512, y: 228 },
+        { id: 4, x: 512, y: 284 },
+    ];
+    const segments = [
+        { x1: 0, y1: 200, x2: 1024, y2: 200 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS, segments);
+    for (const r of res) {
+        assert.ok(!leaderHitsSegment(r, segments[0]),
+            `leader ${r.id} (stem|tail) crosses horizontal track y=200: ` +
+            `marker=${JSON.stringify(r.marker)} bend=${JSON.stringify(r.bend)} ` +
+            `card=${JSON.stringify(r.card)}`);
+    }
+});
+
+test('ring: tail does not cross a vertical track on the far side of the card', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 500, y: 256 },
+        { id: 2, x: 520, y: 240 },
+        { id: 3, x: 520, y: 272 },
+    ];
+    // Вертикальная трасса сразу за правым краем вероятной карточки.
+    const segments = [
+        { x1: 720, y1: 0, x2: 720, y2: 512 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS, segments);
+    for (const r of res) {
+        assert.ok(!leaderHitsSegment(r, segments[0]),
+            `leader ${r.id} (stem|tail) pierces vertical track x=720`);
+    }
+});
+
+test('ring: combined — neither card bbox nor leader crosses horizontal track', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const segments = [
+        { x1: 0, y1: 256, x2: 1024, y2: 256 },
+    ];
+    const res = layout.layout(RING_CLUSTER_6, [], BOUNDS, segments);
+    const padding = RING_OPTS.forbiddenPadding != null ? RING_OPTS.forbiddenPadding : 5;
+    for (const r of res) {
+        assert.strictEqual(countCardCrossings(r.card, padding, segments), 0,
+            `card ${r.id} bbox crosses track`);
+        assert.ok(!leaderHitsSegment(r, segments[0]),
+            `leader ${r.id} crosses track (stem+tail check)`);
+    }
+});
+
+test('ring: leader-aware avoidance minimises total (card + stem + tail) hits vs baseline', () => {
+    // «Забор» из трёх горизонтальных трасс — почти невозможно уйти.
+    // Best-effort контракт: сумма пересечений leader'а ≤ сумме без обхода.
+    const layout = new CalloutLayout(RING_OPTS);
+    const segments = [
+        { x1: 0, y1: 180, x2: 1024, y2: 180 },
+        { x1: 0, y1: 260, x2: 1024, y2: 260 },
+        { x1: 0, y1: 340, x2: 1024, y2: 340 },
+    ];
+    const optimised = layout.layout(RING_CLUSTER_6, [], BOUNDS, segments);
+    const baseline  = layout.layout(RING_CLUSTER_6, [], BOUNDS);
+    const padding = RING_OPTS.forbiddenPadding != null ? RING_OPTS.forbiddenPadding : 5;
+    let baseSum = 0, optSum = 0;
+    for (let i = 0; i < optimised.length; i++) {
+        baseSum += countLeaderTrackHits(baseline[i],  padding, segments);
+        optSum  += countLeaderTrackHits(optimised[i], padding, segments);
+    }
+    assert.ok(optSum <= baseSum,
+        `leader-aware avoidance regressed: baseline=${baseSum}, optimised=${optSum}`);
+});
+
+// ── Ring layout: циклический порядок θ по маркерам (шаг 5) ────────────────
+//
+// Шаг 5: первичное размещение сохраняет циклический порядок маркеров вокруг
+// PCA-эллипса. Это математически исключает пересечение leader-линий двух
+// ближайших по углу соседей — самая частая причина «лапши» на плотных кадрах.
+
+console.log('\nCallouts: ring layout — cyclic θ order preservation (step 5)');
+
+/**
+ * Циклический порядок: массив `ids` (angles) «эквивалентен» `expected`, если
+ * существует такой сдвиг/разворот, что они совпадают. Возвращает true/false.
+ */
+function cyclicOrderMatches(order, expected) {
+    const n = order.length;
+    if (n !== expected.length) { return false; }
+    for (let dir = 0; dir < 2; dir++) {
+        const seq = (dir === 0) ? expected : expected.slice().reverse();
+        for (let shift = 0; shift < n; shift++) {
+            let ok = true;
+            for (let i = 0; i < n; i++) {
+                if (order[i] !== seq[(i + shift) % n]) { ok = false; break; }
+            }
+            if (ok) { return true; }
+        }
+    }
+    return false;
+}
+
+test('ring: cyclic order of cards around ellipse matches cyclic order of markers', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    // 6 маркеров равномерно по окружности радиуса 40 вокруг (512, 256).
+    // Ожидаемый циклический порядок id: 1→2→3→4→5→6.
+    const N = 6;
+    const markers = [];
+    for (let i = 0; i < N; i++) {
+        const t = (2 * Math.PI * i) / N;
+        markers.push({ id: i + 1, x: 512 + 40 * Math.cos(t), y: 256 + 40 * Math.sin(t) });
+    }
+    const res = layout.layout(markers, [], BOUNDS);
+    // Центр «кольца карточек» — среднее от центров всех карточек.
+    let sx = 0, sy = 0;
+    for (const r of res) { sx += r.card.x + r.card.w / 2; sy += r.card.y + r.card.h / 2; }
+    const cx = sx / res.length, cy = sy / res.length;
+    const byAngle = res.slice().sort((A, B) => {
+        const tA = Math.atan2(A.card.y + A.card.h / 2 - cy, A.card.x + A.card.w / 2 - cx);
+        const tB = Math.atan2(B.card.y + B.card.h / 2 - cy, B.card.x + B.card.w / 2 - cx);
+        return tA - tB;
+    });
+    const order = byAngle.map(r => r.id);
+    assert.ok(cyclicOrderMatches(order, [1, 2, 3, 4, 5, 6]),
+        `cyclic order mismatch: got ${JSON.stringify(order)}`);
+});
+
+test('ring: 8-marker ring — zero leader crossings (cyclic order guarantees it)', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const N = 8;
+    const markers = [];
+    for (let i = 0; i < N; i++) {
+        const t = (2 * Math.PI * i) / N;
+        markers.push({ id: i + 1, x: 512 + 50 * Math.cos(t), y: 256 + 50 * Math.sin(t) });
+    }
+    const res = layout.layout(markers, [], BOUNDS);
+    assert.strictEqual(countCrossings(res), 0,
+        'ring with 8 markers must have 0 leader crossings after cyclic θ ordering');
+});
+
+test('ring: asymmetric cluster (markers lumped on one side) — still zero leader crossings', () => {
+    // Все маркеры на правой половине кадра — без упорядочивания θ могли бы
+    // дать стыки, когда distributeAnglesAround распихал их в пределах узкого
+    // сектора; циклический порядок гарантирует 0 пересечений.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 600, y: 210 },
+        { id: 2, x: 640, y: 240 },
+        { id: 3, x: 660, y: 280 },
+        { id: 4, x: 630, y: 310 },
+        { id: 5, x: 580, y: 290 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    assert.strictEqual(countCrossings(res), 0,
+        'asymmetric ring cluster: expected 0 leader crossings');
+});
+
+test('ring: 10 near-collinear markers (horizontal line, small y jitter) — zero leader crossings', () => {
+    // Реалистичный патологический: маркеры сильно вытянуты по одной оси,
+    // но имеют небольшой разброс по y (как проекции орбитальных КА вблизи
+    // наклонной трассы). PCA не вырождается → циклический порядок θ
+    // определён однозначно → переназначка спиц убирает все пересечения.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [];
+    for (let i = 0; i < 10; i++) {
+        markers.push({ id: i + 1, x: 340 + i * 30, y: 256 + ((i % 2) ? 1 : -1) * 4 });
+    }
+    const res = layout.layout(markers, [], BOUNDS);
+    assert.strictEqual(countCrossings(res), 0,
+        'near-collinear cluster: expected 0 leader crossings (cyclic ordering must apply)');
+});
+
+test('ring: 12 markers in tight grid — zero leader crossings', () => {
+    // Плотная прямоугольная группа 4×3 с шагом 20 px. При таком плотном
+    // расположении Phase A без циклической раскладки двигает слоты
+    // независимо и нередко создаёт X-образные пересечения.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [];
+    let id = 1;
+    for (let r = 0; r < 3; r++) {
+        for (let c = 0; c < 4; c++) {
+            markers.push({ id: id++, x: 470 + c * 20, y: 230 + r * 20 });
+        }
+    }
+    const res = layout.layout(markers, [], BOUNDS);
+    assert.strictEqual(countCrossings(res), 0,
+        '4x3 tight grid: expected 0 leader crossings');
+});
+
+// ── Ring layout: анти-cross пост-проход свапом θ (шаг 2) ──────────────────
+//
+// Шаг 2: в ring-режиме `_resolveCrossings` работает через обмен углами θ
+// (аналог sector-swap в greedy-режиме). Применяется, если шаги 5+обход трасс
+// оставили leader-пересечения из-за клампинга в bounds.
+
+console.log('\nCallouts: ring layout — θ-swap anti-crossing post-pass (step 2)');
+
+test('ring: post-pass removes leader crossings after forbidden-track avoidance', () => {
+    // Патологический: плотный кластер + трасса через центр. После обхода
+    // трассы Phase A/B двигают слоты, и порядок по θ может нарушиться —
+    // leader-линии двух смежных слотов пересекаются. Пост-проход свапом
+    // θ должен их развести.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 470, y: 240 },
+        { id: 2, x: 510, y: 240 },
+        { id: 3, x: 550, y: 240 },
+        { id: 4, x: 470, y: 272 },
+        { id: 5, x: 510, y: 272 },
+        { id: 6, x: 550, y: 272 },
+    ];
+    // Диагональная трасса через центр — «режет» кольцо на два коридора.
+    const segments = [
+        { x1: 100, y1: 100, x2: 900, y2: 400 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS, segments);
+    assert.strictEqual(countCrossings(res), 0,
+        'ring θ-swap post-pass must remove all leader crossings even after track avoidance');
+});
+
+test('ring: resolveCrossings=false (ring) allows pre-swap crossings on pathological input', () => {
+    // Чистый сигнал SANITY: если выключить пост-проход, на патологическом
+    // кадре остаются пересечения. Включённый — убирает.
+    const mk = [
+        { id: 1, x: 470, y: 240 },
+        { id: 2, x: 510, y: 240 },
+        { id: 3, x: 550, y: 240 },
+        { id: 4, x: 470, y: 272 },
+        { id: 5, x: 510, y: 272 },
+        { id: 6, x: 550, y: 272 },
+    ];
+    const segments = [{ x1: 100, y1: 100, x2: 900, y2: 400 }];
+    const optsOn  = Object.assign({}, RING_OPTS, { resolveCrossings: true  });
+    const optsOff = Object.assign({}, RING_OPTS, { resolveCrossings: false });
+    const on  = new CalloutLayout(optsOn ).layout(mk, [], BOUNDS, segments);
+    const off = new CalloutLayout(optsOff).layout(mk, [], BOUNDS, segments);
+    const cOn  = countCrossings(on);
+    const cOff = countCrossings(off);
+    assert.ok(cOn <= cOff,
+        `θ-swap post-pass must not increase crossings (on=${cOn}, off=${cOff})`);
+});
+
+// ── Ring layout: стекинг co-located маркеров ──────────────────────────────
+//
+// Co-located КА (distance ≤ stackDistance) объединяются в один «стек»:
+// одна карточка с увеличенным cardHeight и несколькими строками имён.
+// Ключевые гарантии: стабильный порядок строк (по возрастанию NORAD ID),
+// height = N × stackLineHeight + padding, поглощённые маркеры → null в result.
+
+console.log('\nCallouts: ring layout — stacking co-located markers');
+
+test('ring: 4 co-located markers → 1 stacked card + 3 nulls', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 25544, x: 500, y: 250 },
+        { id: 43205, x: 502, y: 252 },
+        { id: 43206, x: 501, y: 249 },
+        { id: 43207, x: 503, y: 251 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    const nonNull = res.filter(r => r !== null);
+    assert.strictEqual(nonNull.length, 1, 'co-located markers must produce 1 card');
+    const card = nonNull[0];
+    assert.ok(Array.isArray(card.stacked), 'must have stacked array');
+    assert.strictEqual(card.stacked.length, 4);
+    // Порядок по возрастанию NORAD ID
+    assert.deepStrictEqual(card.stacked, [25544, 43205, 43206, 43207]);
+});
+
+test('ring: stacked card height = N × stackLineHeight + 4', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 500, y: 250 },
+        { id: 2, x: 503, y: 252 },
+        { id: 3, x: 501, y: 249 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    const card = res.filter(r => r !== null)[0];
+    // stackLineHeight=18 (DEFAULTS), N=3 → 3×18+4 = 58
+    const expectedH = 3 * 18 + 4;
+    assert.strictEqual(card.card.h, expectedH,
+        `stacked card height: expected ${expectedH}, got ${card.card.h}`);
+});
+
+test('ring: large stack (>maxVisible) has capped card height', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    // 8 маркеров в одной точке — стек из 8 при maxVisible=4 → высота = (4+1)×18+4 = 94
+    const markers = [];
+    for (let i = 0; i < 8; i++) {
+        markers.push({ id: i + 1, x: 500 + i, y: 250 + i });
+    }
+    const res = layout.layout(markers, [], BOUNDS);
+    const card = res.filter(r => r !== null)[0];
+    const maxVis = 4;
+    const expectedH = (maxVis + 1) * 18 + 4;  // 4 строки + 1 строка "...+N"
+    assert.strictEqual(card.card.h, expectedH,
+        `large stack height: expected ${expectedH}, got ${card.card.h}`);
+    assert.strictEqual(card.stacked.length, 8);
+});
+
+test('ring: markers farther than stackDistance are NOT stacked', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    // Расстояние между маркерами > 12 (stackDistance)
+    const markers = [
+        { id: 1, x: 500, y: 250 },
+        { id: 2, x: 520, y: 270 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    const nonNull = res.filter(r => r !== null);
+    assert.strictEqual(nonNull.length, 2, 'distant markers must NOT be stacked');
+    for (const r of nonNull) {
+        assert.ok(!r.stacked || r.stacked.length <= 1,
+            'distant markers must not have stacked array');
+    }
+});
+
+test('ring: mixed — some co-located, some distant → separate stacks', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    // Два подкластера: (500,250)±3px и (600,300)±3px
+    const markers = [
+        { id: 1, x: 500, y: 250 },
+        { id: 2, x: 502, y: 252 },
+        { id: 3, x: 600, y: 300 },
+        { id: 4, x: 601, y: 302 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    const nonNull = res.filter(r => r !== null);
+    assert.strictEqual(nonNull.length, 2, 'two stacks expected');
+    // Каждый стек имеет 2 id
+    for (const r of nonNull) {
+        assert.ok(Array.isArray(r.stacked), 'each group must be stacked');
+        assert.strictEqual(r.stacked.length, 2);
+    }
+});
+
+test('ring: stacked card id is the smallest NORAD in group', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 99999, x: 500, y: 250 },
+        { id: 11111, x: 502, y: 252 },
+        { id: 55555, x: 501, y: 249 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    const card = res.filter(r => r !== null)[0];
+    assert.strictEqual(card.id, 11111, 'stacked card id must be smallest NORAD');
+    assert.deepStrictEqual(card.stacked, [11111, 55555, 99999]);
+});
+
+// ── Ring layout: избегание препятствий-иконок (шаг 1) ─────────────────────
+//
+// Шаг 1 фикса callout-разметки: пост-проход `_avoidForbiddenSegments` теперь
+// учитывает не только запретные трассы, но и obstacle-bbox (иконки чужих КА,
+// подписи городов, observer). Лекс-стоимость: [iconHits, cardHits, leaderHits].
+// Карточка может не уйти от иконки только если эллипс/bounds не оставляют
+// угла без перекрытия (best-effort).
+
+console.log('\nCallouts: ring layout — obstacle (icon) avoidance (step 1)');
+
+test('ring: card avoids a foreign obstacle in its default sector', () => {
+    // Два маркера на горизонтальной оси: PCA-эллипс растянут по X.
+    // theta маркера (544, 256) ≈ 0 → карточка по умолчанию идёт ВПРАВО.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 480, y: 256 },
+        { id: 2, x: 544, y: 256 },
+    ];
+    // Препятствие ровно справа — там, где встанет карточка маркера id=2,
+    // если игнорировать obstacles. Размеры: ~карточка по высоте.
+    const obstacles = [
+        { x: 600, y: 240, w: 120, h: 36 },
+    ];
+    const baseline = layout.layout(markers, [], BOUNDS);
+    const res = layout.layout(markers, obstacles, BOUNDS);
+    // Sanity: без obstacles какая-то карточка действительно перекрывает
+    // зону препятствия — иначе тест бы прошёл «случайно».
+    let baselineHits = 0;
+    for (const r of baseline) {
+        for (const ob of obstacles) {
+            if (overlap(bbox(r.card), ob)) { baselineHits++; }
+        }
+    }
+    assert.ok(baselineHits > 0,
+        'sanity: без obstacle-обхода карточка должна попадать в препятствие');
+
+    for (let i = 0; i < res.length; i++) {
+        const c = res[i].card;
+        for (let k = 0; k < obstacles.length; k++) {
+            const ob = obstacles[k];
+            const sepX = (c.x + c.w <= ob.x) || (ob.x + ob.w <= c.x);
+            const sepY = (c.y + c.h <= ob.y) || (ob.y + ob.h <= c.y);
+            assert.ok(sepX || sepY,
+                `card[${i}] overlaps obstacle[${k}]: ` +
+                `card=${JSON.stringify(c)} ob=${JSON.stringify(ob)}`);
+        }
+    }
+});
+
+test('ring: own marker icon does not fight its own card (no self-block)', () => {
+    // Свой маркер находится В ТОЧКЕ (m.x, m.y); собственная иконка
+    // включается в obstacles (bbox содержит точку маркера). Алгоритм должен
+    // её игнорировать — иначе карточка не может встать рядом со своим КА.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 480, y: 256 },
+        { id: 2, x: 544, y: 256 },
+    ];
+    const r = 18;
+    const obstacles = markerObstacles(markers, r);
+    const res = layout.layout(markers, obstacles, BOUNDS);
+    assert.strictEqual(res.length, markers.length);
+    for (let i = 0; i < res.length; i++) {
+        const m = markers[i];
+        const c = res[i].card;
+        // Чужие иконки не пересекаются:
+        for (let k = 0; k < obstacles.length; k++) {
+            if (k === i) { continue; }
+            const ob = obstacles[k];
+            const sepX = (c.x + c.w <= ob.x) || (ob.x + ob.w <= c.x);
+            const sepY = (c.y + c.h <= ob.y) || (ob.y + ob.h <= c.y);
+            assert.ok(sepX || sepY,
+                `card[${i}] overlaps foreign icon[${k}]`);
+        }
+        // Bend/card находятся в разумной близости от своего маркера
+        // (карточка не «ускакала» из-за того что её собственная иконка
+        // считается препятствием).
+        const dx = (c.x + c.w / 2) - m.x;
+        const dy = (c.y + c.h / 2) - m.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        assert.ok(dist < 300,
+            `card[${i}] too far from its marker (dist=${dist.toFixed(1)})`);
+    }
+});
+
+test('ring: cluster of 6 in dense scene with city obstacles — minimises icon hits vs baseline', () => {
+    // Плотный кластер + 2 препятствия-«города» рядом. Best-effort: число
+    // карточек, перекрывающих obstacle, не должно вырасти относительно
+    // baseline без obstacle-обхода.
+    const layout = new CalloutLayout(RING_OPTS);
+    const obstacles = [
+        { x: 360, y: 200, w: 90, h: 16 },   // «город» слева-сверху от кластера
+        { x: 600, y: 290, w: 90, h: 16 },   // «город» справа-снизу
+    ];
+    const baseline = layout.layout(RING_CLUSTER_6, [], BOUNDS);
+    const res = layout.layout(RING_CLUSTER_6, obstacles, BOUNDS);
+    let baseHits = 0, optHits = 0;
+    for (const r of baseline) {
+        for (const ob of obstacles) {
+            if (overlap(bbox(r.card), ob)) { baseHits++; }
+        }
+    }
+    for (const r of res) {
+        for (const ob of obstacles) {
+            if (overlap(bbox(r.card), ob)) { optHits++; }
+        }
+    }
+    assert.ok(optHits <= baseHits,
+        `obstacle-aware avoidance regressed: baseline=${baseHits}, opt=${optHits}`);
+});
+
+// ── Ring layout: θ-swap для пересечений leader-линий и card-to-card overlaps ─
+
+console.log('\nCallouts: ring layout — θ-swap (leader crossings + card overlaps)');
+
+test('ring: θ-swap resolves leader-line crossing for opposing markers', () => {
+    // Два маркера расположены так, что при наивном распределении θ
+    // (θ на противоположной стороне от другого маркера) их leader'ы пересекаются.
+    // Маркер A внизу-слева, маркер B вверху-справа — карточки по умолчанию
+    // ставятся по θ маркера, и stem'ы X-образно перекрещиваются.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 480, y: 280 },
+        { id: 2, x: 540, y: 230 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    const valid = res.filter(r => r !== null);
+    // После swap leader'ы не должны пересекаться.
+    for (let i = 0; i < valid.length; i++) {
+        for (let j = i + 1; j < valid.length; j++) {
+            const li = { marker: valid[i].marker, bend: valid[i].bend, card: valid[i].card };
+            const lj = { marker: valid[j].marker, bend: valid[j].bend, card: valid[j].card };
+            assert.ok(!leadersIntersect(li, lj),
+                `leaders ${valid[i].id} & ${valid[j].id} still cross after swap`);
+        }
+    }
+});
+
+test('ring: θ-swap resolves card-to-card overlap when simple exchange fixes it', () => {
+    // Специальный сценарий: 4 маркера создают ситуацию где свап позиций
+    // двух карточек устраняет перекрытие bbox'ов.
+    const layout = new CalloutLayout(RING_OPTS);
+    const markers = [
+        { id: 1, x: 500, y: 250 },
+        { id: 2, x: 510, y: 260 },
+        { id: 3, x: 520, y: 250 },
+        { id: 4, x: 530, y: 260 },
+    ];
+    const res = layout.layout(markers, [], BOUNDS);
+    const valid = res.filter(r => r !== null);
+    const gap = RING_OPTS.minCardGap || 4;
+    let overlaps = 0;
+    for (let i = 0; i < valid.length; i++) {
+        for (let j = i + 1; j < valid.length; j++) {
+            if (bboxOverlap(valid[i].card, valid[j].card, gap)) { overlaps++; }
+        }
+    }
+    // Свап должен минимизировать/устранить перекрытия (best-effort)
+    assert.strictEqual(overlaps, 0, `card-to-card overlaps remain: ${overlaps}`);
 });
 
 // ── Summary ────────────────────────────────────────────────

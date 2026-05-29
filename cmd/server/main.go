@@ -15,6 +15,7 @@ import (
 	assets "github.com/art-injener/satellite-scout"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/services"
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
@@ -87,12 +88,26 @@ func main() {
 	// Связываем trackingService с passService для авто-трекинга.
 	trackingService.SetPassProvider(passService)
 
+	// SatNOGS — частоты и модуляция передатчиков спутников. Опционально:
+	// при cfg.SatNOGSEnabled=false сервис не создаётся, поля freq_mhz/modulation в SSE пустые.
+	var satnogsService *satnogs.Service
+	if cfg.SatNOGSEnabled {
+		satnogsClient := satnogs.NewClient()
+		satnogsService = satnogs.NewService(satnogsClient).
+			WithCacheTTL(cfg.SatNOGSCacheTTL)
+		go satnogsService.Run(svcCtx)
+		trackingService.SetTransmitterProvider(newSatnogsTransmitterAdapter(satnogsService))
+		slog.Info("satnogs integration enabled", "cache_ttl", cfg.SatNOGSCacheTTL)
+	} else {
+		slog.Info("satnogs integration disabled (SATNOGS_ENABLED=false)")
+	}
+
 	// Запускаем сервис отслеживания.
 	go trackingService.Run(svcCtx)
 
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, sseHub, passService, trackingService, templatesFS, staticFS)
+	setupRoutes(mux, cfg, sseHub, trackingService, satnogsService, templatesFS, staticFS)
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.

@@ -190,6 +190,21 @@
             const s = evt.status;
             if (s === window.SSEConnectionStatus.CONNECTED) {
                 setConnectionStatus('connected');
+                // При (ре)подключении к бэкенду — повторно загрузить конфиг
+                // наблюдателя: если страница была открыта до старта бэкенда,
+                // карта центрирована на (0,0) и без retry так и останется.
+                if (window.earthView && typeof window.earthView.setObserver === 'function') {
+                    fetch('/api/config').then(function(r) { return r.json(); }).then(function(cfg) {
+                        if (cfg && cfg.observer) {
+                            var ev = window.earthView;
+                            var cur = ev.observer;
+                            if (!cur || cur.lon !== cfg.observer.lon || cur.lat !== cfg.observer.lat) {
+                                ev.setObserver(cfg.observer.lon, cfg.observer.lat, cfg.observer.name || cur && cur.name || '');
+                                ev.draw();
+                            }
+                        }
+                    }).catch(function() { /* бэкенд ещё не отвечает — повторим на следующем reconnect */ });
+                }
             } else if (s === window.SSEConnectionStatus.CONNECTING) {
                 setConnectionStatus('connecting');
             } else {
@@ -405,7 +420,7 @@
             }
         });
 
-        // ── SATELLITE_GROUP_UPDATE: обновление вторичных, синхронизация часов ──
+        // ── SATELLITE_GROUP_UPDATE: обновление вторичных, синхронизация часов, sky tracks ──
         sm.subscribe(StateEventType.SATELLITE_GROUP_UPDATE, function(group) {
             if (!group || !group.satellites) { return; }
             if (group.ts && window.skyView) {
@@ -413,13 +428,22 @@
             }
             _updateSecondaryPositions();
             _updateSecondaryTracks();
+
+            // Sky tracks из SSE: tracking, selected, вторичные.
+            if (window.skyView) {
+                const trackingId = sm.getTrackingSatelliteId();
+                const selectedId = sm.getSelectedSatelliteId();
+                if (trackingId) { loadSkyPathForSatellite(trackingId, 'tracking'); }
+                if (selectedId && selectedId !== trackingId) { loadSkyPathForSatellite(selectedId, 'selected'); }
+                _refreshSecondarySkyTracks();
+                window.skyView.draw();
+            }
         });
 
         // ── TRACK_VISIBILITY_CHANGE: toggle видимости трасс в таблице ──
         sm.subscribe(StateEventType.TRACK_VISIBILITY_CHANGE, function() {
             _updateSecondaryPositions();
             _updateSecondaryTracks();
-            // Перезагружаем sky_path для вторичных, чтобы трассы с включённой видимостью появились на SkyView.
             _refreshSecondarySkyTracks();
             if (window.earthView) { window.earthView.draw(); }
             if (window.skyView) { window.skyView.draw(); }
@@ -488,50 +512,27 @@
         }
     }
 
-    /** Обновить трассы вторичных спутников в SkyView из массива пролётов (sky_path → az/el). */
-    function applySecondarySkyTracks(passes) {
-        if (!passes || !window.skyView) { return; }
+    /** Обновить трассы вторичных спутников в SkyView из данных группы (sky_path в satellite_group_update). */
+    function _refreshSecondarySkyTracks() {
+        if (!window.skyView) { return; }
         const sm = window._stateManager;
         const group = sm && sm.getSatelliteGroup();
         if (!group || !group.satellites) { return; }
 
-        const now = Date.now();
         const selectedId = sm.getSelectedSatelliteId();
         const trackingId = sm.getTrackingSatelliteId();
 
         for (let i = 0; i < group.satellites.length; i++) {
             const sat = group.satellites[i];
             if (sat.norad_id === selectedId || sat.norad_id === trackingId) { continue; }
-            // SkyView: трассы только для спутников с isTrackVisible (PASS-MAP-001).
             if (!sm.isTrackVisible(sat.norad_id)) { continue; }
-            let pass = null;
-            for (let j = 0; j < passes.length; j++) {
-                const p = passes[j];
-                if (p.norad_id === sat.norad_id && ((p.aos <= now && now <= p.los) || now < p.aos)) {
-                    pass = p;
-                    break;
-                }
-            }
-            if (pass && pass.sky_path && pass.sky_path.length > 0) {
-                const track = pass.sky_path.map(function(pt) {
+            if (sat.sky_path && sat.sky_path.length > 0) {
+                const track = sat.sky_path.map(function(pt) {
                     return { az: pt.az, el: pt.el, time: pt.time };
                 });
                 window.skyView.setSecondaryTrack(sat.norad_id, track);
             }
         }
-    }
-
-    /** Загрузить пролёты и применить трассы вторичных спутников на SkyView (при смене видимости трасс). */
-    function _refreshSecondarySkyTracks() {
-        fetch('/api/passes?hours=24')
-            .then(function(resp) { return resp.json(); })
-            .then(function(data) {
-                if (data.passes && data.passes.length > 0) {
-                    applySecondarySkyTracks(data.passes);
-                    if (window.skyView) { window.skyView.draw(); }
-                }
-            })
-            .catch(function() {});
     }
 
     // Загрузка sky path для SkyView (selected или tracking).
@@ -590,51 +591,31 @@
 
 
     /**
-     * Загрузка sky path для SkyView.
+     * Установка sky path для SkyView из данных группы (satellite_group_update SSE).
      * @param {number} noradId
      * @param {string} target — 'selected' или 'tracking'
      */
     function loadSkyPathForSatellite(noradId, target) {
         if (!noradId || !window.skyView) { return; }
+        const sm = window._stateManager;
+        const group = sm && sm.getSatelliteGroup();
+        if (!group || !group.satellites) { return; }
 
-        fetch('/api/passes?hours=24')
-            .then(function(resp) { return resp.json(); })
-            .then(function(data) {
-                if (!data.passes || data.passes.length === 0) { return; }
+        const sat = group.satellites.find(function(s) { return s.norad_id === noradId; });
+        if (!sat || !sat.sky_path || sat.sky_path.length === 0) { return; }
 
-                const now = Date.now();
-                let pass = null;
-                for (let i = 0; i < data.passes.length; i++) {
-                    const p = data.passes[i];
-                    if (p.norad_id === noradId) {
-                        if ((p.aos <= now && now <= p.los) || now < p.aos) {
-                            pass = p;
-                            break;
-                        }
-                    }
-                }
+        const track = sat.sky_path.map(function(point) {
+            return { az: point.az, el: point.el, time: point.time };
+        });
 
-                if (pass && pass.sky_path && pass.sky_path.length > 0) {
-                    const track = pass.sky_path.map(function(point) {
-                        return { az: point.az, el: point.el, time: point.time };
-                    });
-
-                    if (target === 'tracking') {
-                        window.skyView.setTrack(track);
-                        window.skyView.setPassTimes(pass.aos, pass.los);
-                    } else {
-                        window.skyView.setSelectedTrack(track);
-                        window.skyView.setSelectedPassTimes(pass.aos, pass.los);
-                    }
-                    console.log('[app.js] SkyView', target, 'track для', noradId, ':', track.length, 'точек');
-                }
-
-                // Обновляем трассы вторичных спутников в SkyView из того же ответа
-                applySecondarySkyTracks(data.passes);
-            })
-            .catch(function(err) {
-                console.error('[app.js] Ошибка загрузки sky path:', err);
-            });
+        if (target === 'tracking') {
+            window.skyView.setTrack(track);
+            window.skyView.setPassTimes(sat.aos, sat.los);
+        } else {
+            window.skyView.setSelectedTrack(track);
+            window.skyView.setSelectedPassTimes(sat.aos, sat.los);
+        }
+        console.log('[app.js] SkyView', target, 'track для', noradId, ':', track.length, 'точек');
     }
 
     // Инициализация нижней панели: вкладки + водопад
@@ -692,11 +673,15 @@
                 sm.setSelectedSatellite(noradId, name, true);
             };
             window.earthView.init().then(function() {
-                // Загрузка координат наблюдателя из конфигурации сервера
-                return fetch('/api/config').then(function(resp) { return resp.json(); });
+                // Загрузка координат наблюдателя из конфигурации сервера.
+                // При отсутствии бэкенда — catch возвращает null; повторный запрос
+                // произойдёт при SSE-reconnect (onStatusChange → CONNECTED).
+                return fetch('/api/config')
+                    .then(function(resp) { return resp.json(); })
+                    .catch(function() { return null; });
             }).then(function(cfg) {
                 if (cfg && cfg.observer) {
-                    window.earthView.setObserver(cfg.observer.lon, cfg.observer.lat, 'Ростов-на-Дону');
+                    window.earthView.setObserver(cfg.observer.lon, cfg.observer.lat, cfg.observer.name || '');
                 }
                 // Подтягиваем накопленные данные из StateManager (track/position могли прийти до init).
                 // Используем selected-слой: tracking-слой устанавливается только когда пользователь

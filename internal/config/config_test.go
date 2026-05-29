@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"testing"
+	"time"
 )
 
 func TestLoad_DefaultValues(t *testing.T) {
@@ -141,6 +142,68 @@ func TestGetEnv(t *testing.T) {
 
 			if got := getEnv(tt.key, tt.defaultVal); got != tt.want {
 				t.Errorf("getEnv() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoad_SatNOGSDefaults(t *testing.T) {
+	_ = os.Unsetenv("SATNOGS_ENABLED")
+	_ = os.Unsetenv("SATNOGS_CACHE_TTL")
+
+	cfg := Load()
+	if !cfg.SatNOGSEnabled {
+		t.Error("SatNOGSEnabled = false, want true (default)")
+	}
+	if cfg.SatNOGSCacheTTL != 24*time.Hour {
+		t.Errorf("SatNOGSCacheTTL = %v, want 24h (default)", cfg.SatNOGSCacheTTL)
+	}
+}
+
+func TestLoad_SatNOGSCustomValues(t *testing.T) {
+	t.Setenv("SATNOGS_ENABLED", "false")
+	t.Setenv("SATNOGS_CACHE_TTL", "30m")
+
+	cfg := Load()
+	if cfg.SatNOGSEnabled {
+		t.Error("SatNOGSEnabled = true, want false")
+	}
+	if cfg.SatNOGSCacheTTL != 30*time.Minute {
+		t.Errorf("SatNOGSCacheTTL = %v, want 30m", cfg.SatNOGSCacheTTL)
+	}
+}
+
+func TestLoad_SatNOGSInvalidDurationFallsBackToDefault(t *testing.T) {
+	t.Setenv("SATNOGS_CACHE_TTL", "not-a-duration")
+	cfg := Load()
+	if cfg.SatNOGSCacheTTL != 24*time.Hour {
+		t.Errorf("SatNOGSCacheTTL = %v, want 24h (fallback)", cfg.SatNOGSCacheTTL)
+	}
+}
+
+func TestGetEnvDuration(t *testing.T) {
+	tests := []struct {
+		name       string
+		envValue   string
+		defaultVal time.Duration
+		want       time.Duration
+	}{
+		{"valid 24h", "24h", time.Hour, 24 * time.Hour},
+		{"valid 30m", "30m", time.Hour, 30 * time.Minute},
+		{"valid composite", "1h30m", time.Hour, 90 * time.Minute},
+		{"empty fallback", "", 5 * time.Minute, 5 * time.Minute},
+		{"invalid fallback", "not-a-duration", 5 * time.Minute, 5 * time.Minute},
+		{"zero treated as invalid", "0s", time.Hour, time.Hour},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue == "" {
+				_ = os.Unsetenv("TEST_DUR")
+			} else {
+				t.Setenv("TEST_DUR", tt.envValue)
+			}
+			if got := getEnvDuration("TEST_DUR", tt.defaultVal); got != tt.want {
+				t.Errorf("getEnvDuration(%q) = %v, want %v", tt.envValue, got, tt.want)
 			}
 		})
 	}

@@ -352,7 +352,9 @@
     white-space: nowrap;
 }
 
-/* Колонка 4: Частота / Мод. (заглушка, данные из SatNOGS DB — будущее) */
+/* Колонка 4: Частота / Мод. (данные из SatNOGS DB).
+   Без данных (нет передатчика / SatNOGS недоступен) — приглушённое «—»;
+   с данными — обычный читаемый текст. */
 .pc-freq-cell {
     font-variant-numeric: tabular-nums;
 }
@@ -369,6 +371,16 @@
     color: var(--text-muted);
     line-height: 1.4;
     white-space: nowrap;
+}
+
+/* Подсветка ячейки с реальными данными SatNOGS */
+.pc-freq-cell--has-data .pc-freq-val {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.pc-freq-cell--has-data .pc-freq-mod {
+    color: var(--text-secondary);
 }
 
 /* Колонка 3: верх — до AOS / «ЗРВ»; низ — длит. пролёта до AOS или остаток до LOS (см. right-panel.js) */
