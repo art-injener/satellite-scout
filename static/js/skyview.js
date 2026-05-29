@@ -316,28 +316,80 @@
     };
 
     /**
-     * Отрисовка иконки наблюдателя в центре (зенит)
-     * Простой маленький треугольник
+     * Отрисовка иконки наблюдателя в центре (зенит).
+     * Значок наземной станции: мачта-вышка вниз от точки + излучатель
+     * в центре + две статичные дуги радиоволн симметрично по бокам.
      */
     SkyView.prototype._drawObserver = function() {
         if (!this.options.showObserver) {return;}
 
         const ctx = this.ctx;
         const cx = this.centerX;
-        const cy = this.centerY;
+        const dpr = window.devicePixelRatio || 1;
 
-        // Размеры треугольника
-        const size = 8;
+        // Геометрия значка
+        const mastH = 14 * dpr;        // высота мачты вниз от излучателя
+        // Сдвигаем излучатель вверх, чтобы визуальный центр значка был в centerY
+        const cy = this.centerY - mastH * 0.35;
+        const mastHalf = 6 * dpr;      // полуширина основания мачты
+        const crossY = cy + mastH * 0.55; // уровень поперечины
+        const crossHalf = mastHalf * 0.55;
+        const waveR1 = 7 * dpr;        // радиус ближней дуги волн
+        const waveR2 = 11 * dpr;       // радиус дальней дуги волн
+        const waveSpread = Math.PI / 4; // ±45° раствор дуг от горизонтали
+        const emitterR = 2 * dpr;      // радиус излучателя
 
-        // Треугольник (вершиной вверх)
-        ctx.fillStyle = this.colors.observer;
-        ctx.strokeStyle = this.colors.observer;
-        ctx.lineWidth = 1;
+        const iconColor = this.colors.observer || '#ffaa00';
+        const haloColor = this.colors.canvasTextStroke || 'rgba(0,0,0,0.9)';
+
+        // Контуры мачты и волн одним path — рисуем дважды: тёмный ореол,
+        // затем основной цвет поверх (читаемость на любом фоне неба).
+        const tracePaths = function() {
+            ctx.beginPath();
+            // Мачта: две ноги от вершины (центр) к основанию
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx - mastHalf, cy + mastH);
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + mastHalf, cy + mastH);
+            // Основание мачты
+            ctx.moveTo(cx - mastHalf, cy + mastH);
+            ctx.lineTo(cx + mastHalf, cy + mastH);
+            // Поперечина
+            ctx.moveTo(cx - crossHalf, crossY);
+            ctx.lineTo(cx + crossHalf, crossY);
+            // Левые дуги радиоволн (выпуклостью влево)
+            ctx.moveTo(cx - waveR1, cy);
+            ctx.arc(cx, cy, waveR1, Math.PI - waveSpread, Math.PI + waveSpread);
+            ctx.moveTo(cx - waveR2, cy);
+            ctx.arc(cx, cy, waveR2, Math.PI - waveSpread, Math.PI + waveSpread);
+            // Правые дуги радиоволн (выпуклостью вправо)
+            ctx.moveTo(cx + waveR1 * Math.cos(waveSpread), cy - waveR1 * Math.sin(waveSpread));
+            ctx.arc(cx, cy, waveR1, -waveSpread, waveSpread);
+            ctx.moveTo(cx + waveR2 * Math.cos(waveSpread), cy - waveR2 * Math.sin(waveSpread));
+            ctx.arc(cx, cy, waveR2, -waveSpread, waveSpread);
+        };
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Тёмный ореол
+        tracePaths();
+        ctx.strokeStyle = haloColor;
+        ctx.lineWidth = 2.5 * dpr;
+        ctx.stroke();
+
+        // Основной цвет
+        tracePaths();
+        ctx.strokeStyle = iconColor;
+        ctx.lineWidth = 1.4 * dpr;
+        ctx.stroke();
+
+        // Излучатель в центре (зенит)
         ctx.beginPath();
-        ctx.moveTo(cx, cy - size); // Вершина
-        ctx.lineTo(cx - size, cy + size); // Левый нижний угол
-        ctx.lineTo(cx + size, cy + size); // Правый нижний угол
-        ctx.closePath();
+        ctx.arc(cx, cy, emitterR, 0, Math.PI * 2);
+        ctx.fillStyle = iconColor;
+        ctx.strokeStyle = haloColor;
+        ctx.lineWidth = 1 * dpr;
         ctx.fill();
         ctx.stroke();
     };

@@ -1549,26 +1549,81 @@
         // карты сместился (например, во время тестов с искусственным центром).
         if (!this._isInViewport(p, 60)) { return; }
 
-        const size = 8;
+        // Значок наземной станции: треугольная мачта-вышка вниз от точки +
+        // излучатель в самой точке наблюдения + две статичные дуги радиоволн
+        // симметрично по бокам. Центр значка (излучатель) = гео-координата.
+        const dpr = window.devicePixelRatio || 1;
+        const mastH = 16 * dpr;        // высота мачты вниз от точки
+        const mastHalf = 7 * dpr;      // полуширина основания мачты
+        const crossY = p.y + mastH * 0.55; // уровень поперечины
+        const crossHalf = mastHalf * 0.55;
+        const waveR1 = 8 * dpr;        // радиус ближней дуги волн
+        const waveR2 = 13 * dpr;       // радиус дальней дуги волн
+        const waveSpread = Math.PI / 4; // ±45° раствор дуг от горизонтали
+        const emitterR = 2.4 * dpr;    // радиус излучателя
+
+        const iconColor = this.colors.observer || '#d4a040';
+        const haloColor = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
+
+        // Контуры мачты и волн одним path — рисуем дважды: тёмный ореол под низ,
+        // затем основной цвет поверх (читаемость на любой теме карты).
+        const tracePaths = function() {
+            ctx.beginPath();
+            // Мачта: две ноги от вершины (точка) к основанию
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x - mastHalf, p.y + mastH);
+            ctx.moveTo(p.x, p.y);
+            ctx.lineTo(p.x + mastHalf, p.y + mastH);
+            // Основание мачты
+            ctx.moveTo(p.x - mastHalf, p.y + mastH);
+            ctx.lineTo(p.x + mastHalf, p.y + mastH);
+            // Поперечина
+            ctx.moveTo(p.x - crossHalf, crossY);
+            ctx.lineTo(p.x + crossHalf, crossY);
+            // Левые дуги радиоволн (выпуклостью влево)
+            ctx.moveTo(p.x - waveR1, p.y);
+            ctx.arc(p.x, p.y, waveR1, Math.PI - waveSpread, Math.PI + waveSpread);
+            ctx.moveTo(p.x - waveR2, p.y);
+            ctx.arc(p.x, p.y, waveR2, Math.PI - waveSpread, Math.PI + waveSpread);
+            // Правые дуги радиоволн (выпуклостью вправо)
+            ctx.moveTo(p.x + waveR1 * Math.cos(waveSpread), p.y - waveR1 * Math.sin(waveSpread));
+            ctx.arc(p.x, p.y, waveR1, -waveSpread, waveSpread);
+            ctx.moveTo(p.x + waveR2 * Math.cos(waveSpread), p.y - waveR2 * Math.sin(waveSpread));
+            ctx.arc(p.x, p.y, waveR2, -waveSpread, waveSpread);
+        };
+
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+
+        // Тёмный ореол
+        tracePaths();
+        ctx.strokeStyle = haloColor;
+        ctx.lineWidth = 3 * dpr;
+        ctx.stroke();
+
+        // Основной цвет
+        tracePaths();
+        ctx.strokeStyle = iconColor;
+        ctx.lineWidth = 1.6 * dpr;
+        ctx.stroke();
+
+        // Излучатель в точке наблюдения
         ctx.beginPath();
-        ctx.moveTo(p.x, p.y - size); // вершина
-        ctx.lineTo(p.x - size, p.y + size); // нижний левый
-        ctx.lineTo(p.x + size, p.y + size); // нижний правый
-        ctx.closePath();
-        ctx.fillStyle = this.colors.observerLabel || '#ff9500';
-        ctx.strokeStyle = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
-        ctx.lineWidth = 1;
+        ctx.arc(p.x, p.y, emitterR, 0, Math.PI * 2);
+        ctx.fillStyle = iconColor;
+        ctx.strokeStyle = haloColor;
+        ctx.lineWidth = 1 * dpr;
         ctx.fill();
         ctx.stroke();
 
-        // Название точки наблюдения — обводка из темы (светлая тема: светлый ореол)
+        // Название точки наблюдения — справа за дугами волн; обводка из темы
         if (this.observer.name) {
             const obsText = this.observer.name.toLocaleUpperCase();
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'left';
             ctx.textBaseline = 'middle';
-            const labelX = p.x + size + 3;
-            ctx.strokeStyle = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
+            const labelX = p.x + waveR2 + 4 * dpr;
+            ctx.strokeStyle = haloColor;
             ctx.lineWidth = 2;
             ctx.strokeText(obsText, labelX, p.y);
             ctx.fillStyle = this.colors.cityLabel || '#ffffff';
