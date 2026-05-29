@@ -14,6 +14,7 @@ import (
 
 	assets "github.com/art-injener/satellite-scout"
 	"github.com/art-injener/satellite-scout/internal/config"
+	"github.com/art-injener/satellite-scout/internal/exclude"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/services"
@@ -82,11 +83,17 @@ func main() {
 		return []handlers.SSEEvent{{Type: "client_state_restore", Data: data}}
 	})
 
-	// Сервис пролётов — расчёт и кеширование пролётов спутников.
-	passService := services.NewPassService(tleStore, observer)
+	// Список исключённых NORAD ID — не попадают в группу, список пролётов и ручное наблюдение.
+	excludeStore := exclude.NewStore(cfg.ExcludeNoradFile)
+	slog.Info("exclusions loaded",
+		slog.String("file", cfg.ExcludeNoradFile), slog.Int("count", len(excludeStore.List())))
 
-	// Связываем trackingService с passService для авто-трекинга.
+	// Сервис пролётов — расчёт и кеширование пролётов спутников.
+	passService := services.NewPassService(tleStore, observer).WithExcluder(excludeStore)
+
+	// Связываем trackingService с passService для авто-трекинга + жёсткий запрет на наблюдение исключённых.
 	trackingService.SetPassProvider(passService)
+	trackingService.WithExcluder(excludeStore)
 
 	// SatNOGS — частоты и модуляция передатчиков спутников. Опционально:
 	// при cfg.SatNOGSEnabled=false сервис не создаётся, поля freq_mhz/modulation в SSE пустые.
@@ -107,7 +114,7 @@ func main() {
 
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, sseHub, trackingService, satnogsService, templatesFS, staticFS)
+	setupRoutes(mux, cfg, sseHub, trackingService, satnogsService, excludeStore, passService, trackingService, templatesFS, staticFS)
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.

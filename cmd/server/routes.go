@@ -18,6 +18,9 @@ func setupRoutes(
 	sseHub *handlers.SSEHub,
 	trackingService handlers.TrackingServiceInterface,
 	satnogsService *satnogs.Service,
+	excludeStore handlers.ExclusionAdder,
+	passCache handlers.PassCacheInvalidator,
+	groupRefresher handlers.GroupRefresher,
 	templatesFS fs.FS,
 	staticFS fs.FS,
 ) {
@@ -47,6 +50,10 @@ func setupRoutes(
 	// API управления наблюдением (tracking).
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
+
+	// API списка исключений: скрыть спутник из группы и списка пролётов.
+	exclusionsHandler := handlers.NewExclusionsHandler(excludeStore, passCache, groupRefresher)
+	mux.HandleFunc("POST /api/exclusions", exclusionsHandler.Add)
 
 	// API SatNOGS (полный список передатчиков по NORAD ID — для будущего dropdown).
 	if satnogsService != nil {

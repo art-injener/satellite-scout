@@ -175,6 +175,7 @@
 
     RightPanelTable.prototype._render = function() {
         if (!this._tbody) { return; }
+        this._hideMenu();
 
         const satellites = (this._group && this._group.satellites) ? this._group.satellites : [];
 
@@ -380,8 +381,87 @@
                     const id = parseInt(row.getAttribute('data-norad'), 10);
                     self._onRowDblClick(id);
                 });
+                // ПКМ по строке — контекст-меню «Скрыть спутник».
+                row.addEventListener('contextmenu', function(e) {
+                    e.preventDefault();
+                    const id = parseInt(row.getAttribute('data-norad'), 10);
+                    const sat = self._findSatInGroup(id);
+                    const name = sat ? (sat.sat_name || String(id)) : String(id);
+                    self._showHideMenu(e.clientX, e.clientY, id, name);
+                });
             })(rows[i]);
         }
+    };
+
+    // ── Контекст-меню «Скрыть спутник» ──
+
+    RightPanelTable.prototype._showHideMenu = function(x, y, noradId, name) {
+        this._hideMenu();
+        const self = this;
+
+        const menu = document.createElement('div');
+        menu.className = 'pc-context-menu';
+        menu.setAttribute('role', 'menu');
+
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'pc-context-menu__item';
+        item.textContent = 'Скрыть спутник' + (name ? ' «' + name + '»' : '');
+        item.addEventListener('click', function() {
+            self._hideSatellite(noradId);
+            self._hideMenu();
+        });
+        menu.appendChild(item);
+        document.body.appendChild(menu);
+
+        // Позиционирование с учётом краёв окна.
+        const rect = menu.getBoundingClientRect();
+        const left = Math.max(4, Math.min(x, window.innerWidth - rect.width - 4));
+        const top = Math.max(4, Math.min(y, window.innerHeight - rect.height - 4));
+        menu.style.left = left + 'px';
+        menu.style.top = top + 'px';
+        this._contextMenu = menu;
+
+        // Закрытие по клику вне меню и по Esc.
+        this._menuDismiss = function(ev) {
+            if (ev.type === 'keydown' && ev.key !== 'Escape') { return; }
+            if (ev.type === 'mousedown' && menu.contains(ev.target)) { return; }
+            self._hideMenu();
+        };
+        setTimeout(function() {
+            document.addEventListener('mousedown', self._menuDismiss, true);
+            document.addEventListener('keydown', self._menuDismiss, true);
+        }, 0);
+    };
+
+    RightPanelTable.prototype._hideMenu = function() {
+        if (this._contextMenu) {
+            if (this._contextMenu.parentNode) {
+                this._contextMenu.parentNode.removeChild(this._contextMenu);
+            }
+            this._contextMenu = null;
+        }
+        if (this._menuDismiss) {
+            document.removeEventListener('mousedown', this._menuDismiss, true);
+            document.removeEventListener('keydown', this._menuDismiss, true);
+            this._menuDismiss = null;
+        }
+    };
+
+    RightPanelTable.prototype._hideSatellite = function(noradId) {
+        const clientId = (typeof window.getClientId === 'function') ? window.getClientId() : '';
+        fetch('/api/exclusions', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Client-Id': clientId
+            },
+            body: JSON.stringify({ norad_id: noradId })
+        }).then(function(r) {
+            if (!r.ok) { console.error('[RightPanel] exclusions error:', r.status); }
+        }).catch(function(err) {
+            console.error('[RightPanel] exclusions fetch error:', err);
+        });
     };
 
     RightPanelTable.prototype._onRowClick = function(noradId) {
@@ -497,6 +577,7 @@
 
     RightPanelTable.prototype.destroy = function() {
         if (this._countdownTimer) { clearInterval(this._countdownTimer); }
+        this._hideMenu();
     };
 
     window.RightPanelTable = RightPanelTable;

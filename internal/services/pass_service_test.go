@@ -9,6 +9,36 @@ import (
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
 
+// fakeExcluder — простой набор исключённых NORAD для тестов фильтрации.
+type fakeExcluder map[int]bool
+
+func (f fakeExcluder) Contains(norad int) bool { return f[norad] }
+
+func TestPassService_FilterExcluded(t *testing.T) {
+	passes := []*tracker.Pass{
+		{NoradID: 25544},
+		{NoradID: 43666},
+		{NoradID: 47959},
+	}
+
+	svc := NewPassService(nil, nil).WithExcluder(fakeExcluder{43666: true})
+	got := svc.filterExcluded(passes)
+
+	require.Len(t, got, 2)
+	for _, p := range got {
+		require.NotEqual(t, 43666, p.NoradID, "excluded satellite must be filtered out")
+	}
+}
+
+func TestPassService_FilterExcluded_NilExcluder(t *testing.T) {
+	passes := []*tracker.Pass{{NoradID: 25544}, {NoradID: 43666}}
+
+	svc := NewPassService(nil, nil)
+	got := svc.filterExcluded(passes)
+
+	require.Len(t, got, 2, "without excluder nothing is filtered")
+}
+
 // --- Тестовые данные ---
 
 // makeTLELine создаёт строку TLE с правильной контрольной суммой.

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -15,15 +16,19 @@ const (
 	defaultObserverAlt = 70.0
 
 	// Имена переменных окружения.
-	envPort            = "PORT"
-	envObserverLat     = "OBSERVER_LAT"
-	envObserverLon     = "OBSERVER_LON"
-	envObserverAlt     = "OBSERVER_ALT"
-	envDevMode         = "DEV_MODE"
-	envTLECacheDir     = "TLE_CACHE_DIR"
-	envTheme           = "THEME"
-	envSatNOGSEnabled  = "SATNOGS_ENABLED"
-	envSatNOGSCacheTTL = "SATNOGS_CACHE_TTL"
+	envPort             = "PORT"
+	envObserverLat      = "OBSERVER_LAT"
+	envObserverLon      = "OBSERVER_LON"
+	envObserverAlt      = "OBSERVER_ALT"
+	envDevMode          = "DEV_MODE"
+	envTLECacheDir      = "TLE_CACHE_DIR"
+	envTheme            = "THEME"
+	envSatNOGSEnabled   = "SATNOGS_ENABLED"
+	envSatNOGSCacheTTL  = "SATNOGS_CACHE_TTL"
+	envExcludeNoradFile = "EXCLUDE_NORAD_FILE"
+
+	// Имя файла исключений по умолчанию (внутри каталога кеша TLE).
+	defaultExcludeNoradFilename = "exclude_norad.txt"
 
 	// Тема по умолчанию — Operations Center.
 	defaultTheme = "default"
@@ -62,6 +67,10 @@ type Config struct {
 
 	// SatNOGSCacheTTL — время жизни записи в кеше передатчиков SatNOGS.
 	SatNOGSCacheTTL time.Duration
+
+	// ExcludeNoradFile — путь к текстовому файлу со списком исключённых NORAD ID
+	// (один ID на строку, «#» — комментарий). По умолчанию лежит в каталоге кеша TLE.
+	ExcludeNoradFile string
 }
 
 // Load возвращает конфигурацию из переменных окружения с значениями по умолчанию.
@@ -72,15 +81,16 @@ func Load() *Config {
 	}
 
 	cfg := &Config{
-		Port:            getEnv(envPort, "8080"),
-		DevMode:         getEnvBool(envDevMode, true),
-		ObserverLat:     getEnvFloat(envObserverLat, defaultObserverLat),
-		ObserverLon:     getEnvFloat(envObserverLon, defaultObserverLon),
-		ObserverAlt:     getEnvFloat(envObserverAlt, defaultObserverAlt),
-		TLE:             tleCfg,
-		Theme:           getEnv(envTheme, defaultTheme),
-		SatNOGSEnabled:  getEnvBool(envSatNOGSEnabled, defaultSatNOGSEnabled),
-		SatNOGSCacheTTL: getEnvDuration(envSatNOGSCacheTTL, defaultSatNOGSCacheTTL),
+		Port:             getEnv(envPort, "8080"),
+		DevMode:          getEnvBool(envDevMode, true),
+		ObserverLat:      getEnvFloat(envObserverLat, defaultObserverLat),
+		ObserverLon:      getEnvFloat(envObserverLon, defaultObserverLon),
+		ObserverAlt:      getEnvFloat(envObserverAlt, defaultObserverAlt),
+		TLE:              tleCfg,
+		Theme:            getEnv(envTheme, defaultTheme),
+		SatNOGSEnabled:   getEnvBool(envSatNOGSEnabled, defaultSatNOGSEnabled),
+		SatNOGSCacheTTL:  getEnvDuration(envSatNOGSCacheTTL, defaultSatNOGSCacheTTL),
+		ExcludeNoradFile: getEnv(envExcludeNoradFile, filepath.Join(tleCfg.CacheDir, defaultExcludeNoradFilename)),
 	}
 	return cfg
 }

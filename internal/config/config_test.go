@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -72,6 +73,35 @@ func TestLoad_InvalidFloatValues(t *testing.T) {
 
 	if cfg.ObserverLon != 39.788243 {
 		t.Errorf("Expected default lon 39.788243 for invalid value, got %f", cfg.ObserverLon)
+	}
+}
+
+func TestLoad_ExcludeNoradFileDefault(t *testing.T) {
+	t.Setenv("EXCLUDE_NORAD_FILE", "")
+	t.Setenv("TLE_CACHE_DIR", "")
+
+	cfg := Load()
+
+	// По умолчанию путь к файлу исключений лежит внутри каталога кеша TLE.
+	if cfg.ExcludeNoradFile == "" {
+		t.Fatal("expected non-empty default ExcludeNoradFile")
+	}
+	if filepath.Base(cfg.ExcludeNoradFile) != "exclude_norad.txt" {
+		t.Errorf("expected default filename exclude_norad.txt, got %s", cfg.ExcludeNoradFile)
+	}
+	if filepath.Dir(cfg.ExcludeNoradFile) != cfg.TLE.CacheDir {
+		t.Errorf("expected exclude file inside TLE cache dir %s, got %s",
+			cfg.TLE.CacheDir, cfg.ExcludeNoradFile)
+	}
+}
+
+func TestLoad_ExcludeNoradFileCustom(t *testing.T) {
+	t.Setenv("EXCLUDE_NORAD_FILE", "/tmp/custom_exclude.txt")
+
+	cfg := Load()
+
+	if cfg.ExcludeNoradFile != "/tmp/custom_exclude.txt" {
+		t.Errorf("expected custom exclude file path, got %s", cfg.ExcludeNoradFile)
 	}
 }
 

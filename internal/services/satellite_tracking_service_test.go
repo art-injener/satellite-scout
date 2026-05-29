@@ -129,6 +129,25 @@ func TestTrackSatellite(t *testing.T) {
 	}
 }
 
+func TestTrackSatelliteExcluded(t *testing.T) {
+	svc, cancel := setupTrackingService(t)
+	defer cancel()
+
+	svc.WithExcluder(fakeExcluder{issNoradID: true})
+
+	err := svc.TrackSatellite(issNoradID)
+	if err == nil {
+		t.Fatal("expected error when tracking an excluded satellite")
+	}
+	var excludedErr *SatelliteExcludedError
+	if !errors.As(err, &excludedErr) {
+		t.Errorf("expected SatelliteExcludedError, got %T", err)
+	}
+	if svc.TrackedCount() != 0 {
+		t.Errorf("excluded satellite must not be tracked, got %d", svc.TrackedCount())
+	}
+}
+
 func TestTrackSatelliteNotFound(t *testing.T) {
 	svc, cancel := setupTrackingService(t)
 	defer cancel()

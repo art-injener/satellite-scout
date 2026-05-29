@@ -133,6 +133,15 @@ func (e *SatelliteNotFoundError) Error() string {
 	return fmt.Sprintf("satellite not found in TLE store: %d", e.NoradID)
 }
 
+// SatelliteExcludedError — спутник в списке исключений и не может отслеживаться.
+type SatelliteExcludedError struct {
+	NoradID int
+}
+
+func (e *SatelliteExcludedError) Error() string {
+	return fmt.Sprintf("satellite is excluded: %d", e.NoradID)
+}
+
 // PropagationError — ошибка создания пропагатора.
 type PropagationError struct {
 	NoradID int
@@ -186,6 +195,9 @@ type SatelliteTrackingService struct {
 	// Источник данных о передатчиках (частота/модуляция). Опционально, nil = выключено.
 	transmitterProvider TransmitterProvider
 
+	// Набор исключённых NORAD ID. Опционально, nil = исключений нет.
+	excluder Excluder
+
 	// Per-client состояние наблюдения
 	clientState *ClientStateStore
 	// clientID последнего SetManualSelection — для направленного SSE-уведомления.
@@ -202,6 +214,9 @@ type SatelliteTrackingService struct {
 
 	// notifyOnConnect — при получении сигнала выполняем немедленный updateGroup + broadcast.
 	notifyOnConnect chan struct{}
+
+	// forceUpdate — сигнал немедленного пересчёта группы (например, после изменения исключений).
+	forceUpdate chan struct{}
 }
 
 // NewSatelliteTrackingService создаёт новый сервис отслеживания спутников.
@@ -220,6 +235,7 @@ func NewSatelliteTrackingService(
 		windowForward:       DefaultWindowForward,
 		tracked:             make(map[int]*trackedSatellite),
 		clientState:         NewClientStateStore(24 * time.Hour),
+		forceUpdate:         make(chan struct{}, 1),
 	}
 }
 
@@ -288,6 +304,25 @@ func (s *SatelliteTrackingService) SetTransmitterProvider(provider TransmitterPr
 	s.mu.Unlock()
 }
 
+// WithExcluder подключает набор исключённых NORAD ID (жёсткий запрет на ручное наблюдение).
+func (s *SatelliteTrackingService) WithExcluder(e Excluder) *SatelliteTrackingService {
+	s.excluder = e
+	return s
+}
+
+// ForceGroupUpdate запрашивает немедленный пересчёт и рассылку группы.
+// Используется после изменения списка исключений, чтобы спутник пропадал сразу.
+// Не блокирует: при уже стоящем в очереди сигнале повтор отбрасывается.
+func (s *SatelliteTrackingService) ForceGroupUpdate() {
+	s.mu.Lock()
+	s.pendingManualBroadcast = true
+	s.mu.Unlock()
+	select {
+	case s.forceUpdate <- struct{}{}:
+	default:
+	}
+}
+
 // Run запускает основной цикл отслеживания спутников.
 // Три тикера:
 //   - positionTicker (1/сек) — текущие позиции спутников, AER, зона видимости
@@ -328,6 +363,9 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 			s.computeAndBroadcastState(true)
 		case <-groupTicker.C:
 			s.updateGroup()
+		case <-s.forceUpdate:
+			// Внешний запрос немедленного пересчёта группы (например, после изменения исключений).
+			s.updateGroup()
 		case <-s.notifyOnConnect:
 			// Новый клиент подключился — рассылаем свежие позиции и треки немедленно.
 			// Группа (satellite_group_update) уже доставлена Hub из кеша через sendCachedEvents,
@@ -340,6 +378,10 @@ func (s *SatelliteTrackingService) Run(ctx context.Context) {
 // TrackSatellite добавляет спутник в отслеживание.
 // Загружает TLE из хранилища и создаёт пропагатор.
 func (s *SatelliteTrackingService) TrackSatellite(noradID int) error {
+	if s.excluder != nil && s.excluder.Contains(noradID) {
+		return &SatelliteExcludedError{NoradID: noradID}
+	}
+
 	tle, ok := s.store.Get(noradID)
 	if !ok {
 		return &SatelliteNotFoundError{NoradID: noradID}

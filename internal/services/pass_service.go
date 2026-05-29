@@ -27,6 +27,11 @@ const (
 	allGroupsCacheKey = "all"
 )
 
+// Excluder сообщает, исключён ли спутник из группы и списка пролётов.
+type Excluder interface {
+	Contains(norad int) bool
+}
+
 // cacheEntry — запись в кеше пролётов.
 type cacheEntry struct {
 	passes    []*tracker.Pass
@@ -46,6 +51,7 @@ type PassService struct {
 	store    *tracker.TLEStore
 	observer *tracker.Observer
 	cacheTTL time.Duration
+	excluder Excluder
 
 	mu    sync.RWMutex
 	cache map[string]*cacheEntry // ключ: "group:hours:minEl"
@@ -67,6 +73,27 @@ func (s *PassService) WithCacheTTL(ttl time.Duration) *PassService {
 		s.cacheTTL = ttl
 	}
 	return s
+}
+
+// WithExcluder подключает набор исключённых NORAD ID.
+func (s *PassService) WithExcluder(e Excluder) *PassService {
+	s.excluder = e
+	return s
+}
+
+// filterExcluded убирает из списка пролёты исключённых спутников.
+func (s *PassService) filterExcluded(passes []*tracker.Pass) []*tracker.Pass {
+	if s.excluder == nil || len(passes) == 0 {
+		return passes
+	}
+	out := make([]*tracker.Pass, 0, len(passes))
+	for _, p := range passes {
+		if s.excluder.Contains(p.NoradID) {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
 }
 
 // GetPasses возвращает список пролётов для указанной группы спутников.
@@ -193,7 +220,7 @@ func (s *PassService) computeAllPasses(hours int, minEl float64) ([]*tracker.Pas
 		return nil, err
 	}
 
-	return passes, nil
+	return s.filterExcluded(passes), nil
 }
 
 // InvalidateCache очищает весь кеш пролётов.
@@ -242,6 +269,8 @@ func (s *PassService) computePasses(group string, hours int, minEl float64) ([]*
 	if err != nil {
 		return nil, err
 	}
+
+	passes = s.filterExcluded(passes)
 
 	// Сортировка по AOS (ближайшие первыми).
 	sort.Slice(passes, func(i, j int) bool {
