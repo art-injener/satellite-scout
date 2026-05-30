@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"math"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/handlers"
@@ -169,9 +170,12 @@ type trackedSatellite struct {
 // рассылает данные через SSE Hub.
 // Три тикера: positions (1/сек), tracks (1/30 сек), group update (5/сек).
 type SatelliteTrackingService struct {
-	hub      *handlers.SSEHub
-	store    *tracker.TLEStore
-	observer *tracker.Observer
+	hub   *handlers.SSEHub
+	store *tracker.TLEStore
+	// observer хранится в atomic.Pointer для горячей смены координат из UI
+	// настроек: тиковые горутины читают через Load(), модалка настроек
+	// меняет через SetObserver().
+	observer atomic.Pointer[tracker.Observer]
 
 	positionInterval    time.Duration // Интервал обновления позиций.
 	trackInterval       time.Duration // Интервал обновления наземных трасс.
@@ -225,10 +229,9 @@ func NewSatelliteTrackingService(
 	store *tracker.TLEStore,
 	observer *tracker.Observer,
 ) *SatelliteTrackingService {
-	return &SatelliteTrackingService{
+	s := &SatelliteTrackingService{
 		hub:                 hub,
 		store:               store,
-		observer:            observer,
 		positionInterval:    DefaultTrackingInterval,
 		trackInterval:       DefaultTrackInterval,
 		groupUpdateInterval: DefaultGroupUpdateInterval,
@@ -237,6 +240,23 @@ func NewSatelliteTrackingService(
 		clientState:         NewClientStateStore(24 * time.Hour),
 		forceUpdate:         make(chan struct{}, 1),
 	}
+	s.observer.Store(observer)
+	return s
+}
+
+// Observer возвращает текущую точку наблюдения (потокобезопасно).
+func (s *SatelliteTrackingService) Observer() *tracker.Observer {
+	return s.observer.Load()
+}
+
+// SetObserver атомарно меняет точку наблюдения. Используется hot-reload-ом
+// единого конфига при правке Observer в модалке настроек: тиковые горутины
+// со следующего цикла будут считать AER/трассы относительно новой точки.
+func (s *SatelliteTrackingService) SetObserver(o *tracker.Observer) {
+	if o == nil {
+		return
+	}
+	s.observer.Store(o)
 }
 
 // WithPositionInterval устанавливает интервал обновления позиций.
@@ -854,8 +874,8 @@ func (s *SatelliteTrackingService) computeAndBroadcastState(refreshTracks bool) 
 			// GenerateGroundTrackByLonWindow — устраняет «избыточность» (несколько
 			// витков на карте) и «обрывы» в середине, даёт сплошную линию от края до края.
 			obsLon := 0.0
-			if s.observer != nil {
-				obsLon = s.observer.Lon
+			if obs := s.observer.Load(); obs != nil {
+				obsLon = obs.Lon
 			}
 			track, err := tracker.GenerateGroundTrackByLonWindow(tle, now, obsLon, tracker.DefaultGroundTrackStep)
 			if err != nil {
@@ -917,7 +937,7 @@ func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now ti
 	lla := tracker.ECEFToLLA(ecef)
 
 	// AER (азимут, элевация, дальность от наблюдателя).
-	aer := s.observer.GetAER(eci)
+	aer := s.observer.Load().GetAER(eci)
 
 	// Зона видимости (72 точки контура).
 	zone := tracker.GenerateVisibilityZoneFromLLA(lla, sat.noradID, visibilityZonePoints)

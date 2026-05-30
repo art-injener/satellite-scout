@@ -1,0 +1,144 @@
+{{define "settings-modal"}}
+<div class="settings-modal" id="settings-modal" hidden role="dialog" aria-modal="true" aria-labelledby="settings-modal-title">
+    <div class="settings-modal__backdrop" data-action="cancel-settings"></div>
+    <div class="settings-modal__window" role="document">
+        <header class="settings-modal__header">
+            <h2 class="settings-modal__title" id="settings-modal-title">Настройки</h2>
+            <button type="button" class="settings-modal__close" data-action="cancel-settings" aria-label="Закрыть настройки">×</button>
+        </header>
+        <div class="settings-modal__body">
+            <nav class="settings-modal__tabs" role="tablist" aria-label="Разделы настроек">
+                <button type="button" class="settings-tab" data-tab="server" role="tab">Сервер</button>
+                <button type="button" class="settings-tab" data-tab="ui" role="tab">Внешний вид</button>
+                <button type="button" class="settings-tab is-active" data-tab="observer" role="tab" aria-selected="true">Наблюдатель</button>
+                <button type="button" class="settings-tab" data-tab="tle" role="tab">TLE</button>
+                <button type="button" class="settings-tab" data-tab="satnogs" role="tab">SatNOGS</button>
+                <button type="button" class="settings-tab" data-tab="station" role="tab">Станция</button>
+                <button type="button" class="settings-tab" data-tab="radio-paths" role="tab">Радиотракты</button>
+                <button type="button" class="settings-tab" data-tab="exclusions" role="tab">Исключения</button>
+            </nav>
+            <section class="settings-modal__panel">
+                <article class="settings-pane is-active" data-pane="observer">
+                    <h3 class="settings-pane__title">Точка наблюдения</h3>
+                    <p class="settings-pane__hint">Маркер на карте обновляется сразу при правке. Полный пересчёт пролётов выполнится после сохранения.</p>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Город</span>
+                        <select class="settings-field__input" id="settings-observer-city" aria-label="Выбор города из списка">
+                            <option value="__custom__">— Свои координаты —</option>
+                        </select>
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Название</span>
+                        <input type="text" class="settings-field__input" data-bind="station.observer.name" maxlength="80">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Широта, градусы</span>
+                        <input type="number" class="settings-field__input" data-bind="station.observer.lat" step="0.000001" min="-90" max="90">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Долгота, градусы</span>
+                        <input type="number" class="settings-field__input" data-bind="station.observer.lon" step="0.000001" min="-180" max="180">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Высота, м</span>
+                        <input type="number" class="settings-field__input" data-bind="station.observer.alt_m" step="1" min="0" max="8000">
+                    </label>
+                </article>
+                <article class="settings-pane" data-pane="server">
+                    <h3 class="settings-pane__title">HTTP-сервер</h3>
+                    <p class="settings-pane__hint">Изменение порта применится после перезапуска приложения.</p>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Порт</span>
+                        <input type="text" class="settings-field__input" data-bind="server.port" pattern="[0-9]+">
+                    </label>
+                </article>
+                <article class="settings-pane" data-pane="ui">
+                    <h3 class="settings-pane__title">Тема интерфейса</h3>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Тема</span>
+                        <select class="settings-field__input" data-bind="ui.theme">
+                            <option value="default">Operations Center</option>
+                            <option value="classic">Classic</option>
+                            <option value="stsplus">STSPLUS</option>
+                            <option value="light">Light</option>
+                            <option value="breeze">Breeze</option>
+                            <option value="breeze-light">Breeze Light</option>
+                            <option value="breeze-steel">Breeze Steel</option>
+                            <option value="breeze-dark">Breeze Dark</option>
+                        </select>
+                    </label>
+                    <h3 class="settings-pane__title">Поведение при старте</h3>
+                    <label class="settings-field settings-field--checkbox">
+                        <input type="checkbox" class="settings-field__checkbox" data-bind="ui.show_all_tracks_on_start">
+                        <span class="settings-field__label">Показывать все трассы группы при старте</span>
+                    </label>
+                </article>
+                <article class="settings-pane" data-pane="tle">
+                    <h3 class="settings-pane__title">Источники TLE</h3>
+                    <p class="settings-pane__hint">Каталог кеша и список групп требуют перезапуска.</p>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Каталог кеша</span>
+                        <input type="text" class="settings-field__input" data-bind="tle.cache_dir">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Группы (через запятую)</span>
+                        <input type="text" class="settings-field__input" data-bind="tle.groups" data-bind-type="csv-list">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Интервал обновления</span>
+                        <input type="text" class="settings-field__input" data-bind="tle.update_interval" data-bind-type="duration" placeholder="6h">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Макс. возраст TLE, дней</span>
+                        <input type="number" class="settings-field__input" data-bind="tle.max_tle_age_days" step="0.5" min="0">
+                    </label>
+                </article>
+                <article class="settings-pane" data-pane="satnogs">
+                    <h3 class="settings-pane__title">Интеграция SatNOGS</h3>
+                    <label class="settings-field settings-field--checkbox">
+                        <input type="checkbox" class="settings-field__checkbox" data-bind="satnogs.enabled">
+                        <span class="settings-field__label">Включена (требует перезапуска)</span>
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">TTL кеша</span>
+                        <input type="text" class="settings-field__input" data-bind="satnogs.cache_ttl" data-bind-type="duration" placeholder="24h">
+                    </label>
+                </article>
+                <article class="settings-pane" data-pane="station">
+                    <h3 class="settings-pane__title">Параметры станции</h3>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Название</span>
+                        <input type="text" class="settings-field__input" data-bind="station.name" maxlength="120">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Тип</span>
+                        <select class="settings-field__input" data-bind="station.type">
+                            <option value="auto">Авто</option>
+                            <option value="observation">Обзор</option>
+                            <option value="tracking">Слежение</option>
+                            <option value="hybrid">Гибрид</option>
+                        </select>
+                    </label>
+                </article>
+                <article class="settings-pane" data-pane="radio-paths">
+                    <h3 class="settings-pane__title">Радиотракты</h3>
+                    <p class="settings-pane__hint">Список оборудования станции. Изменения применяются после перезапуска (реинициализация SDR-устройств).</p>
+                    <div class="settings-radio-paths" data-list="station.radio_paths"></div>
+                </article>
+                <article class="settings-pane" data-pane="exclusions">
+                    <h3 class="settings-pane__title">Исключённые спутники (NORAD ID)</h3>
+                    <p class="settings-pane__hint">Спутники из списка не попадают в группу, таблицу пролётов и не доступны для ручного наблюдения.</p>
+                    <div class="settings-exclusions" data-list="exclusions"></div>
+                </article>
+            </section>
+        </div>
+        <footer class="settings-modal__footer">
+            <span class="settings-modal__status" data-role="status" aria-live="polite"></span>
+            <div class="settings-modal__actions">
+                <button type="button" class="settings-btn settings-btn--secondary" data-action="cancel-settings">Отменить</button>
+                <button type="button" class="settings-btn settings-btn--primary" data-action="save-settings" disabled>Сохранить</button>
+            </div>
+        </footer>
+    </div>
+</div>
+{{end}}

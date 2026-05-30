@@ -11,10 +11,10 @@ import (
 
 func TestNewAPIHandler(t *testing.T) {
 	cfg := &config.Config{
-		Port:        "8080",
-		ObserverLat: 47.315813,
-		ObserverLon: 39.788243,
-		ObserverAlt: 70.0,
+		Server: config.ServerConfig{Port: "8080"},
+		Station: config.StationConfig{
+			Observer: config.ObserverConfig{Lat: 47.315813, Lon: 39.788243, AltM: 70.0},
+		},
 	}
 
 	handler := NewAPIHandler(cfg)
@@ -29,7 +29,7 @@ func TestNewAPIHandler(t *testing.T) {
 }
 
 func TestAPIHandler_HealthCheck(t *testing.T) {
-	cfg := &config.Config{Port: "8080"}
+	cfg := &config.Config{Server: config.ServerConfig{Port: "8080"}}
 	handler := NewAPIHandler(cfg)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
@@ -61,10 +61,10 @@ func TestAPIHandler_HealthCheck(t *testing.T) {
 
 func TestAPIHandler_GetConfig(t *testing.T) {
 	cfg := &config.Config{
-		Port:        "8080",
-		ObserverLat: 51.5074,
-		ObserverLon: -0.1278,
-		ObserverAlt: 11.0,
+		Server: config.ServerConfig{Port: "8080"},
+		Station: config.StationConfig{
+			Observer: config.ObserverConfig{Lat: 51.5074, Lon: -0.1278, AltM: 11.0},
+		},
 	}
 	handler := NewAPIHandler(cfg)
 
@@ -90,16 +90,16 @@ func TestAPIHandler_GetConfig(t *testing.T) {
 		t.Fatalf("Failed to decode response: %v", err)
 	}
 
-	if body.Observer.Lat != cfg.ObserverLat {
-		t.Errorf("Expected lat %f, got %f", cfg.ObserverLat, body.Observer.Lat)
+	if body.Observer.Lat != cfg.Station.Observer.Lat {
+		t.Errorf("Expected lat %f, got %f", cfg.Station.Observer.Lat, body.Observer.Lat)
 	}
 
-	if body.Observer.Lon != cfg.ObserverLon {
-		t.Errorf("Expected lon %f, got %f", cfg.ObserverLon, body.Observer.Lon)
+	if body.Observer.Lon != cfg.Station.Observer.Lon {
+		t.Errorf("Expected lon %f, got %f", cfg.Station.Observer.Lon, body.Observer.Lon)
 	}
 
-	if body.Observer.Alt != cfg.ObserverAlt {
-		t.Errorf("Expected alt %f, got %f", cfg.ObserverAlt, body.Observer.Alt)
+	if body.Observer.Alt != cfg.Station.Observer.AltM {
+		t.Errorf("Expected alt %f, got %f", cfg.Station.Observer.AltM, body.Observer.Alt)
 	}
 }
 

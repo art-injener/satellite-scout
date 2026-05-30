@@ -38,13 +38,15 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, HealthResponse{Status: "ok"})
 }
 
-// GetConfig возвращает текущую конфигурацию.
+// GetConfig возвращает текущую конфигурацию (только публичная часть, без
+// секретов и серверных деталей). Полная схема для UI настроек будет добавлена
+// отдельным эндпоинтом в рамках CFG-API-001.
 func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, ConfigResponse{
 		Observer: ObserverConfig{
-			Lat: h.config.ObserverLat,
-			Lon: h.config.ObserverLon,
-			Alt: h.config.ObserverAlt,
+			Lat: h.config.Station.Observer.Lat,
+			Lon: h.config.Station.Observer.Lon,
+			Alt: h.config.Station.Observer.AltM,
 		},
 	})
 }

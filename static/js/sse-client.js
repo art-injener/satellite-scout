@@ -180,6 +180,18 @@ class SSEClient {
             this._handleEvent('client_state_restore', e);
         });
 
+        // Горячее переключение темы по PUT /api/settings → ui.theme.
+        this._eventSource.addEventListener('theme_changed', (e) => {
+            try {
+                const payload = JSON.parse(e.data);
+                if (!payload || !payload.theme) return;
+                if (typeof window.applySatWatchTheme !== 'function') return;
+                window.applySatWatchTheme(payload.theme, true);
+            } catch (err) {
+                console.error('[SSEClient] theme_changed parse error:', err);
+            }
+        });
+
         // Обработка ошибок (потеря соединения и т.д.).
         this._eventSource.onerror = () => {
             this._onError();

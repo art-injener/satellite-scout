@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"sort"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/tracker"
@@ -47,9 +48,13 @@ func (e *cacheEntry) isExpired(ttl time.Duration) bool {
 }
 
 // PassService предоставляет расчёт пролётов спутников с кешированием.
+//
+// observer хранится в atomic.Pointer для безопасной замены координат на лету
+// (hot-reload из единого конфига): счётчики тиков и обработчики читают точку
+// наблюдения через Load(), а UI настроек подменяет её через SetObserver().
 type PassService struct {
 	store    *tracker.TLEStore
-	observer *tracker.Observer
+	observer atomic.Pointer[tracker.Observer]
 	cacheTTL time.Duration
 	excluder Excluder
 
@@ -59,12 +64,30 @@ type PassService struct {
 
 // NewPassService создаёт новый сервис пролётов.
 func NewPassService(store *tracker.TLEStore, observer *tracker.Observer) *PassService {
-	return &PassService{
+	s := &PassService{
 		store:    store,
-		observer: observer,
 		cacheTTL: DefaultPassCacheTTL,
 		cache:    make(map[string]*cacheEntry),
 	}
+	s.observer.Store(observer)
+	return s
+}
+
+// Observer возвращает текущую точку наблюдения. Указатель безопасно читать —
+// внутри значения не изменяются, при hot-reload подменяется весь указатель.
+func (s *PassService) Observer() *tracker.Observer {
+	return s.observer.Load()
+}
+
+// SetObserver атомарно заменяет точку наблюдения и сбрасывает кеш пролётов —
+// все ранее посчитанные значения опираются на старые координаты и недопустимы.
+// nil игнорируется, чтобы случайная сериализация не «потеряла» observer.
+func (s *PassService) SetObserver(o *tracker.Observer) {
+	if o == nil {
+		return
+	}
+	s.observer.Store(o)
+	s.InvalidateCache()
 }
 
 // WithCacheTTL устанавливает время жизни кеша.
@@ -215,7 +238,7 @@ func (s *PassService) computeAllPasses(hours int, minEl float64) ([]*tracker.Pas
 	now := time.Now().UTC()
 	end := now.Add(time.Duration(hours) * time.Hour)
 
-	passes, err := tracker.PredictPassesForAll(s.store, s.observer, now, end, minEl)
+	passes, err := tracker.PredictPassesForAll(s.store, s.observer.Load(), now, end, minEl)
 	if err != nil {
 		return nil, err
 	}
@@ -265,7 +288,7 @@ func (s *PassService) computePasses(group string, hours int, minEl float64) ([]*
 	now := time.Now().UTC()
 	end := now.Add(time.Duration(hours) * time.Hour)
 
-	passes, err := tracker.PredictAllPasses(s.store, s.observer, group, now, end, minEl)
+	passes, err := tracker.PredictAllPasses(s.store, s.observer.Load(), group, now, end, minEl)
 	if err != nil {
 		return nil, err
 	}

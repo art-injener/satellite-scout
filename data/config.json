@@ -1,0 +1,60 @@
+{
+  "_version": 1,
+  "server": {
+    "port": "8080"
+  },
+  "ui": {
+    "theme": "breeze-dark",
+    "show_all_tracks_on_start": false
+  },
+  "tle": {
+    "cache_dir": "data/tle_cache",
+    "groups": [
+      "stations",
+      "amateur",
+      "cubesat"
+    ],
+    "update_interval": 21600000000000,
+    "max_tle_age_days": 7
+  },
+  "satnogs": {
+    "enabled": true,
+    "cache_ttl": 86400000000000
+  },
+  "exclude_norad_file": "data/tle_cache/exclude_norad.txt",
+  "station": {
+    "name": "Станция Ростов-на-Дону",
+    "type": "observation",
+    "observer": {
+      "name": "Ростов-на-Дону",
+      "lat": 47.2357,
+      "lon": 39.7015,
+      "alt_m": 70
+    },
+    "radio_paths": [
+      {
+        "id": 1,
+        "name": "Имитатор SDR",
+        "antenna": {
+          "type": "omnidirectional",
+          "model": "QFH 145 MHz",
+          "band": "VHF",
+          "freq_range_mhz": [
+            144,
+            148
+          ]
+        },
+        "receiver": {
+          "driver": "simulated",
+          "serial": "",
+          "defaults": {
+            "center_freq_hz": 145900000,
+            "gain_db": 42,
+            "bandwidth_hz": 2400000,
+            "sample_rate_hz": 2400000
+          }
+        }
+      }
+    ]
+  }
+}

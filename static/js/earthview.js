@@ -1544,7 +1544,11 @@
      */
     EarthView.prototype._drawObserver = function() {
         const ctx = this.ctx;
-        const p = this.project(this.observer.lon, this.observer.lat);
+        // Если активен live-preview из модалки настроек — рисуем маркер по
+        // временным координатам, не трогая постоянную observer (бэкенд при
+        // этом продолжает считать трассы по старой точке до Save).
+        const src = this._observerPreview || this.observer;
+        const p = this.project(src.lon, src.lat);
         // Отсекаем наблюдателя вне видимой области: на zoom>1, если центр
         // карты сместился (например, во время тестов с искусственным центром).
         if (!this._isInViewport(p, 60)) { return; }
@@ -1616,8 +1620,10 @@
         ctx.fill();
         ctx.stroke();
 
-        // Название точки наблюдения — справа за дугами волн; обводка из темы
-        if (this.observer.name) {
+        // Название точки наблюдения — справа за дугами волн; обводка из темы.
+        // В режиме preview подпись не дублируем — координаты в форме настроек
+        // понятны без неё, а старое имя справа исчезает только после Save.
+        if (!this._observerPreview && this.observer.name) {
             const obsText = this.observer.name.toLocaleUpperCase();
             ctx.font = 'bold 12px sans-serif';
             ctx.textAlign = 'left';
@@ -2089,6 +2095,33 @@
         this.observer = { lon: lon, lat: lat, name: name || '' };
         // Центр карты всегда «прилипает» к наблюдателю.
         this._syncCenterToObserver();
+    };
+
+    /**
+     * Live-preview маркера наблюдателя. Используется модалкой настроек:
+     * пока пользователь правит координаты, маркер двигается на канвасе без
+     * обращения к бэкенду (трассы/зона/группа не пересчитываются до Save).
+     * Координаты сохраняются в `_observerPreview`; реальная `observer`
+     * остаётся прежней до подтверждения.
+     * @param {number} lon Долгота preview, градусы.
+     * @param {number} lat Широта preview, градусы.
+     */
+    EarthView.prototype.setObserverPreview = function(lon, lat) {
+        if (typeof lon !== 'number' || typeof lat !== 'number') return;
+        if (Number.isNaN(lon) || Number.isNaN(lat)) return;
+        this._observerPreview = { lon: lon, lat: lat };
+        this.draw();
+    };
+
+    /**
+     * Сбрасывает live-preview наблюдателя (Cancel модалки настроек).
+     * Маркер возвращается в текущую (сохранённую) позицию.
+     */
+    EarthView.prototype.clearObserverPreview = function() {
+        if (this._observerPreview) {
+            this._observerPreview = null;
+            this.draw();
+        }
     };
 
     // ========== Управление масштабом карты ==========

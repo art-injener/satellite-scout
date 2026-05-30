@@ -113,6 +113,22 @@
             'ind-satellite-line': 'rgba(65, 75, 90, 0.40)',
             'ind-out-of-view':    'rgba(218, 68, 83, 0.50)'
         },
+        // STSPLUS: ретро-палитра, footprint серый (как в оригинале), яркие DOS-акценты
+        'stsplus': {
+            'map-footprint':            'rgba(180, 180, 180, 0.60)',
+            'map-footprint-fill':       'rgba(180, 180, 180, 0.08)',
+            'map-selected-footprint':      'rgba(0, 255, 255, 0.55)',
+            'map-selected-footprint-fill': 'rgba(0, 255, 255, 0.12)',
+            'map-observer-label-stroke': 'rgba(0,0,16,0.92)',
+            'map-observer-label-bg':     'rgba(0,0,16,0.70)',
+            'map-sat-label-stroke':      'rgba(0,0,16,0.90)',
+            'map-sat-label-bg':          'rgba(0,0,16,0.70)',
+            'sky-satellite-glow':   'rgba(0, 255, 255, 0.35)',
+            'sky-satellite-signal': 'rgba(0, 255, 200, 0.5)',
+            'sky-satellite-aura':   'rgba(255, 68, 68, 0.80)',
+            'ind-satellite-line': 'rgba(255, 255, 255, 0.5)',
+            'ind-out-of-view':    'rgba(255, 68, 68, 0.7)'
+        },
         // Светлая тема: значения согласованы с static/css/colors-light.css (themeRgba для canvas)
         'light': {
             'map-footprint':            'rgba(175, 48, 32, 0.88)',

@@ -4,11 +4,18 @@ import (
 	"encoding/json"
 	"log/slog"
 	"net/http"
+	"strconv"
 )
 
 // ExclusionAdder добавляет спутник в список исключений.
+//
+// Список и удаление вынесены в отдельные методы интерфейса, чтобы упростить
+// мокирование в тестах: модалке настроек нужны Add/List/Remove, а основной
+// flow «скрыть спутник через ПКМ» — только Add.
 type ExclusionAdder interface {
 	Add(norad int) error
+	Remove(norad int) error
+	List() []int
 }
 
 // PassCacheInvalidator сбрасывает кеш пролётов после изменения списка исключений,
@@ -79,4 +86,53 @@ func (h *ExclusionsHandler) Add(w http.ResponseWriter, r *http.Request) {
 
 	slog.Info("satellite excluded", slog.Int("norad_id", req.NoradID))
 	writeJSON(w, http.StatusOK, TrackingResponse{Status: "ok", NoradID: req.NoradID})
+}
+
+// ExclusionItem — запись в ответе GET /api/exclusions.
+type ExclusionItem struct {
+	NoradID int `json:"norad_id"`
+}
+
+// ExclusionsListResponse — ответ GET /api/exclusions.
+type ExclusionsListResponse struct {
+	Exclusions []ExclusionItem `json:"exclusions"`
+}
+
+// List обрабатывает GET /api/exclusions — возвращает текущий список исключённых
+// NORAD ID. Используется модалкой настроек («Исключения»).
+func (h *ExclusionsHandler) List(w http.ResponseWriter, r *http.Request) {
+	ids := h.store.List()
+	items := make([]ExclusionItem, 0, len(ids))
+	for _, id := range ids {
+		items = append(items, ExclusionItem{NoradID: id})
+	}
+	writeJSON(w, http.StatusOK, ExclusionsListResponse{Exclusions: items})
+}
+
+// Delete обрабатывает DELETE /api/exclusions/{norad} — снимает исключение и
+// форсирует пересчёт группы, чтобы спутник вернулся в выдачу немедленно.
+func (h *ExclusionsHandler) Delete(w http.ResponseWriter, r *http.Request) {
+	noradStr := r.PathValue("norad")
+	noradID, err := strconv.Atoi(noradStr)
+	if err != nil || noradID <= 0 {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: "norad_id must be positive integer"})
+		return
+	}
+
+	if err := h.store.Remove(noradID); err != nil {
+		slog.Error("failed to remove exclusion",
+			slog.Int("norad_id", noradID), slog.String("error", err.Error()))
+		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to remove exclusion"})
+		return
+	}
+
+	if h.invalidator != nil {
+		h.invalidator.InvalidateCache()
+	}
+	if h.refresher != nil {
+		h.refresher.ForceGroupUpdate()
+	}
+
+	slog.Info("satellite exclusion removed", slog.Int("norad_id", noradID))
+	w.WriteHeader(http.StatusNoContent)
 }

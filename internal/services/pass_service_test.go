@@ -86,7 +86,7 @@ func TestNewPassService(t *testing.T) {
 	if svc.store != store {
 		t.Error("store not set")
 	}
-	if svc.observer != observer {
+	if svc.Observer() != observer {
 		t.Error("observer not set")
 	}
 	if svc.cacheTTL != DefaultPassCacheTTL {

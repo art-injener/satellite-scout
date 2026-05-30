@@ -20,11 +20,15 @@ RUN apk add --no-cache ca-certificates
 
 COPY --from=builder /satellite-scout /usr/local/bin/satellite-scout
 
-RUN mkdir -p /var/cache/satellite-scout/tle_cache
+# Единое место для пользовательских данных: config.json, кеш TLE, список исключений.
+# Содержимое монтируется через volume в docker-compose.yml.
+WORKDIR /app
+RUN mkdir -p /app/data/tle_cache
 
+# Только две переменные окружения, признанных архитектурой долгосрочно. Все
+# прочие настройки живут в /app/data/config.json и редактируются через UI.
 ENV DEV_MODE=false
-ENV PORT=8080
-ENV TLE_CACHE_DIR=/var/cache/satellite-scout/tle_cache
+ENV SS_CONFIG=/app/data/config.json
 
 EXPOSE 8080
 

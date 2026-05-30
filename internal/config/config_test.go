@@ -7,91 +7,186 @@ import (
 	"time"
 )
 
-func TestLoad_DefaultValues(t *testing.T) {
-	// Очищаем переменные окружения
-	_ = os.Unsetenv("PORT")
-	_ = os.Unsetenv("OBSERVER_LAT")
-	_ = os.Unsetenv("OBSERVER_LON")
-	_ = os.Unsetenv("OBSERVER_ALT")
+// TestDefaultConfig_Values проверяет, что DefaultConfig() возвращает корректный
+// набор значений по умолчанию во всех вложенных секциях.
+func TestDefaultConfig_Values(t *testing.T) {
+	cfg := DefaultConfig()
 
-	cfg := Load()
-
-	if cfg.Port != "8080" {
-		t.Errorf("Expected default port 8080, got %s", cfg.Port)
+	if cfg.Version != CurrentVersion {
+		t.Errorf("Version = %d, want %d", cfg.Version, CurrentVersion)
 	}
-
-	if cfg.ObserverLat != 47.315813 {
-		t.Errorf("Expected default lat 47.315813, got %f", cfg.ObserverLat)
+	if cfg.Server.Port != defaultPort {
+		t.Errorf("Server.Port = %q, want %q", cfg.Server.Port, defaultPort)
 	}
-
-	if cfg.ObserverLon != 39.788243 {
-		t.Errorf("Expected default lon 39.788243, got %f", cfg.ObserverLon)
+	if cfg.UI.Theme != defaultTheme {
+		t.Errorf("UI.Theme = %q, want %q", cfg.UI.Theme, defaultTheme)
 	}
-
-	if cfg.ObserverAlt != 70.0 {
-		t.Errorf("Expected default alt 70.0, got %f", cfg.ObserverAlt)
+	if cfg.Station.Observer.Lat != defaultObserverLat {
+		t.Errorf("Observer.Lat = %f, want %f", cfg.Station.Observer.Lat, defaultObserverLat)
+	}
+	if cfg.Station.Observer.Lon != defaultObserverLon {
+		t.Errorf("Observer.Lon = %f, want %f", cfg.Station.Observer.Lon, defaultObserverLon)
+	}
+	if cfg.Station.Observer.AltM != defaultObserverAlt {
+		t.Errorf("Observer.AltM = %f, want %f", cfg.Station.Observer.AltM, defaultObserverAlt)
+	}
+	if !cfg.SatNOGS.Enabled {
+		t.Error("SatNOGS.Enabled = false, want true")
+	}
+	if cfg.SatNOGS.CacheTTL != defaultSatNOGSCacheTTL {
+		t.Errorf("SatNOGS.CacheTTL = %v, want %v", cfg.SatNOGS.CacheTTL, defaultSatNOGSCacheTTL)
+	}
+	if cfg.TLE.CacheDir == "" {
+		t.Error("TLE.CacheDir is empty")
+	}
+	if len(cfg.TLE.Groups) == 0 {
+		t.Error("TLE.Groups is empty")
+	}
+	if cfg.TLE.UpdateInterval <= 0 {
+		t.Errorf("TLE.UpdateInterval = %v, want > 0", cfg.TLE.UpdateInterval)
 	}
 }
 
-func TestLoad_CustomValues(t *testing.T) {
-	// Устанавливаем переменные окружения
+// TestDefaultConfig_HasDefaultRadioPath гарантирует, что при первом запуске
+// существует ровно один виртуальный радиотракт-имитатор. Без него UI имитации
+// и режим работы UX-MODES-001 не имеют точки крепления.
+func TestDefaultConfig_HasDefaultRadioPath(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if got := len(cfg.Station.RadioPaths); got != 1 {
+		t.Fatalf("RadioPaths len = %d, want 1", got)
+	}
+	rp := cfg.Station.RadioPaths[0]
+	if rp.ID != defaultRadioPathID {
+		t.Errorf("RadioPath.ID = %d, want %d", rp.ID, defaultRadioPathID)
+	}
+	if rp.Receiver.Driver != defaultRadioPathReceiverDriver {
+		t.Errorf("Receiver.Driver = %q, want %q", rp.Receiver.Driver, defaultRadioPathReceiverDriver)
+	}
+	if rp.Antenna.FreqRangeMHz != defaultRadioPathFreqRange {
+		t.Errorf("Antenna.FreqRangeMHz = %v, want %v", rp.Antenna.FreqRangeMHz, defaultRadioPathFreqRange)
+	}
+	if rp.Rotator != nil {
+		t.Errorf("Rotator = %+v, want nil for default radio path", rp.Rotator)
+	}
+}
+
+// TestDefaultConfig_ExcludeNoradPath — путь к файлу исключений по умолчанию
+// должен лежать внутри каталога кеша TLE и иметь стандартное имя.
+func TestDefaultConfig_ExcludeNoradPath(t *testing.T) {
+	cfg := DefaultConfig()
+
+	if cfg.ExcludeNoradFile == "" {
+		t.Fatal("ExcludeNoradFile is empty")
+	}
+	if filepath.Base(cfg.ExcludeNoradFile) != defaultExcludeNoradFilename {
+		t.Errorf("ExcludeNoradFile basename = %q, want %q",
+			filepath.Base(cfg.ExcludeNoradFile), defaultExcludeNoradFilename)
+	}
+	if filepath.Dir(cfg.ExcludeNoradFile) != cfg.TLE.CacheDir {
+		t.Errorf("ExcludeNoradFile dir = %q, want %q",
+			filepath.Dir(cfg.ExcludeNoradFile), cfg.TLE.CacheDir)
+	}
+}
+
+// TestConfig_TLEStoreConfig — преобразование TLE-секции в форму, понятную
+// пакету tracker. Гарантирует, что Groups копируются (не shared slice).
+func TestConfig_TLEStoreConfig(t *testing.T) {
+	cfg := DefaultConfig()
+	tle := cfg.TLEStoreConfig()
+
+	if tle.CacheDir != cfg.TLE.CacheDir {
+		t.Errorf("CacheDir mismatch")
+	}
+	if tle.UpdateInterval != cfg.TLE.UpdateInterval {
+		t.Errorf("UpdateInterval mismatch")
+	}
+	if tle.MaxTLEAgeDays != cfg.TLE.MaxTLEAgeDays {
+		t.Errorf("MaxTLEAgeDays mismatch")
+	}
+	if len(tle.Groups) != len(cfg.TLE.Groups) {
+		t.Fatalf("Groups len mismatch")
+	}
+	tle.Groups[0] = "modified"
+	if cfg.TLE.Groups[0] == "modified" {
+		t.Error("TLEStoreConfig() returned shared Groups slice — must be copy")
+	}
+}
+
+func TestLoad_DefaultsWhenEnvUnset(t *testing.T) {
+	clearLegacyEnv()
+
+	cfg := Load()
+
+	if cfg.Server.Port != defaultPort {
+		t.Errorf("Server.Port = %q, want %q", cfg.Server.Port, defaultPort)
+	}
+	if cfg.Station.Observer.Lat != defaultObserverLat {
+		t.Errorf("Observer.Lat = %f, want %f", cfg.Station.Observer.Lat, defaultObserverLat)
+	}
+	if cfg.Station.Observer.Lon != defaultObserverLon {
+		t.Errorf("Observer.Lon = %f, want %f", cfg.Station.Observer.Lon, defaultObserverLon)
+	}
+	if cfg.Station.Observer.AltM != defaultObserverAlt {
+		t.Errorf("Observer.AltM = %f, want %f", cfg.Station.Observer.AltM, defaultObserverAlt)
+	}
+}
+
+func TestLoad_OverridesFromEnv(t *testing.T) {
 	t.Setenv("PORT", "3000")
 	t.Setenv("OBSERVER_LAT", "51.5074")
 	t.Setenv("OBSERVER_LON", "-0.1278")
 	t.Setenv("OBSERVER_ALT", "11.0")
+	t.Setenv("THEME", "classic")
 
 	cfg := Load()
 
-	if cfg.Port != "3000" {
-		t.Errorf("Expected port 3000, got %s", cfg.Port)
+	if cfg.Server.Port != "3000" {
+		t.Errorf("Server.Port = %q, want %q", cfg.Server.Port, "3000")
 	}
-
-	if cfg.ObserverLat != 51.5074 {
-		t.Errorf("Expected lat 51.5074, got %f", cfg.ObserverLat)
+	if cfg.Station.Observer.Lat != 51.5074 {
+		t.Errorf("Observer.Lat = %f, want 51.5074", cfg.Station.Observer.Lat)
 	}
-
-	if cfg.ObserverLon != -0.1278 {
-		t.Errorf("Expected lon -0.1278, got %f", cfg.ObserverLon)
+	if cfg.Station.Observer.Lon != -0.1278 {
+		t.Errorf("Observer.Lon = %f, want -0.1278", cfg.Station.Observer.Lon)
 	}
-
-	if cfg.ObserverAlt != 11.0 {
-		t.Errorf("Expected alt 11.0, got %f", cfg.ObserverAlt)
+	if cfg.Station.Observer.AltM != 11.0 {
+		t.Errorf("Observer.AltM = %f, want 11.0", cfg.Station.Observer.AltM)
+	}
+	if cfg.UI.Theme != "classic" {
+		t.Errorf("UI.Theme = %q, want %q", cfg.UI.Theme, "classic")
 	}
 }
 
-func TestLoad_InvalidFloatValues(t *testing.T) {
-	// Устанавливаем невалидные значения
+func TestLoad_InvalidFloatFallsBackToDefault(t *testing.T) {
 	t.Setenv("OBSERVER_LAT", "invalid")
 	t.Setenv("OBSERVER_LON", "not-a-number")
 
 	cfg := Load()
 
-	// Должны использоваться значения по умолчанию
-	if cfg.ObserverLat != 47.315813 {
-		t.Errorf("Expected default lat 47.315813 for invalid value, got %f", cfg.ObserverLat)
+	if cfg.Station.Observer.Lat != defaultObserverLat {
+		t.Errorf("Observer.Lat = %f, want default %f", cfg.Station.Observer.Lat, defaultObserverLat)
 	}
-
-	if cfg.ObserverLon != 39.788243 {
-		t.Errorf("Expected default lon 39.788243 for invalid value, got %f", cfg.ObserverLon)
+	if cfg.Station.Observer.Lon != defaultObserverLon {
+		t.Errorf("Observer.Lon = %f, want default %f", cfg.Station.Observer.Lon, defaultObserverLon)
 	}
 }
 
 func TestLoad_ExcludeNoradFileDefault(t *testing.T) {
-	t.Setenv("EXCLUDE_NORAD_FILE", "")
-	t.Setenv("TLE_CACHE_DIR", "")
+	clearLegacyEnv()
 
 	cfg := Load()
 
-	// По умолчанию путь к файлу исключений лежит внутри каталога кеша TLE.
 	if cfg.ExcludeNoradFile == "" {
-		t.Fatal("expected non-empty default ExcludeNoradFile")
+		t.Fatal("ExcludeNoradFile is empty")
 	}
-	if filepath.Base(cfg.ExcludeNoradFile) != "exclude_norad.txt" {
-		t.Errorf("expected default filename exclude_norad.txt, got %s", cfg.ExcludeNoradFile)
+	if filepath.Base(cfg.ExcludeNoradFile) != defaultExcludeNoradFilename {
+		t.Errorf("ExcludeNoradFile basename = %q, want %q",
+			filepath.Base(cfg.ExcludeNoradFile), defaultExcludeNoradFilename)
 	}
 	if filepath.Dir(cfg.ExcludeNoradFile) != cfg.TLE.CacheDir {
-		t.Errorf("expected exclude file inside TLE cache dir %s, got %s",
-			cfg.TLE.CacheDir, cfg.ExcludeNoradFile)
+		t.Errorf("ExcludeNoradFile dir = %q, want %q",
+			filepath.Dir(cfg.ExcludeNoradFile), cfg.TLE.CacheDir)
 	}
 }
 
@@ -101,7 +196,22 @@ func TestLoad_ExcludeNoradFileCustom(t *testing.T) {
 	cfg := Load()
 
 	if cfg.ExcludeNoradFile != "/tmp/custom_exclude.txt" {
-		t.Errorf("expected custom exclude file path, got %s", cfg.ExcludeNoradFile)
+		t.Errorf("ExcludeNoradFile = %q, want %q", cfg.ExcludeNoradFile, "/tmp/custom_exclude.txt")
+	}
+}
+
+func TestLoad_TLECacheDirEnvShiftsExcludePath(t *testing.T) {
+	clearLegacyEnv()
+	t.Setenv("TLE_CACHE_DIR", "/var/lib/sat/tle")
+
+	cfg := Load()
+
+	if cfg.TLE.CacheDir != "/var/lib/sat/tle" {
+		t.Errorf("TLE.CacheDir = %q, want %q", cfg.TLE.CacheDir, "/var/lib/sat/tle")
+	}
+	wantExclude := filepath.Join("/var/lib/sat/tle", defaultExcludeNoradFilename)
+	if cfg.ExcludeNoradFile != wantExclude {
+		t.Errorf("ExcludeNoradFile = %q, want %q", cfg.ExcludeNoradFile, wantExclude)
 	}
 }
 
@@ -111,82 +221,30 @@ func TestConfig_Addr(t *testing.T) {
 		port string
 		want string
 	}{
-		{
-			name: "default port",
-			port: "8080",
-			want: ":8080",
-		},
-		{
-			name: "custom port",
-			port: "3000",
-			want: ":3000",
-		},
-		{
-			name: "empty port",
-			port: "",
-			want: ":",
-		},
+		{"default port", "8080", ":8080"},
+		{"custom port", "3000", ":3000"},
+		{"empty port", "", ":"},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			cfg := &Config{Port: tt.port}
+			cfg := &Config{Server: ServerConfig{Port: tt.port}}
 			if got := cfg.Addr(); got != tt.want {
-				t.Errorf("Addr() = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
-func TestGetEnv(t *testing.T) {
-	tests := []struct {
-		name       string
-		key        string
-		envValue   string
-		defaultVal string
-		want       string
-	}{
-		{
-			name:       "existing env var",
-			key:        "TEST_KEY",
-			envValue:   "test_value",
-			defaultVal: "default",
-			want:       "test_value",
-		},
-		{
-			name:       "missing env var",
-			key:        "MISSING_KEY",
-			envValue:   "",
-			defaultVal: "default",
-			want:       "default",
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if tt.envValue != "" {
-				t.Setenv(tt.key, tt.envValue)
-			} else {
-				_ = os.Unsetenv(tt.key)
-			}
-
-			if got := getEnv(tt.key, tt.defaultVal); got != tt.want {
-				t.Errorf("getEnv() = %v, want %v", got, tt.want)
+				t.Errorf("Addr() = %q, want %q", got, tt.want)
 			}
 		})
 	}
 }
 
 func TestLoad_SatNOGSDefaults(t *testing.T) {
-	_ = os.Unsetenv("SATNOGS_ENABLED")
-	_ = os.Unsetenv("SATNOGS_CACHE_TTL")
+	clearLegacyEnv()
 
 	cfg := Load()
-	if !cfg.SatNOGSEnabled {
-		t.Error("SatNOGSEnabled = false, want true (default)")
+	if !cfg.SatNOGS.Enabled {
+		t.Error("SatNOGS.Enabled = false, want true (default)")
 	}
-	if cfg.SatNOGSCacheTTL != 24*time.Hour {
-		t.Errorf("SatNOGSCacheTTL = %v, want 24h (default)", cfg.SatNOGSCacheTTL)
+	if cfg.SatNOGS.CacheTTL != 24*time.Hour {
+		t.Errorf("SatNOGS.CacheTTL = %v, want 24h", cfg.SatNOGS.CacheTTL)
 	}
 }
 
@@ -195,19 +253,19 @@ func TestLoad_SatNOGSCustomValues(t *testing.T) {
 	t.Setenv("SATNOGS_CACHE_TTL", "30m")
 
 	cfg := Load()
-	if cfg.SatNOGSEnabled {
-		t.Error("SatNOGSEnabled = true, want false")
+	if cfg.SatNOGS.Enabled {
+		t.Error("SatNOGS.Enabled = true, want false")
 	}
-	if cfg.SatNOGSCacheTTL != 30*time.Minute {
-		t.Errorf("SatNOGSCacheTTL = %v, want 30m", cfg.SatNOGSCacheTTL)
+	if cfg.SatNOGS.CacheTTL != 30*time.Minute {
+		t.Errorf("SatNOGS.CacheTTL = %v, want 30m", cfg.SatNOGS.CacheTTL)
 	}
 }
 
 func TestLoad_SatNOGSInvalidDurationFallsBackToDefault(t *testing.T) {
 	t.Setenv("SATNOGS_CACHE_TTL", "not-a-duration")
 	cfg := Load()
-	if cfg.SatNOGSCacheTTL != 24*time.Hour {
-		t.Errorf("SatNOGSCacheTTL = %v, want 24h (fallback)", cfg.SatNOGSCacheTTL)
+	if cfg.SatNOGS.CacheTTL != 24*time.Hour {
+		t.Errorf("SatNOGS.CacheTTL = %v, want 24h (fallback)", cfg.SatNOGS.CacheTTL)
 	}
 }
 
@@ -247,34 +305,10 @@ func TestGetEnvFloat(t *testing.T) {
 		defaultVal float64
 		want       float64
 	}{
-		{
-			name:       "valid float",
-			key:        "TEST_FLOAT",
-			envValue:   "123.456",
-			defaultVal: 0.0,
-			want:       123.456,
-		},
-		{
-			name:       "invalid float",
-			key:        "TEST_FLOAT",
-			envValue:   "not-a-float",
-			defaultVal: 99.9,
-			want:       99.9,
-		},
-		{
-			name:       "missing env var",
-			key:        "MISSING_FLOAT",
-			envValue:   "",
-			defaultVal: 42.0,
-			want:       42.0,
-		},
-		{
-			name:       "negative float",
-			key:        "TEST_FLOAT",
-			envValue:   "-12.34",
-			defaultVal: 0.0,
-			want:       -12.34,
-		},
+		{"valid float", "TEST_FLOAT", "123.456", 0.0, 123.456},
+		{"invalid float", "TEST_FLOAT", "not-a-float", 99.9, 99.9},
+		{"missing env var", "MISSING_FLOAT", "", 42.0, 42.0},
+		{"negative float", "TEST_FLOAT", "-12.34", 0.0, -12.34},
 	}
 
 	for _, tt := range tests {
@@ -289,5 +323,19 @@ func TestGetEnvFloat(t *testing.T) {
 				t.Errorf("getEnvFloat() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// clearLegacyEnv очищает все legacy-переменные окружения, чтобы тесты дефолтов
+// не зависели от среды разработчика.
+func clearLegacyEnv() {
+	for _, k := range []string{
+		"PORT", "DEV_MODE",
+		"OBSERVER_LAT", "OBSERVER_LON", "OBSERVER_ALT",
+		"TLE_CACHE_DIR", "THEME",
+		"SATNOGS_ENABLED", "SATNOGS_CACHE_TTL",
+		"EXCLUDE_NORAD_FILE",
+	} {
+		_ = os.Unsetenv(k)
 	}
 }

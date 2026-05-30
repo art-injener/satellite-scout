@@ -10,6 +10,7 @@
     const THEMES = [
         { id: 'default', label: 'Operations Center' },
         { id: 'classic', label: 'Classic' },
+        { id: 'stsplus', label: 'STSPLUS' },
         { id: 'light', label: 'Светлая' },
         { id: 'breeze-light', label: 'Breeze' },
         { id: 'breeze', label: 'Breeze (серый)' },

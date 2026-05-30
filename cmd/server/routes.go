@@ -15,6 +15,7 @@ import (
 func setupRoutes(
 	mux *http.ServeMux,
 	cfg *config.Config,
+	configStore *config.Store,
 	sseHub *handlers.SSEHub,
 	trackingService handlers.TrackingServiceInterface,
 	satnogsService *satnogs.Service,
@@ -25,7 +26,7 @@ func setupRoutes(
 	staticFS fs.FS,
 ) {
 	// Инициализация обработчиков.
-	pageHandler, err := handlers.NewPageHandler(templatesFS, cfg.DevMode, cfg.Theme)
+	pageHandler, err := handlers.NewPageHandler(templatesFS, cfg.DevMode, cfg.UI.Theme, configStore)
 	if err != nil {
 		slog.Error("failed to initialize page handler", "error", err)
 		panic("page handler init failed: " + err.Error())
@@ -43,17 +44,33 @@ func setupRoutes(
 	mux.HandleFunc("GET /receiver", pageHandler.Receiver)
 	mux.HandleFunc("GET /simulation", pageHandler.Simulation)
 
+	// Deep-link «Настройки»: единый URL для шеринга и автоматической отправки
+	// пользователя в модалку настроек на актуальной странице (без отдельной
+	// HTML-страницы — модалка живёт в base.html).
+	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/tracking?settings=open", http.StatusFound)
+	})
+
 	// API маршруты.
 	mux.HandleFunc("GET /api/health", apiHandler.HealthCheck)
 	mux.HandleFunc("GET /api/config", apiHandler.GetConfig)
+
+	// Полные настройки приложения (модальное окно «Настройки»).
+	settingsHandler := handlers.NewSettingsHandler(configStore)
+	mux.HandleFunc("GET /api/settings", settingsHandler.Get)
+	mux.HandleFunc("PUT /api/settings", settingsHandler.Update)
 
 	// API управления наблюдением (tracking).
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
 
 	// API списка исключений: скрыть спутник из группы и списка пролётов.
+	// GET/DELETE используются модалкой «Настройки» для просмотра и снятия
+	// записей; POST — старый flow «скрыть через ПКМ».
 	exclusionsHandler := handlers.NewExclusionsHandler(excludeStore, passCache, groupRefresher)
 	mux.HandleFunc("POST /api/exclusions", exclusionsHandler.Add)
+	mux.HandleFunc("GET /api/exclusions", exclusionsHandler.List)
+	mux.HandleFunc("DELETE /api/exclusions/{norad}", exclusionsHandler.Delete)
 
 	// API SatNOGS (полный список передатчиков по NORAD ID — для будущего dropdown).
 	if satnogsService != nil {

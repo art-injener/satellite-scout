@@ -1,0 +1,358 @@
+/* ========================================================================
+   Модальное окно «Настройки»
+
+   Открывается двумя путями:
+     1) шестерёнка в footer (`.station-footer__settings`),
+     2) deep-link `/settings` — backend редиректит на текущую страницу с
+        параметром `?settings=open`, JS открывает модалку на загрузке.
+
+   Фон под окном — адаптивный: при табах «Наблюдатель» и «Внешний вид» карта
+   и интерфейс читаемы (только dim, без blur); на остальных — blur.
+   ======================================================================== */
+
+.station-footer__settings {
+    background: transparent;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.18));
+    border-radius: 4px;
+    color: var(--text-label, #d8dde3);
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    width: 28px;
+    margin-left: 8px;
+    padding: 0;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.station-footer__settings:hover,
+.station-footer__settings:focus-visible {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #ffffff);
+    border-color: var(--accent-primary, #6aa6ff);
+    outline: none;
+}
+.station-footer__settings svg {
+    width: 18px;
+    height: 18px;
+    pointer-events: none;
+}
+
+.settings-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+/* Скрыто до явного open() — селектор должен идти ПОСЛЕ базового, чтобы при
+   равной специфичности побеждать display:flex (классическая ошибка каскада). */
+.settings-modal[hidden] {
+    display: none;
+}
+.settings-modal__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    transition: backdrop-filter 0.18s ease-out;
+}
+.settings-modal[data-tab="server"] .settings-modal__backdrop,
+.settings-modal[data-tab="tle"] .settings-modal__backdrop,
+.settings-modal[data-tab="satnogs"] .settings-modal__backdrop,
+.settings-modal[data-tab="station"] .settings-modal__backdrop,
+.settings-modal[data-tab="radio-paths"] .settings-modal__backdrop,
+.settings-modal[data-tab="exclusions"] .settings-modal__backdrop {
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+/* «Наблюдатель» — без blur: видна карта для live-preview маркера.
+   «Внешний вид» — без blur: виден интерфейс и карта при выборе темы. */
+.settings-modal[data-tab="observer"] .settings-modal__backdrop,
+.settings-modal[data-tab="ui"] .settings-modal__backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
+
+.settings-modal__window {
+    position: relative;
+    background: var(--bg-primary, #1b232c);
+    color: var(--text-primary, #e6ebf2);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 6px;
+    width: min(80vw, 1200px);
+    height: min(80vh, 800px);
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.settings-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    background: var(--bg-secondary, #1f2832);
+}
+.settings-modal__title {
+    margin: 0;
+    font-size: 16px;
+    color: var(--text-heading, #ffffff);
+    font-weight: 600;
+    letter-spacing: 0.4px;
+}
+.settings-modal__close {
+    background: transparent;
+    border: none;
+    color: var(--text-label, #d8dde3);
+    cursor: pointer;
+    font-size: 22px;
+    line-height: 1;
+    padding: 4px 8px;
+    border-radius: 4px;
+}
+.settings-modal__close:hover,
+.settings-modal__close:focus-visible {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #ffffff);
+    outline: none;
+}
+
+.settings-modal__body {
+    display: grid;
+    grid-template-columns: 220px 1fr;
+    min-height: 0;
+}
+.settings-modal__tabs {
+    display: flex;
+    flex-direction: column;
+    border-right: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    background: var(--bg-secondary, #1f2832);
+    padding: 10px 0;
+    overflow-y: auto;
+}
+.settings-tab {
+    background: transparent;
+    border: none;
+    text-align: left;
+    color: var(--text-label, #d8dde3);
+    cursor: pointer;
+    padding: 10px 18px;
+    font-size: 13px;
+    border-left: 2px solid transparent;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.settings-tab:hover,
+.settings-tab:focus-visible {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #ffffff);
+    outline: none;
+}
+.settings-tab.is-active {
+    background: var(--bg-tertiary, rgba(255, 255, 255, 0.04));
+    color: var(--text-heading, #ffffff);
+    border-left-color: var(--accent-primary, #6aa6ff);
+}
+
+.settings-modal__panel {
+    overflow-y: auto;
+    padding: 22px 28px;
+}
+.settings-pane {
+    display: none;
+}
+.settings-pane.is-active {
+    display: block;
+}
+.settings-pane__title {
+    margin: 0 0 6px;
+    font-size: 15px;
+    color: var(--text-heading, #ffffff);
+    font-weight: 600;
+}
+.settings-pane__hint {
+    margin: 0 0 18px;
+    color: var(--text-muted, #98a2b0);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    margin-bottom: 14px;
+    max-width: 480px;
+}
+.settings-field--checkbox {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+}
+.settings-field__label {
+    font-size: 12px;
+    color: var(--text-label, #d8dde3);
+    margin-bottom: 4px;
+}
+.settings-field__input {
+    background: var(--bg-secondary, #15202a);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.16));
+    color: var(--text-primary, #e6ebf2);
+    border-radius: 4px;
+    padding: 8px 10px;
+    font-size: 13px;
+    line-height: 1.4;
+    font-family: inherit;
+}
+.settings-field__input:focus {
+    border-color: var(--border-focus, var(--accent-primary, #6aa6ff));
+    outline: none;
+    box-shadow: 0 0 0 2px rgba(106, 166, 255, 0.18);
+}
+.settings-field__input.is-invalid {
+    border-color: var(--accent-danger, #d94c4c);
+    box-shadow: 0 0 0 2px rgba(217, 76, 76, 0.18);
+}
+/* Поле заблокировано — выбран город из списка. Чтобы редактировать,
+   нужно сменить селектор на «— Свои координаты —». */
+.settings-field__input.is-locked,
+.settings-field__input[readonly] {
+    background: var(--bg-secondary-disabled, rgba(255, 255, 255, 0.04));
+    color: var(--text-secondary, #94a4b8);
+    cursor: not-allowed;
+}
+.settings-field__error {
+    color: var(--accent-danger, #ff7676);
+    font-size: 11px;
+    margin-top: 4px;
+}
+
+.settings-radio-paths,
+.settings-exclusions {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+.settings-radio-path {
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 4px;
+    padding: 12px 14px;
+    background: var(--bg-secondary, #1f2832);
+}
+.settings-radio-path__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+    color: var(--text-heading, #ffffff);
+}
+.settings-radio-path__remove {
+    background: transparent;
+    border: 1px solid var(--accent-danger, #d94c4c);
+    color: var(--accent-danger, #ff7676);
+    border-radius: 4px;
+    padding: 4px 10px;
+    font-size: 12px;
+    cursor: pointer;
+}
+.settings-radio-path__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px 12px;
+}
+.settings-add-btn {
+    align-self: flex-start;
+    background: transparent;
+    border: 1px dashed var(--border-color, rgba(255, 255, 255, 0.24));
+    color: var(--text-label, #d8dde3);
+    border-radius: 4px;
+    padding: 8px 14px;
+    cursor: pointer;
+}
+.settings-add-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+    color: var(--text-primary, #ffffff);
+}
+
+.settings-exclusions__row {
+    display: grid;
+    grid-template-columns: 100px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 6px 8px;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    font-size: 13px;
+}
+.settings-exclusions__id {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    color: var(--text-heading, #ffffff);
+}
+.settings-exclusions__remove {
+    background: transparent;
+    border: none;
+    color: var(--accent-danger, #ff7676);
+    cursor: pointer;
+    font-size: 12px;
+}
+.settings-exclusions__empty {
+    color: var(--text-muted, #98a2b0);
+    font-size: 12px;
+    padding: 16px 0;
+}
+
+.settings-modal__footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 20px;
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+    background: var(--bg-secondary, #1f2832);
+}
+.settings-modal__status {
+    font-size: 12px;
+    color: var(--text-muted, #98a2b0);
+    min-height: 16px;
+}
+.settings-modal__status.is-error {
+    color: var(--accent-danger, #ff7676);
+}
+.settings-modal__status.is-success {
+    color: var(--accent-success, #6cd97a);
+}
+.settings-modal__actions {
+    display: flex;
+    gap: 8px;
+}
+.settings-btn {
+    padding: 8px 18px;
+    border-radius: 4px;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+}
+.settings-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+.settings-btn--secondary {
+    background: transparent;
+    color: var(--text-label, #d8dde3);
+    border-color: var(--border-color, rgba(255, 255, 255, 0.18));
+}
+.settings-btn--secondary:hover:not(:disabled) {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary, #ffffff);
+}
+.settings-btn--primary {
+    background: var(--accent-primary, #6aa6ff);
+    color: var(--btn-primary-text, #0d141c);
+    border-color: var(--accent-primary, #6aa6ff);
+    font-weight: 600;
+}
+.settings-btn--primary:hover:not(:disabled) {
+    background: var(--btn-primary-hover-bg, #87b8ff);
+    border-color: var(--btn-primary-hover-bg, #87b8ff);
+}

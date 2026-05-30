@@ -183,6 +183,17 @@
         console.log('[app.js] SSEClient доступен:', typeof window.SSEClient);
 
         window._stateManager = new window.SatelliteStateManager();
+
+        // Стартовое состояние «глазика» master-toggle берётся из config (UI →
+        // ShowAllTracksOnStart) и прокидывается сервером в data-атрибут <body>.
+        // Применяется до первого SSE-события, чтобы исключить мерцание.
+        const showAllAttr = document.body && document.body.dataset
+            ? document.body.dataset.showAllTracksOnStart
+            : null;
+        if (showAllAttr === 'true' && typeof window._stateManager.setShowAllMode === 'function') {
+            window._stateManager.setShowAllMode(true);
+        }
+
         window._sseClient = new window.SSEClient(window._stateManager);
 
         window._sseClient.onStatusChange(function(evt) {

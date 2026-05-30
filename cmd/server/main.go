@@ -30,13 +30,21 @@ func main() {
 		}))
 	slog.SetDefault(logger)
 
-	// Загрузка конфигурации.
-	cfg := config.Load()
+	// Загрузка конфигурации: открываем data/config.json (или путь из SS_CONFIG);
+	// при первом запуске собираем конфиг из устаревших ENV и записываем файл —
+	// дальше единственным источником правды становится файл.
+	configStore, err := config.Bootstrap(config.ResolveConfigPath())
+	if err != nil {
+		slog.Error("failed to bootstrap configuration", "error", err)
+		os.Exit(1)
+	}
+	cfg := configStore.Get()
 	slog.Info("configuration loaded",
-		"port", cfg.Port,
+		"path", configStore.Path(),
+		"port", cfg.Server.Port,
 		"dev_mode", cfg.DevMode,
-		"observer_lat", cfg.ObserverLat,
-		"observer_lon", cfg.ObserverLon,
+		"observer_lat", cfg.Station.Observer.Lat,
+		"observer_lon", cfg.Station.Observer.Lon,
 	)
 
 	// Выбор источника шаблонов и статики.
@@ -46,8 +54,9 @@ func main() {
 	svcCtx, svcCancel := context.WithCancel(context.Background())
 	defer svcCancel()
 
-	// TLEStore — хранилище TLE с автообновлением.
-	tleStore := tracker.NewTLEStore(cfg.TLE)
+	// TLEStore — хранилище TLE с автообновлением. Конфиг tracker'а собирается
+	// из единого config.Config через адаптер TLEStoreConfig().
+	tleStore := tracker.NewTLEStore(cfg.TLEStoreConfig())
 	if err := tleStore.Start(svcCtx); err != nil {
 		slog.Error("failed to start TLE store", "error", err)
 	}
@@ -56,8 +65,12 @@ func main() {
 	sseHub := handlers.NewSSEHub()
 	go sseHub.Run(svcCtx)
 
-	// Наблюдатель (ObserverAlt в метрах → км).
-	observer := tracker.NewObserver(cfg.ObserverLat, cfg.ObserverLon, cfg.ObserverAlt/1000.0)
+	// Наблюдатель (Observer.AltM в метрах → км).
+	observer := tracker.NewObserver(
+		cfg.Station.Observer.Lat,
+		cfg.Station.Observer.Lon,
+		cfg.Station.Observer.AltM/1000.0,
+	)
 
 	// Сервис отслеживания спутников — позиции (1/сек), трассы (1/30 сек), авто-трекинг (1/10 сек).
 	trackingService := services.NewSatelliteTrackingService(sseHub, tleStore, observer)
@@ -96,25 +109,53 @@ func main() {
 	trackingService.WithExcluder(excludeStore)
 
 	// SatNOGS — частоты и модуляция передатчиков спутников. Опционально:
-	// при cfg.SatNOGSEnabled=false сервис не создаётся, поля freq_mhz/modulation в SSE пустые.
+	// при satnogs.enabled=false сервис не создаётся, поля freq_mhz/modulation в SSE пустые.
 	var satnogsService *satnogs.Service
-	if cfg.SatNOGSEnabled {
+	if cfg.SatNOGS.Enabled {
 		satnogsClient := satnogs.NewClient()
 		satnogsService = satnogs.NewService(satnogsClient).
-			WithCacheTTL(cfg.SatNOGSCacheTTL)
+			WithCacheTTL(cfg.SatNOGS.CacheTTL)
 		go satnogsService.Run(svcCtx)
 		trackingService.SetTransmitterProvider(newSatnogsTransmitterAdapter(satnogsService))
-		slog.Info("satnogs integration enabled", "cache_ttl", cfg.SatNOGSCacheTTL)
+		slog.Info("satnogs integration enabled", "cache_ttl", cfg.SatNOGS.CacheTTL)
 	} else {
-		slog.Info("satnogs integration disabled (SATNOGS_ENABLED=false)")
+		slog.Info("satnogs integration disabled (config: satnogs.enabled=false)")
 	}
 
 	// Запускаем сервис отслеживания.
 	go trackingService.Run(svcCtx)
 
+	// Hot-reload подписка: при правке наблюдателя/темы через UI настроек
+	// обновляем сервисы без перезапуска процесса.
+	configStore.Subscribe(func(old, n *config.Config) {
+		if old.Station.Observer != n.Station.Observer {
+			newObs := tracker.NewObserver(
+				n.Station.Observer.Lat,
+				n.Station.Observer.Lon,
+				n.Station.Observer.AltM/1000.0,
+			)
+			passService.SetObserver(newObs)
+			trackingService.SetObserver(newObs)
+			passService.InvalidateCache()
+			trackingService.ForceGroupUpdate()
+			slog.Info("observer hot-reloaded",
+				slog.Float64("lat", n.Station.Observer.Lat),
+				slog.Float64("lon", n.Station.Observer.Lon),
+				slog.Float64("alt_m", n.Station.Observer.AltM),
+			)
+		}
+		if old.UI.Theme != n.UI.Theme {
+			payload, err := json.Marshal(map[string]string{"theme": n.UI.Theme})
+			if err == nil {
+				sseHub.Broadcast("theme_changed", payload)
+				slog.Info("theme hot-reloaded", slog.String("theme", n.UI.Theme))
+			}
+		}
+	})
+
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, sseHub, trackingService, satnogsService, excludeStore, passService, trackingService, templatesFS, staticFS)
+	setupRoutes(mux, cfg, configStore, sseHub, trackingService, satnogsService, excludeStore, passService, trackingService, templatesFS, staticFS)
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.
