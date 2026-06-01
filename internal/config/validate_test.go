@@ -49,9 +49,10 @@ func TestValidate_ObserverAltOutOfRange(t *testing.T) {
 
 func TestValidate_DuplicateRadioPathID(t *testing.T) {
 	cfg := DefaultConfig()
-	dup := cfg.Station.RadioPaths[0]
+	rp := sampleRadioPath(1)
+	dup := rp
 	dup.Name = "Duplicate"
-	cfg.Station.RadioPaths = append(cfg.Station.RadioPaths, dup)
+	cfg.Station.RadioPaths = []RadioPath{rp, dup}
 
 	verrs := mustValidationErrors(t, cfg.Validate())
 	if !hasField(verrs, "station.radio_paths[1].id") {
@@ -61,7 +62,9 @@ func TestValidate_DuplicateRadioPathID(t *testing.T) {
 
 func TestValidate_InvalidFreqRange(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Station.RadioPaths[0].Antenna.FreqRangeMHz = [2]float64{500, 100}
+	rp := sampleRadioPath(1)
+	rp.Antenna.FreqRangeMHz = [2]float64{500, 100}
+	cfg.Station.RadioPaths = []RadioPath{rp}
 
 	verrs := mustValidationErrors(t, cfg.Validate())
 	if !hasField(verrs, "station.radio_paths[0].antenna.freq_range_mhz") {
@@ -69,13 +72,40 @@ func TestValidate_InvalidFreqRange(t *testing.T) {
 	}
 }
 
-func TestValidate_EmptyRadioPaths(t *testing.T) {
+// TestValidate_EmptyRadioPathsAllowed — дефолтная конфигурация ("basic"):
+// пустой список радиотрактов считается валидным, потому что пользователь без
+// SDR-оборудования должен иметь возможность работать только с трекером.
+func TestValidate_EmptyRadioPathsAllowed(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.Station.RadioPaths = nil
+	cfg.Station.RadioPaths = []RadioPath{}
 
-	verrs := mustValidationErrors(t, cfg.Validate())
-	if !hasField(verrs, "station.radio_paths") {
-		t.Errorf("expected radio_paths error, got %v", verrs)
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("empty RadioPaths must be valid for basic station, got: %v", err)
+	}
+}
+
+// sampleRadioPath — фабрика валидного радиотракта для тестов, в которых нужно
+// сконструировать минимальный тракт с заданным id (после ухода от обязательного
+// дефолтного радиотракта в DefaultConfig).
+func sampleRadioPath(id int) RadioPath {
+	return RadioPath{
+		ID:   id,
+		Name: "Test Radio Path",
+		Antenna: AntennaConfig{
+			Type:         "omnidirectional",
+			Model:        "QFH 145 MHz",
+			Band:         "VHF",
+			FreqRangeMHz: [2]float64{144.0, 148.0},
+		},
+		Receiver: ReceiverConfig{
+			Driver: "simulated",
+			Defaults: ReceiverDefaults{
+				CenterFreqHz: 145_900_000,
+				GainDB:       42,
+				BandwidthHz:  2_400_000,
+				SampleRateHz: 2_400_000,
+			},
+		},
 	}
 }
 

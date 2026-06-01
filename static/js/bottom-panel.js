@@ -1,4 +1,4 @@
-// Нижняя панель: вкладки «Обзор» / «Сопровождение» / «ТМИ».
+// Нижняя панель: вкладки «Обзор» / «Сопровождение».
 // Компоненты: SpectrumDataSource, WaterfallView, FFTSpectrumView, BottomPanel.
 
 (function() {
@@ -609,9 +609,9 @@
     // ════════════════════════════════════════════════════════════════════════
 
     // Миграция старых ключей вкладок (UX-BOTTOM-RENAME-001)
-    const LEGACY_BOTTOM_TAB = { spectrum: 'overview', antenna: 'follow' };
+    const LEGACY_BOTTOM_TAB = { spectrum: 'overview', antenna: 'follow', tmi: 'overview' };
 
-    const VALID_BOTTOM_TABS = ['overview', 'follow', 'tmi', 'plan'];
+    const VALID_BOTTOM_TABS = ['overview', 'follow', 'plan'];
 
     function migrateBottomTabFromStorage() {
         const raw = localStorage.getItem('ux.bottomTab');
@@ -627,9 +627,9 @@
         return next;
     }
 
-    const TAB_LABELS = { follow: 'Сопровождение', overview: 'Обзор', tmi: 'ТМИ', plan: 'План сеансов' };
+    const TAB_LABELS = { follow: 'Сопровождение', overview: 'Обзор', plan: 'План сеансов' };
     /** Вертикальная колонка в полоске РТН (по одному знаку; follow — сокращение «Сопровожд.») */
-    const TAB_LABELS_SIDE = { follow: 'Сопр-ние', overview: 'ОБЗОР', tmi: 'ТМИ', plan: 'ПЛАН' };
+    const TAB_LABELS_SIDE = { follow: 'Сопр-ние', overview: 'ОБЗОР', plan: 'ПЛАН' };
 
     // Центральный bin и ширина среза для узкополосного водопада вкладки «Сопровождение»
     const FOLLOW_CENTER_BIN = 256;
@@ -660,7 +660,6 @@
         }
         this._initTabs();
         this._initSDRForm();
-        this._initTMIExport();
         this._initSpectrum();
         this._switchTab(this._currentTab, false);
         this._startSpectrumTimer();
@@ -679,7 +678,7 @@
     // Кнопки режима РТН: полоска слева от тела нижней панели
     const BOTTOM_TAB_BTN_SELECTOR = '.bottom-panel__tab-btn';
 
-    // Привязываем клики (Обзор / Сопровождение / ТМИ)
+    // Привязываем клики (Обзор / Сопровождение)
     BottomPanel.prototype._initTabs = function() {
         const self = this;
         const tabs = document.querySelectorAll(BOTTOM_TAB_BTN_SELECTOR);
@@ -852,7 +851,7 @@
 
     /**
      * Переключить вкладку программно.
-     * @param {string} name — 'overview' | 'follow' | 'tmi' | 'plan'
+     * @param {string} name — 'overview' | 'follow' | 'plan'
      * @param {boolean} [persist=false] — true при клике пользователя (localStorage)
      */
     BottomPanel.prototype.showTab = function(name, persist) {
@@ -963,23 +962,6 @@
                     mod:  document.getElementById('sdr-mod') && document.getElementById('sdr-mod').value,
                     baud: document.getElementById('sdr-baud') && document.getElementById('sdr-baud').value
                 });
-            });
-        }
-    };
-
-    // ── Заглушки экспорта ТМИ ──
-
-    BottomPanel.prototype._initTMIExport = function() {
-        const csvBtn = document.getElementById('tmi-export-csv');
-        const jsonBtn = document.getElementById('tmi-export-json');
-        if (csvBtn) {
-            csvBtn.addEventListener('click', function() {
-                console.log('[BottomPanel] TODO: export TMI as CSV');
-            });
-        }
-        if (jsonBtn) {
-            jsonBtn.addEventListener('click', function() {
-                console.log('[BottomPanel] TODO: export TMI as JSON');
             });
         }
     };

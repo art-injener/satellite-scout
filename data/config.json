@@ -4,7 +4,7 @@
     "port": "8080"
   },
   "ui": {
-    "theme": "breeze-dark",
+    "theme": "classic",
     "show_all_tracks_on_start": false
   },
   "tle": {
@@ -23,8 +23,7 @@
   },
   "exclude_norad_file": "data/tle_cache/exclude_norad.txt",
   "station": {
-    "name": "Станция Ростов-на-Дону",
-    "type": "observation",
+    "name": "Домашняя станция",
     "observer": {
       "name": "Ростов-на-Дону",
       "lat": 47.2357,
@@ -34,25 +33,19 @@
     "radio_paths": [
       {
         "id": 1,
-        "name": "Имитатор SDR",
+        "name": "VHF Имитатор",
         "antenna": {
           "type": "omnidirectional",
-          "model": "QFH 145 MHz",
           "band": "VHF",
-          "freq_range_mhz": [
-            144,
-            148
-          ]
+          "gain_dbi": 3.0,
+          "simulated": true
         },
         "receiver": {
-          "driver": "simulated",
-          "serial": "",
-          "defaults": {
-            "center_freq_hz": 145900000,
-            "gain_db": 42,
-            "bandwidth_hz": 2400000,
-            "sample_rate_hz": 2400000
-          }
+          "type": "rtlsdr",
+          "device_id": "sim-0",
+          "sample_rate": 2048000,
+          "ppm_correction": 0,
+          "simulated": true
         }
       }
     ]

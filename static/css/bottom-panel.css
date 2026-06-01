@@ -1,4 +1,4 @@
-/* ===== Нижняя панель: вкладки Обзор / Сопровождение / ТМИ / План ===== */
+/* ===== Нижняя панель: вкладки Обзор / Сопровождение / План ===== */
 
 /* Вкладка «План»: полная таблица пролётов со скроллом */
 #bp-pane-plan {
@@ -474,58 +474,4 @@
 
 .bp-stat-val--yes {
     color: var(--accent-primary);
-}
-
-/* ===== Вкладка: ТМИ ===== */
-
-#bp-pane-tmi {
-    flex-direction: column;
-    padding: 0;
-}
-
-.bp-tmi-table-wrap {
-    flex: 1;
-    overflow-y: auto;
-    overflow-x: auto;
-    min-height: 0;
-}
-
-.bp-tmi-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-family: var(--font-mono);
-    font-size: 11px;
-}
-
-.bp-tmi-table thead {
-    position: sticky;
-    top: 0;
-    z-index: 2;
-}
-
-.bp-tmi-table th {
-    padding: 4px 8px;
-    font-size: 9px;
-    font-weight: 600;
-    color: var(--panel-header-title, var(--text-muted));
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    background: var(--bg-tertiary);
-    border-bottom: 1px solid var(--border-color);
-    text-align: left;
-    white-space: nowrap;
-}
-
-.bp-tmi-table td {
-    padding: 3px 8px;
-    color: var(--text-secondary);
-    border-bottom: 1px solid var(--bp-stat-row-border, rgba(42, 52, 68, 0.3));
-    white-space: nowrap;
-}
-
-.bp-tmi-empty {
-    text-align: center !important;
-    color: var(--text-muted) !important;
-    padding: 20px 8px !important;
-    font-style: italic;
 }

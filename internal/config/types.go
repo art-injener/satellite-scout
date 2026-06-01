@@ -93,20 +93,65 @@ type SatNOGSConfig struct {
 // StationConfig — описание наземной станции по ADR-004 §2.2.
 //
 // Содержит координаты наблюдателя и список радиотрактов (антенна + приёмник +
-// опционально поворотка). При отсутствии оборудования генерируется один
-// дефолтный виртуальный тракт SimulatedSDR.
+// опционально поворотка). Тип станции явно не задаётся пользователем — он
+// вычисляется методом StationType() по составу RadioPaths. При первом запуске
+// без оборудования RadioPaths пустой — это конфигурация "basic" (только
+// отслеживание спутников на карте, без работы с радиотрактами).
 type StationConfig struct {
 	// Name — отображаемое имя станции ("Станция Ростов-на-Дону").
 	Name string `json:"name"`
 
-	// Type — тип станции: "auto", "observation", "tracking", "hybrid".
-	// При "auto" определяется автоматически по составу RadioPaths.
-	Type string `json:"type"`
-
 	Observer ObserverConfig `json:"observer"`
 
-	// RadioPaths — список радиотрактов станции. Минимум один тракт.
+	// RadioPaths — список радиотрактов станции. Может быть пустым:
+	// конфигурация "basic" — пользователь только смотрит карту и план сеансов,
+	// без SDR-приёмников и поворотных платформ.
 	RadioPaths []RadioPath `json:"radio_paths"`
+}
+
+// Возможные значения, возвращаемые StationType().
+const (
+	// StationTypeBasic — станция без радиотрактов: только трекер на карте.
+	// Mode-bar в UI скрыт, режимы Обзор/Ручной/Имитация недоступны.
+	StationTypeBasic = "basic"
+
+	// StationTypeObservation — все тракты без поворотной платформы.
+	// Работа в режимах Обзор и Имитация; кнопка "Сопровождать" заблокирована.
+	StationTypeObservation = "observation"
+
+	// StationTypeTracking — все тракты с поворотной платформой.
+	// Полный набор режимов, включая сопровождение по азимуту/углу места.
+	StationTypeTracking = "tracking"
+
+	// StationTypeHybrid — часть трактов с повороткой, часть без.
+	// Возможности зависят от выбранного радиотракта.
+	StationTypeHybrid = "hybrid"
+)
+
+// StationType вычисляет тип станции из состава RadioPaths. В JSON-схеме
+// конфигурации этого поля нет: тип — производное от оборудования, и пересчёт
+// автоматический при добавлении/удалении трактов через UI.
+func (sc *StationConfig) StationType() string {
+	if len(sc.RadioPaths) == 0 {
+		return StationTypeBasic
+	}
+	hasRotator := false
+	hasNoRotator := false
+	for _, rp := range sc.RadioPaths {
+		if rp.Rotator != nil {
+			hasRotator = true
+		} else {
+			hasNoRotator = true
+		}
+	}
+	switch {
+	case hasRotator && hasNoRotator:
+		return StationTypeHybrid
+	case hasRotator:
+		return StationTypeTracking
+	default:
+		return StationTypeObservation
+	}
 }
 
 // ObserverConfig — географические координаты точки наблюдения.

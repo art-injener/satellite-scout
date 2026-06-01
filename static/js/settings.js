@@ -742,11 +742,11 @@
             }
         }
 
-        const cityEl = document.getElementById('sf-city');
+        const cityEl = document.getElementById('app-header-city');
         if (cityEl && obs.name) {
             cityEl.textContent = obs.name;
         }
-        const coordsEl = document.getElementById('sf-coords');
+        const coordsEl = document.getElementById('app-header-coords');
         if (coordsEl && typeof obs.lat === 'number' && typeof obs.lon === 'number') {
             const ns = obs.lat >= 0 ? 'N' : 'S';
             const ew = obs.lon >= 0 ? 'E' : 'W';
@@ -795,7 +795,7 @@
         const earthView = window.earthView || (window.app && window.app.earthView) || null;
         const modal = new SettingsModal({ earthView: earthView });
 
-        const gear = document.getElementById('settings-gear');
+        const gear = document.getElementById('app-header-settings');
         if (gear) {
             gear.addEventListener('click', () => modal.open());
         }

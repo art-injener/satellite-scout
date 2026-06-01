@@ -40,7 +40,9 @@ func (errs ValidationErrors) HasErrors() bool {
 // Покрытие:
 //   - server.port не пустой;
 //   - station.observer.lat ∈ [-90; 90], lon ∈ [-180; 180], alt_m ∈ [0; 8000];
-//   - station.radio_paths: минимум один тракт, уникальные id, корректный freq_range_mhz;
+//   - station.radio_paths: пустой список допустим (конфигурация "basic" —
+//     только отслеживание спутников без SDR-оборудования); при наличии трактов
+//     проверяются уникальные id, корректный freq_range_mhz и параметры поворотки;
 //   - tle.update_interval > 0, satnogs.cache_ttl > 0;
 //   - exclude_norad_file не пустой.
 func (c *Config) Validate() error {
@@ -90,12 +92,7 @@ func (c *Config) Validate() error {
 		})
 	}
 
-	if len(c.Station.RadioPaths) == 0 {
-		errs = append(errs, ValidationError{
-			Field:   "station.radio_paths",
-			Message: "должен быть хотя бы один радиотракт",
-		})
-	} else {
+	if len(c.Station.RadioPaths) > 0 {
 		seenIDs := make(map[int]int, len(c.Station.RadioPaths))
 		for i, rp := range c.Station.RadioPaths {
 			prefix := fmt.Sprintf("station.radio_paths[%d]", i)

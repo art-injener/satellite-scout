@@ -34,10 +34,66 @@
         }
     }
 
+    /**
+     * Загрузка конфигурации станции и инициализация ModeManager + app-header.
+     * Запускается параллельно с инициализацией карты (initCanvasPlaceholders
+     * тоже ходит за /api/config — это два независимых потребителя одного ответа).
+     */
+    function initStationModes() {
+        if (!window.ModeManager || !window.attachModeBar) {
+            return;
+        }
+        fetch('/api/config')
+            .then(function(r) { return r.json(); })
+            .then(function(cfg) {
+                if (!cfg) { return; }
+                const stationType = cfg.station_type || 'basic';
+                const radioPaths = Array.isArray(cfg.radio_paths) ? cfg.radio_paths : [];
+
+                // CSS-классы на body — используются и mode-bar (видимость),
+                // и любыми будущими виджетами для адаптации под режим/тип станции.
+                document.body.classList.add('station-' + stationType);
+
+                const manager = new window.ModeManager(stationType, radioPaths);
+                window._modeManager = manager;
+
+                function notifyModeChange(mode) {
+                    document.dispatchEvent(new CustomEvent('satellite-scout-mode-change', {
+                        detail: { mode: mode },
+                    }));
+                }
+
+                if (manager.getMode()) {
+                    document.body.classList.add('mode-' + manager.getMode());
+                    notifyModeChange(manager.getMode());
+                }
+                manager.onModeChange(function(mode) {
+                    // Снимаем все предыдущие mode-*; ставим текущий.
+                    const cls = document.body.classList;
+                    for (let i = cls.length - 1; i >= 0; i--) {
+                        if (cls[i].indexOf('mode-') === 0) {
+                            cls.remove(cls[i]);
+                        }
+                    }
+                    cls.add('mode-' + mode);
+                    notifyModeChange(mode);
+                });
+
+                window._modeBar = window.attachModeBar(manager);
+            })
+            .catch(function(err) {
+                // eslint-disable-next-line no-console
+                console.warn('[app.js] Не удалось загрузить конфигурацию станции:', err);
+            });
+    }
+
     // Initialize when DOM is ready
     document.addEventListener('DOMContentLoaded', function() {
         // eslint-disable-next-line no-console
         console.log('SatWatch initialized');
+
+        // Mode-bar: переключатель режимов работы и активного радиотракта.
+        initStationModes();
 
         // Set default datetime for simulation
         const passTimeInput = document.getElementById('pass-time');
@@ -66,24 +122,22 @@
         // Initialize canvas placeholders
         initCanvasPlaceholders();
 
-        // Часы в station-footer: UTC и местное время (обновление каждую секунду)
-        const sfUtc = document.getElementById('sf-utc');
-        const sfLocal = document.getElementById('sf-local');
-        if (sfUtc || sfLocal) {
+        // Часы в app-header: UTC и местное время (обновление каждую секунду)
+        const headerUtc = document.getElementById('app-header-utc');
+        const headerLocal = document.getElementById('app-header-local');
+        if (headerUtc || headerLocal) {
             const pad2 = function(n) { return n < 10 ? '0' + n : String(n); };
-            const updateFooterClocks = function() {
+            const updateHeaderClocks = function() {
                 const now = new Date();
-                if (sfUtc) {
-                    sfUtc.textContent = 'UTC ' + pad2(now.getUTCHours()) + ':' + pad2(now.getUTCMinutes()) + ':' + pad2(now.getUTCSeconds());
+                if (headerUtc) {
+                    headerUtc.textContent = pad2(now.getUTCHours()) + ':' + pad2(now.getUTCMinutes()) + ':' + pad2(now.getUTCSeconds());
                 }
-                if (sfLocal) {
-                    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
-                    const tzShort = tz.split('/').pop().replace(/_/g, ' ');
-                    sfLocal.textContent = tzShort + ' ' + pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
+                if (headerLocal) {
+                    headerLocal.textContent = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
                 }
             };
-            updateFooterClocks();
-            setInterval(updateFooterClocks, 1000);
+            updateHeaderClocks();
+            setInterval(updateHeaderClocks, 1000);
         }
 
         // Инициализация расписания сеансов наблюдения, если мы на вкладке /passes

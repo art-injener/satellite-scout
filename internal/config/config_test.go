@@ -47,27 +47,18 @@ func TestDefaultConfig_Values(t *testing.T) {
 	}
 }
 
-// TestDefaultConfig_HasDefaultRadioPath гарантирует, что при первом запуске
-// существует ровно один виртуальный радиотракт-имитатор. Без него UI имитации
-// и режим работы UX-MODES-001 не имеют точки крепления.
-func TestDefaultConfig_HasDefaultRadioPath(t *testing.T) {
+// TestDefaultConfig_EmptyRadioPaths гарантирует, что при первом запуске
+// дефолтная конфигурация — "basic": список радиотрактов пустой. Пользователь
+// сам добавляет SDR-оборудование (или имитатор) через UI настроек или правку
+// config.json с последующим перезапуском.
+func TestDefaultConfig_EmptyRadioPaths(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if got := len(cfg.Station.RadioPaths); got != 1 {
-		t.Fatalf("RadioPaths len = %d, want 1", got)
+	if got := len(cfg.Station.RadioPaths); got != 0 {
+		t.Fatalf("RadioPaths len = %d, want 0 (basic station)", got)
 	}
-	rp := cfg.Station.RadioPaths[0]
-	if rp.ID != defaultRadioPathID {
-		t.Errorf("RadioPath.ID = %d, want %d", rp.ID, defaultRadioPathID)
-	}
-	if rp.Receiver.Driver != defaultRadioPathReceiverDriver {
-		t.Errorf("Receiver.Driver = %q, want %q", rp.Receiver.Driver, defaultRadioPathReceiverDriver)
-	}
-	if rp.Antenna.FreqRangeMHz != defaultRadioPathFreqRange {
-		t.Errorf("Antenna.FreqRangeMHz = %v, want %v", rp.Antenna.FreqRangeMHz, defaultRadioPathFreqRange)
-	}
-	if rp.Rotator != nil {
-		t.Errorf("Rotator = %+v, want nil for default radio path", rp.Rotator)
+	if cfg.Station.StationType() != StationTypeBasic {
+		t.Errorf("StationType() = %q, want %q", cfg.Station.StationType(), StationTypeBasic)
 	}
 }
 

@@ -4,12 +4,12 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css?v=88">
+    <link rel="stylesheet" href="/static/css/main.css?v=137">
     <link id="theme-colorsheet" rel="stylesheet" href="/static/css/colors-{{.Theme}}.css?v=38">
     <link rel="stylesheet" href="/static/css/overlay-panel.css?v=1">
     <link rel="stylesheet" href="/static/css/info-panel.css?v=6">
     <link rel="stylesheet" href="/static/css/right-panel.css?v=26">
-    <link rel="stylesheet" href="/static/css/bottom-panel.css?v=8">
+    <link rel="stylesheet" href="/static/css/bottom-panel.css?v=9">
     <link rel="stylesheet" href="/static/css/map-zoom.css?v=2">
     <link rel="stylesheet" href="/static/css/settings.css?v=2">
     <script src="/static/vendor/htmx.min.js"></script>
@@ -18,7 +18,69 @@
 <body data-show-all-tracks-on-start="{{if .ShowAllTracksOnStart}}true{{else}}false{{end}}">
     <!-- Основная область: левый сайдбар убран; план сеансов — вкладка нижней панели на /tracking -->
     <div class="main-wrapper{{if eq .ActiveTab "tracking"}} tracking-page{{end}}">
+        <!-- App Header — строка над картой: режим, тракт, настройки, место, время, связь -->
+        <header class="app-header" id="app-header">
+            <div class="app-header__controls">
+                <div class="app-header__section app-header__modes">
+                    <label class="app-header__label" id="app-header-mode-label">Режим</label>
+                    <div class="app-header__mode-toggle" role="group" aria-labelledby="app-header-mode-label">
+                        <button type="button" class="app-header__mode-toggle__btn" data-mode="overview" aria-pressed="false">Авто</button>
+                        <button type="button" class="app-header__mode-toggle__btn" data-mode="manual" aria-pressed="false">Ручной</button>
+                    </div>
+                </div>
+                <div class="app-header__section app-header__path">
+                    <label class="app-header__label" for="app-header-path">Тракт</label>
+                    <select class="app-header__dropdown" id="app-header-path" aria-label="Активный радиотракт"></select>
+                </div>
+                <button type="button" class="app-header__section app-header__settings" id="app-header-settings" title="Настройки приложения" aria-label="Открыть настройки">
+                    <svg class="app-header__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="12" cy="12" r="3"/>
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                    </svg>
+                    <span class="app-header__text">Настройки</span>
+                </button>
+            </div>
+            <!-- Правая группа: место, время, связь -->
+            <div class="app-header__info">
+            <div class="app-header__section app-header__observer" title="Точка наблюдения">
+                <svg class="app-header__icon app-header__icon--observer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <!-- Мачта-вышка -->
+                    <path d="M12 3 L8 21 M12 3 L16 21 M7 21 L17 21 M9.5 12 L14.5 12"/>
+                    <!-- Дуги радиоволн слева -->
+                    <path d="M5 5 A7 7 0 0 0 5 12"/>
+                    <path d="M2 4 A11 11 0 0 0 2 13"/>
+                    <!-- Дуги радиоволн справа -->
+                    <path d="M19 5 A7 7 0 0 1 19 12"/>
+                    <path d="M22 4 A11 11 0 0 1 22 13"/>
+                </svg>
+                <span class="app-header__text" id="app-header-city">{{.ObserverName}}</span>
+                <span class="app-header__subtext" id="app-header-coords">{{.ObserverCoordsLabel}}</span>
+            </div>
+            <!-- Секция: Время -->
+            <div class="app-header__section app-header__time">
+                <span class="app-header__time-item"><span class="app-header__time-label">MSK</span><span class="app-header__time-value" id="app-header-local">--:--:--</span></span>
+                <span class="app-header__time-item"><span class="app-header__time-label">UTC</span><span class="app-header__time-value" id="app-header-utc">--:--:--</span></span>
+            </div>
+            <!-- Секция: Статус связи -->
+            <div class="app-header__section app-header__connection sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Обмен данными с бэкендом">
+                <svg class="app-header__icon app-header__icon--connection" viewBox="0 0 32 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <!-- Левый узел (сервер) -->
+                    <circle cx="4" cy="12" r="3" stroke="none"/>
+                    <!-- Правый узел (клиент) -->
+                    <circle cx="28" cy="12" r="3" stroke="none"/>
+                    <!-- Стрелка вправо (отправка) -->
+                    <path d="M9 8 L21 8" fill="none"/>
+                    <path d="M18 5 L22 8 L18 11" fill="none"/>
+                    <!-- Стрелка влево (приём) -->
+                    <path d="M23 16 L11 16" fill="none"/>
+                    <path d="M14 13 L10 16 L14 19" fill="none"/>
+                </svg>
+                <span class="app-header__text" id="connection-status-label">Отключено</span>
+            </div>
+            </div>
+        </header>
         <main class="main" role="tabpanel">
+
             {{if eq .ActiveTab "tracking"}}
                 {{template "tracking-content" .}}
             {{else if eq .ActiveTab "receiver"}}
@@ -31,33 +93,6 @@
             {{template "tracking-right-panel" .}}
             {{template "tracking-bottom-panel" .}}
         {{end}}
-        <footer class="station-footer" id="station-footer">
-            <div class="station-footer__left">
-                <!-- <span class="station-footer__badge station-footer__mode" id="sf-mode" title="Режим работы">Режим: ОБЗОР</span> -->
-                <span class="station-footer__badge station-footer__sdr" id="sf-sdr" title="Подключение SDR">SDR: ---</span>
-                <span class="station-footer__badge sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Подключение к бэкенду">
-                    <svg class="sse-status__icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="20" r="1.5" fill="currentColor" stroke="none"/>
-                        <path d="M8.5 16.5a5 5 0 0 1 7 0"/>
-                        <path d="M5 13a9 9 0 0 1 14 0"/>
-                        <path d="M1.5 9.5a13 13 0 0 1 21 0"/>
-                    </svg>
-                    <span class="sse-status__label" id="connection-status-label">Отключено</span>
-                </span>
-            </div>
-            <div class="station-footer__right">
-                <button type="button" class="station-footer__settings" id="settings-gear" title="Настройки приложения" aria-label="Открыть настройки">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                        <circle cx="12" cy="12" r="3"/>
-                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-                    </svg>
-                </button>
-                <span class="station-footer__item" id="sf-city" title="Город наблюдателя">{{.ObserverName}}</span>
-                <span class="station-footer__item" id="sf-coords" title="Геокоординаты">{{.ObserverCoordsLabel}}</span>
-                <span class="station-footer__item station-footer__time" id="sf-local" title="Местное время">MSK --:--:--</span>
-                <span class="station-footer__item station-footer__time" id="sf-utc" title="Время UTC">UTC --:--:--</span>
-            </div>
-        </footer>
         {{template "settings-modal" .}}
     </div>
 
@@ -74,9 +109,11 @@
     <script src="/static/js/sse-client.js?v=3"></script>
     <script src="/static/js/info-panel.js?v=4"></script>
     <script src="/static/js/overlay-panel.js?v=2"></script>
-    <script src="/static/js/right-panel.js?v=13"></script>
-    <script src="/static/js/bottom-panel.js?v=9"></script>
-    <script src="/static/js/app.js?v=74"></script>
-    <script src="/static/js/settings.js?v=1"></script>
+    <script src="/static/js/right-panel.js?v=14"></script>
+    <script src="/static/js/bottom-panel.js?v=10"></script>
+    <script src="/static/js/mode-manager.js?v=2"></script>
+    <script src="/static/js/mode-bar.js?v=8"></script>
+    <script src="/static/js/app.js?v=77"></script>
+    <script src="/static/js/settings.js?v=2"></script>
 </body>
 </html>

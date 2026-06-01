@@ -82,14 +82,23 @@ func TestStore_LoadAfterSaveRestoresSameValues(t *testing.T) {
 func TestStore_GetReturnsDeepCopy(t *testing.T) {
 	dir := t.TempDir()
 	store := NewStore(filepath.Join(dir, "config.json"))
-	store.Set(DefaultConfig())
+	seed := DefaultConfig()
+	// Подсаживаем один радиотракт, чтобы проверить глубокую копию RadioPaths и Rotator.
+	seed.Station.RadioPaths = []RadioPath{{
+		ID:   1,
+		Name: "Test",
+		Antenna: AntennaConfig{
+			Type: "omnidirectional", Model: "QFH", Band: "VHF",
+			FreqRangeMHz: [2]float64{144, 148},
+		},
+		Receiver: ReceiverConfig{Driver: "simulated"},
+	}}
+	store.Set(seed)
 
 	first := store.Get()
 	first.Station.Observer.Lat = 999.0
 	first.TLE.Groups[0] = "tampered"
-	if first.Station.RadioPaths[0].Rotator == nil {
-		first.Station.RadioPaths[0].Rotator = &RotatorConfig{Driver: "tampered"}
-	}
+	first.Station.RadioPaths[0].Rotator = &RotatorConfig{Driver: "tampered"}
 
 	second := store.Get()
 	if second.Station.Observer.Lat == 999.0 {

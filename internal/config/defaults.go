@@ -22,26 +22,17 @@ const (
 	// Имя файла исключений по умолчанию (внутри каталога кеша TLE).
 	defaultExcludeNoradFilename = "exclude_norad.txt"
 
-	defaultSatNOGSEnabled                 = true
-	defaultSatNOGSCacheTTL                = 24 * time.Hour
-	defaultRadioPathID                    = 1
-	defaultRadioPathName                  = "Имитатор SDR"
-	defaultRadioPathAntennaType           = "omnidirectional"
-	defaultRadioPathAntennaModel          = "QFH 145 MHz"
-	defaultRadioPathAntennaBand           = "VHF"
-	defaultRadioPathReceiverDriver        = "simulated"
-	defaultReceiverCenterFreqHz    uint64 = 145_900_000
-	defaultReceiverGainDB                 = 42
-	defaultReceiverBandwidthHz     uint64 = 2_400_000
-	defaultReceiverSampleRateHz    uint64 = 2_400_000
+	defaultSatNOGSEnabled  = true
+	defaultSatNOGSCacheTTL = 24 * time.Hour
 )
-
-// defaultRadioPathFreqRange — рабочий диапазон антенны дефолтного радиотракта (МГц).
-var defaultRadioPathFreqRange = [2]float64{144.0, 148.0}
 
 // DefaultConfig возвращает конфигурацию приложения со всеми значениями по умолчанию.
 //
-// Используется при первом запуске (когда файла config.json ещё нет) и в тестах.
+// При первом запуске (когда файла config.json ещё нет) станция создаётся в
+// конфигурации "basic": Observer задан координатами Ростова-на-Дону, а список
+// RadioPaths пустой. Пользователь сам добавляет радиотракты — через UI настроек
+// или ручной правкой config.json с последующим перезапуском.
+//
 // Параметры TLE собираются из tracker.DefaultTLEStoreConfig() для единого источника
 // дефолтов (DRY между слоями).
 func DefaultConfig() *Config {
@@ -66,14 +57,13 @@ func DefaultConfig() *Config {
 		},
 		Station: StationConfig{
 			Name: defaultStationName,
-			Type: "auto",
 			Observer: ObserverConfig{
 				Name: defaultObserverName,
 				Lat:  defaultObserverLat,
 				Lon:  defaultObserverLon,
 				AltM: defaultObserverAlt,
 			},
-			RadioPaths: []RadioPath{defaultRadioPath()},
+			RadioPaths: []RadioPath{},
 		},
 	}
 
@@ -82,32 +72,6 @@ func DefaultConfig() *Config {
 	cfg.ExcludeNoradFile = filepath.Join(cfg.TLE.CacheDir, defaultExcludeNoradFilename)
 
 	return cfg
-}
-
-// defaultRadioPath возвращает один виртуальный радиотракт-имитатор. Используется
-// при первом запуске, когда у пользователя ещё нет реального оборудования.
-func defaultRadioPath() RadioPath {
-	return RadioPath{
-		ID:   defaultRadioPathID,
-		Name: defaultRadioPathName,
-		Antenna: AntennaConfig{
-			Type:         defaultRadioPathAntennaType,
-			Model:        defaultRadioPathAntennaModel,
-			Band:         defaultRadioPathAntennaBand,
-			FreqRangeMHz: defaultRadioPathFreqRange,
-		},
-		Receiver: ReceiverConfig{
-			Driver: defaultRadioPathReceiverDriver,
-			Serial: "",
-			Defaults: ReceiverDefaults{
-				CenterFreqHz: defaultReceiverCenterFreqHz,
-				GainDB:       defaultReceiverGainDB,
-				BandwidthHz:  defaultReceiverBandwidthHz,
-				SampleRateHz: defaultReceiverSampleRateHz,
-			},
-		},
-		Rotator: nil,
-	}
 }
 
 // TLEStoreConfig переносит настройки TLE из единого конфига в форму, понятную

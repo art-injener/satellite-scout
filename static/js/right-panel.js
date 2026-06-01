@@ -74,6 +74,7 @@
 
         this._trackBtn = document.getElementById('rp-track');
         this._resetBtn = document.getElementById('rp-reset');
+        this._controlsEl = document.querySelector('.right-panel__controls');
 
         this._bindControls();
     }
@@ -133,6 +134,16 @@
             this._syncThTrackEye();
         }
 
+        const self = this;
+        document.addEventListener('satellite-scout-mode-change', function(ev) {
+            const mode = ev && ev.detail ? ev.detail.mode : null;
+            self._applyTrackingControlsVisibility(mode);
+        });
+        this._applyTrackingControlsVisibility(
+            window._modeManager && typeof window._modeManager.getMode === 'function'
+                ? window._modeManager.getMode()
+                : null
+        );
         this._updateControls();
     };
 
@@ -489,6 +500,32 @@
 
     // ── Кнопки управления ──
 
+    /** Ручной режим работы (не basic): доступны «Сопровождать» и «Сброс». */
+    RightPanelTable.prototype._isManualWorkMode = function() {
+        if (document.body.classList.contains('station-basic')) {
+            return false;
+        }
+        const mm = window._modeManager;
+        return Boolean(mm && typeof mm.getMode === 'function' && mm.getMode() === 'manual');
+    };
+
+    /** Показать блок кнопок только в mode-manual. */
+    RightPanelTable.prototype._applyTrackingControlsVisibility = function(mode) {
+        if (!this._controlsEl) {
+            return;
+        }
+        if (document.body.classList.contains('station-basic')) {
+            this._controlsEl.hidden = true;
+            return;
+        }
+        const current = mode != null ? mode : (
+            window._modeManager && window._modeManager.getMode
+                ? window._modeManager.getMode()
+                : null
+        );
+        this._controlsEl.hidden = current !== 'manual';
+    };
+
     RightPanelTable.prototype._bindControls = function() {
         const self = this;
 
@@ -507,6 +544,9 @@
     };
 
     RightPanelTable.prototype._setManualTracking = function(noradId) {
+        if (!this._isManualWorkMode()) {
+            return;
+        }
         const clientId = (typeof window.getClientId === 'function') ? window.getClientId() : '';
         fetch('/api/tracking/current', {
             method: 'POST',
@@ -523,6 +563,9 @@
     };
 
     RightPanelTable.prototype._resetTracking = function() {
+        if (!this._isManualWorkMode()) {
+            return;
+        }
         const clientId = (typeof window.getClientId === 'function') ? window.getClientId() : '';
         fetch('/api/tracking/reset', {
             method: 'POST',
@@ -537,13 +580,12 @@
     };
 
     RightPanelTable.prototype._updateControls = function() {
+        const manual = this._isManualWorkMode();
         if (this._trackBtn) {
-            // «Сопровождать» активна если есть выбранный спутник.
-            this._trackBtn.disabled = !this._selectedNoradId;
+            this._trackBtn.disabled = !manual || !this._selectedNoradId;
         }
         if (this._resetBtn) {
-            // «Сброс» активна если есть спутник под наблюдением.
-            this._resetBtn.disabled = !this._trackingNoradId;
+            this._resetBtn.disabled = !manual || !this._trackingNoradId;
         }
     };
 

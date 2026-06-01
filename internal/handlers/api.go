@@ -39,14 +39,30 @@ func (h *APIHandler) HealthCheck(w http.ResponseWriter, r *http.Request) {
 }
 
 // GetConfig возвращает текущую конфигурацию (только публичная часть, без
-// секретов и серверных деталей). Полная схема для UI настроек будет добавлена
-// отдельным эндпоинтом в рамках CFG-API-001.
+// секретов и серверных деталей). Содержит координаты наблюдателя, вычисленный
+// тип станции и компактный список радиотрактов — этого достаточно, чтобы
+// фронтенд построил mode-bar и переключатель режимов. Полная схема для модалки
+// настроек отдаётся через GET /api/settings.
 func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
+	station := &h.config.Station
+
+	paths := make([]RadioPathInfo, 0, len(station.RadioPaths))
+	for _, rp := range station.RadioPaths {
+		paths = append(paths, RadioPathInfo{
+			ID:         rp.ID,
+			Name:       rp.Name,
+			Band:       rp.Antenna.Band,
+			HasRotator: rp.Rotator != nil,
+		})
+	}
+
 	writeJSON(w, http.StatusOK, ConfigResponse{
 		Observer: ObserverConfig{
-			Lat: h.config.Station.Observer.Lat,
-			Lon: h.config.Station.Observer.Lon,
-			Alt: h.config.Station.Observer.AltM,
+			Lat: station.Observer.Lat,
+			Lon: station.Observer.Lon,
+			Alt: station.Observer.AltM,
 		},
+		StationType: station.StationType(),
+		RadioPaths:  paths,
 	})
 }
