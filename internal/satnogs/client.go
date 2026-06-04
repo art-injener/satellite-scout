@@ -24,12 +24,16 @@ const (
 	DefaultRateLimit = 1 * time.Second
 
 	// DefaultTimeout — таймаут одного HTTP-запроса.
-	// SatNOGS DB периодически отвечает 20+ сек (особенно в часы пик),
-	// 30 секунд дают разумный запас без чрезмерного ожидания.
-	DefaultTimeout = 30 * time.Second
+	// SatNOGS DB иногда отвечает медленно, но держать воркер по 30 секунд на
+	// каждом «висящем» спутнике слишком дорого. 12 секунд — компромисс: успеваем
+	// получить ответ в обычной ситуации и быстро отпускаем воркер при зависании.
+	DefaultTimeout = 12 * time.Second
 
-	// DefaultMaxRetries — количество дополнительных попыток при 5xx / транспортных ошибках.
-	DefaultMaxRetries = 5
+	// DefaultMaxRetries — количество дополнительных попыток при 5xx / 429.
+	// Таймауты и отмена контекста НЕ ретраятся на уровне клиента: повтор медленного
+	// запроса почти никогда не помогает и блокирует воркер. Повтор после таймаута
+	// берёт на себя сервисный слой (см. Service.retryAfter).
+	DefaultMaxRetries = 2
 
 	// userAgent — постоянный User-Agent для идентификации проекта в логах SatNOGS.
 	userAgent = "Satellite Scout/1.0 (https://github.com/art-injener/satellite-scout)"
@@ -76,6 +80,16 @@ func WithRateLimit(d time.Duration) Option {
 	return func(c *Client) {
 		if d >= 0 {
 			c.rateLimit = d
+		}
+	}
+}
+
+// WithTimeout задаёт таймаут одного HTTP-запроса.
+// Неположительное значение игнорируется — остаётся DefaultTimeout.
+func WithTimeout(d time.Duration) Option {
+	return func(c *Client) {
+		if d > 0 && c.httpClient != nil {
+			c.httpClient.Timeout = d
 		}
 	}
 }
@@ -138,14 +152,15 @@ func (c *Client) FetchTransmitters(ctx context.Context, noradID int) ([]Transmit
 }
 
 // retrySchedule — фиксированные задержки между попытками.
-// Индекс = номер retry (1-based): retry#1 → 5с, retry#2 → 15с, retry#3 → 30с, далее 1 мин.
+// Индекс = номер retry (1-based): retry#1 → 2с, retry#2 → 5с, далее 10с (cap).
+// Расписание короткое намеренно: ретраятся только быстрые ошибки (5xx/429),
+// поэтому долго ждать смысла нет.
 var retrySchedule = []time.Duration{
+	2 * time.Second,
 	5 * time.Second,
-	15 * time.Second,
-	30 * time.Second,
 }
 
-const retryScheduleCap = 1 * time.Minute
+const retryScheduleCap = 10 * time.Second
 
 // retryBackoff возвращает задержку перед retry по фиксированному расписанию.
 func retryBackoff(attempt int) time.Duration {
@@ -160,8 +175,11 @@ func retryBackoff(attempt int) time.Duration {
 }
 
 // fetch выполняет HTTP-запрос с rate-limit и retry по фиксированному расписанию.
-// Любая 4xx ошибка (кроме 429) — терминальная: повторы бесполезны.
-// 429 и 5xx — ретраятся до maxRetries раз с задержками 5с → 15с → 30с → 1мин.
+// Ретраятся только быстрые транзиентные ошибки — 429 и 5xx (до maxRetries раз,
+// задержки 2с → 5с → 10с). Не ретраятся:
+//   - 4xx (кроме 429) — терминальные клиентские ошибки;
+//   - таймаут запроса и отмена контекста — повтор медленного запроса блокирует
+//     воркер и почти никогда не помогает (повтор отдан сервисному слою).
 func (c *Client) fetch(ctx context.Context, endpoint string) ([]byte, error) {
 	c.waitForRateLimit()
 
@@ -182,20 +200,23 @@ func (c *Client) fetch(ctx context.Context, endpoint string) ([]byte, error) {
 		}
 		lastErr = err
 
-		// 4xx (кроме 429) — терминальная клиентская ошибка, ретраи бесполезны.
-		if isTerminalClientError(err) {
+		// Ошибка, при которой повтор бесполезен, — выходим сразу.
+		if isNonRetryable(err) {
 			return nil, err
 		}
 	}
 	return nil, fmt.Errorf("after %d retries: %w", c.maxRetries, lastErr)
 }
 
-// isTerminalClientError — ошибка клиентского уровня (4xx кроме 429),
-// при которой повторные попытки бесполезны.
-func isTerminalClientError(err error) bool {
+// isNonRetryable сообщает, что повторять запрос бесполезно:
+//   - 4xx кроме 429 — терминальная клиентская ошибка;
+//   - таймаут запроса / отмена контекста — повтор только зря держит воркер.
+func isNonRetryable(err error) bool {
 	return errors.Is(err, ErrSatNOGSNotFound) ||
 		errors.Is(err, ErrSatNOGSBadRequest) ||
-		errors.Is(err, ErrSatNOGSClientError)
+		errors.Is(err, ErrSatNOGSClientError) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)
 }
 
 // waitForRateLimit блокирует горутину до соблюдения интервала между запросами.

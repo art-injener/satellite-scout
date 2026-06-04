@@ -1,0 +1,371 @@
+/* ===== Ручной режим — внутренняя сетка #layout-manual =====
+   Layout по ADR-004 § 4.3: 4 горизонтальных блока сверху вниз.
+   Видимость самого #layout-manual управляется в main.css по body.mode-manual.
+
+   Структура (4 строки grid):
+     1) Rx toolbar (строка ~28px) + Spectrum + freq-scale + Waterfall + Heat-grid — на всю ширину
+     2) Eye/Const | Демодулятор | VFO Manager
+     3) Таблица телеметрии (на всю ширину)
+     4) Az компас (300×300) | Pass profile (верх) + Rotator panel (низ) | El угломер (300×300)
+
+   SkyView остаётся в правой панели (как в Авто-режиме).
+   В этой итерации работают только Az/El/спектр/водопад. Остальные блоки —
+   визуальные заглушки .ml-stub под будущие задачи. */
+
+#layout-manual {
+    grid-row: 2;
+    grid-column: 1;
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    padding: 4px;
+    gap: 4px;
+    /* Порядок: РЧ-блок (1fr) | Декодер | Телеметрия | Антенна (фикс. высота) */
+    grid-template-rows:
+        minmax(220px, 1.2fr)
+        minmax(120px, 0.8fr)
+        minmax(100px, 0.6fr)
+        var(--indicator-block-height);
+    overflow: hidden;
+    min-height: 0;
+}
+
+/* Общий блок (горизонтальный ряд) */
+.ml-block {
+    display: grid;
+    gap: 4px;
+    min-height: 0;
+    min-width: 0;
+}
+
+/* ── Заглушка: единый стиль для всех неинтерактивных блоков ── */
+.ml-stub {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 12px;
+    background: var(--bg-primary);
+    border: 1px dashed var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-muted);
+    text-align: center;
+    overflow: hidden;
+    min-height: 0;
+    min-width: 0;
+}
+
+.ml-stub__title {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--panel-header-title, var(--text-muted));
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+.ml-stub__hint {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.4;
+    color: var(--text-muted);
+    opacity: 0.85;
+    max-width: 80%;
+}
+
+/* ───────────── Блок 1: Спектр + freq-scale + Waterfall + Heat-grid ───────────── */
+
+.ml-block--top {
+    grid-template-columns: 1fr;
+}
+
+.ml-settings {
+    /* Заглушка настроек приёмника — наполнение в задаче MANUAL-001 */
+}
+
+/* Toolbar настроек приёмника — под графиками, контролы-заглушки */
+.ml-rx-bar {
+    height: 44px;
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 12px;
+    background: var(--bg-secondary, var(--bg-tertiary));
+    border-top: 1px solid var(--border-color);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    overflow: hidden;
+}
+
+.ml-rx-bar__item {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.ml-rx-bar__label {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+.ml-rx-bar__select,
+.ml-rx-bar__input {
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.ml-rx-bar__select {
+    min-width: 96px;
+}
+
+.ml-rx-bar__input {
+    width: 80px;
+    text-align: right;
+}
+
+.ml-rx-bar__unit {
+    color: var(--text-muted);
+    font-size: 12px;
+}
+
+/* Частота — крупно, акцентный цвет */
+.ml-rx-bar__item--freq {
+    gap: 6px;
+}
+
+.ml-rx-bar__freq-input {
+    height: 32px;
+    width: 160px;
+    padding: 0 10px;
+    border: 1px solid var(--accent-primary);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--accent-primary);
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    text-align: center;
+    letter-spacing: 0.5px;
+}
+
+/* Разделитель */
+.ml-rx-bar__sep {
+    width: 1px;
+    height: 24px;
+    background: var(--border-color);
+    flex-shrink: 0;
+}
+
+/* Слайдер допплера ±25 кГц */
+.ml-rx-bar__range {
+    width: 100px;
+    height: 4px;
+    accent-color: var(--accent-primary);
+    cursor: pointer;
+}
+
+.ml-rx-bar__range:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Спейсер — прижимает кнопку вправо */
+.ml-rx-bar__spacer {
+    flex: 1;
+}
+
+/* Кнопка SET (рядом с частотой) */
+.ml-rx-bar__btn {
+    height: 30px;
+    padding: 0 16px;
+    border: 1px solid var(--accent-primary);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--accent-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.ml-rx-bar__btn:hover:not(:disabled) {
+    background: var(--accent-primary);
+    color: var(--bg-primary);
+}
+
+.ml-rx-bar__btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ml-rx-bar__select:disabled,
+.ml-rx-bar__input:disabled,
+.ml-rx-bar__freq-input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.ml-spec {
+    display: flex;
+    flex-direction: column;
+    background: var(--spectrum-instrument-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    min-height: 0;
+    min-width: 0;
+}
+
+/* Спектр и водопад делят основную высоту блока 1; шкала и heat — фиксированные снизу */
+.ml-spec__fft {
+    flex: 4;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.ml-spec__scale-wrap {
+    height: 18px;
+    flex-shrink: 0;
+    background: var(--bp-overview-freq-scale-bg, var(--bg-tertiary));
+    overflow: hidden;
+}
+
+.ml-spec__wf {
+    flex: 6;
+    min-height: 0;
+    overflow: hidden;
+}
+
+/* Heat-grid под водопадом — 2-3 строки фиксированной высоты, общая ось X (MANUAL-LAYOUT-001) */
+.ml-spec__heat {
+    flex: 0 0 auto;
+    height: 80px;
+    border-top: 1px solid var(--border-color);
+    border-radius: 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    padding: 6px 8px;
+}
+
+.ml-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+}
+
+/* ───────────── Блок 4 (низ): Az | Pass profile + Rotator | El ─────────────
+   Az/El — фиксированный квадрат 300×300. Центральная колонка (Side) — 1fr,
+   вертикальный стек: Pass profile сверху, Rotator panel снизу. */
+
+.ml-block--mid {
+    grid-template-columns:
+        var(--indicator-graph-size)
+        1fr
+        var(--indicator-graph-size);
+    align-items: stretch;
+}
+
+.ml-az,
+.ml-el {
+    width: var(--indicator-graph-size);
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    min-height: 0;
+    min-width: 0;
+}
+
+.ml-indicator-canvas {
+    width: var(--indicator-graph-size);
+    height: var(--indicator-graph-size);
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ml-indicator-canvas canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Side — центральная колонка: Pass profile сверху, Rotator panel снизу */
+.ml-side {
+    display: grid;
+    grid-template-rows: 1fr 1fr;
+    gap: 4px;
+    min-width: 0;
+    min-height: 0;
+}
+
+.ml-profile,
+.ml-rotator {
+    min-width: 0;
+    min-height: 0;
+}
+
+.ml-indicator-info {
+    flex-shrink: 0;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border-top: 1px solid var(--border-color);
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 4px 16px;
+    justify-content: space-between;
+}
+
+.ml-info-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.2;
+    min-width: 0;
+}
+
+.ml-info-label {
+    color: var(--bp-info-label, var(--panel-header-title, var(--text-muted)));
+}
+
+.ml-info-value {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+    color: var(--bp-info-value, var(--accent-primary));
+}
+
+/* ───────────── Блок 2: Eye/Const | Демодулятор | VFO Manager ───────────── */
+
+.ml-block--demod {
+    grid-template-columns: minmax(360px, 1fr) minmax(440px, 1fr) minmax(480px, 1fr);
+}
+
+/* ───────────── Блок 3: Телеметрия ───────────── */
+
+.ml-block--tmi {
+    grid-template-columns: 1fr;
+}

@@ -19,7 +19,10 @@
   },
   "satnogs": {
     "enabled": true,
-    "cache_ttl": 86400000000000
+    "cache_ttl": 86400000000000,
+    "timeout": 12000000000,
+    "max_retries": 2,
+    "workers": 4
   },
   "exclude_norad_file": "data/tle_cache/exclude_norad.txt",
   "station": {

@@ -88,6 +88,18 @@ type SatNOGSConfig struct {
 
 	// CacheTTL — время жизни записи в кеше передатчиков SatNOGS.
 	CacheTTL time.Duration `json:"cache_ttl"`
+
+	// Timeout — таймаут одного HTTP-запроса к SatNOGS DB.
+	// 0 — использовать значение по умолчанию клиента.
+	Timeout time.Duration `json:"timeout"`
+
+	// MaxRetries — число повторов запроса при быстрых ошибках (5xx/429).
+	// Таймауты не повторяются на уровне клиента. 0 — значение по умолчанию.
+	MaxRetries int `json:"max_retries"`
+
+	// Workers — число параллельных воркеров-загрузчиков передатчиков.
+	// 0 — использовать значение по умолчанию.
+	Workers int `json:"workers"`
 }
 
 // StationConfig — описание наземной станции по ADR-004 §2.2.

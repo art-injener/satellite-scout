@@ -193,6 +193,7 @@ func sendCachedEvents(client *sseClient, lastEvents map[string]SSEEvent) {
 	for _, eventType := range []string{
 		"satellite_group_update",
 		"satellite_state_update",
+		"tx_cycle",
 	} {
 		if cached, ok := lastEvents[eventType]; ok {
 			select {

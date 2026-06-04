@@ -51,28 +51,14 @@
         if (window.skyView && typeof window.skyView.refreshThemeColors === 'function') {
             window.skyView.refreshThemeColors();
         }
-        if (window.azimuthIndicator && typeof window.azimuthIndicator.refreshThemeColors === 'function') {
-            window.azimuthIndicator.refreshThemeColors();
-        }
-        if (window.elevationIndicator && typeof window.elevationIndicator.refreshThemeColors === 'function') {
-            window.elevationIndicator.refreshThemeColors();
-        }
         if (window.earthView && typeof window.earthView.draw === 'function') {
             window.earthView.draw();
         }
         if (window.skyView && typeof window.skyView.draw === 'function') {
             window.skyView.draw();
         }
-        if (window.azimuthIndicator && typeof window.azimuthIndicator.draw === 'function') {
-            window.azimuthIndicator.draw();
-        }
-        if (window.elevationIndicator && typeof window.elevationIndicator.draw === 'function') {
-            window.elevationIndicator.draw();
-        }
-        if (window._bottomPanel && typeof window._bottomPanel.refreshAfterThemeChange === 'function') {
-            window._bottomPanel.refreshAfterThemeChange();
-        } else if (window._bottomPanel && typeof window._bottomPanel.refreshWaterfall === 'function') {
-            window._bottomPanel.refreshWaterfall();
+        if (window._manualLayout && typeof window._manualLayout.refreshAfterThemeChange === 'function') {
+            window._manualLayout.refreshAfterThemeChange();
         }
         try {
             const tid = parseThemeFromHref(document.getElementById('theme-colorsheet').href);

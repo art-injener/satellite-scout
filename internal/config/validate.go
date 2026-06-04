@@ -86,6 +86,24 @@ func (c *Config) Validate() error {
 		})
 	}
 
+	// Для timeout/max_retries/workers ноль означает «взять значение по умолчанию»,
+	// поэтому ошибкой считаем только отрицательные значения.
+	if c.SatNOGS.Timeout < 0 {
+		errs = append(errs, ValidationError{
+			Field: "satnogs.timeout", Message: "таймаут не может быть отрицательным",
+		})
+	}
+	if c.SatNOGS.MaxRetries < 0 {
+		errs = append(errs, ValidationError{
+			Field: "satnogs.max_retries", Message: "число повторов не может быть отрицательным",
+		})
+	}
+	if c.SatNOGS.Workers < 0 {
+		errs = append(errs, ValidationError{
+			Field: "satnogs.workers", Message: "число воркеров не может быть отрицательным",
+		})
+	}
+
 	if strings.TrimSpace(c.ExcludeNoradFile) == "" {
 		errs = append(errs, ValidationError{
 			Field: "exclude_norad_file", Message: "путь не может быть пустым",

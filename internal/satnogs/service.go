@@ -26,6 +26,12 @@ const (
 	// fetchQueueSize — буфер канала запросов на фоновую загрузку.
 	// 256 — запас на случай добавления большой группы (10–30 КА) одним вызовом.
 	fetchQueueSize = 256
+
+	// DefaultWorkers — число параллельных горутин-воркеров, разбирающих очередь.
+	// Несколько воркеров не дают одному медленному спутнику застопорить выдачу
+	// данных по всем остальным. Старт запросов всё равно сериализуется rate-limit
+	// клиента, но сами запросы выполняются с перекрытием.
+	DefaultWorkers = 4
 )
 
 // fetcher — узкий интерфейс HTTP-клиента, нужный сервису.
@@ -91,6 +97,7 @@ type Service struct {
 	client     fetcher
 	cacheTTL   time.Duration
 	retryAfter time.Duration
+	workers    int
 
 	mu    sync.RWMutex
 	cache map[int]*cacheEntry
@@ -107,6 +114,7 @@ func NewService(client fetcher) *Service {
 		client:     client,
 		cacheTTL:   DefaultCacheTTL,
 		retryAfter: DefaultRetryAfter,
+		workers:    DefaultWorkers,
 		cache:      make(map[int]*cacheEntry),
 		fetchQueue: make(chan int, fetchQueueSize),
 		logger:     slog.Default(),
@@ -129,6 +137,15 @@ func (s *Service) WithRetryAfter(d time.Duration) *Service {
 	return s
 }
 
+// WithWorkers задаёт число параллельных воркеров-загрузчиков.
+// Неположительное значение игнорируется — остаётся DefaultWorkers.
+func (s *Service) WithWorkers(n int) *Service {
+	if n > 0 {
+		s.workers = n
+	}
+	return s
+}
+
 // WithLogger подключает кастомный slog-логгер.
 func (s *Service) WithLogger(logger *slog.Logger) *Service {
 	if logger != nil {
@@ -137,19 +154,41 @@ func (s *Service) WithLogger(logger *slog.Logger) *Service {
 	return s
 }
 
-// Run запускает фоновую горутину-воркер.
-// Горутина читает fetchQueue и для каждого NORAD вызывает client.FetchTransmitters,
-// после чего обновляет кеш. Завершается при отмене ctx.
+// Run запускает пул фоновых воркеров.
+// Каждый воркер читает fetchQueue и для каждого NORAD вызывает
+// client.FetchTransmitters, после чего обновляет кеш. Несколько воркеров не дают
+// одному медленному спутнику застопорить загрузку остальных. Run завершается,
+// когда отменён ctx и все воркеры остановлены.
 func (s *Service) Run(ctx context.Context) {
+	workers := s.workers
+	if workers <= 0 {
+		workers = 1
+	}
+
 	s.logger.InfoContext(ctx, "satnogs service started",
 		slog.Duration("cache_ttl", s.cacheTTL),
 		slog.Duration("retry_after", s.retryAfter),
+		slog.Int("workers", workers),
 	)
 
+	var wg sync.WaitGroup
+	wg.Add(workers)
+	for i := 0; i < workers; i++ {
+		go func() {
+			defer wg.Done()
+			s.worker(ctx)
+		}()
+	}
+	wg.Wait()
+
+	s.logger.InfoContext(ctx, "satnogs service stopped")
+}
+
+// worker — цикл одного воркера: разбирает очередь до отмены контекста.
+func (s *Service) worker(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.InfoContext(ctx, "satnogs service stopped")
 			return
 		case noradID := <-s.fetchQueue:
 			s.fetchOne(ctx, noradID)
@@ -167,10 +206,16 @@ func (s *Service) GetPrimaryTransmitter(noradID int) *TransmitterSummary {
 
 	s.mu.RLock()
 	entry := s.cache[noradID]
+	var primary *TransmitterSummary
+	fresh := false
+	if entry != nil {
+		fresh = entry.isFresh(s.cacheTTL)
+		primary = entry.primary
+	}
 	s.mu.RUnlock()
 
-	if entry != nil && entry.isFresh(s.cacheTTL) {
-		return entry.primary
+	if entry != nil && fresh {
+		return primary
 	}
 
 	s.maybeEnqueue(noradID, entry)
@@ -179,7 +224,7 @@ func (s *Service) GetPrimaryTransmitter(noradID int) *TransmitterSummary {
 		// Возвращаем последний известный primary, даже если запись устарела.
 		// Это даёт «sticky» поведение: пока новый fetch в работе, UI показывает старое значение,
 		// а не пустую заглушку.
-		return entry.primary
+		return primary
 	}
 	return nil
 }
@@ -193,20 +238,24 @@ func (s *Service) GetAllTransmitters(noradID int) []Transmitter {
 
 	s.mu.RLock()
 	entry := s.cache[noradID]
+	var out []Transmitter
+	fresh := false
+	if entry != nil {
+		fresh = entry.isFresh(s.cacheTTL)
+		if len(entry.transmitters) > 0 {
+			out = make([]Transmitter, len(entry.transmitters))
+			copy(out, entry.transmitters)
+		}
+	}
 	s.mu.RUnlock()
 
 	if entry == nil {
 		s.maybeEnqueue(noradID, nil)
 		return nil
 	}
-	if !entry.isFresh(s.cacheTTL) {
+	if !fresh {
 		s.maybeEnqueue(noradID, entry)
 	}
-	if len(entry.transmitters) == 0 {
-		return nil
-	}
-	out := make([]Transmitter, len(entry.transmitters))
-	copy(out, entry.transmitters)
 	return out
 }
 

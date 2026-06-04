@@ -111,12 +111,24 @@ func main() {
 	// SatNOGS — частоты и модуляция передатчиков спутников. Опционально:
 	// при satnogs.enabled=false сервис не создаётся, поля freq_mhz/modulation в SSE пустые.
 	var satnogsService *satnogs.Service
+	var satnogsAdapter *satnogsTransmitterAdapter
 	if cfg.SatNOGS.Enabled {
-		satnogsClient := satnogs.NewClient()
+		// Нулевые значения параметров означают «использовать дефолт клиента/сервиса»,
+		// поэтому опции применяем только при положительных значениях из конфига.
+		clientOpts := []satnogs.Option{}
+		if cfg.SatNOGS.Timeout > 0 {
+			clientOpts = append(clientOpts, satnogs.WithTimeout(cfg.SatNOGS.Timeout))
+		}
+		if cfg.SatNOGS.MaxRetries > 0 {
+			clientOpts = append(clientOpts, satnogs.WithMaxRetries(cfg.SatNOGS.MaxRetries))
+		}
+		satnogsClient := satnogs.NewClient(clientOpts...)
 		satnogsService = satnogs.NewService(satnogsClient).
-			WithCacheTTL(cfg.SatNOGS.CacheTTL)
+			WithCacheTTL(cfg.SatNOGS.CacheTTL).
+			WithWorkers(cfg.SatNOGS.Workers)
 		go satnogsService.Run(svcCtx)
-		trackingService.SetTransmitterProvider(newSatnogsTransmitterAdapter(satnogsService))
+		satnogsAdapter = newSatnogsTransmitterAdapter(satnogsService)
+		trackingService.SetTransmitterProvider(satnogsAdapter)
 		slog.Info("satnogs integration enabled", "cache_ttl", cfg.SatNOGS.CacheTTL)
 	} else {
 		slog.Info("satnogs integration disabled (config: satnogs.enabled=false)")
@@ -124,6 +136,14 @@ func main() {
 
 	// Запускаем сервис отслеживания.
 	go trackingService.Run(svcCtx)
+
+	// Mock-генератор tx_cycle для UI Авто-режима (auto-link/heat-grid).
+	// Запускается только при включённом SatNOGS — без каталога передатчиков
+	// генерация бессмысленна. Будет заменён на ScanStrategy (см. ADR-004 §3).
+	if satnogsAdapter != nil {
+		txCycleMock := services.NewTxCycleMock(sseHub, trackingService, satnogsAdapter, services.DefaultTxCycleInterval)
+		go txCycleMock.Run(svcCtx)
+	}
 
 	// Hot-reload подписка: при правке наблюдателя/темы через UI настроек
 	// обновляем сервисы без перезапуска процесса.

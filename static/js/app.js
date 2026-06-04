@@ -80,6 +80,18 @@
                 });
 
                 window._modeBar = window.attachModeBar(manager);
+
+                // Реакция на смену режима: активируем/паузим Ручной layout
+                document.addEventListener('satellite-scout-mode-change', function(ev) {
+                    const mode = ev && ev.detail ? ev.detail.mode : null;
+                    if (window._manualLayout) {
+                        if (mode === 'manual') {
+                            window._manualLayout.activate();
+                        } else {
+                            window._manualLayout.deactivate();
+                        }
+                    }
+                });
             })
             .catch(function(err) {
                 // eslint-disable-next-line no-console
@@ -154,11 +166,11 @@
         // Нижняя панель: переключение вкладок + водопад
         initBottomPanel();
 
-        // Открыть вкладку «План» по ссылке /tracking?tab=plan
-        if (/[?&]tab=plan(?:&|$)/.test(window.location.search) &&
-            window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
-            window._bottomPanel.showTab('plan', false);
-        }
+        // Ручной layout: Az/El + спектр/водопад в #layout-manual
+        initManualLayout();
+
+        // Нижняя панель Авто: связка Передатчики ↔ История активности
+        initOverviewLink();
 
         // ── Нижняя панель: сворачивание (класс на main-wrapper уменьшает высоту строки 2 grid) ──
         const mainWrapper = document.querySelector('.main-wrapper');
@@ -175,31 +187,12 @@
             } else {
                 bottomToggle.setAttribute('title', 'Свернуть');
             }
-            // Синхронизируем начальное состояние с BottomPanel (создаётся позже в initCanvasPlaceholders).
-            // Используем setTimeout(0), чтобы _bottomPanel уже был инициализирован.
-            if (initiallyCollapsed) {
-                setTimeout(function() {
-                    if (window._bottomPanel && typeof window._bottomPanel.setCollapsed === 'function') {
-                        window._bottomPanel.setCollapsed(true);
-                    }
-                }, 0);
-            }
             bottomToggle.addEventListener('click', function() {
                 const collapsed = bottomPanel.classList.toggle('bottom-panel--collapsed');
                 mainWrapper.classList.toggle('bottom-panel-collapsed', collapsed);
                 bottomToggle.textContent = collapsed ? '▲' : '▼';
                 bottomToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
                 localStorage.setItem(LS_BOTTOM, collapsed ? '1' : '0');
-                if (window._bottomPanel && typeof window._bottomPanel.setCollapsed === 'function') {
-                    window._bottomPanel.setCollapsed(collapsed);
-                }
-                if (!collapsed && window._bottomPanel && typeof window._bottomPanel.refreshWaterfall === 'function') {
-                    requestAnimationFrame(function() {
-                        requestAnimationFrame(function() {
-                            window._bottomPanel.refreshWaterfall();
-                        });
-                    });
-                }
             });
         }
 
@@ -353,24 +346,6 @@
                 }
                 _updateSecondaryPositions();
             }
-
-            // Az/El индикаторы — только для tracking.
-            if (trackingId) {
-                const trkState = sm.getState(trackingId);
-                if (trkState && trkState.position) {
-                    const tp = trkState.position;
-                    if (window.azimuthIndicator) {
-                        window.azimuthIndicator.setSatellitePosition(tp.az);
-                        window.azimuthIndicator.setAzimuth(tp.az);
-                        window.azimuthIndicator.setNoradId(trackingId);
-                    }
-                    if (window.elevationIndicator) {
-                        window.elevationIndicator.setSatellitePosition(tp.el, tp.az);
-                        window.elevationIndicator.setPosition(tp.az, tp.el);
-                        window.elevationIndicator.setNoradId(trackingId);
-                    }
-                }
-            }
         });
 
         // ── TRACK: обновление треков selected + tracking + secondary ──
@@ -400,10 +375,6 @@
             if (!state) { return; }
             console.log('[app.js] Selected:', state.noradId, state.name);
 
-            if (window._bottomPanel && typeof window._bottomPanel.resetSimulation === 'function') {
-                window._bottomPanel.resetSimulation();
-            }
-
             if (window.earthView) {
                 window.earthView.setSelectedSatelliteInfo(state.name || '', state.noradId);
                 window.earthView.setSelectedGroundTrack(state.track || null);
@@ -428,15 +399,6 @@
                 console.log('[app.js] Tracking ON:', state.noradId, state.name);
                 showTrackingOverlay(state.noradId, state.name || '');
 
-                // Запуск отрисовки водопада при включении наблюдения
-                if (window._bottomPanel && typeof window._bottomPanel.startWaterfall === 'function') {
-                    window._bottomPanel.startWaterfall();
-                }
-                // Вкладка «Сопровождение» (Az/El/водопад) при активном сопровождении
-                if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
-                    window._bottomPanel.showTab('follow', false);
-                }
-
                 // Трек tracking на EarthView.
                 if (window.earthView) {
                     window.earthView.setSatelliteInfo(state.name || '', state.noradId);
@@ -455,13 +417,6 @@
                 }
             } else {
                 console.log('[app.js] Tracking OFF');
-                // Остановка водопада и очистка окна при сбросе наблюдения
-                if (window._bottomPanel && typeof window._bottomPanel.stopWaterfallAndClear === 'function') {
-                    window._bottomPanel.stopWaterfallAndClear();
-                }
-                if (window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
-                    window._bottomPanel.showTab('overview', false);
-                }
                 if (window.earthView) {
                     window.earthView.clearTrackingLayer();
                     window.earthView.draw();
@@ -470,17 +425,6 @@
                     window.skyView.setSatelliteInfo('', null);
                     window.skyView.setTrack([]);
                     window.skyView.setSatellitePosition(NaN, NaN);
-                }
-                // Сброс графиков азимута и угла места — очищаем данные и перерисовываем.
-                if (window.azimuthIndicator) {
-                    window.azimuthIndicator.setSatellitePosition(null);
-                    window.azimuthIndicator.setNoradId(null);
-                    window.azimuthIndicator.draw();
-                }
-                if (window.elevationIndicator) {
-                    window.elevationIndicator.setSatellitePosition(null, null);
-                    window.elevationIndicator.setNoradId(null);
-                    window.elevationIndicator.draw();
                 }
             }
         });
@@ -683,7 +627,7 @@
         console.log('[app.js] SkyView', target, 'track для', noradId, ':', track.length, 'точек');
     }
 
-    // Инициализация нижней панели: вкладки + водопад
+    // Инициализация нижней панели: миграция legacy-ключа localStorage
     function initBottomPanel() {
         if (window._bottomPanel) {
             window._bottomPanel.destroy();
@@ -691,11 +635,45 @@
         }
         if (document.getElementById('bottom-panel-body') && typeof window.BottomPanel === 'function') {
             window._bottomPanel = new window.BottomPanel();
-            // Синхронизация водопада с текущим наблюдением (например после HTMX-навигации)
-            if (window._stateManager && window._stateManager.getTrackingSatelliteId() && typeof window._bottomPanel.startWaterfall === 'function') {
-                window._bottomPanel.startWaterfall();
-            }
         }
+    }
+
+    // Инициализация Ручного layout: отдельные canvas Az/El/FFT/WF в #layout-manual
+    function initManualLayout() {
+        if (window._manualLayout) {
+            window._manualLayout.destroy();
+            window._manualLayout = null;
+        }
+        if (!document.getElementById('layout-manual') || typeof window.ManualLayout !== 'function') {
+            return;
+        }
+        if (!window._stateManager) {
+            return;
+        }
+        window._manualLayout = new window.ManualLayout(window._stateManager);
+        // Если текущий режим уже Ручной — стартуем рендер сразу.
+        const mm = window._modeManager;
+        const currentMode = mm && typeof mm.getMode === 'function' ? mm.getMode() : null;
+        if (currentMode === 'manual') {
+            window._manualLayout.activate();
+        }
+    }
+
+    // Инициализация связки нижней панели Авто-режима:
+    // список передатчиков всех КА группы (#auto-link-tx-list).
+    function initOverviewLink() {
+        if (window._overviewLink) {
+            window._overviewLink.destroy();
+            window._overviewLink = null;
+        }
+        const txListEl = document.getElementById('auto-link-tx-list');
+        if (!txListEl) { return; }
+        if (!window._stateManager || typeof window.OverviewLink !== 'function') {
+            return;
+        }
+        window._overviewLink = new window.OverviewLink(window._stateManager, {
+            txListEl: txListEl,
+        });
     }
 
     // Инициализация расписания сеансов наблюдения в правой панели
@@ -829,49 +807,9 @@
             drawPlaceholder(skyCanvas, '', 'Небесная сфера');
         }
 
-        // Azimuth indicator — данные с SSE; панель информации отдельно под canvas
-        const azCanvas = document.getElementById('azimuth-view');
-        if (azCanvas && window.AzimuthIndicator) {
-            window.azimuthIndicator = new window.AzimuthIndicator(azCanvas);
-            window.azimuthIndicator.setInfoElements({ ant: 'az-info-ant', sat: 'az-info-sat' });
-            const azWrap = azCanvas.parentElement;
-            if (azWrap && typeof ResizeObserver !== 'undefined') {
-                const syncAzSize = function() {
-                    const w = azWrap.clientWidth;
-                    const h = azWrap.clientHeight;
-                    if (w > 0 && h > 0 && window.azimuthIndicator) {
-                        window.azimuthIndicator.resize(w, h);
-                    }
-                };
-                const azRo = new ResizeObserver(syncAzSize);
-                azRo.observe(azWrap);
-                syncAzSize();
-            } else {
-                window.azimuthIndicator.draw();
-            }
-        }
-
-        // Elevation indicator — данные с SSE; панель информации отдельно под canvas
-        const elCanvas = document.getElementById('elevation-view');
-        if (elCanvas && window.ElevationIndicator) {
-            window.elevationIndicator = new window.ElevationIndicator(elCanvas);
-            window.elevationIndicator.setInfoElements({ ant: 'el-info-ant', sat: 'el-info-sat' });
-            const elWrap = elCanvas.parentElement;
-            if (elWrap && typeof ResizeObserver !== 'undefined') {
-                const syncElSize = function() {
-                    const w = elWrap.clientWidth;
-                    const h = elWrap.clientHeight;
-                    if (w > 0 && h > 0 && window.elevationIndicator) {
-                        window.elevationIndicator.resize(w, h);
-                    }
-                };
-                const elRo = new ResizeObserver(syncElSize);
-                elRo.observe(elWrap);
-                syncElSize();
-            } else {
-                window.elevationIndicator.draw();
-            }
-        }
+        // Azimuth/Elevation индикаторы для tracking-страницы живут в Ручном режиме —
+        // их инстансы создаёт ManualLayout (см. manual-layout.js). Глобальных
+        // window.azimuthIndicator/elevationIndicator больше нет (ADR-004 v2026-06-03).
 
         // Waterfall placeholder
         const wfCanvas = document.getElementById('waterfall');
@@ -962,11 +900,8 @@
 
         initRightPanel();
         initBottomPanel();
-
-        if (/[?&]tab=plan(?:&|$)/.test(window.location.search) &&
-            window._bottomPanel && typeof window._bottomPanel.showTab === 'function') {
-            window._bottomPanel.showTab('plan', false);
-        }
+        initManualLayout();
+        initOverviewLink();
     });
 
     // Переключение активного класса на табах при клике

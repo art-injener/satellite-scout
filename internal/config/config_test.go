@@ -36,6 +36,15 @@ func TestDefaultConfig_Values(t *testing.T) {
 	if cfg.SatNOGS.CacheTTL != defaultSatNOGSCacheTTL {
 		t.Errorf("SatNOGS.CacheTTL = %v, want %v", cfg.SatNOGS.CacheTTL, defaultSatNOGSCacheTTL)
 	}
+	if cfg.SatNOGS.Timeout != defaultSatNOGSTimeout {
+		t.Errorf("SatNOGS.Timeout = %v, want %v", cfg.SatNOGS.Timeout, defaultSatNOGSTimeout)
+	}
+	if cfg.SatNOGS.MaxRetries != defaultSatNOGSMaxRetries {
+		t.Errorf("SatNOGS.MaxRetries = %d, want %d", cfg.SatNOGS.MaxRetries, defaultSatNOGSMaxRetries)
+	}
+	if cfg.SatNOGS.Workers != defaultSatNOGSWorkers {
+		t.Errorf("SatNOGS.Workers = %d, want %d", cfg.SatNOGS.Workers, defaultSatNOGSWorkers)
+	}
 	if cfg.TLE.CacheDir == "" {
 		t.Error("TLE.CacheDir is empty")
 	}

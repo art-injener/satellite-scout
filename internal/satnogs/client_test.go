@@ -328,18 +328,59 @@ func TestClient_DefaultsApplied(t *testing.T) {
 	}
 }
 
+func TestWithTimeout(t *testing.T) {
+	c := NewClient(WithTimeout(3 * time.Second))
+	if c.httpClient.Timeout != 3*time.Second {
+		t.Errorf("httpClient.Timeout = %v, want 3s", c.httpClient.Timeout)
+	}
+
+	// Неположительное значение игнорируется — остаётся дефолт.
+	c2 := NewClient(WithTimeout(0))
+	if c2.httpClient.Timeout != DefaultTimeout {
+		t.Errorf("httpClient.Timeout = %v, want %v (default)", c2.httpClient.Timeout, DefaultTimeout)
+	}
+}
+
+func TestClient_FetchTransmitters_TimeoutNoRetry(t *testing.T) {
+	var attempts int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		time.Sleep(300 * time.Millisecond) // дольше таймаута клиента
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	// Короткий таймаут + ретраи разрешены: убеждаемся, что таймаут НЕ повторяется.
+	c := NewClient(
+		WithBaseURL(server.URL),
+		WithRateLimit(0),
+		WithMaxRetries(3),
+		WithTimeout(50*time.Millisecond),
+	)
+
+	_, err := c.FetchTransmitters(context.Background(), 25544)
+	if err == nil {
+		t.Fatal("FetchTransmitters() expected timeout error, got nil")
+	}
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Errorf("err = %v, want context.DeadlineExceeded", err)
+	}
+	if got := atomic.LoadInt32(&attempts); got != 1 {
+		t.Errorf("attempts = %d, want 1 (timeout must not retry)", got)
+	}
+}
+
 func TestRetryBackoff(t *testing.T) {
 	tests := []struct {
 		attempt int
 		want    time.Duration
 	}{
 		{0, 0},
-		{1, 5 * time.Second},
-		{2, 15 * time.Second},
-		{3, 30 * time.Second},
-		{4, 1 * time.Minute},
-		{5, 1 * time.Minute},
-		{100, 1 * time.Minute},
+		{1, 2 * time.Second},
+		{2, 5 * time.Second},
+		{3, 10 * time.Second},
+		{4, 10 * time.Second},
+		{100, 10 * time.Second},
 	}
 	for _, tt := range tests {
 		if got := retryBackoff(tt.attempt); got != tt.want {

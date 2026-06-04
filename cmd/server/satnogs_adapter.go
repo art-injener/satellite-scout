@@ -39,3 +39,28 @@ func (a *satnogsTransmitterAdapter) RequestFetch(noradIDs []int) {
 	}
 	a.svc.RequestFetch(noradIDs)
 }
+
+// ListActiveTransmitters — реализация интерфейса services.TxCatalog.
+// Отдаёт UUID только тех передатчиков, у которых есть downlink и которые
+// в активном статусе (alive + status=active).
+func (a *satnogsTransmitterAdapter) ListActiveTransmitters(noradID int) []services.TransmitterRef {
+	if a == nil || a.svc == nil {
+		return nil
+	}
+	all := a.svc.GetAllTransmitters(noradID)
+	if len(all) == 0 {
+		return nil
+	}
+	out := make([]services.TransmitterRef, 0, len(all))
+	for i := range all {
+		t := &all[i]
+		if !t.IsActive() || !t.HasDownlink() {
+			continue
+		}
+		if t.UUID == "" {
+			continue
+		}
+		out = append(out, services.TransmitterRef{UUID: t.UUID})
+	}
+	return out
+}

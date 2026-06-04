@@ -1,5 +1,13 @@
-// Нижняя панель: вкладки «Обзор» / «Сопровождение».
-// Компоненты: SpectrumDataSource, WaterfallView, FFTSpectrumView, BottomPanel.
+// Нижняя панель и общие компоненты спектра.
+//
+// После редизайна Авто-режима (ADR-004 v2026-06-03) сама нижняя панель в Авто
+// больше не содержит вкладок «Обзор» / «Сопровождение» — на её месте связка
+// «Передатчики ↔ Heat-grid TX × циклы» (см. auto-link.js).
+//
+// В этом файле остаются только переиспользуемые компоненты, нужные Ручному
+// режиму (manual-layout.js): SpectrumDataSource, WaterfallView, FFTSpectrumView.
+// Класс BottomPanel — минимальный: одноразовая миграция legacy-ключа
+// localStorage и заглушка-конструктор для совместимости с app.js.
 
 (function() {
     'use strict';
@@ -551,450 +559,36 @@
     };
 
     // ════════════════════════════════════════════════════════════════════════
-    // Общая шкала частот (между FFT и водопадом на вкладке «Обзор»)
+    // BottomPanel — минимальная заглушка после редизайна
+    //
+    // До 2026-06-03 здесь жили вкладки «Обзор» / «Сопровождение», SDR-форма,
+    // спектр и водопад. По ADR-004 v2026-06-03 всё это либо переехало в Ручной
+    // режим (manual-layout.js, MANUAL-MAGNIFIER-001 — в работе), либо заменено
+    // связкой `Передатчики ↔ Heat-grid TX × циклы` (auto-link.js).
+    //
+    // Класс остаётся, чтобы не ломать вызовы из app.js: внешне это no-op,
+    // но при инициализации выполняет одноразовую миграцию legacy-ключа
+    // localStorage `ux.bottomTab`.
     // ════════════════════════════════════════════════════════════════════════
 
-    // Шкала с засечками вверх (к FFT) и вниз (к водопаду), метки по центру
-    function drawOverviewFreqScale(canvas, freqCenterMHz, freqSpanMHz, marginLeft) {
-        if (!canvas) { return; }
-        const parent = canvas.parentElement;
-        let totalW = parent ? Math.floor(parent.getBoundingClientRect().width) : 0;
-        if (totalW < 10) { totalW = canvas.offsetWidth || 0; }
-        if (totalW < 10) { return; }
-        if (canvas.width !== totalW || canvas.height !== 18) {
-            canvas.width = totalW;
-            canvas.height = 18;
-        }
-        const ctx = canvas.getContext('2d');
-        const bg = cssVar('--bg-tertiary', '#243848');
-        const fg = cssVar('--text-muted', '#c8d0d8');
-        ctx.fillStyle = bg;
-        ctx.fillRect(0, 0, totalW, 18);
-
-        const ml = marginLeft || 0;
-        const mr = 4;
-        const plotW = totalW - ml - mr;
-        if (plotW < 10) { return; }
-
-        const freqMin = freqCenterMHz - freqSpanMHz / 2;
-        const freqMax = freqCenterMHz + freqSpanMHz / 2;
-        const stepMHz = calcFreqScaleStep(freqSpanMHz, plotW, 52);
-        const decimals = stepMHz >= 1 ? 1 : (stepMHz >= 0.1 ? 2 : 3);
-
-        ctx.strokeStyle = fg;
-        ctx.fillStyle = fg;
-        ctx.font = '10px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-
-        for (let f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
-            const x = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
-            // Засечка вверх (к FFT)
-            ctx.beginPath();
-            ctx.moveTo(x, 0);
-            ctx.lineTo(x, 4);
-            ctx.stroke();
-            // Засечка вниз (к водопаду)
-            ctx.beginPath();
-            ctx.moveTo(x, 14);
-            ctx.lineTo(x, 18);
-            ctx.stroke();
-            // Подпись по центру
-            ctx.fillText(f.toFixed(decimals), x, 9);
-        }
+    /** Удалить устаревший ключ переключения вкладок нижней панели. */
+    function migrateLegacyBottomTab() {
+        try {
+            if (localStorage.getItem('ux.bottomTab') !== null) {
+                localStorage.removeItem('ux.bottomTab');
+            }
+        } catch (e) { /* no storage — ничего не делаем */ }
     }
-
-    // ════════════════════════════════════════════════════════════════════════
-    // BottomPanel — переключение вкладок, управление компонентами спектра
-    // ════════════════════════════════════════════════════════════════════════
-
-    // Миграция старых ключей вкладок (UX-BOTTOM-RENAME-001)
-    const LEGACY_BOTTOM_TAB = { spectrum: 'overview', antenna: 'follow', tmi: 'overview' };
-
-    const VALID_BOTTOM_TABS = ['overview', 'follow', 'plan'];
-
-    function migrateBottomTabFromStorage() {
-        const raw = localStorage.getItem('ux.bottomTab');
-        if (!raw) { return 'overview'; }
-        const next = LEGACY_BOTTOM_TAB[raw] || raw;
-        if (VALID_BOTTOM_TABS.indexOf(next) < 0) {
-            try { localStorage.setItem('ux.bottomTab', 'overview'); } catch (e) { /* ignore */ }
-            return 'overview';
-        }
-        if (next !== raw) {
-            try { localStorage.setItem('ux.bottomTab', next); } catch (e) { /* ignore */ }
-        }
-        return next;
-    }
-
-    const TAB_LABELS = { follow: 'Сопровождение', overview: 'Обзор', plan: 'План сеансов' };
-    /** Вертикальная колонка в полоске РТН (по одному знаку; follow — сокращение «Сопровожд.») */
-    const TAB_LABELS_SIDE = { follow: 'Сопр-ние', overview: 'ОБЗОР', plan: 'ПЛАН' };
-
-    // Центральный bin и ширина среза для узкополосного водопада вкладки «Сопровождение»
-    const FOLLOW_CENTER_BIN = 256;
-    const FOLLOW_NARROW_BINS = 128;
 
     function BottomPanel() {
-        this._panes = {};
-        this._currentTab = migrateBottomTabFromStorage();
-        this._resizeBound = null;
-        this._spectrumTimer = null;
-        this._followRunning = false;
-
-        // Флаг свёрнутости панели — при true спектр/водопад не рисуются.
-        this._collapsed = false;
-
-        // Компоненты визуализации (создаются в _initSpectrum)
-        this._dataSource = null;
-        this._followWF = null;
-        this._overviewWF = null;
-        this._overviewFFT = null;
-        this._overviewScaleCanvas = null;
-        this._resizeObserver = null;
-
-        this._collectPanes();
-        if (!this._panes[this._currentTab]) {
-            this._currentTab = 'overview';
-            try { localStorage.setItem('ux.bottomTab', 'overview'); } catch (e) { /* ignore */ }
-        }
-        this._initTabs();
-        this._initSDRForm();
-        this._initSpectrum();
-        this._switchTab(this._currentTab, false);
-        this._startSpectrumTimer();
-        this._bindResize();
+        migrateLegacyBottomTab();
     }
 
-    // Собираем ссылки на pane-контейнеры
-    BottomPanel.prototype._collectPanes = function() {
-        const els = document.querySelectorAll('.bp-pane');
-        for (let i = 0; i < els.length; i++) {
-            const id = els[i].id.replace('bp-pane-', '');
-            this._panes[id] = els[i];
-        }
-    };
+    BottomPanel.prototype.destroy = function() { /* нечего освобождать */ };
 
-    // Кнопки режима РТН: полоска слева от тела нижней панели
-    const BOTTOM_TAB_BTN_SELECTOR = '.bottom-panel__tab-btn';
-
-    // Привязываем клики (Обзор / Сопровождение)
-    BottomPanel.prototype._initTabs = function() {
-        const self = this;
-        const tabs = document.querySelectorAll(BOTTOM_TAB_BTN_SELECTOR);
-        for (let i = 0; i < tabs.length; i++) {
-            (function(tab) {
-                tab.addEventListener('click', function() {
-                    self._switchTab(tab.getAttribute('data-tab'), true);
-                });
-            })(tabs[i]);
-        }
-    };
-
-    // Переключение активной вкладки
-    BottomPanel.prototype._switchTab = function(name, save) {
-        const tabs = document.querySelectorAll(BOTTOM_TAB_BTN_SELECTOR);
-        for (let i = 0; i < tabs.length; i++) {
-            const on = tabs[i].getAttribute('data-tab') === name;
-            tabs[i].classList.toggle('active', on);
-            if (tabs[i].getAttribute('role') === 'tab') {
-                tabs[i].setAttribute('aria-selected', on ? 'true' : 'false');
-            }
-        }
-        for (const key in this._panes) {
-            this._panes[key].classList.toggle('bp-pane--hidden', key !== name);
-        }
-        // Подпись в полоске — столбиком (по одной букве); только короткий вариант
-        const modeEl = document.getElementById('bottom-panel-mode');
-        if (modeEl) {
-            const full = TAB_LABELS[name] || name;
-            modeEl.setAttribute('title', full);
-            const label = TAB_LABELS_SIDE[name] || full;
-            modeEl.innerHTML = label.split('').map(function(c) {
-                return '<span>' + (c === ' ' ? '\u00A0' : c) + '</span>';
-            }).join('');
-        }
-        this._currentTab = name;
-        this._overviewScaleDrawn = false;
-        if (save) {
-            try { localStorage.setItem('ux.bottomTab', name); } catch (e) { /* ignore */ }
-        }
-        if (name === 'plan' && typeof window.ensurePassesTableBottom === 'function') {
-            window.ensurePassesTableBottom();
-        }
-        // Отложенное обновление размеров видимых компонентов
-        const self = this;
-        requestAnimationFrame(function() {
-            requestAnimationFrame(function() {
-                self._refreshCurrentTab();
-            });
-        });
-    };
-
-    // Обновление видимых компонентов текущей вкладки
-    BottomPanel.prototype._refreshCurrentTab = function() {
-        if (this._currentTab === 'overview') {
-            if (this._overviewFFT) { this._overviewFFT._resize(); }
-            if (this._overviewWF) { this._overviewWF.refresh(); }
-            this._drawOverviewScale();
-        } else if (this._currentTab === 'follow') {
-            if (this._followWF) { this._followWF.refresh(); }
-        }
-        // plan — только таблица в скролле, спектр не трогаем
-    };
-
-    // Инициализация всех компонентов спектра
-    BottomPanel.prototype._initSpectrum = function() {
-        this._dataSource = new SpectrumDataSource({
-            bins: 512,
-            freqCenterMHz: 437.365,
-            freqSpanMHz: 0.192
-        });
-
-        const ds = this._dataSource;
-
-        // Водопад «Сопровождение»
-        const followCanvas = document.getElementById('waterfall-compact');
-        const followScale = document.getElementById('waterfall-freq-scale');
-        if (followCanvas) {
-            this._followWF = new WaterfallView(followCanvas, followScale, {
-                freqCenterMHz: ds.freqCenterMHz,
-                freqSpanMHz: ds.freqSpanMHz,
-                headerFreqId: 'wf-freq',
-                headerResId: 'wf-res',
-                marginLeft: 32
-            });
-            this._followWF.clear();
-        }
-
-        // FFT спектр «Обзор»
-        const fftCanvas = document.getElementById('fft-spectrum');
-        if (fftCanvas) {
-            this._overviewFFT = new FFTSpectrumView(fftCanvas, {
-                freqCenterMHz: ds.freqCenterMHz,
-                freqSpanMHz: ds.freqSpanMHz
-            });
-        }
-
-        // Водопад «Обзор» — marginLeft совпадает с отступом FFT для выравнивания
-        const overviewWFCanvas = document.getElementById('spectrum-waterfall');
-        const fftML = this._overviewFFT ? this._overviewFFT._marginLeft : 40;
-        const fftMR = this._overviewFFT ? this._overviewFFT._marginRight : 4;
-        if (overviewWFCanvas) {
-            this._overviewWF = new WaterfallView(overviewWFCanvas, null, {
-                freqCenterMHz: ds.freqCenterMHz,
-                freqSpanMHz: ds.freqSpanMHz,
-                marginLeft: fftML,
-                marginRight: fftMR
-            });
-            this._overviewWF.start();
-        }
-
-        this._overviewScaleCanvas = document.getElementById('overview-freq-scale') || null;
-
-        // ResizeObserver на контейнеры
-        if (typeof ResizeObserver !== 'undefined') {
-            const self = this;
-            this._resizeObserver = new ResizeObserver(function() {
-                self._refreshCurrentTab();
-            });
-            if (followCanvas && followCanvas.parentElement) {
-                this._resizeObserver.observe(followCanvas.parentElement);
-            }
-            const overviewCharts = document.querySelector('.bp-overview-charts');
-            if (overviewCharts) {
-                this._resizeObserver.observe(overviewCharts);
-            }
-        }
-    };
-
-    // Отрисовка общей шкалы частот «Обзор»
-    BottomPanel.prototype._drawOverviewScale = function() {
-        if (!this._overviewScaleCanvas || !this._dataSource) { return; }
-        const ml = this._overviewFFT ? this._overviewFFT._marginLeft : 40;
-        drawOverviewFreqScale(
-            this._overviewScaleCanvas,
-            this._dataSource.freqCenterMHz,
-            this._dataSource.freqSpanMHz,
-            ml
-        );
-    };
-
-    // Запуск единого таймера спектра (80 мс)
-    BottomPanel.prototype._startSpectrumTimer = function() {
-        const self = this;
-        this._spectrumTimer = setInterval(function() { self._spectrumTick(); }, 80);
-    };
-
-    // Один такт: генерация данных + отрисовка для видимой вкладки
-    BottomPanel.prototype._spectrumTick = function() {
-        if (!this._dataSource || this._collapsed) { return; }
-        this._dataSource.generateLine();
-
-        if (this._currentTab === 'overview') {
-            const line = this._dataSource.getLine();
-            if (this._overviewFFT) { this._overviewFFT.draw(line); }
-            if (this._overviewWF) { this._overviewWF.pushLine(line); }
-            if (!this._overviewScaleDrawn) {
-                this._drawOverviewScale();
-                this._overviewScaleDrawn = true;
-            }
-        }
-
-        if (this._currentTab === 'follow' && this._followRunning && this._followWF) {
-            const slice = this._dataSource.getSlice(FOLLOW_CENTER_BIN, FOLLOW_NARROW_BINS);
-            this._followWF.pushLine(slice);
-        }
-    };
-
-    // ── Публичный API ──
-
-    /**
-     * Переключить вкладку программно.
-     * @param {string} name — 'overview' | 'follow' | 'plan'
-     * @param {boolean} [persist=false] — true при клике пользователя (localStorage)
-     */
-    BottomPanel.prototype.showTab = function(name, persist) {
-        if (!this._panes[name]) { return; }
-        this._switchTab(name, persist === true);
-    };
-
-    // Сброс имитации Доплера + очистка водопадов (при смене спутника)
-    BottomPanel.prototype.resetSimulation = function() {
-        if (this._dataSource) { this._dataSource.reset(); }
-        if (this._followWF) { this._followWF.clear(); }
-        if (this._overviewWF) { this._overviewWF.clear(); }
-    };
-
-    // Запуск водопада «Сопровождение» (кнопка «Сопровождать» в правой панели)
-    BottomPanel.prototype.startWaterfall = function() {
-        this.resetSimulation();
-        this._followRunning = true;
-        if (this._followWF) { this._followWF.start(); }
-    };
-
-    // Остановка и очистка водопада «Сопровождение» (кнопка «Сброс»)
-    BottomPanel.prototype.stopWaterfallAndClear = function() {
-        this._followRunning = false;
-        if (this._followWF) { this._followWF.clear(); }
-    };
-
-    // Принудительное обновление видимых водопадов (после resize / разворота)
-    BottomPanel.prototype.refreshWaterfall = function() {
-        this._refreshCurrentTab();
-    };
-
-    /** После смены colors-*.css: сбросить буфер водопада (фон «холодных» пикселей) и перерисовать шкалы. */
-    BottomPanel.prototype.refreshAfterThemeChange = function() {
-        this._overviewScaleDrawn = false;
-        if (this._overviewWF) {
-            this._overviewWF._imageData = null;
-            if (!this._overviewWF._running) {
-                this._overviewWF.clear();
-            }
-        }
-        if (this._followWF) {
-            this._followWF._imageData = null;
-            if (!this._followWF._running) {
-                this._followWF.clear();
-            }
-        }
-        this._refreshCurrentTab();
-    };
-
-    /**
-     * Установить состояние свёрнутости панели.
-     * При collapsed=true генерация данных и отрисовка спектра/водопада приостанавливается.
-     * @param {boolean} collapsed
-     */
-    BottomPanel.prototype.setCollapsed = function(collapsed) {
-        this._collapsed = Boolean(collapsed);
-    };
-
-    /** @returns {boolean} true если панель свёрнута. */
-    BottomPanel.prototype.isCollapsed = function() {
-        return this._collapsed;
-    };
-
-    // ── Заглушки формы SDR ──
-
-    BottomPanel.prototype._initSDRForm = function() {
-        const gainSlider = document.getElementById('sdr-gain');
-        const gainVal = document.getElementById('sdr-gain-val');
-        if (gainSlider && gainVal) {
-            gainSlider.addEventListener('input', function() {
-                gainVal.textContent = gainSlider.value;
-            });
-        }
-
-        const deviceSel = document.getElementById('sdr-device');
-        const deviceRefresh = document.getElementById('sdr-device-refresh');
-        if (deviceRefresh) {
-            deviceRefresh.addEventListener('click', function() {
-                console.log('[BottomPanel] TODO: GET /api/sdr/devices — обновление списка устройств', {
-                    current: deviceSel && deviceSel.value,
-                });
-            });
-        }
-
-        // Привязка футер-индикатора `#sf-sdr` к текущему выбору устройства.
-        // Live-биндинг: меняется сразу при выборе в dropdown (не ждём «Установить»).
-        const syncFooterSDR = function() {
-            const footer = document.getElementById('sf-sdr');
-            if (!footer || !deviceSel) { return; }
-            const opt = deviceSel.options[deviceSel.selectedIndex];
-            const txt = opt && opt.textContent ? opt.textContent.trim() : '---';
-            footer.textContent = 'SDR: ' + txt;
-        };
-        if (deviceSel) {
-            syncFooterSDR();
-            deviceSel.addEventListener('change', syncFooterSDR);
-        }
-
-        const startBtn = document.getElementById('sdr-start');
-        if (startBtn) {
-            startBtn.addEventListener('click', function() {
-                console.log('[BottomPanel] TODO: POST /api/sdr/start', {
-                    device: deviceSel && deviceSel.value,
-                    freq: document.getElementById('sdr-freq') && document.getElementById('sdr-freq').value,
-                    gain: gainSlider && gainSlider.value,
-                    bw:   document.getElementById('sdr-bw') && document.getElementById('sdr-bw').value,
-                    mod:  document.getElementById('sdr-mod') && document.getElementById('sdr-mod').value,
-                    baud: document.getElementById('sdr-baud') && document.getElementById('sdr-baud').value
-                });
-            });
-        }
-    };
-
-    // Обработка resize окна
-    BottomPanel.prototype._bindResize = function() {
-        const self = this;
-        this._resizeBound = function() { self._refreshCurrentTab(); };
-        window.addEventListener('resize', this._resizeBound);
-    };
-
-    // Очистка ресурсов
-    BottomPanel.prototype.destroy = function() {
-        if (this._resizeBound) {
-            window.removeEventListener('resize', this._resizeBound);
-            this._resizeBound = null;
-        }
-        if (this._spectrumTimer) {
-            clearInterval(this._spectrumTimer);
-            this._spectrumTimer = null;
-        }
-        if (this._resizeObserver) {
-            this._resizeObserver.disconnect();
-            this._resizeObserver = null;
-        }
-        this._followWF = null;
-        this._overviewWF = null;
-        this._overviewFFT = null;
-        this._dataSource = null;
-    };
-
-    // Экспорт
     window.BottomPanel = BottomPanel;
     window.WaterfallView = WaterfallView;
+    window.FFTSpectrumView = FFTSpectrumView;
+    window.SpectrumDataSource = SpectrumDataSource;
 
 })();

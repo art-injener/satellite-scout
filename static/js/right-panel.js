@@ -129,12 +129,14 @@
                 sm.subscribe(window.StateEventType.SHOW_ALL_MODE_CHANGE, function() {
                     self._render();
                 });
+                sm.subscribe(window.StateEventType.TX_CYCLE, function() {
+                    self._updatePacketCells();
+                });
             }
         } else {
             this._syncThTrackEye();
         }
 
-        const self = this;
         document.addEventListener('satellite-scout-mode-change', function(ev) {
             const mode = ev && ev.detail ? ev.detail.mode : null;
             self._applyTrackingControlsVisibility(mode);
@@ -222,15 +224,21 @@
             const trackCls = 'pc-track-cell' + (trackVisible ? ' pc-track-cell--on' : ' pc-track-cell--off');
             const trackIcon = trackVisible ? eyeVisibleSvg(markerColor) : eyeHiddenSvg(markerColor);
 
-            // Частота и модуляция приходят из SatNOGS (поля freq_mhz / modulation в satellite_group_update).
-            // Если данных нет — заглушка «—»; ячейка с данными подсвечивается классом pc-freq-cell--has-data.
-            const freqVal = sat.freq_mhz ? this._escapeHtml(sat.freq_mhz) : '\u2014';
-            const freqMod = sat.modulation ? this._escapeHtml(sat.modulation) : '\u2014';
+            // Пакеты за пролёт (tx_cycle, Σ по всем TX). Частота SatNOGS — только в подсказке ячейки.
             const hasFreq = Boolean(sat.freq_mhz);
-            const freqCellCls = 'pc-freq-cell' + (hasFreq ? ' pc-freq-cell--has-data' : '');
-            const freqTitle = hasFreq
+            const satnoogsHint = hasFreq
                 ? (sat.freq_mhz + ' MHz' + (sat.modulation ? ' · ' + sat.modulation : '') + ' (SatNOGS)')
                 : 'Данные SatNOGS недоступны';
+
+            const pktTotal = window._stateManager && typeof window._stateManager.getPassPacketTotal === 'function'
+                ? window._stateManager.getPassPacketTotal(sat.norad_id)
+                : 0;
+            const pktVal = pktTotal > 0 ? String(pktTotal) : '\u2014';
+            const pktHint = pktTotal > 0
+                ? (pktTotal + ' пакетов за пролёт (все передатчики)')
+                : 'Пакетов пока нет';
+            const pktCellCls = 'pc-pkt-cell' + (pktTotal > 0 ? ' pc-pkt-cell--has-data' : '');
+            const cellTitle = satnoogsHint + '. ' + pktHint;
 
             html += '<tr class="' + cls + '" data-norad="' + sat.norad_id + '"' +
                 ' data-aos="' + sat.aos + '" data-los="' + sat.los + '" data-dur="' + sat.duration + '">' +
@@ -248,9 +256,9 @@
                     '<div class="pc-azel-el">' + azel.el + '</div>' +
                 '</td>' +
                 '<td class="pc-col3-cell">' + col3 + '</td>' +
-                '<td class="' + freqCellCls + '" title="' + this._escapeHtml(freqTitle) + '">' +
-                    '<div class="pc-freq-val">' + freqVal + '</div>' +
-                    '<div class="pc-freq-mod">' + freqMod + '</div>' +
+                '<td class="' + pktCellCls + '" title="' + this._escapeHtml(cellTitle) + '"' +
+                    ' data-satnoogs-title="' + this._escapeHtml(satnoogsHint) + '">' +
+                    '<div class="pc-pkt-val">' + pktVal + '</div>' +
                 '</td>' +
                 '</tr>';
         }
@@ -280,6 +288,32 @@
             az: state.position.az.toFixed(1) + '\u00b0',
             el: state.position.el.toFixed(1) + '\u00b0'
         };
+    };
+
+    /** Обновить колонку «Пакеты» без полного перерендера (по событию tx_cycle). */
+    RightPanelTable.prototype._updatePacketCells = function() {
+        if (!this._tbody || !window._stateManager) { return; }
+        const sm = window._stateManager;
+        if (typeof sm.getPassPacketTotal !== 'function') { return; }
+        const rows = this._tbody.querySelectorAll('.pc-row');
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const noradId = parseInt(row.getAttribute('data-norad'), 10);
+            if (!noradId) { continue; }
+            const pktTd = row.querySelector('.pc-pkt-cell');
+            const pktEl = row.querySelector('.pc-pkt-val');
+            if (!pktEl || !pktTd) { continue; }
+            const total = sm.getPassPacketTotal(noradId);
+            pktEl.textContent = total > 0 ? String(total) : '\u2014';
+            pktTd.classList.toggle('pc-pkt-cell--has-data', total > 0);
+            const baseTitle = pktTd.getAttribute('data-satnoogs-title') || '';
+            const pktHint = total > 0
+                ? (total + ' пакетов за пролёт (все передатчики)')
+                : 'Пакетов пока нет';
+            if (baseTitle) {
+                pktTd.title = baseTitle + '. ' + pktHint;
+            }
+        }
     };
 
     RightPanelTable.prototype._tickCountdowns = function() {

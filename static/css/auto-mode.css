@@ -1,0 +1,400 @@
+/* ===== Авто-режим — нижняя панель =====
+   Единый список передатчиков всех КА группы (UI «Передатчики») со встроенной
+   на каждой строке лентой «визитов сканера» (квадратики с цифрой пакетов и
+   цветом по уровню сигнала), кумулятивом за пролёт и последним dB.
+   Подпись «Передатчики» — столбиком в .bottom-panel__side.
+   Связка и подсветка — auto-link.js. См. ADR-004 §3.
+
+   Видимость самой #bottom-panel управляется в main.css по body.mode-overview /
+   body.mode-manual. Здесь — только внутренняя сетка #auto-link и стили виджетов. */
+
+.auto-link {
+    /* Единая шкала типографики и высот строк нижней панели Авто. */
+    /* Две строки в ячейке КА (NORAD + имя) при фиксированной высоте строки TX */
+    --auto-link-row-h: 36px;
+    /* Шапка: две строки в колонке КА (как план сеансов) */
+    --auto-link-head-h: 40px;
+    --auto-link-font: 13px;
+    --auto-link-font-head: 11px;
+    --auto-link-font-sat-norad: 11px;
+    --auto-link-font-sat-name: 13px;
+    --auto-link-cell-w: 26px;
+    --auto-link-cell-h: 22px;
+    display: flex;
+    flex-direction: column;
+    padding: 4px;
+    gap: 4px;
+    width: 100%;
+    height: 100%;
+    box-sizing: border-box;
+    min-height: 0;
+    min-width: 0;
+}
+
+.auto-link__col {
+    display: flex;
+    flex-direction: column;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    min-height: 0;
+    min-width: 0;
+    flex: 1;
+}
+
+/* ===== Список передатчиков ===== */
+
+.auto-link__tx-list {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 0;
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+}
+
+/* Общая сетка колонок: КА | частота | модуляция | детектор | Σ | dB */
+.auto-link__tx-list-header,
+.auto-link__group-grid {
+    --auto-link-cols: 148px 118px 112px minmax(120px, 1fr) 88px 80px;
+}
+
+.auto-link__tx-list-header {
+    display: grid;
+    grid-template-columns: var(--auto-link-cols);
+    align-items: stretch;
+    column-gap: 1px;
+    row-gap: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: var(--font-mono);
+    min-height: var(--auto-link-head-h);
+    flex-shrink: 0;
+    overflow: visible;
+    /* 1px зазоры сетки = сплошные вертикальные линии на всю высоту шапки */
+    background: var(--border-color);
+    border-bottom: 1px solid var(--border-color);
+    font-size: var(--auto-link-font-head);
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+}
+
+/* Ячейки шапки перекрывают линии сетки своим фоном. */
+.auto-link__tx-list-header > .auto-link__th-col,
+.auto-link__tx-list-header > .auto-link__th--right {
+    display: flex;
+    align-items: center;
+    padding: 4px 8px;
+    box-sizing: border-box;
+    background: var(--bg-tertiary);
+    min-height: 100%;
+}
+
+.auto-link__th-col {
+    white-space: nowrap;
+}
+
+/* Заголовок колонки КА — как в плане сеансов: ИМЯ КА / NORAD ID */
+.auto-link__th-ka {
+    text-transform: none;
+    letter-spacing: 0;
+    white-space: normal;
+    align-items: center;
+    justify-content: center;
+}
+
+.auto-link__th-ka__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 13px;
+    line-height: 1.25;
+    font-weight: 600;
+    color: inherit;
+}
+
+.auto-link__th-ka__line {
+    display: block;
+    white-space: nowrap;
+}
+
+.auto-link__th--right {
+    justify-content: flex-end;
+    text-align: right;
+}
+
+.auto-link__tx-list-header > .auto-link__th--right:last-child {
+    justify-content: flex-end;
+}
+
+.auto-link__placeholder {
+    margin: auto;
+    padding: 12px;
+    color: var(--text-muted);
+    font-size: var(--auto-link-font);
+    text-align: center;
+    font-family: var(--font-mono);
+}
+
+/* Группа одного КА — сетка: слева объединённая ячейка КА, справа строки TX. */
+.auto-link__group {
+    position: relative;
+    flex-shrink: 0;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    overflow: hidden;
+}
+
+.auto-link__group-grid {
+    display: grid;
+    grid-template-columns: var(--auto-link-cols);
+    /* Фиксированная высота трека — без роста от переноса текста в ячейках */
+    grid-auto-rows: var(--auto-link-row-h);
+    column-gap: 1px;
+    row-gap: 1px;
+    align-items: stretch;
+    background: var(--border-color);
+}
+
+/* Ячейка КА на несколько строк передатчиков (grid-row задаётся из JS). */
+/* Имя сверху, NORAD снизу (как план сеансов); при нескольких TX — span на N строк */
+.auto-link__sat-cell {
+    grid-column: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    justify-content: center;
+    gap: 2px;
+    padding: 4px 8px;
+    box-sizing: border-box;
+    background: var(--bg-tertiary);
+    font-family: var(--font-mono);
+    cursor: pointer;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.auto-link__sat-cell:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.auto-link__sat-name {
+    max-width: 100%;
+    font-size: var(--auto-link-font-sat-name);
+    font-weight: 600;
+    color: var(--text-primary);
+    line-height: 1.35;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.auto-link__sat-norad {
+    max-width: 100%;
+    font-size: var(--auto-link-font-sat-norad);
+    font-weight: 400;
+    color: var(--text-muted);
+    line-height: 1.3;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Строка передатчика — колонки 2…6, выравнивание через subgrid. */
+.auto-link__tx {
+    grid-column: 2 / -1;
+    display: grid;
+    grid-template-columns: subgrid;
+    height: var(--auto-link-row-h);
+    max-height: var(--auto-link-row-h);
+    min-height: var(--auto-link-row-h);
+    padding: 0;
+    box-sizing: border-box;
+    font-family: var(--font-mono);
+    font-size: var(--auto-link-font);
+    line-height: 1.35;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-top: 1px solid transparent;
+    border-bottom: 1px solid transparent;
+    align-items: stretch;
+}
+
+.auto-link__tx:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.auto-link__tx-freq,
+.auto-link__tx-mode,
+.auto-link__strip,
+.auto-link__tx-total,
+.auto-link__tx-db {
+    display: flex;
+    align-items: center;
+    padding: 0 8px;
+    box-sizing: border-box;
+    background: var(--bg-secondary);
+    min-height: 100%;
+    min-width: 0;
+}
+
+.auto-link__tx-freq {
+    color: var(--text-primary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-link__tx-mode {
+    color: var(--text-muted);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.auto-link__tx:hover > .auto-link__tx-freq,
+.auto-link__tx:hover > .auto-link__tx-mode,
+.auto-link__tx:hover > .auto-link__strip,
+.auto-link__tx:hover > .auto-link__tx-total,
+.auto-link__tx:hover > .auto-link__tx-db {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+/* ===== Лента детектора пакетов ===== */
+
+/* Новый визит слева; справа — зарезервированные пустые квадраты (outline). */
+.auto-link__strip {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 3px;
+    height: var(--auto-link-cell-h);
+    min-width: 0;
+    overflow: hidden;
+    box-sizing: border-box;
+    justify-content: flex-start;
+    align-items: center;
+}
+
+/* Один визит = квадрат с цифрой пакетов внутри. */
+.auto-link__cell {
+    flex: 0 0 var(--auto-link-cell-w);
+    width: var(--auto-link-cell-w);
+    height: var(--auto-link-cell-h);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-family: var(--font-mono);
+    font-size: var(--auto-link-font-head);
+    font-weight: 600;
+    line-height: 1;
+    color: #0e0e0e;
+    background: transparent;
+    border-radius: 2px;
+    box-sizing: border-box;
+    user-select: none;
+}
+
+/* Молчащий визит — тонкая outline-рамка, без подложки и без подписи внутри. */
+.auto-link__cell--silent {
+    color: transparent;
+    font-weight: 400;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Цветовые уровни по power. */
+.auto-link__cell--lvl1 { background: #2f7a3a; color: #e6ffe9; } /* очень слабый */
+.auto-link__cell--lvl2 { background: #4caf50; color: #0e0e0e; } /* слабый */
+.auto-link__cell--lvl3 { background: #cddc39; color: #0e0e0e; } /* средний */
+.auto-link__cell--lvl4 { background: #ffb300; color: #0e0e0e; } /* сильный */
+.auto-link__cell--lvl5 { background: #ff5722; color: #fff;    } /* очень сильный */
+
+/* Колонка «Всего» (пакеты за пролёт). */
+.auto-link__tx-total {
+    justify-content: flex-end;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--auto-link-font);
+    font-weight: 600;
+    color: var(--text-muted);
+}
+
+.auto-link__tx-total--active {
+    color: var(--text-primary);
+}
+
+.auto-link__tx-db {
+    justify-content: flex-end;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    font-size: var(--auto-link-font);
+    color: var(--text-muted);
+}
+
+.auto-link__tx-db--active {
+    color: var(--text-primary);
+}
+
+/* Подсветка: рамка поверх всей группы (inset shadow сетки перекрывался ячейками КА/TX) */
+.auto-link__group--highlighted::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+    box-sizing: border-box;
+    border: 1px solid var(--accent-primary, #4dabf7);
+}
+
+.auto-link__group--highlighted .auto-link__sat-cell,
+.auto-link__tx--highlighted > .auto-link__tx-freq,
+.auto-link__tx--highlighted > .auto-link__tx-mode,
+.auto-link__tx--highlighted > .auto-link__strip,
+.auto-link__tx--highlighted > .auto-link__tx-total,
+.auto-link__tx--highlighted > .auto-link__tx-db {
+    background: var(--bg-hover, rgba(77, 171, 247, 0.12));
+}
+
+.auto-link__group--highlighted .auto-link__sat-name,
+.auto-link__group--highlighted .auto-link__sat-norad {
+    color: var(--accent-primary, #4dabf7);
+}
+
+.auto-link__group--highlighted .auto-link__sat-norad {
+    opacity: 0.75;
+}
+
+/* Рамка только на строках TX давала «обрезанную» подсветку без колонки КА */
+.auto-link__tx--highlighted {
+    border-top-color: transparent;
+    border-bottom-color: transparent;
+}
+
+/* Заглушка в группе («Активные не найдены», «Загрузка…») — на всю ширину без TX. */
+.auto-link__tx--empty {
+    grid-column: 2 / -1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    color: var(--text-muted);
+    font-style: italic;
+    font-size: var(--auto-link-font);
+    cursor: default;
+    min-height: var(--auto-link-row-h);
+    padding: 4px 8px;
+    background: var(--bg-secondary);
+}
+
+.auto-link__tx--empty:hover {
+    background: transparent;
+}

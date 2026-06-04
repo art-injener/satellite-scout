@@ -252,6 +252,32 @@ func TestService_RequestFetch_DedupsConcurrentRequests(t *testing.T) {
 	}
 }
 
+func TestService_WorkersProcessConcurrently(t *testing.T) {
+	mock := newMockFetcher()
+	for _, id := range []int{1, 2, 3, 4} {
+		mock.results[id] = []Transmitter{
+			{Alive: true, Status: "active", DownlinkLow: ptrInt64(145_800_000), Mode: "FM"},
+		}
+	}
+	// Каждый запрос «висит» 80мс. При одном воркере 4 запроса заняли бы ~320мс,
+	// при пуле из 4 воркеров они выполняются параллельно (~80мс).
+	mock.delay = 80 * time.Millisecond
+
+	svc := NewService(mock).WithWorkers(4)
+	stop := runService(svc)
+	defer stop()
+
+	start := time.Now()
+	svc.RequestFetch([]int{1, 2, 3, 4})
+	waitFor(t, 1*time.Second, func() bool { return mock.callCount() == 4 })
+	elapsed := time.Since(start)
+
+	// Порог с запасом: явно меньше последовательного исполнения (320мс).
+	if elapsed > 250*time.Millisecond {
+		t.Errorf("elapsed = %v, want < 250ms (workers must run in parallel)", elapsed)
+	}
+}
+
 func TestService_GetAllTransmitters(t *testing.T) {
 	mock := newMockFetcher()
 	mock.results[1] = []Transmitter{

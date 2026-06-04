@@ -62,9 +62,9 @@
     --state-disabled-opacity: 0.38;
 }
 
-/* Инфо-панели под графиками (SkyView, Az/El) — единая высота и шрифт */
-.skyview-info,
-.bp-indicator-info {
+/* Инфо-панели под графиками (SkyView) — единая высота и шрифт.
+   Az/El в Ручном используют свои стили в manual-layout.css. */
+.skyview-info {
     min-height: var(--info-panel-height);
     max-height: var(--info-panel-height);
     height: var(--info-panel-height);
@@ -219,6 +219,36 @@ body:not(.station-basic):not(.mode-manual) .right-panel__controls {
 
 body.mode-manual:not(.station-basic) .right-panel__controls {
     display: flex;
+}
+
+/* ───────────────── Ручной режим: layout вместо карты, нижняя панель скрыта ─────────────────
+   В Авто карта (#tracking-layout) и нижняя панель видны.
+   В Ручном карту прячем, нижнюю панель прячем, а #layout-manual растягивается во всю
+   главную зону. Grid-rows main-wrapper переключаем на 2 строки (без bottom-panel). */
+
+#layout-manual {
+    display: none;
+}
+
+body.mode-manual:not(.station-basic) #tracking-layout {
+    display: none;
+}
+
+body.mode-manual:not(.station-basic) #layout-manual {
+    display: grid;
+}
+
+body.mode-manual:not(.station-basic) .bottom-panel {
+    display: none;
+}
+
+body.mode-manual:not(.station-basic) .main-wrapper.tracking-page {
+    grid-template-rows: 44px 1fr;
+}
+
+/* В Ручном правая панель занимает обе строки (как при station-basic) */
+body.mode-manual:not(.station-basic) .right-panel {
+    grid-row: 1 / -1;
 }
 
 /* Main Content — левая колонка (карта + infoPanel), строка 2 (после header) */
@@ -715,6 +745,18 @@ body.station-basic .app-header__dropdown {
     grid-template-rows: 44px 1fr 30px;
 }
 
+/* Свёрнутая нижняя панель: карта как в basic-режиме — 2:1 по центру, без растягивания */
+.main-wrapper.tracking-page.bottom-panel-collapsed .tracking-left {
+    justify-content: center;
+}
+
+.main-wrapper.tracking-page.bottom-panel-collapsed .tracking-left .map-area {
+    flex: none;
+    aspect-ratio: 2 / 1;
+    width: 100%;
+    max-height: 100%;
+}
+
 /* ─── Зона карты ─── */
 .map-area {
     position: relative;
@@ -999,62 +1041,13 @@ body.station-basic .app-header__dropdown {
     z-index: 2;
 }
 
-/* Режимы РТН в полоске */
-.bottom-panel__tabs {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 4px;
-    width: 100%;
-    flex-shrink: 0;
-    padding-bottom: 8px;
-    margin-bottom: 6px;
-    border-bottom: 1px solid var(--border-color);
-}
-
-.bottom-panel__tab-btn {
-    width: 32px;
-    height: 32px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 1px solid transparent;
-    border-radius: var(--radius-sm);
-    background: transparent;
-    color: var(--text-muted);
-    cursor: pointer;
-    transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
-}
-
-.bottom-panel__tab-btn svg {
-    width: 18px;
-    height: 18px;
-}
-
-.bottom-panel__tab-btn:hover {
-    color: var(--text-primary);
-    background: var(--bg-elevated);
-}
-
-.bottom-panel__tab-btn.active {
-    color: var(--accent-primary);
-    border-color: var(--accent-primary);
-    background: var(--sidebar-accordion-active-bg, rgba(0, 212, 170, 0.1));
-}
-
-.bottom-panel__tab-btn:focus-visible {
-    outline: 2px solid var(--border-focus);
-    outline-offset: 2px;
-}
-
 .bottom-panel__side .panel-collapse-btn {
     color: var(--panel-header-title, var(--text-muted));
     margin-top: auto;
     flex-shrink: 0;
 }
 
-/* Режим панели — буквы столбиком; цвет как у заголовков панелей (--panel-header-title) */
+/* Подпись режима / вкладки в боковой полоске — столбиком (по одной букве). */
 .bottom-panel__mode {
     flex: 1;
     display: flex;
@@ -1068,12 +1061,12 @@ body.station-basic .app-header__dropdown {
     text-transform: uppercase;
     letter-spacing: 0.08em;
     min-height: 0;
+    user-select: none;
 }
 
 .bottom-panel__mode span {
     display: block;
-    /* Плотнее столбик, чтобы подписи (ОБЗОР / СОПРОВОЖД.) стабильно влезали */
-    line-height: 1.08;
+    line-height: 1.25;
 }
 
 /* ─── Общий заголовок панелей ─── */
@@ -1148,10 +1141,6 @@ body.station-basic .app-header__dropdown {
 
 .bottom-panel--collapsed .bottom-panel__side .panel-collapse-btn {
     margin-top: 0;
-}
-
-.bottom-panel--collapsed .bottom-panel__tabs {
-    display: none;
 }
 
 .bottom-panel--collapsed .bottom-panel__mode {

@@ -22,8 +22,11 @@ const (
 	// Имя файла исключений по умолчанию (внутри каталога кеша TLE).
 	defaultExcludeNoradFilename = "exclude_norad.txt"
 
-	defaultSatNOGSEnabled  = true
-	defaultSatNOGSCacheTTL = 24 * time.Hour
+	defaultSatNOGSEnabled    = true
+	defaultSatNOGSCacheTTL   = 24 * time.Hour
+	defaultSatNOGSTimeout    = 12 * time.Second
+	defaultSatNOGSMaxRetries = 2
+	defaultSatNOGSWorkers    = 4
 )
 
 // DefaultConfig возвращает конфигурацию приложения со всеми значениями по умолчанию.
@@ -52,8 +55,11 @@ func DefaultConfig() *Config {
 			MaxTLEAgeDays:  tleDefaults.MaxTLEAgeDays,
 		},
 		SatNOGS: SatNOGSConfig{
-			Enabled:  defaultSatNOGSEnabled,
-			CacheTTL: defaultSatNOGSCacheTTL,
+			Enabled:    defaultSatNOGSEnabled,
+			CacheTTL:   defaultSatNOGSCacheTTL,
+			Timeout:    defaultSatNOGSTimeout,
+			MaxRetries: defaultSatNOGSMaxRetries,
+			Workers:    defaultSatNOGSWorkers,
 		},
 		Station: StationConfig{
 			Name: defaultStationName,

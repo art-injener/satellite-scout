@@ -194,6 +194,32 @@ func TestValidate_SatNOGSValidTTL(t *testing.T) {
 	}
 }
 
+func TestValidate_SatNOGSNegativeParams(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.SatNOGS.Timeout = -1
+	cfg.SatNOGS.MaxRetries = -1
+	cfg.SatNOGS.Workers = -1
+
+	verrs := mustValidationErrors(t, cfg.Validate())
+	for _, field := range []string{"satnogs.timeout", "satnogs.max_retries", "satnogs.workers"} {
+		if !hasField(verrs, field) {
+			t.Errorf("expected error on %s, got %v", field, verrs)
+		}
+	}
+}
+
+func TestValidate_SatNOGSZeroParamsAllowed(t *testing.T) {
+	cfg := DefaultConfig()
+	// Ноль = «использовать дефолт», поэтому валидация должна пройти.
+	cfg.SatNOGS.Timeout = 0
+	cfg.SatNOGS.MaxRetries = 0
+	cfg.SatNOGS.Workers = 0
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("expected valid config with zero satnogs params, got %v", err)
+	}
+}
+
 func mustValidationErrors(t *testing.T, err error) ValidationErrors {
 	t.Helper()
 	if err == nil {

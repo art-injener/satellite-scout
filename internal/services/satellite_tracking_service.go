@@ -461,6 +461,23 @@ func (s *SatelliteTrackingService) CurrentNoradID() int {
 	return s.currentNoradID
 }
 
+// GroupNoradIDs возвращает NORAD ID активной группы скользящего окна
+// в стабильном порядке (отсортирован по NoradID, как currentGroupEntries).
+// Используется внешними потребителями (mock SSE-каналов и пр.).
+// Возвращает nil, если группа ещё не сформирована.
+func (s *SatelliteTrackingService) GroupNoradIDs() []int {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if len(s.currentGroupEntries) == 0 {
+		return nil
+	}
+	ids := make([]int, len(s.currentGroupEntries))
+	for i, e := range s.currentGroupEntries {
+		ids[i] = e.NoradID
+	}
+	return ids
+}
+
 // updateGroup обновляет группу спутников скользящего окна.
 //
 // Алгоритм:

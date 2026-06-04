@@ -10,15 +10,18 @@ import (
 // миграции к единому файлу config.json. Подхватываются ровно один раз — при
 // первом запуске на стенде, где файла ещё нет (см. Bootstrap).
 const (
-	envPort             = "PORT"
-	envObserverLat      = "OBSERVER_LAT"
-	envObserverLon      = "OBSERVER_LON"
-	envObserverAlt      = "OBSERVER_ALT"
-	envTLECacheDir      = "TLE_CACHE_DIR"
-	envTheme            = "THEME"
-	envSatNOGSEnabled   = "SATNOGS_ENABLED"
-	envSatNOGSCacheTTL  = "SATNOGS_CACHE_TTL"
-	envExcludeNoradFile = "EXCLUDE_NORAD_FILE"
+	envPort              = "PORT"
+	envObserverLat       = "OBSERVER_LAT"
+	envObserverLon       = "OBSERVER_LON"
+	envObserverAlt       = "OBSERVER_ALT"
+	envTLECacheDir       = "TLE_CACHE_DIR"
+	envTheme             = "THEME"
+	envSatNOGSEnabled    = "SATNOGS_ENABLED"
+	envSatNOGSCacheTTL   = "SATNOGS_CACHE_TTL"
+	envSatNOGSTimeout    = "SATNOGS_TIMEOUT"
+	envSatNOGSMaxRetries = "SATNOGS_MAX_RETRIES"
+	envSatNOGSWorkers    = "SATNOGS_WORKERS"
+	envExcludeNoradFile  = "EXCLUDE_NORAD_FILE"
 )
 
 // loadFromLegacyEnv собирает Config поверх DefaultConfig() с учётом устаревших
@@ -41,6 +44,9 @@ func loadFromLegacyEnv() *Config {
 
 	cfg.SatNOGS.Enabled = getEnvBool(envSatNOGSEnabled, cfg.SatNOGS.Enabled)
 	cfg.SatNOGS.CacheTTL = getEnvDuration(envSatNOGSCacheTTL, cfg.SatNOGS.CacheTTL)
+	cfg.SatNOGS.Timeout = getEnvDuration(envSatNOGSTimeout, cfg.SatNOGS.Timeout)
+	cfg.SatNOGS.MaxRetries = getEnvInt(envSatNOGSMaxRetries, cfg.SatNOGS.MaxRetries)
+	cfg.SatNOGS.Workers = getEnvInt(envSatNOGSWorkers, cfg.SatNOGS.Workers)
 
 	cfg.ExcludeNoradFile = getEnv(envExcludeNoradFile, cfg.ExcludeNoradFile)
 
@@ -72,6 +78,17 @@ func getEnvFloat(key string, defaultVal float64) float64 {
 	if val := os.Getenv(key); val != "" {
 		if f, err := strconv.ParseFloat(val, 64); err == nil {
 			return f
+		}
+	}
+	return defaultVal
+}
+
+// getEnvInt читает целое число из переменной окружения.
+// Невалидное значение → defaultVal.
+func getEnvInt(key string, defaultVal int) int {
+	if val := os.Getenv(key); val != "" {
+		if n, err := strconv.Atoi(val); err == nil {
+			return n
 		}
 	}
 	return defaultVal
