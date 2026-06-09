@@ -32,7 +32,7 @@ const STORAGE_RADIO_PATH = 'ux.radioPath';
 /**
  * Минимальный JSDoc-тип радиотракта в форме, приходящей с бэкенда
  * через GET /api/config (см. handlers.RadioPathInfo).
- * @typedef {{id: number, name: string, band: string, has_rotator: boolean}} RadioPathInfo
+ * @typedef {{id: number, name: string, has_rotator: boolean}} RadioPathInfo
  */
 
 /**

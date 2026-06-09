@@ -51,7 +51,6 @@ func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 		paths = append(paths, RadioPathInfo{
 			ID:         rp.ID,
 			Name:       rp.Name,
-			Band:       rp.Antenna.Band,
 			HasRotator: rp.Rotator != nil,
 		})
 	}

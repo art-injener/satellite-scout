@@ -22,12 +22,10 @@ type ObserverConfig struct {
 // RadioPathInfo — компактное представление радиотракта для фронтенда.
 // Передаётся в /api/config — этого достаточно, чтобы построить dropdown
 // в mode-bar и понять, доступна ли кнопка "Сопровождать" для тракта.
-// Полные параметры (Receiver.Defaults, Rotator.Port и т.п.) UI получает
-// только через GET /api/settings, когда открыта модалка настроек.
+// Полные параметры радиотракта UI получает через GET /api/settings.
 type RadioPathInfo struct {
 	ID         int    `json:"id"`
 	Name       string `json:"name"`
-	Band       string `json:"band"`
 	HasRotator bool   `json:"has_rotator"`
 }
 

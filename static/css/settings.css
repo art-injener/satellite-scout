@@ -8,6 +8,7 @@
 
    Фон под окном — адаптивный: при табах «Наблюдатель» и «Внешний вид» карта
    и интерфейс читаемы (только dim, без blur); на остальных — blur.
+   Вкладка «Станция» — blur (технические параметры).
    ======================================================================== */
 
 .station-footer__settings {
@@ -57,7 +58,6 @@
     background: rgba(0, 0, 0, 0.45);
     transition: backdrop-filter 0.18s ease-out;
 }
-.settings-modal[data-tab="server"] .settings-modal__backdrop,
 .settings-modal[data-tab="tle"] .settings-modal__backdrop,
 .settings-modal[data-tab="satnogs"] .settings-modal__backdrop,
 .settings-modal[data-tab="station"] .settings-modal__backdrop,
@@ -261,6 +261,55 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px 12px;
+}
+.settings-field--full {
+    grid-column: 1 / -1;
+}
+.settings-radio-path__subtitle {
+    margin: 12px 0 6px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-heading, #ffffff);
+    letter-spacing: 0.02em;
+}
+.settings-receiver-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+    margin-bottom: 8px;
+}
+.settings-receiver-select {
+    flex: 1;
+    min-width: 0;
+}
+.settings-receiver-refresh {
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+.settings-receiver-test {
+    margin-bottom: 8px;
+}
+.settings-receiver-log {
+    margin: 0;
+    padding: 10px 12px;
+    min-height: 120px;
+    max-height: 220px;
+    overflow: auto;
+    background: var(--bg-primary, #151b22);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--text-label, #d8dde3);
+    white-space: pre-wrap;
+}
+.settings-receiver-option--offline,
+.settings-receiver-select option.settings-receiver-option--offline {
+    color: var(--text-muted, #98a2b0);
+}
+.settings-rotator-block[hidden] {
+    display: none;
 }
 .settings-add-btn {
     align-self: flex-start;

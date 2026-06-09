@@ -132,16 +132,33 @@
     line-height: 1.2;
 }
 
-/* Колонка «Пакеты» — обычный регистр (перебивает uppercase у всех th) */
-.passes-compact__table th.pc-th-pkt {
-    width: 56px;
-    white-space: nowrap;
+/* Колонка «Кол-во TX» — число активных передатчиков (SatNOGS) */
+.passes-compact__table th.pc-th-tx {
+    width: 52px;
+    white-space: normal;
     text-align: center;
     vertical-align: middle;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
     font-size: 13px;
+}
+
+.pc-th-tx__stack {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 13px;
+    line-height: 1.2;
+    text-transform: none;
+    letter-spacing: 0;
+    font-weight: 600;
+}
+
+.pc-th-tx__line {
+    display: block;
+    white-space: nowrap;
 }
 
 /* Две строки заголовка: «До AOS» сверху, «До LOS» снизу */
@@ -337,21 +354,21 @@
     white-space: nowrap;
 }
 
-/* Колонка «Пакеты»: Σ за пролёт (tx_cycle). Частота SatNOGS — в title ячейки. */
-.pc-pkt-cell {
+/* Колонка «Кол-во TX»: активные передатчики SatNOGS. */
+.pc-tx-cell {
     font-variant-numeric: tabular-nums;
     text-align: center;
     vertical-align: middle;
 }
 
-.pc-pkt-val {
+.pc-tx-val {
     font-size: 13px;
     color: var(--text-muted);
     line-height: 1.4;
     white-space: nowrap;
 }
 
-.pc-pkt-cell--has-data .pc-pkt-val {
+.pc-tx-cell--has-data .pc-tx-val {
     color: var(--text-primary);
     font-weight: 600;
 }

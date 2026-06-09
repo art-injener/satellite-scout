@@ -674,6 +674,15 @@
         window._overviewLink = new window.OverviewLink(window._stateManager, {
             txListEl: txListEl,
         });
+
+        const layoutBtn = document.getElementById('auto-link-layout-toggle');
+        if (layoutBtn) {
+            layoutBtn.addEventListener('click', function () {
+                if (window._overviewLink && typeof window._overviewLink.toggleLayout === 'function') {
+                    window._overviewLink.toggleLayout();
+                }
+            });
+        }
     }
 
     // Инициализация расписания сеансов наблюдения в правой панели

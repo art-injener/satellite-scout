@@ -590,5 +590,8 @@
     window.WaterfallView = WaterfallView;
     window.FFTSpectrumView = FFTSpectrumView;
     window.SpectrumDataSource = SpectrumDataSource;
+    // hotColor и cssVarRgbHex нужны построчному водопаду в auto-link.js
+    window.hotColor = hotColor;
+    window.cssVarRgbHex = cssVarRgbHex;
 
 })();

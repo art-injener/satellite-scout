@@ -190,38 +190,44 @@ type RadioPath struct {
 	Rotator  *RotatorConfig `json:"rotator,omitempty"`
 }
 
+// Типы антенны радиотракта (операционная классификация для UI и валидации).
+const (
+	// AntennaTypeStationary — стационарная антенна без поворотной платформы.
+	AntennaTypeStationary = "stationary"
+	// AntennaTypeRotatable — антенна на поворотной платформе (управление rotator).
+	AntennaTypeRotatable = "rotatable"
+)
+
 // AntennaConfig — параметры антенны радиотракта.
+// Диапазон частот и название носят справочный характер — в расчётах не участвуют.
 type AntennaConfig struct {
-	// Type — "omnidirectional" или "directional".
+	// Name — отображаемое название ("QFH 145", "3 м парабола").
+	Name string `json:"name,omitempty"`
+
+	// Type — AntennaTypeStationary или AntennaTypeRotatable.
 	Type string `json:"type"`
 
-	// Model — модель антенны для отображения в UI ("QFH 145 MHz", "Yagi 437 MHz").
-	Model string `json:"model"`
+	// FreqMinMHz — нижняя граница рабочего диапазона, МГц (необязательно).
+	FreqMinMHz *float64 `json:"freq_min_mhz,omitempty"`
 
-	// Band — диапазон ("VHF", "UHF", "L", ...).
-	Band string `json:"band"`
-
-	// FreqRangeMHz — рабочий диапазон антенны [min, max] в МГц.
-	FreqRangeMHz [2]float64 `json:"freq_range_mhz"`
+	// FreqMaxMHz — верхняя граница рабочего диапазона, МГц (необязательно).
+	FreqMaxMHz *float64 `json:"freq_max_mhz,omitempty"`
 }
 
-// ReceiverConfig — параметры SDR-приёмника радиотракта.
+// ReceiverConfig — привязка SDR-приёмника к радиотракту.
+// Частота и gain задаются в Ручном режиме; здесь только выбор железа.
 type ReceiverConfig struct {
-	// Driver — драйвер: "rtlsdr", "airspy", "hackrf", "simulated".
-	Driver string `json:"driver"`
+	// Driver — "rtlsdr", "airspy", "hackrf", "simulated" или пусто (не выбран).
+	Driver string `json:"driver,omitempty"`
 
-	// Serial — серийный номер устройства (пусто для simulated и единственного приёмника).
-	Serial string `json:"serial"`
+	// Serial — серийный номер USB-устройства (стабильный идентификатор).
+	Serial string `json:"serial,omitempty"`
 
-	Defaults ReceiverDefaults `json:"defaults"`
-}
+	// DevicePath — путь к устройству (/dev/bus/usb/...), может меняться при переподключении.
+	DevicePath string `json:"device_path,omitempty"`
 
-// ReceiverDefaults — настройки приёмника по умолчанию при первом запуске радиотракта.
-type ReceiverDefaults struct {
-	CenterFreqHz uint64 `json:"center_freq_hz"`
-	GainDB       int    `json:"gain_db"`
-	BandwidthHz  uint64 `json:"bandwidth_hz"`
-	SampleRateHz uint64 `json:"sample_rate_hz"`
+	// Label — кэшированное имя модели для отображения в UI.
+	Label string `json:"label,omitempty"`
 }
 
 // RotatorConfig — параметры поворотной платформы радиотракта.

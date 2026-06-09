@@ -134,8 +134,7 @@ func TestAPIHandler_GetConfig_BasicStation(t *testing.T) {
 }
 
 // TestAPIHandler_GetConfig_HybridStation — смешанная станция: VHF без поворотки
-// + UHF с повороткой. Проверяем правильный station_type, корректные id, name,
-// band и флаг has_rotator у каждого тракта.
+// + UHF с повороткой. Проверяем правильный station_type и has_rotator.
 func TestAPIHandler_GetConfig_HybridStation(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{Port: "8080"},
@@ -146,14 +145,14 @@ func TestAPIHandler_GetConfig_HybridStation(t *testing.T) {
 					ID:   1,
 					Name: "VHF Обзорный",
 					Antenna: config.AntennaConfig{
-						Band: "VHF", FreqRangeMHz: [2]float64{144, 148},
+						Type: config.AntennaTypeStationary,
 					},
 				},
 				{
 					ID:   2,
 					Name: "UHF Поворотный",
 					Antenna: config.AntennaConfig{
-						Band: "UHF", FreqRangeMHz: [2]float64{430, 440},
+						Type: config.AntennaTypeRotatable,
 					},
 					Rotator: &config.RotatorConfig{Driver: "rotctld", Port: 4533},
 				},
@@ -183,9 +182,6 @@ func TestAPIHandler_GetConfig_HybridStation(t *testing.T) {
 	}
 	if !body.RadioPaths[1].HasRotator {
 		t.Error("RadioPaths[1].HasRotator = false, want true")
-	}
-	if body.RadioPaths[0].Band != "VHF" || body.RadioPaths[1].Band != "UHF" {
-		t.Errorf("Bands = %q/%q, want VHF/UHF", body.RadioPaths[0].Band, body.RadioPaths[1].Band)
 	}
 }
 

@@ -1,7 +1,7 @@
 // План сеансов наблюдения в правой панели (компактная таблица) + кнопки управления.
 // Данные приходят из SSE-события satellite_group_update,
 // не из polling GET /api/passes.
-// Колонки: [глаз — видимость трассы] | NORAD/имя | AOS/LOS | До AOS / До LOS (подписи в шапке).
+// Колонки: [глаз — видимость трассы] | NORAD/имя | AOS/LOS | До AOS / До LOS (подписи в шапке) | Кол-во TX.
 // Логика значений колонки 3 совпадает с internal/services/session_table_ui.go (FormatSessionTableColumns).
 
 (function() {
@@ -71,6 +71,10 @@
         this._countdownTimer = null;
         /** Смещение клиентских часов относительно server ts из satellite_group_update (мс). */
         this._serverSkewMs = 0;
+        /** NORAD → число активных TX (SatNOGS). */
+        this._txCountByNorad = new Map();
+        /** Кеш запросов SatNOGS: norad → Promise<number>. */
+        this._txCountCache = new Map();
 
         this._trackBtn = document.getElementById('rp-track');
         this._resetBtn = document.getElementById('rp-reset');
@@ -129,9 +133,6 @@
                 sm.subscribe(window.StateEventType.SHOW_ALL_MODE_CHANGE, function() {
                     self._render();
                 });
-                sm.subscribe(window.StateEventType.TX_CYCLE, function() {
-                    self._updatePacketCells();
-                });
             }
         } else {
             this._syncThTrackEye();
@@ -182,6 +183,72 @@
         }
         this._render();
         this._updateControls();
+        const satellites = (data && Array.isArray(data.satellites)) ? data.satellites : [];
+        this._refreshTxCounts(satellites);
+    };
+
+    /** Число активных передатчиков КА по SatNOGS (кэш Promise). */
+    RightPanelTable.prototype._fetchTxCount = function(norad) {
+        if (!norad) { return Promise.resolve(0); }
+        if (this._txCountCache.has(norad)) {
+            return this._txCountCache.get(norad);
+        }
+        const self = this;
+        const p = fetch('/api/satnogs/transmitters/' + norad, {
+            headers: { Accept: 'application/json' },
+        })
+            .then(function(resp) {
+                if (!resp.ok) { return 0; }
+                return resp.json();
+            })
+            .then(function(data) {
+                const txs = data && Array.isArray(data.transmitters) ? data.transmitters : [];
+                const txFromSatnogs = window.AutoLink && window.AutoLink.txFromSatnogs;
+                if (!txFromSatnogs) { return txs.length > 0 ? txs.length : 0; }
+                let count = 0;
+                const satStub = { norad_id: norad, sat_name: '' };
+                for (let i = 0; i < txs.length; i++) {
+                    if (txFromSatnogs(satStub, txs[i])) { count++; }
+                }
+                return count;
+            })
+            .catch(function(err) {
+                console.warn('[RightPanel] SatNOGS TX count ' + norad + ':', err);
+                self._txCountCache.delete(norad);
+                return 0;
+            });
+        this._txCountCache.set(norad, p);
+        return p;
+    };
+
+    /** Подгрузить количество TX для всех КА группы и обновить ячейки. */
+    RightPanelTable.prototype._refreshTxCounts = function(satellites) {
+        const self = this;
+        if (!Array.isArray(satellites)) { return; }
+        for (let i = 0; i < satellites.length; i++) {
+            const norad = satellites[i] && satellites[i].norad_id;
+            if (!norad) { continue; }
+            this._fetchTxCount(norad).then(function(count) {
+                self._txCountByNorad.set(norad, count);
+                self._updateTxCountCell(norad, count);
+            });
+        }
+    };
+
+    /** Обновить ячейку «Кол-во TX» одной строки. */
+    RightPanelTable.prototype._updateTxCountCell = function(noradId, count) {
+        if (!this._tbody) { return; }
+        const row = this._tbody.querySelector('.pc-row[data-norad="' + noradId + '"]');
+        if (!row) { return; }
+        const txTd = row.querySelector('.pc-tx-cell');
+        const txEl = row.querySelector('.pc-tx-val');
+        if (!txTd || !txEl) { return; }
+        txEl.textContent = count > 0 ? String(count) : '\u2014';
+        txTd.classList.toggle('pc-tx-cell--has-data', count > 0);
+        const hint = count > 0
+            ? (count + ' активных передатчиков (SatNOGS)')
+            : 'Активные передатчики не найдены';
+        txTd.title = hint;
     };
 
     // ── Рендер ──
@@ -224,21 +291,16 @@
             const trackCls = 'pc-track-cell' + (trackVisible ? ' pc-track-cell--on' : ' pc-track-cell--off');
             const trackIcon = trackVisible ? eyeVisibleSvg(markerColor) : eyeHiddenSvg(markerColor);
 
-            // Пакеты за пролёт (tx_cycle, Σ по всем TX). Частота SatNOGS — только в подсказке ячейки.
-            const hasFreq = Boolean(sat.freq_mhz);
-            const satnoogsHint = hasFreq
-                ? (sat.freq_mhz + ' MHz' + (sat.modulation ? ' · ' + sat.modulation : '') + ' (SatNOGS)')
-                : 'Данные SatNOGS недоступны';
-
-            const pktTotal = window._stateManager && typeof window._stateManager.getPassPacketTotal === 'function'
-                ? window._stateManager.getPassPacketTotal(sat.norad_id)
-                : 0;
-            const pktVal = pktTotal > 0 ? String(pktTotal) : '\u2014';
-            const pktHint = pktTotal > 0
-                ? (pktTotal + ' пакетов за пролёт (все передатчики)')
-                : 'Пакетов пока нет';
-            const pktCellCls = 'pc-pkt-cell' + (pktTotal > 0 ? ' pc-pkt-cell--has-data' : '');
-            const cellTitle = satnoogsHint + '. ' + pktHint;
+            const txCount = this._txCountByNorad.has(sat.norad_id)
+                ? this._txCountByNorad.get(sat.norad_id)
+                : null;
+            const txVal = txCount != null ? (txCount > 0 ? String(txCount) : '\u2014') : '\u2026';
+            const txCellCls = 'pc-tx-cell' + (txCount > 0 ? ' pc-tx-cell--has-data' : '');
+            const txHint = txCount != null
+                ? (txCount > 0
+                    ? (txCount + ' активных передатчиков (SatNOGS)')
+                    : 'Активные передатчики не найдены')
+                : 'Загрузка списка передатчиков…';
 
             html += '<tr class="' + cls + '" data-norad="' + sat.norad_id + '"' +
                 ' data-aos="' + sat.aos + '" data-los="' + sat.los + '" data-dur="' + sat.duration + '">' +
@@ -256,9 +318,8 @@
                     '<div class="pc-azel-el">' + azel.el + '</div>' +
                 '</td>' +
                 '<td class="pc-col3-cell">' + col3 + '</td>' +
-                '<td class="' + pktCellCls + '" title="' + this._escapeHtml(cellTitle) + '"' +
-                    ' data-satnoogs-title="' + this._escapeHtml(satnoogsHint) + '">' +
-                    '<div class="pc-pkt-val">' + pktVal + '</div>' +
+                '<td class="' + txCellCls + '" title="' + this._escapeHtml(txHint) + '">' +
+                    '<div class="pc-tx-val">' + txVal + '</div>' +
                 '</td>' +
                 '</tr>';
         }
@@ -288,32 +349,6 @@
             az: state.position.az.toFixed(1) + '\u00b0',
             el: state.position.el.toFixed(1) + '\u00b0'
         };
-    };
-
-    /** Обновить колонку «Пакеты» без полного перерендера (по событию tx_cycle). */
-    RightPanelTable.prototype._updatePacketCells = function() {
-        if (!this._tbody || !window._stateManager) { return; }
-        const sm = window._stateManager;
-        if (typeof sm.getPassPacketTotal !== 'function') { return; }
-        const rows = this._tbody.querySelectorAll('.pc-row');
-        for (let i = 0; i < rows.length; i++) {
-            const row = rows[i];
-            const noradId = parseInt(row.getAttribute('data-norad'), 10);
-            if (!noradId) { continue; }
-            const pktTd = row.querySelector('.pc-pkt-cell');
-            const pktEl = row.querySelector('.pc-pkt-val');
-            if (!pktEl || !pktTd) { continue; }
-            const total = sm.getPassPacketTotal(noradId);
-            pktEl.textContent = total > 0 ? String(total) : '\u2014';
-            pktTd.classList.toggle('pc-pkt-cell--has-data', total > 0);
-            const baseTitle = pktTd.getAttribute('data-satnoogs-title') || '';
-            const pktHint = total > 0
-                ? (total + ' пакетов за пролёт (все передатчики)')
-                : 'Пакетов пока нет';
-            if (baseTitle) {
-                pktTd.title = baseTitle + '. ' + pktHint;
-            }
-        }
     };
 
     RightPanelTable.prototype._tickCountdowns = function() {

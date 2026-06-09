@@ -88,8 +88,7 @@ func TestStore_GetReturnsDeepCopy(t *testing.T) {
 		ID:   1,
 		Name: "Test",
 		Antenna: AntennaConfig{
-			Type: "omnidirectional", Model: "QFH", Band: "VHF",
-			FreqRangeMHz: [2]float64{144, 148},
+			Type: AntennaTypeStationary, Name: "QFH",
 		},
 		Receiver: ReceiverConfig{Driver: "simulated"},
 	}}

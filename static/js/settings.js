@@ -3,8 +3,8 @@
 
    Отвечает за:
      - чтение GET /api/settings и заполнение формы по data-bind путям;
-     - переключение табов (Сервер / Внешний вид / Наблюдатель / TLE / SatNOGS
-       / Станция / Радиотракты / Исключения);
+     - переключение табов (Станция / Внешний вид / Наблюдатель / TLE / SatNOGS
+       / Радиотракты / Исключения);
      - dirty-state, валидация, отправка PUT /api/settings;
      - live-preview наблюдателя на карте (EarthView.setObserverPreview)
        без обращения к бэкенду;
@@ -14,7 +14,12 @@
 (function() {
     'use strict';
 
-    const TAB_OBSERVER = 'observer';
+    const TAB_STATION = 'station';
+    const TAB_RADIO_PATHS = 'radio-paths';
+    const ANTENNA_STATIONARY = 'stationary';
+    const ANTENNA_ROTATABLE = 'rotatable';
+    const RECEIVER_NONE = '';
+    const RECEIVER_SIMULATED = 'simulated';
     const STATUS_RESET_DELAY_MS = 6000;
     // Курируемый список городов (Россия + СНГ + столицы) для быстрого
     // выбора точки наблюдения. Подгружается один раз и кешируется.
@@ -165,12 +170,14 @@
         this._exclusions = [];
         this._cities = null;
         this._dirty = false;
-        this._activeTab = TAB_OBSERVER;
+        this._activeTab = TAB_STATION;
         this._statusTimer = null;
         this._suppressCityAutoSwitch = false;
+        this._sdrDevices = [];
+        this._receiverTestLogs = {};
 
         this._bindEvents();
-        this._setActiveTab(TAB_OBSERVER);
+        this._setActiveTab(TAB_STATION);
     }
 
     SettingsModal.prototype._bindEvents = function() {
@@ -229,6 +236,9 @@
         this._root.querySelectorAll('.settings-pane').forEach((pane) => {
             pane.classList.toggle('is-active', pane.dataset.pane === tab);
         });
+        if (tab === TAB_RADIO_PATHS) {
+            this._ensureSdrDevicesLoaded();
+        }
     };
 
     /**
@@ -465,12 +475,37 @@
         });
     };
 
+    SettingsModal.prototype._ensureSdrDevicesLoaded = function() {
+        if (this._sdrDevices.length > 0) {
+            return Promise.resolve(this._sdrDevices);
+        }
+        return this._refreshSdrDevices(false);
+    };
+
+    SettingsModal.prototype._refreshSdrDevices = function(rerender) {
+        const self = this;
+        return fetch('/api/sdr/devices')
+            .then((r) => self._parseJSONOrThrow(r))
+            .then((data) => {
+                self._sdrDevices = (data && data.devices) || [];
+                if (rerender !== false) {
+                    self._renderRadioPaths();
+                }
+            })
+            .catch((err) => {
+                self._setStatus('Не удалось обновить список приёмников: ' + err.message, 'error');
+            });
+    };
+
     SettingsModal.prototype._renderRadioPaths = function() {
         const container = this._root.querySelector('[data-list="station.radio_paths"]');
         if (!container) return;
         container.innerHTML = '';
 
-        const paths = (this._workingConfig.station && this._workingConfig.station.radio_paths) || [];
+        if (!this._workingConfig.station) {
+            this._workingConfig.station = {};
+        }
+        const paths = this._workingConfig.station.radio_paths || [];
         paths.forEach((rp, idx) => {
             container.appendChild(this._renderRadioPathRow(rp, idx));
         });
@@ -485,12 +520,8 @@
             list.push({
                 id: nextID,
                 name: 'Новый тракт',
-                antenna: { type: 'omnidirectional', model: '', band: 'VHF', freq_range_mhz: [144.0, 148.0] },
-                receiver: {
-                    driver: 'simulated',
-                    serial: '',
-                    defaults: { center_freq_hz: 145900000, gain_db: 42, bandwidth_hz: 2400000, sample_rate_hz: 2400000 }
-                },
+                antenna: { name: '', type: ANTENNA_STATIONARY },
+                receiver: { driver: RECEIVER_SIMULATED, label: 'Имитатор (simulated)' },
                 rotator: null
             });
             this._workingConfig.station.radio_paths = list;
@@ -501,64 +532,351 @@
     };
 
     SettingsModal.prototype._renderRadioPathRow = function(rp, idx) {
+        const self = this;
         const wrap = document.createElement('div');
         wrap.className = 'settings-radio-path';
         wrap.dataset.idx = String(idx);
 
         const head = document.createElement('div');
         head.className = 'settings-radio-path__head';
-        head.innerHTML = '<span>Тракт #' + rp.id + ' — ' + escapeHTML(rp.name || '') + '</span>';
+        head.innerHTML = '<span>Тракт #' + rp.id + '</span>';
         const remove = document.createElement('button');
         remove.type = 'button';
         remove.className = 'settings-radio-path__remove';
         remove.textContent = 'Удалить';
         remove.addEventListener('click', () => {
-            this._workingConfig.station.radio_paths.splice(idx, 1);
-            this._renderRadioPaths();
-            this._setDirty(true);
+            self._workingConfig.station.radio_paths.splice(idx, 1);
+            delete self._receiverTestLogs[idx];
+            self._renderRadioPaths();
+            self._setDirty(true);
         });
         head.appendChild(remove);
         wrap.appendChild(head);
 
-        const grid = document.createElement('div');
-        grid.className = 'settings-radio-path__grid';
-        grid.appendChild(this._radioField(idx, 'name', 'Имя тракта', 'text', rp.name));
-        grid.appendChild(this._radioField(idx, 'antenna.model', 'Антенна (модель)', 'text', rp.antenna.model));
-        grid.appendChild(this._radioField(idx, 'antenna.band', 'Диапазон', 'text', rp.antenna.band));
-        grid.appendChild(this._radioField(idx, 'receiver.driver', 'Драйвер приёмника', 'text', rp.receiver.driver));
-        grid.appendChild(this._radioField(idx, 'receiver.serial', 'Серийный номер', 'text', rp.receiver.serial));
-        grid.appendChild(this._radioField(idx, 'receiver.defaults.center_freq_hz', 'Центральная частота, Гц', 'number', rp.receiver.defaults.center_freq_hz));
-        wrap.appendChild(grid);
+        wrap.appendChild(this._radioField(idx, 'name', 'Имя тракта', 'text', rp.name, true));
+
+        const antTitle = document.createElement('h4');
+        antTitle.className = 'settings-radio-path__subtitle';
+        antTitle.textContent = 'Антенна';
+        wrap.appendChild(antTitle);
+
+        const antGrid = document.createElement('div');
+        antGrid.className = 'settings-radio-path__grid';
+        antGrid.appendChild(this._radioField(idx, 'antenna.name', 'Название антенны', 'text', rp.antenna && rp.antenna.name, false));
+        antGrid.appendChild(this._radioAntennaTypeSelect(idx, rp));
+        antGrid.appendChild(this._radioOptionalNumber(idx, 'antenna.freq_min_mhz', 'Диапазон min, МГц', rp.antenna && rp.antenna.freq_min_mhz));
+        antGrid.appendChild(this._radioOptionalNumber(idx, 'antenna.freq_max_mhz', 'Диапазон max, МГц', rp.antenna && rp.antenna.freq_max_mhz));
+        wrap.appendChild(antGrid);
+
+        const rotatorBlock = this._renderRotatorBlock(rp, idx);
+        wrap.appendChild(rotatorBlock);
+
+        const rxTitle = document.createElement('h4');
+        rxTitle.className = 'settings-radio-path__subtitle';
+        rxTitle.textContent = 'Приёмник';
+        wrap.appendChild(rxTitle);
+
+        const rxRow = document.createElement('div');
+        rxRow.className = 'settings-receiver-row';
+        const rxSelect = document.createElement('select');
+        rxSelect.className = 'settings-field__input settings-receiver-select';
+        rxSelect.dataset.role = 'receiver-select';
+        this._fillReceiverSelect(rxSelect, rp.receiver || {});
+        rxSelect.addEventListener('change', () => {
+            self._applyReceiverSelection(idx, rxSelect.value);
+        });
+        rxRow.appendChild(rxSelect);
+
+        const refreshBtn = document.createElement('button');
+        refreshBtn.type = 'button';
+        refreshBtn.className = 'settings-btn settings-btn--secondary settings-receiver-refresh';
+        refreshBtn.textContent = 'Обновить';
+        refreshBtn.addEventListener('click', () => self._refreshSdrDevices(true));
+        rxRow.appendChild(refreshBtn);
+        wrap.appendChild(rxRow);
+
+        const testBtn = document.createElement('button');
+        testBtn.type = 'button';
+        testBtn.className = 'settings-btn settings-btn--secondary settings-receiver-test';
+        testBtn.textContent = 'Тест';
+        testBtn.addEventListener('click', () => self._testReceiver(idx));
+        wrap.appendChild(testBtn);
+
+        const log = document.createElement('pre');
+        log.className = 'settings-receiver-log';
+        log.textContent = this._receiverTestLogs[idx] || '';
+        wrap.appendChild(log);
+
         return wrap;
     };
 
-    SettingsModal.prototype._radioField = function(idx, subPath, label, type, value) {
+    SettingsModal.prototype._radioAntennaTypeSelect = function(idx, rp) {
+        const self = this;
         const lbl = document.createElement('label');
         lbl.className = 'settings-field';
+        const span = document.createElement('span');
+        span.className = 'settings-field__label';
+        span.textContent = 'Тип антенны';
+        const sel = document.createElement('select');
+        sel.className = 'settings-field__input';
+        [
+            [ANTENNA_STATIONARY, 'Стационарная'],
+            [ANTENNA_ROTATABLE, 'С поворотной платформой']
+        ].forEach(([value, label]) => {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = label;
+            sel.appendChild(opt);
+        });
+        const current = (rp.antenna && rp.antenna.type) || ANTENNA_STATIONARY;
+        sel.value = current;
+        sel.addEventListener('change', () => {
+            const list = self._workingConfig.station.radio_paths;
+            const target = list[idx];
+            if (!target) return;
+            if (!target.antenna) target.antenna = {};
+            target.antenna.type = sel.value;
+            if (sel.value === ANTENNA_STATIONARY) {
+                target.rotator = null;
+            } else if (!target.rotator) {
+                target.rotator = {
+                    driver: 'rotctld',
+                    host: '127.0.0.1',
+                    port: 4533,
+                    az_range: [0, 360],
+                    el_range: [0, 90],
+                    step_deg: 1
+                };
+            }
+            self._renderRadioPaths();
+            self._setDirty(true);
+        });
+        lbl.appendChild(span);
+        lbl.appendChild(sel);
+        return lbl;
+    };
+
+    SettingsModal.prototype._renderRotatorBlock = function(rp, idx) {
+        const block = document.createElement('div');
+        block.className = 'settings-rotator-block';
+        const isRotatable = rp.antenna && rp.antenna.type === ANTENNA_ROTATABLE;
+        block.hidden = !isRotatable;
+        if (!isRotatable) {
+            return block;
+        }
+
+        const title = document.createElement('h4');
+        title.className = 'settings-radio-path__subtitle';
+        title.textContent = 'Поворотная платформа';
+        block.appendChild(title);
+
+        const grid = document.createElement('div');
+        grid.className = 'settings-radio-path__grid';
+        const rot = rp.rotator || {};
+        grid.appendChild(this._radioField(idx, 'rotator.driver', 'Драйвер', 'text', rot.driver, false));
+        grid.appendChild(this._radioField(idx, 'rotator.host', 'Host', 'text', rot.host, false));
+        grid.appendChild(this._radioField(idx, 'rotator.port', 'Порт', 'number', rot.port, false));
+        block.appendChild(grid);
+        return block;
+    };
+
+    SettingsModal.prototype._receiverDeviceKey = function(dev) {
+        if (!dev || dev.driver === RECEIVER_SIMULATED) {
+            return RECEIVER_SIMULATED;
+        }
+        return [dev.driver || '', dev.serial || '', dev.device_path || ''].join('|');
+    };
+
+    SettingsModal.prototype._parseReceiverDeviceKey = function(key) {
+        if (!key || key === RECEIVER_NONE) {
+            return { driver: '', serial: '', device_path: '', label: '' };
+        }
+        if (key === RECEIVER_SIMULATED) {
+            return { driver: RECEIVER_SIMULATED, serial: '', device_path: '', label: 'Имитатор (simulated)' };
+        }
+        const parts = key.split('|');
+        return {
+            driver: parts[0] || '',
+            serial: parts[1] || '',
+            device_path: parts[2] || '',
+            label: ''
+        };
+    };
+
+    SettingsModal.prototype._formatReceiverOptionLabel = function(dev, offline) {
+        const parts = [];
+        if (dev.driver) parts.push(dev.driver);
+        if (dev.label) parts.push(dev.label);
+        if (dev.serial) parts.push('serial ' + dev.serial);
+        if (dev.device_path) parts.push(dev.device_path);
+        let text = parts.join(' · ');
+        if (offline) {
+            text = '(не подключён) · ' + text;
+        }
+        return text || dev.driver || '—';
+    };
+
+    SettingsModal.prototype._fillReceiverSelect = function(sel, receiver) {
+        sel.innerHTML = '';
+        const none = document.createElement('option');
+        none.value = RECEIVER_NONE;
+        none.textContent = '— не выбран —';
+        sel.appendChild(none);
+
+        const simulated = document.createElement('option');
+        simulated.value = RECEIVER_SIMULATED;
+        simulated.textContent = 'Имитатор (simulated)';
+        sel.appendChild(simulated);
+
+        const seen = {};
+        (this._sdrDevices || []).forEach((dev) => {
+            if (!dev || !dev.driver || dev.driver === RECEIVER_SIMULATED) return;
+            const key = this._receiverDeviceKey(dev);
+            if (seen[key]) return;
+            seen[key] = true;
+            const opt = document.createElement('option');
+            opt.value = key;
+            opt.textContent = this._formatReceiverOptionLabel(dev, false);
+            sel.appendChild(opt);
+        });
+
+        const savedKey = this._receiverDeviceKey(receiver);
+        if (savedKey && savedKey !== RECEIVER_NONE && savedKey !== RECEIVER_SIMULATED && !seen[savedKey]) {
+            const offline = document.createElement('option');
+            offline.value = savedKey;
+            offline.textContent = this._formatReceiverOptionLabel(receiver, true);
+            offline.className = 'settings-receiver-option--offline';
+            sel.appendChild(offline);
+        }
+
+        if (savedKey && savedKey !== RECEIVER_NONE) {
+            sel.value = savedKey;
+        } else if (receiver && receiver.driver === RECEIVER_SIMULATED) {
+            sel.value = RECEIVER_SIMULATED;
+        } else {
+            sel.value = RECEIVER_NONE;
+        }
+    };
+
+    SettingsModal.prototype._applyReceiverSelection = function(idx, key) {
+        const list = this._workingConfig.station.radio_paths;
+        const target = list[idx];
+        if (!target) return;
+        const parsed = this._parseReceiverDeviceKey(key);
+        if (key !== RECEIVER_NONE && key !== RECEIVER_SIMULATED) {
+            const dev = (this._sdrDevices || []).find((d) => this._receiverDeviceKey(d) === key);
+            if (dev && dev.label) {
+                parsed.label = dev.label;
+            } else if (target.receiver && target.receiver.label) {
+                parsed.label = target.receiver.label;
+            }
+        }
+        target.receiver = parsed;
+        this._setDirty(true);
+    };
+
+    SettingsModal.prototype._testReceiver = function(idx) {
+        const self = this;
+        const rp = this._workingConfig.station.radio_paths[idx];
+        if (!rp || !rp.receiver || !rp.receiver.driver) {
+            this._receiverTestLogs[idx] = 'Выберите приёмник перед тестом.';
+            this._renderRadioPaths();
+            return;
+        }
+        const rx = rp.receiver;
+        this._receiverTestLogs[idx] = 'Проверка…';
+        this._renderRadioPaths();
+
+        fetch('/api/sdr/test', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                driver: rx.driver,
+                serial: rx.serial || '',
+                device_path: rx.device_path || ''
+            })
+        })
+            .then((r) => self._parseJSONOrThrow(r))
+            .then((data) => {
+                self._receiverTestLogs[idx] = (data.lines || []).join('\n');
+                self._renderRadioPaths();
+            })
+            .catch((err) => {
+                self._receiverTestLogs[idx] = 'Ошибка теста: ' + err.message;
+                self._renderRadioPaths();
+            });
+    };
+
+    SettingsModal.prototype._radioField = function(idx, subPath, label, type, value, fullWidth) {
+        const self = this;
+        const lbl = document.createElement('label');
+        lbl.className = 'settings-field' + (fullWidth ? ' settings-field--full' : '');
         const span = document.createElement('span');
         span.className = 'settings-field__label';
         span.textContent = label;
         const input = document.createElement('input');
         input.type = type;
         input.className = 'settings-field__input';
-        input.dataset.bind = 'station.radio_paths[' + idx + '].' + subPath;
         input.value = value == null ? '' : String(value);
         lbl.appendChild(span);
         lbl.appendChild(input);
         input.addEventListener('input', () => {
-            const list = this._workingConfig.station.radio_paths;
-            const target = list[idx];
-            if (!target) return;
-            const path = subPath.split('.');
-            let cur = target;
-            for (let i = 0; i < path.length - 1; i++) {
-                cur = cur[path[i]];
+            self._setRadioPathValue(idx, subPath, type === 'number' ? parseFloat(input.value) : input.value);
+            if (subPath === 'name') {
+                self._setDirty(true);
             }
-            const leaf = path[path.length - 1];
-            cur[leaf] = type === 'number' ? parseFloat(input.value) : input.value;
-            this._setDirty(true);
         });
+        input.addEventListener('change', () => self._setDirty(true));
         return lbl;
+    };
+
+    SettingsModal.prototype._radioOptionalNumber = function(idx, subPath, label, value) {
+        const self = this;
+        const lbl = document.createElement('label');
+        lbl.className = 'settings-field';
+        const span = document.createElement('span');
+        span.className = 'settings-field__label';
+        span.textContent = label;
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '0.001';
+        input.min = '0';
+        input.className = 'settings-field__input';
+        input.value = value == null ? '' : String(value);
+        lbl.appendChild(span);
+        lbl.appendChild(input);
+        input.addEventListener('input', () => {
+            const raw = input.value.trim();
+            if (raw === '') {
+                self._setRadioPathValue(idx, subPath, null);
+            } else {
+                const v = parseFloat(raw);
+                self._setRadioPathValue(idx, subPath, Number.isFinite(v) ? v : null);
+            }
+        });
+        input.addEventListener('change', () => self._setDirty(true));
+        return lbl;
+    };
+
+    SettingsModal.prototype._setRadioPathValue = function(idx, subPath, value) {
+        const list = this._workingConfig.station.radio_paths;
+        const target = list[idx];
+        if (!target) return;
+        const path = subPath.split('.');
+        let cur = target;
+        for (let i = 0; i < path.length - 1; i++) {
+            if (cur[path[i]] == null) {
+                cur[path[i]] = {};
+            }
+            cur = cur[path[i]];
+        }
+        const leaf = path[path.length - 1];
+        if (value === null || value === '') {
+            delete cur[leaf];
+        } else {
+            cur[leaf] = value;
+        }
+        this._setDirty(true);
     };
 
     SettingsModal.prototype._renderExclusions = function() {

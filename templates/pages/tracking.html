@@ -394,7 +394,12 @@
                                 </div>
                             </th>
                             <th class="pc-th-countdown">ЗРВ</th>
-                            <th class="pc-th-pkt">Пакеты</th>
+                            <th class="pc-th-tx">
+                                <div class="pc-th-tx__stack" title="Количество передатчиков">
+                                    <span class="pc-th-tx__line">Кол-во</span>
+                                    <span class="pc-th-tx__line">TX</span>
+                                </div>
+                            </th>
                         </tr>
                     </thead>
                     <tbody id="passes-compact-body"></tbody>
@@ -446,6 +451,7 @@
 <section class="bottom-panel" id="bottom-panel">
     <div class="bottom-panel__side">
         <span class="bottom-panel__mode" id="auto-link-tx-title" aria-label="Передатчики"><span>П</span><span>е</span><span>р</span><span>е</span><span>д</span><span>а</span><span>т</span><span>ч</span><span>и</span><span>к</span><span>и</span></span>
+        <button class="bottom-panel__layout-btn" id="auto-link-layout-toggle" title="Переключить горизонт./вертик. раскладку">⇄</button>
         <button class="panel-collapse-btn" id="bottom-panel-toggle" title="Свернуть">▼</button>
     </div>
     <div class="bottom-panel__body" id="bottom-panel-body">
@@ -463,8 +469,7 @@
                     <span class="auto-link__th-col">Частота</span>
                     <span class="auto-link__th-col">Модуляция</span>
                     <span class="auto-link__th-col">Детектор пакетов</span>
-                    <span class="auto-link__th-col auto-link__th--right">Всего</span>
-                    <span class="auto-link__th--right">Уровень</span>
+                    <span class="auto-link__th-col">Водопад</span>
                 </div>
                 <div class="auto-link__tx-list" id="auto-link-tx-list" role="list">
                     <p class="auto-link__placeholder">Загрузка списка передатчиков…</p>

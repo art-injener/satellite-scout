@@ -42,7 +42,7 @@ func (errs ValidationErrors) HasErrors() bool {
 //   - station.observer.lat ∈ [-90; 90], lon ∈ [-180; 180], alt_m ∈ [0; 8000];
 //   - station.radio_paths: пустой список допустим (конфигурация "basic" —
 //     только отслеживание спутников без SDR-оборудования); при наличии трактов
-//     проверяются уникальные id, корректный freq_range_mhz и параметры поворотки;
+//     проверяются уникальные id и параметры поворотки;
 //   - tle.update_interval > 0, satnogs.cache_ttl > 0;
 //   - exclude_norad_file не пустой.
 func (c *Config) Validate() error {
@@ -131,21 +131,8 @@ func (c *Config) Validate() error {
 					Field: prefix + ".name", Message: "имя тракта не может быть пустым",
 				})
 			}
-			lo, hi := rp.Antenna.FreqRangeMHz[0], rp.Antenna.FreqRangeMHz[1]
-			if lo <= 0 || hi <= 0 || lo >= hi {
-				errs = append(errs, ValidationError{
-					Field:   prefix + ".antenna.freq_range_mhz",
-					Message: fmt.Sprintf("неверный диапазон [%g; %g] МГц", lo, hi),
-				})
-			}
-			if rp.Rotator != nil {
-				if rp.Rotator.Port <= 0 || rp.Rotator.Port > 65535 {
-					errs = append(errs, ValidationError{
-						Field:   prefix + ".rotator.port",
-						Message: fmt.Sprintf("порт %d вне диапазона [1; 65535]", rp.Rotator.Port),
-					})
-				}
-			}
+			errs = append(errs, validateAntenna(prefix+".antenna", rp.Antenna)...)
+			errs = append(errs, validateRadioPathRotator(prefix, rp)...)
 		}
 	}
 
@@ -225,6 +212,69 @@ func radioPathsEqual(a, b []RadioPath) bool {
 		}
 	}
 	return true
+}
+
+func validateAntenna(fieldPrefix string, ant AntennaConfig) ValidationErrors {
+	var errs ValidationErrors
+	switch ant.Type {
+	case AntennaTypeStationary, AntennaTypeRotatable:
+	default:
+		errs = append(errs, ValidationError{
+			Field:   fieldPrefix + ".type",
+			Message: "тип антенны: stationary или rotatable",
+		})
+	}
+	hasMin := ant.FreqMinMHz != nil
+	hasMax := ant.FreqMaxMHz != nil
+	if hasMin != hasMax {
+		errs = append(errs, ValidationError{
+			Field:   fieldPrefix + ".freq_min_mhz",
+			Message: "укажите обе границы диапазона или оставьте обе пустыми",
+		})
+	}
+	if hasMin && hasMax {
+		if *ant.FreqMinMHz <= 0 || *ant.FreqMaxMHz <= 0 {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".freq_min_mhz",
+				Message: "границы диапазона должны быть положительными",
+			})
+		}
+		if *ant.FreqMinMHz > *ant.FreqMaxMHz {
+			errs = append(errs, ValidationError{
+				Field:   fieldPrefix + ".freq_min_mhz",
+				Message: "минимальная частота не может превышать максимальную",
+			})
+		}
+	}
+	return errs
+}
+
+func validateRadioPathRotator(prefix string, rp RadioPath) ValidationErrors {
+	var errs ValidationErrors
+	switch rp.Antenna.Type {
+	case AntennaTypeStationary:
+		if rp.Rotator != nil {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".rotator",
+				Message: "стационарная антенна не может иметь поворотную платформу",
+			})
+		}
+	case AntennaTypeRotatable:
+		if rp.Rotator == nil {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".rotator",
+				Message: "для антенны с поворотной платформой укажите параметры rotator",
+			})
+			return errs
+		}
+		if rp.Rotator.Port <= 0 || rp.Rotator.Port > 65535 {
+			errs = append(errs, ValidationError{
+				Field:   prefix + ".rotator.port",
+				Message: fmt.Sprintf("порт %d вне диапазона [1; 65535]", rp.Rotator.Port),
+			})
+		}
+	}
+	return errs
 }
 
 func rotatorEqual(a, b *RotatorConfig) bool {

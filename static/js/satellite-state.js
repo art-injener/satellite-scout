@@ -176,14 +176,8 @@ class SatelliteStateManager {
         /** Текущая группа спутников из SSE-события satellite_group_update. */
         this._satelliteGroup = null;
 
-        /**
-         * Сумма принятых пакетов за текущий пролёт по NORAD ID (все TX КА).
-         * Сбрасывается при смене состава пролётов группы (norad+aos+los).
-         * @type {Map<number, number>}
-         */
-        this._passPacketsByNorad = new Map();
-        /** Отпечаток группы для сброса счётчиков пакетов. */
-        this._passPacketsGroupKey = '';
+        /** Последнее SSE-событие tx_cycle (источник total_packets с бэка). */
+        this._lastTxCycleData = null;
 
         /**
          * Набор NORAD ID с включённой видимостью трассы (ручной toggle и режим «все трассы»).
@@ -683,54 +677,9 @@ class SatelliteStateManager {
         // (кроме selected и tracking — их данные ещё актуальны).
         this._cleanupStaleStates(data);
 
-        this._syncPassPacketTotalsOnGroupUpdate(data);
-
         this._notify(StateEventType.SATELLITE_GROUP_UPDATE, data);
     }
 
-    /**
-     * Ключ группы пролётов: при смене norad/aos/los сбрасываем счётчики пакетов.
-     * @param {Object} data — satellite_group_update.
-     * @returns {string}
-     */
-    _passGroupFingerprint(data) {
-        if (!data || !Array.isArray(data.satellites)) { return ''; }
-        const parts = data.satellites.map((s) => {
-            if (!s) { return ''; }
-            return `${s.norad_id}:${s.aos}:${s.los}`;
-        });
-        parts.sort();
-        return parts.join('|');
-    }
-
-    /**
-     * Обнулить счётчики пакетов при новой группе пролётов; убрать NORAD вне группы.
-     * @param {Object} data — satellite_group_update.
-     */
-    _syncPassPacketTotalsOnGroupUpdate(data) {
-        const key = this._passGroupFingerprint(data);
-        if (key !== this._passPacketsGroupKey) {
-            this._passPacketsByNorad = new Map();
-            for (const sat of data.satellites) {
-                if (sat && sat.norad_id) {
-                    this._passPacketsByNorad.set(sat.norad_id, 0);
-                }
-            }
-            this._passPacketsGroupKey = key;
-            return;
-        }
-        const inGroup = new Set(data.satellites.map((s) => s && s.norad_id).filter(Boolean));
-        for (const id of this._passPacketsByNorad.keys()) {
-            if (!inGroup.has(id)) {
-                this._passPacketsByNorad.delete(id);
-            }
-        }
-        for (const sat of data.satellites) {
-            if (sat && sat.norad_id && !this._passPacketsByNorad.has(sat.norad_id)) {
-                this._passPacketsByNorad.set(sat.norad_id, 0);
-            }
-        }
-    }
 
     /**
      * Получить текущую группу спутников.
@@ -741,39 +690,35 @@ class SatelliteStateManager {
     }
 
     /**
-     * Прокинуть SSE-событие "tx_cycle" и накопить Σ пакетов по КА за пролёт
-     * (для колонки «Пакеты» в плане сеансов; детализация по TX — в auto-link).
-     *
-     * @param {Object} data — {ts, satellites: [{norad_id, transmitters: [{uuid, packets, power}]}]}
+     * Прокинуть SSE-событие "tx_cycle" (данные с бэка, включая history и total_packets).
+     * @param {Object} data — {ts, satellites: [{norad_id, transmitters: [{uuid, packets, power, total_packets, history}]}]}
      */
     updateTxCycle(data) {
         if (!data || !Array.isArray(data.satellites)) {
             return;
         }
-        for (const sat of data.satellites) {
-            const norad = Number(sat && sat.norad_id) || 0;
-            if (!norad) { continue; }
-            let add = 0;
-            const txs = Array.isArray(sat.transmitters) ? sat.transmitters : [];
-            for (const tx of txs) {
-                add += Math.max(0, Number(tx.packets) || 0);
-            }
-            if (add <= 0 && !this._passPacketsByNorad.has(norad)) { continue; }
-            const cur = this._passPacketsByNorad.get(norad) || 0;
-            this._passPacketsByNorad.set(norad, cur + add);
-        }
+        this._lastTxCycleData = data;
         this._notify(StateEventType.TX_CYCLE, data);
     }
 
     /**
      * Суммарное число пакетов за текущий пролёт по КА (все передатчики).
+     * Берёт total_packets из последнего tx_cycle-события (бэкенд — источник истины).
      * @param {number} noradId
      * @returns {number}
      */
     getPassPacketTotal(noradId) {
         const id = Number(noradId) || 0;
-        if (!id) { return 0; }
-        return this._passPacketsByNorad.get(id) || 0;
+        if (!id || !this._lastTxCycleData) { return 0; }
+        const sat = this._lastTxCycleData.satellites.find(
+            s => Number(s && s.norad_id) === id
+        );
+        if (!sat || !Array.isArray(sat.transmitters)) { return 0; }
+        let sum = 0;
+        for (const tx of sat.transmitters) {
+            sum += Number(tx.total_packets) || 0;
+        }
+        return sum;
     }
 
     /**

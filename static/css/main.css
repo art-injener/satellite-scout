@@ -1022,7 +1022,7 @@ body.station-basic .app-header__dropdown {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
-    overflow: visible;
+    overflow: hidden;
     min-height: 0;
 }
 
@@ -1039,6 +1039,29 @@ body.station-basic .app-header__dropdown {
     background: var(--bg-tertiary);
     border-right: 1px solid var(--border-color);
     z-index: 2;
+}
+
+.bottom-panel__layout-btn {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin: 4px 0;
+    padding: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm, 4px);
+    background: var(--bg-secondary);
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.bottom-panel__layout-btn:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+    color: var(--text-primary);
 }
 
 .bottom-panel__side .panel-collapse-btn {

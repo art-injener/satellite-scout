@@ -8,6 +8,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
+	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
 // setupRoutes регистрирует все HTTP-маршруты приложения.
@@ -59,6 +60,11 @@ func setupRoutes(
 	settingsHandler := handlers.NewSettingsHandler(configStore)
 	mux.HandleFunc("GET /api/settings", settingsHandler.Get)
 	mux.HandleFunc("PUT /api/settings", settingsHandler.Update)
+
+	// SDR: обнаружение приёмников и проверка для вкладки «Радиотракты».
+	sdrHandler := handlers.NewSDRHandler(sdr.NewService())
+	mux.HandleFunc("GET /api/sdr/devices", sdrHandler.ListDevices)
+	mux.HandleFunc("POST /api/sdr/test", sdrHandler.Test)
 
 	// API управления наблюдением (tracking).
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)

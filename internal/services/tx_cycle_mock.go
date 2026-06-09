@@ -36,7 +36,62 @@ type TxCatalog interface {
 	ListActiveTransmitters(noradID int) []TransmitterRef
 }
 
-// txCycleEvent — JSON-структура SSE-события "tx_cycle".
+// stripCapacity — размер кольцевого буфера истории tx_cycle на передатчик.
+// Рассчитан по числу отображаемых ячеек детектора в нижней панели.
+const stripCapacity = 10
+
+// ── Кольцевой буфер истории ──────────────────────────────────────────
+
+type txCycleHistoryItem struct {
+	Packets int     `json:"packets"`
+	Power   float64 `json:"power"`
+}
+
+type txCycleRing struct {
+	items []txCycleHistoryItem
+	head  int
+	count int
+	cap   int
+}
+
+func newTxCycleRing(cap int) *txCycleRing {
+	if cap <= 0 {
+		cap = stripCapacity
+	}
+	return &txCycleRing{items: make([]txCycleHistoryItem, cap), cap: cap}
+}
+
+func (r *txCycleRing) push(item txCycleHistoryItem) {
+	r.items[r.head] = item
+	r.head = (r.head + 1) % r.cap
+	if r.count < r.cap {
+		r.count++
+	}
+}
+
+// snapshot возвращает срез от новейшего к старейшему.
+func (r *txCycleRing) snapshot() []txCycleHistoryItem {
+	out := make([]txCycleHistoryItem, r.count)
+	for i := 0; i < r.count; i++ {
+		idx := (r.head - 1 - i + r.cap) % r.cap
+		out[i] = r.items[idx]
+	}
+	return out
+}
+
+// ── Состояние одного передатчика ─────────────────────────────────────
+
+type txState struct {
+	ring         *txCycleRing
+	totalPackets int
+}
+
+func newTxState(ringCap int) *txState {
+	return &txState{ring: newTxCycleRing(ringCap)}
+}
+
+// ── JSON-структуры SSE-события "tx_cycle" ────────────────────────────
+
 type txCycleEvent struct {
 	TS         int64        `json:"ts"`
 	Satellites []txCycleSat `json:"satellites"`
@@ -48,9 +103,11 @@ type txCycleSat struct {
 }
 
 type txCycleTx struct {
-	UUID    string  `json:"uuid"`
-	Packets int     `json:"packets"`
-	Power   float64 `json:"power"`
+	UUID         string               `json:"uuid"`
+	Packets      int                  `json:"packets"`
+	Power        float64              `json:"power"`
+	TotalPackets int                  `json:"total_packets"`
+	History      []txCycleHistoryItem `json:"history"`
 }
 
 // TxCycleMock — генератор фейковых событий "tx_cycle" для разработки UI
@@ -76,6 +133,9 @@ type TxCycleMock struct {
 	// Параметры генерации, вынесены для тестов.
 	silentProbability float64 // вероятность что передатчик «молчит»
 	maxPackets        int     // максимум пакетов в активной ячейке
+
+	// noradID → uuid → *txState (кольцевой буфер + Σ пакетов за пролёт).
+	history map[int]map[string]*txState
 }
 
 // NewTxCycleMock конструктор.
@@ -100,6 +160,7 @@ func NewTxCycleMock(
 		rng:               rand.New(rand.NewPCG(seed1, seed2)),
 		silentProbability: 0.25,
 		maxPackets:        40,
+		history:           make(map[int]map[string]*txState),
 	}
 }
 
@@ -139,6 +200,9 @@ func (m *TxCycleMock) tick() {
 	if len(norads) == 0 {
 		return
 	}
+
+	m.cleanupStaleNorad(norads)
+
 	sats := make([]txCycleSat, 0, len(norads))
 	for _, norad := range norads {
 		txs := m.generateForSatellite(norad)
@@ -165,7 +229,36 @@ func (m *TxCycleMock) tick() {
 	m.hub.Broadcast("tx_cycle", data)
 }
 
+// cleanupStaleNorad удаляет буферы КА, ушедших из группы.
+func (m *TxCycleMock) cleanupStaleNorad(active []int) {
+	set := make(map[int]struct{}, len(active))
+	for _, id := range active {
+		set[id] = struct{}{}
+	}
+	for id := range m.history {
+		if _, ok := set[id]; !ok {
+			delete(m.history, id)
+		}
+	}
+}
+
+// getOrCreateTxState возвращает txState для передатчика, создавая при необходимости.
+func (m *TxCycleMock) getOrCreateTxState(norad int, uuid string) *txState {
+	byUUID, ok := m.history[norad]
+	if !ok {
+		byUUID = make(map[string]*txState)
+		m.history[norad] = byUUID
+	}
+	st, ok := byUUID[uuid]
+	if !ok {
+		st = newTxState(stripCapacity)
+		byUUID[uuid] = st
+	}
+	return st
+}
+
 // generateForSatellite — случайные packets/power для всех передатчиков КА.
+// Обновляет кольцевой буфер и накопительный счётчик каждого передатчика.
 func (m *TxCycleMock) generateForSatellite(norad int) []txCycleTx {
 	refs := m.catalog.ListActiveTransmitters(norad)
 	if len(refs) == 0 {
@@ -176,16 +269,26 @@ func (m *TxCycleMock) generateForSatellite(norad int) []txCycleTx {
 		if ref.UUID == "" {
 			continue
 		}
+		var packets int
+		var power float64
+
 		if m.rng.Float64() < m.silentProbability {
-			out = append(out, txCycleTx{UUID: ref.UUID, Packets: 0, Power: 0})
-			continue
+			packets, power = 0, 0
+		} else {
+			packets = 1 + m.rng.IntN(m.maxPackets)
+			power = 0.15 + m.rng.Float64()*0.85
 		}
-		packets := 1 + m.rng.IntN(m.maxPackets)
-		power := 0.15 + m.rng.Float64()*0.85
+
+		st := m.getOrCreateTxState(norad, ref.UUID)
+		st.ring.push(txCycleHistoryItem{Packets: packets, Power: power})
+		st.totalPackets += packets
+
 		out = append(out, txCycleTx{
-			UUID:    ref.UUID,
-			Packets: packets,
-			Power:   power,
+			UUID:         ref.UUID,
+			Packets:      packets,
+			Power:        power,
+			TotalPackets: st.totalPackets,
+			History:      st.ring.snapshot(),
 		})
 	}
 	return out

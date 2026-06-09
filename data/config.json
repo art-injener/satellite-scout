@@ -4,7 +4,7 @@
     "port": "8080"
   },
   "ui": {
-    "theme": "classic",
+    "theme": "breeze-dark",
     "show_all_tracks_on_start": false
   },
   "tle": {
@@ -38,17 +38,14 @@
         "id": 1,
         "name": "VHF Имитатор",
         "antenna": {
-          "type": "omnidirectional",
-          "band": "VHF",
-          "gain_dbi": 3.0,
-          "simulated": true
+          "name": "QFH 145",
+          "type": "stationary",
+          "freq_min_mhz": 144,
+          "freq_max_mhz": 148
         },
         "receiver": {
-          "type": "rtlsdr",
-          "device_id": "sim-0",
-          "sample_rate": 2048000,
-          "ppm_correction": 0,
-          "simulated": true
+          "driver": "simulated",
+          "label": "Имитатор (simulated)"
         }
       }
     ]

@@ -8,17 +8,16 @@
         </header>
         <div class="settings-modal__body">
             <nav class="settings-modal__tabs" role="tablist" aria-label="Разделы настроек">
-                <button type="button" class="settings-tab" data-tab="server" role="tab">Сервер</button>
+                <button type="button" class="settings-tab is-active" data-tab="station" role="tab" aria-selected="true">Станция</button>
                 <button type="button" class="settings-tab" data-tab="ui" role="tab">Внешний вид</button>
-                <button type="button" class="settings-tab is-active" data-tab="observer" role="tab" aria-selected="true">Наблюдатель</button>
+                <button type="button" class="settings-tab" data-tab="observer" role="tab">Наблюдатель</button>
                 <button type="button" class="settings-tab" data-tab="tle" role="tab">TLE</button>
                 <button type="button" class="settings-tab" data-tab="satnogs" role="tab">SatNOGS</button>
-                <button type="button" class="settings-tab" data-tab="station" role="tab">Станция</button>
                 <button type="button" class="settings-tab" data-tab="radio-paths" role="tab">Радиотракты</button>
                 <button type="button" class="settings-tab" data-tab="exclusions" role="tab">Исключения</button>
             </nav>
             <section class="settings-modal__panel">
-                <article class="settings-pane is-active" data-pane="observer">
+                <article class="settings-pane" data-pane="observer">
                     <h3 class="settings-pane__title">Точка наблюдения</h3>
                     <p class="settings-pane__hint">Маркер на карте обновляется сразу при правке. Полный пересчёт пролётов выполнится после сохранения.</p>
                     <label class="settings-field">
@@ -44,13 +43,17 @@
                         <input type="number" class="settings-field__input" data-bind="station.observer.alt_m" step="1" min="0" max="8000">
                     </label>
                 </article>
-                <article class="settings-pane" data-pane="server">
-                    <h3 class="settings-pane__title">HTTP-сервер</h3>
-                    <p class="settings-pane__hint">Изменение порта применится после перезапуска приложения.</p>
+                <article class="settings-pane is-active" data-pane="station">
+                    <h3 class="settings-pane__title">Станция</h3>
                     <label class="settings-field">
-                        <span class="settings-field__label">Порт</span>
+                        <span class="settings-field__label">Название станции</span>
+                        <input type="text" class="settings-field__input" data-bind="station.name" maxlength="120">
+                    </label>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Порт HTTP-сервера</span>
                         <input type="text" class="settings-field__input" data-bind="server.port" pattern="[0-9]+">
                     </label>
+                    <p class="settings-pane__hint">Изменение порта применится после перезапуска приложения.</p>
                 </article>
                 <article class="settings-pane" data-pane="ui">
                     <h3 class="settings-pane__title">Тема интерфейса</h3>
@@ -102,22 +105,6 @@
                     <label class="settings-field">
                         <span class="settings-field__label">TTL кеша</span>
                         <input type="text" class="settings-field__input" data-bind="satnogs.cache_ttl" data-bind-type="duration" placeholder="24h">
-                    </label>
-                </article>
-                <article class="settings-pane" data-pane="station">
-                    <h3 class="settings-pane__title">Параметры станции</h3>
-                    <label class="settings-field">
-                        <span class="settings-field__label">Название</span>
-                        <input type="text" class="settings-field__input" data-bind="station.name" maxlength="120">
-                    </label>
-                    <label class="settings-field">
-                        <span class="settings-field__label">Тип</span>
-                        <select class="settings-field__input" data-bind="station.type">
-                            <option value="auto">Авто</option>
-                            <option value="observation">Обзор</option>
-                            <option value="tracking">Слежение</option>
-                            <option value="hybrid">Гибрид</option>
-                        </select>
                     </label>
                 </article>
                 <article class="settings-pane" data-pane="radio-paths">

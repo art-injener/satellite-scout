@@ -29,11 +29,11 @@ class MemoryStorage {
 // ── Фабрики тестовых данных ──────────────────────────────────
 
 function vhfPath(id = 1) {
-    return { id, name: 'VHF Observation', band: 'VHF', has_rotator: false };
+    return { id, name: 'VHF Observation', has_rotator: false };
 }
 
 function uhfRotatorPath(id = 2) {
-    return { id, name: 'UHF Tracking', band: 'UHF', has_rotator: true };
+    return { id, name: 'UHF Tracking', has_rotator: true };
 }
 
 // ── Микро-фреймворк ──────────────────────────────────────────
@@ -176,7 +176,7 @@ test('setRadioPath notifies subscribers with full path object', () => {
     mm.setRadioPath(2);
     assert.strictEqual(received.length, 1);
     assert.strictEqual(received[0].id, 2);
-    assert.strictEqual(received[0].band, 'UHF');
+    assert.strictEqual(received[0].has_rotator, true);
 });
 
 console.log('\n— Persistence (localStorage) —');
