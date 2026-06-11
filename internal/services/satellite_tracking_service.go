@@ -80,14 +80,18 @@ type groupTimeWin struct {
 
 // positionData — данные позиции одного спутника внутри группового события.
 type positionData struct {
-	NoradID        int                     `json:"norad_id"`
-	Name           string                  `json:"name"`
-	Lat            float64                 `json:"lat"`
-	Lon            float64                 `json:"lon"`
-	Alt            float64                 `json:"alt"`
-	Az             float64                 `json:"az"`
-	El             float64                 `json:"el"`
-	Range          float64                 `json:"range"`
+	NoradID int     `json:"norad_id"`
+	Name    string  `json:"name"`
+	Lat     float64 `json:"lat"`
+	Lon     float64 `json:"lon"`
+	Alt     float64 `json:"alt"`
+	Az      float64 `json:"az"`
+	El      float64 `json:"el"`
+	Range   float64 `json:"range"`
+	// Радиальная скорость спутника относительно наблюдателя, м/с.
+	// «+» — удаляется (red shift), «−» — приближается (blue shift).
+	// Используется фронтом для расчёта доплеровского сдвига приёмника.
+	RangeRate      float64                 `json:"range_rate"`
 	VisibilityZone *tracker.VisibilityZone `json:"visibility_zone,omitempty"`
 	// Вторая точка подспутниковой трассы (now + шаг трассы) — клиент считает угол через project().
 	MapMarkerFwdLon *float64 `json:"map_marker_fwd_lon,omitempty"`
@@ -953,8 +957,11 @@ func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now ti
 	ecef := tracker.ECIToECEF(eci)
 	lla := tracker.ECEFToLLA(ecef)
 
+	obs := s.observer.Load()
 	// AER (азимут, элевация, дальность от наблюдателя).
-	aer := s.observer.Load().GetAER(eci)
+	aer := obs.GetAER(eci)
+	// Радиальная скорость (км/с) → м/с для удобства фронта (избегаем дробных километров).
+	rangeRateMps := tracker.RangeRateKmps(eci, obs) * 1000.0
 
 	// Зона видимости (72 точки контура).
 	zone := tracker.GenerateVisibilityZoneFromLLA(lla, sat.noradID, visibilityZonePoints)
@@ -968,6 +975,7 @@ func (s *SatelliteTrackingService) computePosition(sat *trackedSatellite, now ti
 		Az:             roundTo(aer.AzDeg(), 1),
 		El:             roundTo(aer.ElDeg(), 1),
 		Range:          roundTo(aer.Range, 1),
+		RangeRate:      roundTo(rangeRateMps, 1),
 		VisibilityZone: zone,
 	}
 	if flon, flat, rot := computeMapMarkerOrientation(sat, now, lla); flon != nil && flat != nil && rot != nil {

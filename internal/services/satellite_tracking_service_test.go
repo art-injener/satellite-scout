@@ -281,7 +281,7 @@ func TestPositionDataJSON(t *testing.T) {
 		t.Fatalf("json.Unmarshal failed: %v", unmarshalErr)
 	}
 
-	requiredKeys := []string{"norad_id", "name", "lat", "lon", "alt", "az", "el", "range"}
+	requiredKeys := []string{"norad_id", "name", "lat", "lon", "alt", "az", "el", "range", "range_rate"}
 	for _, key := range requiredKeys {
 		if _, ok := m[key]; !ok {
 			t.Errorf("missing key in positionData JSON: %s", key)

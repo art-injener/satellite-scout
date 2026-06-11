@@ -386,3 +386,49 @@ func (obs *Observer) GetAER(eci *ECIPosition) *AER {
 
 	return ECEFToAER(satECEF, obsECEF, obsLLA)
 }
+
+// RangeRateKmps возвращает радиальную скорость спутника относительно наблюдателя,
+// км/с. Знак: «+» — удаляется, «−» — приближается. Используется для расчёта
+// доплеровского сдвига приёмником на фронте: f_d = -f_dl * (range_rate / c).
+//
+// Алгоритм: в инерциальной системе ECI считаем
+//
+//	v_rel = v_sat − v_obs,  v_obs = ω × r_obs (вращение Земли),
+//	range_rate = (r_rel · v_rel) / |r_rel|.
+//
+// Скорость спутника берётся из ECIPosition.Vx/Vy/Vz (SGP4 заполняет на пропагации).
+func RangeRateKmps(satECI *ECIPosition, obs *Observer) float64 {
+	if satECI == nil || obs == nil {
+		return 0
+	}
+
+	// Наблюдатель ECEF → ECI на момент времени спутника (для общего GMST).
+	obsECEF := ObserverToECEF(obs)
+	if obsECEF == nil {
+		return 0
+	}
+	obsECEF.Time = satECI.Time
+	obsECI := ECEFToECI(obsECEF)
+	if obsECI == nil {
+		return 0
+	}
+
+	// Скорость наблюдателя в ECI — вращение Земли вокруг оси Z:
+	// v_obs = ω × r_obs, где ω = (0, 0, OmegaEarth).
+	vObsX := -OmegaEarth * obsECI.Y
+	vObsY := OmegaEarth * obsECI.X
+
+	rx := satECI.X - obsECI.X
+	ry := satECI.Y - obsECI.Y
+	rz := satECI.Z - obsECI.Z
+
+	vx := satECI.Vx - vObsX
+	vy := satECI.Vy - vObsY
+	vz := satECI.Vz
+
+	rng := math.Sqrt(rx*rx + ry*ry + rz*rz)
+	if rng < 1e-9 {
+		return 0
+	}
+	return (rx*vx + ry*vy + rz*vz) / rng
+}

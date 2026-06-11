@@ -380,6 +380,61 @@ func TestKnownECEFToLLA(t *testing.T) {
 	}
 }
 
+// TestRangeRateKmps_Nil проверяет граничные случаи: nil-указатели → 0.
+func TestRangeRateKmps_Nil(t *testing.T) {
+	obs := NewObserver(55.7558, 37.6173, 0.156)
+	if got := RangeRateKmps(nil, obs); got != 0 {
+		t.Errorf("RangeRateKmps(nil, obs) = %v, want 0", got)
+	}
+	eci := &ECIPosition{X: 1, Y: 2, Z: 3, Vx: 0.1, Vy: 0.2, Vz: 0.3, Time: time.Now()}
+	if got := RangeRateKmps(eci, nil); got != 0 {
+		t.Errorf("RangeRateKmps(eci, nil) = %v, want 0", got)
+	}
+}
+
+// TestRangeRateKmps_AgainstFiniteDiff сравнивает аналитический range-rate с численной
+// производной дальности по времени (центральная разность по шагу 1 с).
+// Использует ISS-TLE и наблюдателя в Москве; берётся произвольный момент времени
+// после эпохи TLE — важна не абсолютная позиция, а согласованность v и d|r|/dt.
+func TestRangeRateKmps_AgainstFiniteDiff(t *testing.T) {
+	tle := &TLE{Name: "ISS (ZARYA)", Line1: issLine1, Line2: issLine2}
+	prop, err := NewPropagator(tle)
+	if err != nil {
+		t.Fatalf("NewPropagator: %v", err)
+	}
+
+	obs := NewObserver(55.7558, 37.6173, 0.156)
+
+	t0 := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	dt := 1 * time.Second
+
+	// Численная производная: центральная разность по дальности.
+	eciPrev, err := prop.Propagate(t0.Add(-dt))
+	if err != nil {
+		t.Fatalf("Propagate(-dt): %v", err)
+	}
+	eciNext, err := prop.Propagate(t0.Add(dt))
+	if err != nil {
+		t.Fatalf("Propagate(+dt): %v", err)
+	}
+	rngPrev := obs.GetAER(eciPrev).Range
+	rngNext := obs.GetAER(eciNext).Range
+	rrNumeric := (rngNext - rngPrev) / (2 * dt.Seconds())
+
+	eci, err := prop.Propagate(t0)
+	if err != nil {
+		t.Fatalf("Propagate(t0): %v", err)
+	}
+	rrAnalytic := RangeRateKmps(eci, obs)
+
+	// Допуск 1 м/с — гарантирует, что формула радиальной скорости согласована
+	// с производной дальности из существующего GetAER (учёт вращения Земли).
+	if diff := math.Abs(rrAnalytic - rrNumeric); diff > 0.001 {
+		t.Errorf("RangeRateKmps mismatch: analytic=%.6f km/s, numeric=%.6f km/s, |diff|=%.6f km/s",
+			rrAnalytic, rrNumeric, diff)
+	}
+}
+
 // BenchmarkECIToECEF измеряет производительность преобразования ECI→ECEF.
 func BenchmarkECIToECEF(b *testing.B) {
 	testTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)

@@ -43,3 +43,4 @@ package-lock.json
 /memory-bank/
 ./memory-bank/
 docs/archive/
+/.cursorignore
