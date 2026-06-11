@@ -56,8 +56,8 @@ const StateEventType = Object.freeze({
     TRACKING_CHANGE: 'tracking_change',
     /** Обновление группы скользящего окна. */
     SATELLITE_GROUP_UPDATE: 'satellite_group_update',
-    /** Очередной цикл сканирования передатчиков (Авто-режим, ADR-004 §3). */
-    TX_CYCLE: 'tx_cycle',
+    /** @deprecated Убран вместе с детектором пакетов. Подписчики должны использовать satellite_group_update. */
+    // TX_CYCLE: 'tx_cycle',
     /** Изменение набора спутников с видимыми трассами (UX-TABLE-TRACK-COL-001). */
     TRACK_VISIBILITY_CHANGE: 'track_visibility_change',
     /** Переключение режима «все трассы группы» (UX-TABLE-TRACK-GROUP-MODE-001). */
@@ -175,9 +175,6 @@ class SatelliteStateManager {
 
         /** Текущая группа спутников из SSE-события satellite_group_update. */
         this._satelliteGroup = null;
-
-        /** Последнее SSE-событие tx_cycle (источник total_packets с бэка). */
-        this._lastTxCycleData = null;
 
         /**
          * Набор NORAD ID с включённой видимостью трассы (ручной toggle и режим «все трассы»).
@@ -340,6 +337,7 @@ class SatelliteStateManager {
             az: data.az,
             el: data.el,
             range: data.range || 0,
+            range_rate: typeof data.range_rate === 'number' ? data.range_rate : 0,
             ts: data.ts,
         };
         if (typeof data.map_marker_rot_deg === 'number' && !Number.isNaN(data.map_marker_rot_deg)) {
@@ -687,38 +685,6 @@ class SatelliteStateManager {
      */
     getSatelliteGroup() {
         return this._satelliteGroup;
-    }
-
-    /**
-     * Прокинуть SSE-событие "tx_cycle" (данные с бэка, включая history и total_packets).
-     * @param {Object} data — {ts, satellites: [{norad_id, transmitters: [{uuid, packets, power, total_packets, history}]}]}
-     */
-    updateTxCycle(data) {
-        if (!data || !Array.isArray(data.satellites)) {
-            return;
-        }
-        this._lastTxCycleData = data;
-        this._notify(StateEventType.TX_CYCLE, data);
-    }
-
-    /**
-     * Суммарное число пакетов за текущий пролёт по КА (все передатчики).
-     * Берёт total_packets из последнего tx_cycle-события (бэкенд — источник истины).
-     * @param {number} noradId
-     * @returns {number}
-     */
-    getPassPacketTotal(noradId) {
-        const id = Number(noradId) || 0;
-        if (!id || !this._lastTxCycleData) { return 0; }
-        const sat = this._lastTxCycleData.satellites.find(
-            s => Number(s && s.norad_id) === id
-        );
-        if (!sat || !Array.isArray(sat.transmitters)) { return 0; }
-        let sum = 0;
-        for (const tx of sat.transmitters) {
-            sum += Number(tx.total_packets) || 0;
-        }
-        return sum;
     }
 
     /**

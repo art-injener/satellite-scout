@@ -34,8 +34,18 @@
         this._fft = null;
         this._wf = null;
         this._dataSource = null;
+        this._panorama = null;
+        this._passProfile = null;
+        this._demodPanel = null;
+        this._tmiTable = null;
+        this._eyeView = null;
+        this._rxBar = null;
+        this._onPanoramaTune = null;
+        this._onRxPipelineChange = null;
+        this._onRxApply = null;
 
         // Ссылки на canvas / контейнеры
+        this._layoutRoot = document.getElementById('layout-manual');
         this._azCanvas = document.getElementById('manual-azimuth-view');
         this._elCanvas = document.getElementById('manual-elevation-view');
         this._fftCanvas = document.getElementById('manual-fft');
@@ -44,6 +54,12 @@
 
         this._initIndicators();
         this._initSpectrum();
+        this._initPanorama();
+        this._initPassProfile();
+        this._initDemodPanel();
+        this._initTelemetryTable();
+        this._initEyeConstellation();
+        this._initRxBar();
         this._subscribeState();
     }
 
@@ -108,15 +124,181 @@
             this._wf.start();
         }
 
-        // Ресайз спектра/водопада при изменении контейнера .ml-spec
+        // Ресайз спектра/водопада при изменении контейнера .ml-loupe
         const self = this;
-        const specWrap = this._fftCanvas ? this._fftCanvas.closest('.ml-spec') : null;
+        const specWrap = this._fftCanvas ? this._fftCanvas.closest('.ml-loupe') : null;
         if (specWrap) {
             this._observeRaw(specWrap, function() {
                 if (self._fft) { self._fft._resize(); }
                 if (self._wf) { self._wf.refresh(); }
             });
         }
+    };
+
+    ManualLayout.prototype._initPanorama = function() {
+        if (typeof window.ManualPanorama !== 'function') { return; }
+        this._panorama = new window.ManualPanorama();
+    };
+
+    ManualLayout.prototype._initPassProfile = function() {
+        if (typeof window.PassProfileView !== 'function') { return; }
+        var canvas = document.getElementById('manual-pass-profile-canvas');
+        if (!canvas) { return; }
+        this._passProfile = new window.PassProfileView(canvas, {
+            satName: 'ISS',
+            noradId: 25544,
+            maxEl: 67,
+            maxDopplerHz: 3000,
+        });
+        var self = this;
+        if (typeof ResizeObserver !== 'undefined') {
+            var ro = new ResizeObserver(function() {
+                if (self._passProfile && self._active) { self._passProfile.draw(); }
+            });
+            ro.observe(canvas.parentElement || canvas);
+            this._resizeObservers.push(ro);
+        }
+    };
+
+    ManualLayout.prototype._initDemodPanel = function() {
+        if (typeof window.DemodPanel !== 'function') { return; }
+        this._demodPanel = new window.DemodPanel();
+        var root = this._layoutRoot || document.getElementById('layout-manual');
+        if (!root) { return; }
+        var self = this;
+        this._onPanoramaTune = function(e) {
+            self._tuneChannel(e.detail || {});
+        };
+        root.addEventListener('panorama:tune', this._onPanoramaTune);
+    };
+
+    ManualLayout.prototype._initTelemetryTable = function() {
+        if (typeof window.TelemetryTable !== 'function') { return; }
+        this._tmiTable = new window.TelemetryTable();
+    };
+
+    ManualLayout.prototype._initEyeConstellation = function() {
+        if (typeof window.EyeConstellationView !== 'function') { return; }
+        var self = this;
+        this._eyeView = new window.EyeConstellationView();
+        this._eyeView._onAutoRestore = function() {
+            self._syncEyeFromPipeline();
+        };
+    };
+
+    ManualLayout.prototype._initRxBar = function() {
+        if (typeof window.ManualRxBar !== 'function') { return; }
+        this._rxBar = new window.ManualRxBar();
+        this._bindRxBarEvents();
+        this._syncEyeFromPipeline();
+    };
+
+    /** Текст pipeline из select «Демод.» или напрямую из DOM. */
+    ManualLayout.prototype._getPipelineLabel = function() {
+        if (this._rxBar && typeof this._rxBar.getPipeline === 'function') {
+            return this._rxBar.getPipeline();
+        }
+        var sel = document.getElementById('manual-rx-pipeline');
+        if (sel && sel.options && sel.selectedIndex >= 0) {
+            var opt = sel.options[sel.selectedIndex];
+            return opt && opt.text ? String(opt.text).trim() : '';
+        }
+        return '';
+    };
+
+    /** Диаграмма Eye/Const следует за полем «Демод.», пока не закреплена вручную. */
+    ManualLayout.prototype._syncEyeFromPipeline = function() {
+        if (!this._eyeView) { return; }
+        var pipeline = this._getPipelineLabel();
+        if (pipeline) {
+            this._eyeView.setModulation(pipeline);
+        }
+    };
+
+    ManualLayout.prototype._bindRxBarEvents = function() {
+        var root = document.getElementById('manual-rx-bar');
+        if (!root) { return; }
+        var self = this;
+        this._onRxPipelineChange = function() {
+            self._syncEyeFromPipeline();
+        };
+        this._onRxApply = function() {
+            self._syncEyeFromPipeline();
+        };
+        root.addEventListener('rx:pipeline-change', this._onRxPipelineChange);
+        root.addEventListener('rx:apply', this._onRxApply);
+    };
+
+    /**
+     * Перенастройка активного канала: демодулятор + лупа (§ 4.6 вариант A).
+     * @param {{ freqMHz?: number, tx?: Object }} detail
+     */
+    ManualLayout.prototype._tuneChannel = function(detail) {
+        var freqMHz = detail.freqMHz;
+        var tx = detail.tx || null;
+        if (typeof freqMHz !== 'number' || !isFinite(freqMHz)) { return; }
+
+        if (this._demodPanel && tx) {
+            this._demodPanel.setChannel(tx);
+        } else if (this._demodPanel) {
+            this._demodPanel.setChannel({
+                freqMHz: freqMHz,
+                label: 'Unknown',
+                modulation: '—',
+                active: true,
+            });
+        }
+
+        if (this._dataSource) {
+            this._dataSource.freqCenterMHz = freqMHz;
+            if (typeof this._dataSource.reset === 'function') {
+                this._dataSource.reset();
+            }
+        }
+        if (this._fft) {
+            this._fft.freqCenterMHz = freqMHz;
+        }
+        if (this._wf) {
+            this._wf._freqCenterMHz = freqMHz;
+            this._wf.clear();
+            if (this._active) {
+                this._wf.start();
+            }
+        }
+
+        if (this._rxBar) {
+            this._rxBar.setFreqMHz(freqMHz);
+        } else {
+            var freqInput = document.getElementById('manual-rx-freq');
+            if (freqInput && typeof window.formatDemodFreqMHz === 'function') {
+                freqInput.value = window.formatDemodFreqMHz(freqMHz);
+            }
+        }
+
+        if (tx && tx.modulation) {
+            if (this._rxBar && typeof this._rxBar.setPipeline === 'function') {
+                this._rxBar.setPipeline(tx.modulation);
+            } else {
+                var pipelineSelect = document.getElementById('manual-rx-pipeline');
+                if (pipelineSelect && pipelineSelect.options) {
+                    var mod = tx.modulation.toLowerCase();
+                    for (var i = 0; i < pipelineSelect.options.length; i++) {
+                        var opt = pipelineSelect.options[i];
+                        if (opt.text && mod.indexOf(opt.text.toLowerCase().replace(/\s+/g, '')) >= 0) {
+                            pipelineSelect.selectedIndex = i;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if (this._tmiTable) {
+            var label = tx ? (tx.label || 'Unknown') : 'Unknown';
+            this._tmiTable.setChannel(label, freqMHz);
+        }
+
+        this._syncEyeFromPipeline();
     };
 
     ManualLayout.prototype._subscribeState = function() {
@@ -229,12 +411,19 @@
             });
         });
         this._startSpectrumTimer();
+        if (this._panorama) { this._panorama.activate(); }
+        if (this._passProfile) { this._passProfile.draw(); }
+        if (this._tmiTable) { this._tmiTable.activate(); }
+        if (this._eyeView) { this._eyeView.activate(); }
     };
 
     ManualLayout.prototype.deactivate = function() {
         if (!this._active) { return; }
         this._active = false;
         this._stopSpectrumTimer();
+        if (this._panorama) { this._panorama.deactivate(); }
+        if (this._tmiTable) { this._tmiTable.deactivate(); }
+        if (this._eyeView) { this._eyeView.deactivate(); }
     };
 
     /** @returns {boolean} */
@@ -267,6 +456,9 @@
             this._el.refreshThemeColors();
             this._el.draw();
         }
+        if (this._panorama) { this._panorama.refreshAfterThemeChange(); }
+        if (this._passProfile) { this._passProfile.refreshAfterThemeChange(); }
+        if (this._eyeView) { this._eyeView.refreshAfterThemeChange(); }
         this.refresh();
     };
 
@@ -291,6 +483,13 @@
         const line = this._dataSource.getLine();
         if (this._fft) { this._fft.draw(line); }
         if (this._wf) { this._wf.pushLine(line); }
+
+        // Pass profile ~1с (каждые ~12 тиков по 80мс)
+        this._ppTickCount = (this._ppTickCount || 0) + 1;
+        if (this._passProfile && this._ppTickCount >= 12) {
+            this._ppTickCount = 0;
+            this._passProfile.draw();
+        }
     };
 
     // ── Очистка ──────────────────────────────────────────────────────────
@@ -311,6 +510,41 @@
         this._fft = null;
         this._wf = null;
         this._dataSource = null;
+        if (this._panorama) {
+            this._panorama.destroy();
+            this._panorama = null;
+        }
+        if (this._demodPanel) {
+            this._demodPanel.destroy();
+            this._demodPanel = null;
+        }
+        var root = this._layoutRoot || document.getElementById('layout-manual');
+        if (root && this._onPanoramaTune) {
+            root.removeEventListener('panorama:tune', this._onPanoramaTune);
+        }
+        this._onPanoramaTune = null;
+        this._passProfile = null;
+        if (this._tmiTable) {
+            this._tmiTable.destroy();
+            this._tmiTable = null;
+        }
+        if (this._eyeView) {
+            this._eyeView.destroy();
+            this._eyeView = null;
+        }
+        if (this._rxBar) {
+            this._rxBar.destroy();
+            this._rxBar = null;
+        }
+        var rxRoot = document.getElementById('manual-rx-bar');
+        if (rxRoot && this._onRxPipelineChange) {
+            rxRoot.removeEventListener('rx:pipeline-change', this._onRxPipelineChange);
+        }
+        if (rxRoot && this._onRxApply) {
+            rxRoot.removeEventListener('rx:apply', this._onRxApply);
+        }
+        this._onRxPipelineChange = null;
+        this._onRxApply = null;
     };
 
     // ── Экспорт ──────────────────────────────────────────────────────────

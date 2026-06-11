@@ -1,18 +1,18 @@
 /* ===== Ручной режим — внутренняя сетка #layout-manual =====
-   Layout по ADR-004 § 4.3: 4 горизонтальных блока сверху вниз.
+   Layout по ADR-004 § 4.3 (перекройка 2026-06-09): 4 уровня сверху вниз.
    Видимость самого #layout-manual управляется в main.css по body.mode-manual.
 
    Структура (4 строки grid):
-     1) Rx toolbar (строка ~28px) + Spectrum + freq-scale + Waterfall + Heat-grid — на всю ширину
-     2) Eye/Const | Демодулятор | VFO Manager
-     3) Таблица телеметрии (на всю ширину)
-     4) Az компас (300×300) | Pass profile (верх) + Rotator panel (низ) | El угломер (300×300)
+     1) Панорама эфира — FFT с метками передатчиков (+ инфо-панель по клику)
+     2) Азимут | Лупа (FFT + Waterfall) | Угол места; приёмник — строка снизу
+     3) Eye/Const | Демодулятор (ужатый) | Профиль сеанса (El + Doppler)
+     4) Телеметрия (на всю ширину, 1 пакет = 1 строка)
 
    SkyView остаётся в правой панели (как в Авто-режиме).
-   В этой итерации работают только Az/El/спектр/водопад. Остальные блоки —
-   визуальные заглушки .ml-stub под будущие задачи. */
+   Высота: 100vh без скролла; уровень 2 фиксирован высотой az/el; буфер — телеметрия. */
 
 #layout-manual {
+    --ml-rx-bar-outer-height: 36px;
     grid-row: 2;
     grid-column: 1;
     box-sizing: border-box;
@@ -20,12 +20,12 @@
     height: 100%;
     padding: 4px;
     gap: 4px;
-    /* Порядок: РЧ-блок (1fr) | Декодер | Телеметрия | Антенна (фикс. высота) */
+    /* Порядок: Панорама | RF (az|лупа|el + rx-bar) | Декодер | Телеметрия */
     grid-template-rows:
-        minmax(220px, 1.2fr)
-        minmax(120px, 0.8fr)
-        minmax(100px, 0.6fr)
-        var(--indicator-block-height);
+        minmax(90px, 0.72fr)
+        calc(var(--indicator-block-height) + var(--ml-rx-bar-outer-height) + 4px)
+        minmax(100px, 0.62fr)
+        minmax(55px, 0.55fr);
     overflow: hidden;
     min-height: 0;
 }
@@ -36,6 +36,66 @@
     gap: 4px;
     min-height: 0;
     min-width: 0;
+}
+
+/* ───────────── Общий компонент: titled-панель ─────────────
+   Рамка + врезанный заголовок + тело. Единый стиль для всех блоков. */
+
+.ml-panel {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
+
+.ml-panel__head {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    height: 24px;
+    padding: 0 10px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ml-panel__title {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    color: var(--panel-header-title, var(--text-primary));
+    white-space: nowrap;
+}
+
+.ml-panel__sub {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Канал текущего приёма — акцентный, прижат вправо */
+.ml-panel__chan {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent-primary);
+    white-space: nowrap;
+}
+
+.ml-panel__body {
+    flex: 1;
+    min-height: 0;
+    min-width: 0;
+    overflow: hidden;
+    position: relative;
 }
 
 /* ── Заглушка: единый стиль для всех неинтерактивных блоков ── */
@@ -74,193 +134,384 @@
     max-width: 80%;
 }
 
-/* ───────────── Блок 1: Спектр + freq-scale + Waterfall + Heat-grid ───────────── */
+/* ───────────── Уровень 1: Панорама эфира (FFT + метки + инфо-панель) ───────────── */
 
-.ml-block--top {
+.ml-block--panorama {
     grid-template-columns: 1fr;
 }
 
-.ml-settings {
-    /* Заглушка настроек приёмника — наполнение в задаче MANUAL-001 */
+.ml-panorama__body {
+    background: var(--spectrum-instrument-bg, var(--bg-primary));
 }
 
-/* Toolbar настроек приёмника — под графиками, контролы-заглушки */
-.ml-rx-bar {
-    height: 44px;
-    flex-shrink: 0;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 0 12px;
-    background: var(--bg-secondary, var(--bg-tertiary));
-    border-top: 1px solid var(--border-color);
-    font-family: var(--font-mono);
-    font-size: 13px;
+.ml-panorama__fft {
+    position: absolute;
+    inset: 0;
+    min-height: 0;
+    min-width: 0;
     overflow: hidden;
 }
 
-.ml-rx-bar__item {
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    white-space: nowrap;
-}
-
-.ml-rx-bar__label {
-    color: var(--text-muted);
-    font-size: 12px;
-}
-
-.ml-rx-bar__select,
-.ml-rx-bar__input {
-    height: 30px;
-    padding: 0 10px;
-    border: 1px solid var(--border-color);
-    border-radius: 4px;
-    background: var(--bg-primary);
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    font-size: 13px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-}
-
-.ml-rx-bar__select {
-    min-width: 96px;
-}
-
-.ml-rx-bar__input {
-    width: 80px;
-    text-align: right;
-}
-
-.ml-rx-bar__unit {
-    color: var(--text-muted);
-    font-size: 12px;
-}
-
-/* Частота — крупно, акцентный цвет */
-.ml-rx-bar__item--freq {
-    gap: 6px;
-}
-
-.ml-rx-bar__freq-input {
-    height: 32px;
-    width: 160px;
-    padding: 0 10px;
+/* Инфо-панель по клику на метку — поверх графика справа */
+.ml-panorama__info {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    width: 220px;
+    max-height: calc(100% - 12px);
+    padding: 8px 10px 10px;
+    background: var(--bg-secondary, var(--bg-tertiary));
     border: 1px solid var(--accent-primary);
-    border-radius: 4px;
-    background: var(--bg-primary);
-    color: var(--accent-primary);
-    font-family: var(--font-mono);
-    font-size: 18px;
-    font-weight: 700;
-    font-variant-numeric: tabular-nums;
-    text-align: center;
-    letter-spacing: 0.5px;
+    border-radius: var(--radius-sm);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    overflow-y: auto;
+    z-index: 2;
 }
 
-/* Разделитель */
-.ml-rx-bar__sep {
-    width: 1px;
-    height: 24px;
-    background: var(--border-color);
-    flex-shrink: 0;
+.ml-panorama__info[hidden] {
+    display: none;
 }
 
-/* Слайдер допплера ±25 кГц */
-.ml-rx-bar__range {
-    width: 100px;
-    height: 4px;
-    accent-color: var(--accent-primary);
-    cursor: pointer;
-}
-
-.ml-rx-bar__range:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
-
-/* Спейсер — прижимает кнопку вправо */
-.ml-rx-bar__spacer {
-    flex: 1;
-}
-
-/* Кнопка SET (рядом с частотой) */
-.ml-rx-bar__btn {
-    height: 30px;
-    padding: 0 16px;
-    border: 1px solid var(--accent-primary);
-    border-radius: 4px;
+.ml-panorama__info-close {
+    position: absolute;
+    top: 4px;
+    right: 6px;
+    width: 18px;
+    height: 18px;
+    padding: 0;
+    border: none;
     background: transparent;
-    color: var(--accent-primary);
+    color: var(--text-muted);
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.ml-panorama__info-close:hover {
+    color: var(--text-primary);
+}
+
+.ml-panorama__info-body {
     font-family: var(--font-mono);
     font-size: 12px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    cursor: pointer;
-    transition: background 0.15s, color 0.15s;
+    color: var(--text-primary);
+    line-height: 1.5;
 }
 
-.ml-rx-bar__btn:hover:not(:disabled) {
-    background: var(--accent-primary);
-    color: var(--bg-primary);
+.ml-panorama__info-name {
+    font-size: 14px;
+    font-weight: 700;
+    margin-bottom: 4px;
+    padding-right: 16px;
 }
 
-.ml-rx-bar__btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+.ml-panorama__info-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
 }
 
-.ml-rx-bar__select:disabled,
-.ml-rx-bar__input:disabled,
-.ml-rx-bar__freq-input:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
+.ml-panorama__info-row span:first-child {
+    color: var(--text-muted);
 }
 
-.ml-spec {
+.ml-panorama__info-row span:last-child {
+    font-variant-numeric: tabular-nums;
+}
+
+/* ───────────── Уровень 2: Az | Лупа | El + приёмник на всю ширину ───────────── */
+
+.ml-block--rf {
+    grid-template-columns:
+        var(--indicator-graph-size)
+        1fr
+        var(--indicator-graph-size);
+    grid-template-rows: minmax(0, 1fr) auto;
+    align-items: stretch;
+    gap: 4px;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.ml-block--rf > .ml-az {
+    grid-column: 1;
+    grid-row: 1;
     display: flex;
     flex-direction: column;
-    background: var(--spectrum-instrument-bg, var(--bg-primary));
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
-    overflow: hidden;
+    min-height: 0;
+    max-height: var(--indicator-block-height);
+}
+
+.ml-block--rf > .ml-loupe {
+    grid-column: 2;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
     min-height: 0;
     min-width: 0;
 }
 
-/* Спектр и водопад делят основную высоту блока 1; шкала и heat — фиксированные снизу */
-.ml-spec__fft {
+.ml-block--rf > .ml-el {
+    grid-column: 3;
+    grid-row: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    max-height: var(--indicator-block-height);
+}
+
+.ml-block--rf > .ml-rx-bar {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-height: var(--ml-rx-bar-outer-height);
+    max-height: var(--ml-rx-bar-outer-height);
+}
+
+/* Лупа — только спектр + шкала + водопад */
+.ml-loupe__fft {
     flex: 4;
     min-height: 0;
     overflow: hidden;
 }
 
-.ml-spec__scale-wrap {
+.ml-loupe__scale-wrap {
     height: 18px;
     flex-shrink: 0;
     background: var(--bp-overview-freq-scale-bg, var(--bg-tertiary));
     overflow: hidden;
 }
 
-.ml-spec__wf {
+.ml-loupe__wf {
     flex: 6;
     min-height: 0;
     overflow: hidden;
 }
 
-/* Heat-grid под водопадом — 2-3 строки фиксированной высоты, общая ось X (MANUAL-LAYOUT-001) */
-.ml-spec__heat {
-    flex: 0 0 auto;
-    height: 80px;
-    border-top: 1px solid var(--border-color);
+/* ── Панель приёмника — секции в стиле app-header, без внутренних полей ── */
+.ml-rx-bar {
+    flex-shrink: 0;
+    box-sizing: border-box;
+    display: grid;
+    grid-template-columns:
+        minmax(0, 1.35fr)
+        minmax(0, 1fr)
+        minmax(0, 1.05fr)
+        minmax(0, 1.15fr)
+        minmax(0, 1.1fr)
+        auto;
+    gap: 4px;
+    align-items: stretch;
+    width: 100%;
+    height: var(--ml-rx-bar-outer-height);
+    padding: 0;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    line-height: 1;
+    min-width: 0;
+    overflow: hidden;
+    --ml-rx-section-h: 100%;
+    --ml-rx-control-h: 28px;
+    --ml-rx-section-border: color-mix(in srgb, var(--border-color), white 50%);
+}
+
+.ml-rx-bar__section {
+    box-sizing: border-box;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    gap: 6px;
+    width: 100%;
+    min-width: 0;
+    min-height: 0;
+    height: var(--ml-rx-section-h);
+    padding: 0 8px 0 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--ml-rx-section-border);
+    border-radius: 3px;
+    white-space: nowrap;
+}
+
+.ml-rx-bar__section--gain,
+.ml-rx-bar__section--doppler,
+.ml-rx-bar__section--demod {
+    padding-right: 6px;
+}
+
+.ml-rx-bar__section--apply {
+    justify-content: center;
+    align-items: stretch;
+    padding: 0;
+    background: transparent;
+    border: none;
     border-radius: 0;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    padding: 6px 8px;
+}
+
+.ml-rx-bar__label {
+    display: inline-flex;
+    align-items: center;
+    height: var(--ml-rx-control-h);
+    margin: 0;
+    padding: 0 8px 0 0;
+    border-right: 1px solid var(--ml-rx-section-border);
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    font-size: inherit;
+    font-weight: 400;
+    white-space: nowrap;
+}
+
+.ml-rx-bar__spin,
+.ml-rx-bar__sel,
+.ml-rx-bar__unit-sel {
+    box-sizing: border-box;
+    height: var(--ml-rx-control-h);
+    margin: 0;
+    padding: 0 6px;
+    border: 1px solid var(--ml-rx-section-border);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.ml-rx-bar__spin {
+    flex: 1 1 0;
+    min-width: 0;
+    padding: 0 6px 0 8px;
+    text-align: left;
+}
+
+.ml-rx-bar__spin::-webkit-inner-spin-button,
+.ml-rx-bar__spin::-webkit-outer-spin-button {
+    -webkit-appearance: inner-spin-button;
+    opacity: 1;
+    height: 24px;
+    margin-left: 4px;
+    cursor: pointer;
+}
+
+.ml-rx-bar__spin--freq {
+    flex: 1.2 1 0;
+    min-width: 72px;
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+    text-align: center;
+    font-size: 0.9375rem;
+}
+
+.ml-rx-bar__sel {
+    flex: 1 1 0;
+    min-width: 0;
+    cursor: pointer;
+}
+
+.ml-rx-bar__unit-sel {
+    flex: 0 0 62px;
+    width: 62px;
+    cursor: pointer;
+}
+
+.ml-rx-bar__section--doppler .ml-rx-bar__spin {
+    flex: 0 1 92px;
+    width: auto;
+    min-width: 92px;
+    max-width: 110px;
+}
+
+.ml-rx-bar__section--gain .ml-rx-bar__spin {
+    flex: 0 1 68px;
+    width: auto;
+    min-width: 68px;
+    max-width: 80px;
+}
+
+.ml-rx-bar__unit {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+}
+
+.ml-rx-bar__spin:focus,
+.ml-rx-bar__sel:focus,
+.ml-rx-bar__unit-sel:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+/* Toggle-кнопки (АРУ, Панорама) — как app-header__mode-toggle__btn */
+.ml-rx-bar__pill-toggle {
+    box-sizing: border-box;
+    flex-shrink: 0;
+    height: var(--ml-rx-control-h);
+    margin: 0;
+    padding: 0 10px;
+    border: 1px solid var(--ml-rx-section-border);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s, border-color 0.12s;
+    white-space: nowrap;
+}
+
+.ml-rx-bar__pill-toggle:hover:not(.ml-rx-bar__pill-toggle--on) {
+    background: color-mix(in srgb, var(--text-primary) calc(var(--state-hover-opacity) * 100%), transparent);
+    color: var(--text-primary);
+}
+
+.ml-rx-bar__pill-toggle--on {
+    background: var(--accent-secondary, #00a8ff);
+    border-color: var(--accent-secondary, #00a8ff);
+    color: var(--btn-primary-text, #fff);
+}
+
+.ml-rx-bar__pill-toggle:focus-visible {
+    outline: 2px solid var(--accent-primary);
+    outline-offset: 1px;
+}
+
+.ml-rx-bar__apply {
+    box-sizing: border-box;
+    width: 100%;
+    height: 100%;
+    min-height: var(--ml-rx-control-h);
+    padding: 0 14px;
+    border: 1px solid var(--accent-success, #00d4aa);
+    border-radius: 3px;
+    background: transparent;
+    color: var(--accent-success, #00d4aa);
+    font-family: var(--font-mono);
+    font-size: 0.8125rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+    white-space: nowrap;
+}
+
+.ml-rx-bar__apply:hover:not(:disabled) {
+    background: var(--accent-success, #00d4aa);
+    color: var(--bg-primary);
+}
+
+.ml-rx-bar__spin:disabled,
+.ml-rx-bar__sel:disabled,
+.ml-rx-bar__unit-sel:disabled,
+.ml-rx-bar__pill-toggle:disabled,
+.ml-rx-bar__apply:disabled {
+    opacity: var(--state-disabled-opacity, 0.38);
+    cursor: not-allowed;
 }
 
 .ml-canvas {
@@ -269,36 +520,22 @@
     height: 100%;
 }
 
-/* ───────────── Блок 4 (низ): Az | Pass profile + Rotator | El ─────────────
-   Az/El — фиксированный квадрат 300×300. Центральная колонка (Side) — 1fr,
-   вертикальный стек: Pass profile сверху, Rotator panel снизу. */
+/* ── Уровень 2: тело индикаторов Az/El (канвас + info снизу) ── */
 
-.ml-block--mid {
-    grid-template-columns:
-        var(--indicator-graph-size)
-        1fr
-        var(--indicator-graph-size);
-    align-items: stretch;
-}
-
-.ml-az,
-.ml-el {
-    width: var(--indicator-graph-size);
-    flex-shrink: 0;
+.ml-indicator-body {
     display: flex;
     flex-direction: column;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    border-radius: var(--radius-sm);
+    align-items: center;
+    justify-content: flex-start;
     overflow: hidden;
     min-height: 0;
-    min-width: 0;
 }
 
 .ml-indicator-canvas {
     width: var(--indicator-graph-size);
     height: var(--indicator-graph-size);
     flex: 0 0 auto;
+    max-width: 100%;
     display: flex;
     align-items: center;
     justify-content: center;
@@ -311,24 +548,11 @@
     object-fit: contain;
 }
 
-/* Side — центральная колонка: Pass profile сверху, Rotator panel снизу */
-.ml-side {
-    display: grid;
-    grid-template-rows: 1fr 1fr;
-    gap: 4px;
-    min-width: 0;
-    min-height: 0;
-}
-
-.ml-profile,
-.ml-rotator {
-    min-width: 0;
-    min-height: 0;
-}
-
 .ml-indicator-info {
     flex-shrink: 0;
-    padding: 4px 8px;
+    width: 100%;
+    margin-top: auto;
+    padding: 4px 10px;
     background: var(--bg-tertiary);
     border-top: 1px solid var(--border-color);
     display: flex;
@@ -340,10 +564,10 @@
 
 .ml-info-row {
     display: flex;
-    align-items: center;
+    align-items: baseline;
     gap: 6px;
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: 12px;
     line-height: 1.2;
     min-width: 0;
 }
@@ -354,18 +578,471 @@
 
 .ml-info-value {
     font-variant-numeric: tabular-nums;
-    font-weight: 600;
+    font-weight: 700;
+    font-size: 15px;
     color: var(--bp-info-value, var(--accent-primary));
 }
 
-/* ───────────── Блок 2: Eye/Const | Демодулятор | VFO Manager ───────────── */
+/* Элементы ротора внутри .ml-rot-ctrl — размеры кнопок компактнее для 300px */
 
-.ml-block--demod {
-    grid-template-columns: minmax(360px, 1fr) minmax(440px, 1fr) minmax(480px, 1fr);
+.ml-rotator__btn {
+    height: 22px;
+    padding: 0 8px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
 }
 
-/* ───────────── Блок 3: Телеметрия ───────────── */
+.ml-rotator__btn--track {
+    border-color: var(--accent-success, #00d4aa);
+    color: var(--accent-success, #00d4aa);
+}
+
+.ml-rotator__btn--track:hover:not(:disabled) {
+    background: var(--accent-success, #00d4aa);
+    color: var(--bg-primary);
+}
+
+.ml-rotator__btn--stop {
+    border-color: var(--accent-danger, #e05555);
+    color: var(--accent-danger, #e05555);
+}
+
+.ml-rotator__btn--stop:hover:not(:disabled) {
+    background: var(--accent-danger, #e05555);
+    color: var(--bg-primary);
+}
+
+.ml-rotator__btn--goto {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.ml-rotator__btn:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.ml-rotator__mode {
+    height: 22px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.ml-rotator__mode:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.ml-rotator__val {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.ml-rotator__val strong {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--accent-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.ml-rotator__goto-label {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.ml-rotator__goto-input {
+    width: 52px;
+    height: 24px;
+    padding: 0 6px;
+    border: 1px solid var(--border-color);
+    border-radius: 4px;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.ml-rotator__goto-input:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.ml-rotator__led {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.ml-rotator__led--on {
+    background: var(--accent-success, #00d4aa);
+}
+
+.ml-rotator__led--off {
+    background: var(--accent-danger, #e05555);
+}
+
+.ml-rotator__status-text {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+/* ── Уровень 3: тело профиля сеанса (canvas) ── */
+/* Профиль сеанса: без шапки — заголовок рисуется на canvas */
+.ml-profile .ml-panel__body {
+    padding: 0;
+}
+
+.ml-profile__body {
+    background: var(--spectrum-instrument-bg, var(--bg-primary));
+}
+
+.ml-profile__body canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* ───────────── Уровень 3: Eye/Const | Демодулятор | Профиль сеанса ───────────── */
+
+.ml-block--decode {
+    grid-template-columns: minmax(200px, 0.9fr) minmax(220px, 0.75fr) minmax(240px, 1fr);
+}
+
+/* Eye/Const: без шапки — управление поверх canvas */
+.ml-eye .ml-panel__body {
+    padding: 0;
+}
+
+.ml-eye__canvas-wrap {
+    flex: 1;
+    min-height: 0;
+    position: relative;
+}
+
+.ml-eye__overlay {
+    position: absolute;
+    top: 4px;
+    left: 4px;
+    right: 4px;
+    z-index: 2;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 4px;
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--bg-primary) 82%, transparent);
+    pointer-events: none;
+}
+
+.ml-eye__overlay > * {
+    pointer-events: auto;
+}
+
+.ml-eye__tabs {
+    display: flex;
+    gap: 2px;
+}
+
+.ml-eye__tab {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    padding: 1px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+
+.ml-eye__tab:hover {
+    background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+.ml-eye__tab--on {
+    background: var(--accent-primary-dim, rgba(0, 212, 170, 0.12));
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.ml-eye__auto {
+    margin-left: auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 1px 5px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    cursor: pointer;
+    transition: opacity 0.12s, border-color 0.12s, color 0.12s;
+}
+
+.ml-eye__auto:hover {
+    color: var(--text-primary);
+    border-color: var(--accent-primary);
+}
+
+.ml-eye__auto--on {
+    color: var(--accent-primary);
+    border-color: var(--accent-primary);
+}
+
+.ml-eye__canvas-wrap canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+}
+
+/* Демодулятор: шапка-канал (.ml-panel__head) + сетка метрик 2×N */
+.ml-demod__channel {
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    justify-content: flex-end;
+    margin-left: auto;
+    gap: 4px 6px;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+.ml-demod__channel-led {
+    font-size: 9px;
+    line-height: 1;
+}
+
+.ml-demod__channel-led--lock {
+    color: var(--accent-success, #00d4aa);
+}
+
+.ml-demod__channel-led--idle {
+    color: var(--text-muted, #7a8a9c);
+}
+
+.ml-demod__channel-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.ml-demod__channel-freq {
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    color: var(--accent-primary);
+}
+
+.ml-demod__channel-unit {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.ml-demod__channel-sep {
+    color: var(--text-muted);
+}
+
+.ml-demod__channel-pipeline {
+    color: var(--text-muted);
+}
+
+.ml-demod__channel-auto {
+    font-size: 10px;
+    color: var(--text-muted);
+    padding: 1px 5px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+}
+
+.ml-demod__grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-auto-rows: 1fr;
+    gap: 0 14px;
+    padding: 4px 10px 6px;
+    align-content: stretch;
+    overflow: hidden;
+}
+
+.ml-demod__metric {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 0 0 1px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ml-demod__label {
+    flex-shrink: 0;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--bp-info-label, var(--panel-header-title, var(--text-muted)));
+}
+
+.ml-demod__value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    color: var(--bp-info-value, var(--text-primary));
+    text-align: right;
+    white-space: nowrap;
+}
+
+.ml-demod__value--ok {
+    color: var(--accent-success, #00d4aa);
+}
+
+.ml-demod__value--idle {
+    color: var(--text-muted, #7a8a9c);
+}
+
+.ml-demod__value--bad {
+    color: var(--accent-danger, #ff6b6b);
+}
+
+/* ───────────── Уровень 4: Телеметрия (пакет = строка) ───────────── */
 
 .ml-block--tmi {
     grid-template-columns: 1fr;
+}
+
+.ml-tmi__scroll {
+    overflow-y: auto;
+    overflow-x: auto;
+    background: var(--bg-primary);
+}
+
+.ml-tmi__table {
+    width: 100%;
+    border-collapse: collapse;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    table-layout: auto;
+}
+
+.ml-tmi__table thead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+
+.ml-tmi__th {
+    padding: 5px 10px;
+    text-align: left;
+    font-weight: 600;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: var(--panel-header-title, var(--text-muted));
+    background: var(--bg-tertiary);
+    border: none;
+    box-shadow: inset -1px 0 0 var(--border-color), inset 0 -1px 0 var(--border-color);
+    white-space: nowrap;
+}
+
+.ml-tmi__th:last-child {
+    box-shadow: inset 0 -1px 0 var(--border-color);
+}
+
+.ml-tmi__table td {
+    padding: 4px 10px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--text-primary);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+    border-right: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.ml-tmi__table td:last-child {
+    border-right: none;
+}
+
+.ml-tmi__table tbody tr:nth-child(even) td {
+    background: var(--bg-primary);
+}
+
+.ml-tmi__table tr:hover td {
+    background: var(--bg-hover, var(--bg-tertiary));
+}
+
+/* Канал — ширина по содержимому; остальные колонки фиксированы */
+.ml-tmi__th:nth-child(1),
+.ml-tmi__table td:nth-child(1) {
+    width: 1%;
+    white-space: nowrap;
+    overflow: visible;
+    text-overflow: clip;
+}
+
+.ml-tmi__chan {
+    color: var(--accent-primary);
+    font-weight: 600;
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.ml-tmi__th:nth-child(2),
+.ml-tmi__table td:nth-child(2) { width: 96px; color: var(--text-muted); }
+.ml-tmi__th:nth-child(3),
+.ml-tmi__table td:nth-child(3) { width: 64px; text-align: right; }
+.ml-tmi__th:nth-child(4),
+.ml-tmi__table td:nth-child(4) { width: 56px; text-align: center; }
+.ml-tmi__th:nth-child(5),
+.ml-tmi__table td:nth-child(5) {
+    width: auto;
+    min-width: 120px;
+    white-space: normal;
+}
+
+.ml-tmi__params {
+    color: var(--text-primary);
+}
+
+.ml-tmi__param-key {
+    color: var(--text-muted);
+}
+
+.ml-tmi__param-val {
+    color: var(--bp-info-value, var(--accent-primary));
+    font-variant-numeric: tabular-nums;
+}
+
+.ml-tmi__crc--ok {
+    color: var(--accent-success, #00d4aa);
+    font-weight: 700;
+}
+
+.ml-tmi__crc--fail {
+    color: var(--accent-danger, #ff6b6b);
+    font-weight: 700;
+}
+
+.ml-tmi__row--fail td {
+    background: color-mix(in srgb, var(--accent-danger, #ff6b6b) 12%, var(--bg-secondary)) !important;
 }

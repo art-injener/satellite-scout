@@ -886,10 +886,14 @@
         this._drawObserver();
         // Слой 1: вторичные (серые пунктиры).
         this._drawSecondaryLayer();
-        // Слой 2: выбранный спутник (оранжевый), если отличается от tracking.
-        if (this._selectedSatellite.noradId &&
-            this._selectedSatellite.noradId !== this.satellite.noradId) {
-            this._drawSelectedLayer();
+        // Слой 2: выбранный спутник (жёлтый трек + маркер).
+        // Рисуем, если selected отличается от tracking ИЛИ tracking-слой без данных.
+        if (this._selectedSatellite.noradId) {
+            var sameAsTracking = this.satellite.noradId &&
+                this._selectedSatellite.noradId === this.satellite.noradId;
+            if (!sameAsTracking || !(this.satellite.track && this.satellite.track.length >= 2)) {
+                this._drawSelectedLayer();
+            }
         }
         // Слой 3: спутник под наблюдением (текущий стиль).
         if (this.satellite.noradId) {

@@ -216,137 +216,255 @@
     </section>
 </div>
 
-<!-- Layout Ручного режима: 4 горизонтальных блока (ADR-004 § 4.3).
-     Порядок: РЧ-блок → Декодер → Телеметрия → Антенна (Az | Profile+Rotator | El).
+<!-- Layout Ручного режима: 5 горизонтальных блоков (ADR-004 § 4.3 v2026-06-04).
+     Порядок: Панорама → Лупа → Декодер → Телеметрия → Антенна (Az | Profile+Rotator | El).
      SkyView остаётся в правой панели. -->
 <section class="layout-manual" id="layout-manual" aria-hidden="true">
-    <!-- Блок 1: Спектр + шкала + Водопад + Heat-grid + Rx toolbar (на всю ширину) -->
-    <div class="ml-block ml-block--top">
-        <div class="ml-spec">
-            <div class="ml-spec__fft">
-                <canvas id="manual-fft" class="ml-canvas" role="img" aria-label="БПФ-спектр узкой полосы выбранного КА"></canvas>
+    <!-- Уровень 1: Панорама (FFT + метки передатчиков, клик → инфо сбоку) -->
+    <div class="ml-block ml-block--panorama">
+        <section class="ml-panel ml-panorama" id="manual-panorama">
+            <div class="ml-panel__body ml-panorama__body">
+                <div class="ml-panorama__fft">
+                    <canvas id="manual-panorama-fft" class="ml-canvas" role="img" aria-label="Панорама эфира: FFT по диапазонам антенны с маркерами передатчиков"></canvas>
+                    <aside class="ml-panorama__info" id="manual-panorama-info" hidden>
+                        <button class="ml-panorama__info-close" id="manual-panorama-info-close" aria-label="Закрыть">×</button>
+                        <div class="ml-panorama__info-body" id="manual-panorama-info-body"></div>
+                    </aside>
+                </div>
             </div>
-            <div class="ml-spec__scale-wrap">
+        </section>
+    </div>
+
+    <!-- Уровень 2: Az | Лупа (спектр + водопад) | El; приёмник — строка на всю ширину -->
+    <div class="ml-block ml-block--rf">
+        <section class="ml-panel ml-az">
+            <div class="ml-panel__body ml-indicator-body">
+                <div class="ml-indicator-canvas">
+                    <canvas id="manual-azimuth-view" width="200" height="200" role="img" aria-label="Индикатор азимута КА и антенны"></canvas>
+                </div>
+                <div class="ml-indicator-info">
+                    <div class="ml-info-row">
+                        <span class="ml-info-label">Аз. ант.:</span>
+                        <span class="ml-info-value" id="manual-az-info-ant">---°</span>
+                    </div>
+                    <div class="ml-info-row">
+                        <span class="ml-info-label">Аз. КА:</span>
+                        <span class="ml-info-value" id="manual-az-info-sat">---°</span>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <section class="ml-panel ml-loupe">
+            <div class="ml-loupe__fft">
+                <canvas id="manual-fft" class="ml-canvas" role="img" aria-label="БПФ-спектр узкой полосы активного канала"></canvas>
+            </div>
+            <div class="ml-loupe__scale-wrap">
                 <canvas id="manual-spec-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
             </div>
-            <div class="ml-spec__wf">
-                <canvas id="manual-wf" class="ml-canvas" role="img" aria-label="Спектрограмма (водопад) выбранного КА"></canvas>
+            <div class="ml-loupe__wf">
+                <canvas id="manual-wf" class="ml-canvas" role="img" aria-label="Спектрограмма (водопад) активного канала"></canvas>
             </div>
-            <div class="ml-spec__heat ml-stub" id="manual-heat-grid">
-                <div class="ml-stub__title">Heat-grid активности</div>
-                <div class="ml-stub__hint">Частоты КА × циклы сканирования · цвет = мощность · число = пакеты за pass</div>
+        </section>
+
+        <section class="ml-panel ml-el">
+            <div class="ml-panel__body ml-indicator-body">
+                <div class="ml-indicator-canvas">
+                    <canvas id="manual-elevation-view" width="200" height="200" role="img" aria-label="Индикатор угла места КА и антенны"></canvas>
+                </div>
+                <div class="ml-indicator-info">
+                    <div class="ml-info-row">
+                        <span class="ml-info-label">Уг. ант.:</span>
+                        <span class="ml-info-value" id="manual-el-info-ant">---°</span>
+                    </div>
+                    <div class="ml-info-row">
+                        <span class="ml-info-label">Уг. КА:</span>
+                        <span class="ml-info-value" id="manual-el-info-sat">---°</span>
+                    </div>
+                </div>
             </div>
-            <!-- Toolbar приёмника — контролы-заглушки под графиками -->
-            <div class="ml-rx-bar">
-                <span class="ml-rx-bar__item ml-rx-bar__item--freq">
-                    <input class="ml-rx-bar__freq-input" id="manual-rx-freq" type="text" value="435,641,694" disabled>
-                    <span class="ml-rx-bar__unit">Hz</span>
-                </span>
-                <span class="ml-rx-bar__sep"></span>
-                <span class="ml-rx-bar__item">
-                    <label class="ml-rx-bar__label">Span</label>
-                    <select class="ml-rx-bar__select" id="manual-rx-span" disabled>
-                        <option>192 kHz</option>
-                        <option>48 kHz</option>
-                        <option>24 kHz</option>
-                    </select>
-                </span>
-                <span class="ml-rx-bar__item">
-                    <label class="ml-rx-bar__label">Gain</label>
-                    <input class="ml-rx-bar__input" id="manual-rx-gain" type="text" value="32" disabled>
-                    <span class="ml-rx-bar__unit">dB</span>
-                </span>
-                <span class="ml-rx-bar__sep"></span>
-                <span class="ml-rx-bar__item">
-                    <label class="ml-rx-bar__label">Doppler</label>
-                    <select class="ml-rx-bar__select" id="manual-rx-doppler-mode" disabled>
-                        <option>Auto</option>
-                        <option>Fixed</option>
-                    </select>
-                    <input class="ml-rx-bar__input" id="manual-rx-doppler-val" type="text" value="+1 315" disabled>
-                    <span class="ml-rx-bar__unit">Hz</span>
-                    <input class="ml-rx-bar__range" id="manual-rx-doppler-slider" type="range" min="-25000" max="25000" value="1315" disabled>
-                </span>
-                <span class="ml-rx-bar__sep"></span>
-                <span class="ml-rx-bar__item">
-                    <label class="ml-rx-bar__label">Демод.</label>
-                    <select class="ml-rx-bar__select" id="manual-rx-pipeline" disabled>
-                        <option>FSK 9600</option>
-                        <option>FSK 1200</option>
-                        <option>AFSK 1200</option>
-                        <option>BPSK 1k2</option>
-                    </select>
-                </span>
-                <span class="ml-rx-bar__spacer"></span>
-                <button class="ml-rx-bar__btn" id="manual-rx-apply" disabled>Установить</button>
+        </section>
+
+        <!-- Управление приёмником — стиль секций как в app-header -->
+        <div class="ml-rx-bar" id="manual-rx-bar">
+            <div class="ml-rx-bar__section">
+                <label class="ml-rx-bar__label" for="manual-rx-freq">Частота</label>
+                <input class="ml-rx-bar__spin ml-rx-bar__spin--freq" id="manual-rx-freq" type="number" step="0.001" value="435.641694">
+                <select class="ml-rx-bar__unit-sel" id="manual-rx-freq-unit" aria-label="Единица частоты">
+                    <option value="hz">Гц</option>
+                    <option value="khz">кГц</option>
+                    <option value="mhz" selected>МГц</option>
+                </select>
+            </div>
+
+            <div class="ml-rx-bar__section">
+                <label class="ml-rx-bar__label" for="manual-rx-span">Полоса</label>
+                <select class="ml-rx-bar__sel" id="manual-rx-span">
+                    <option>2.4 МГц</option>
+                    <option selected>1.024 МГц</option>
+                    <option>256 кГц</option>
+                </select>
+            </div>
+
+            <div class="ml-rx-bar__section ml-rx-bar__section--gain">
+                <label class="ml-rx-bar__label" for="manual-rx-gain">Усиление</label>
+                <input class="ml-rx-bar__spin" id="manual-rx-gain" type="number" min="0" max="49.6" step="0.1" value="32">
+                <span class="ml-rx-bar__unit">дБ</span>
+                <button type="button" class="ml-rx-bar__pill-toggle" id="manual-rx-agc" aria-pressed="false">АРУ</button>
+            </div>
+
+            <div class="ml-rx-bar__section ml-rx-bar__section--doppler">
+                <label class="ml-rx-bar__label" for="manual-rx-doppler-mode">Доплер</label>
+                <select class="ml-rx-bar__unit-sel" id="manual-rx-doppler-mode">
+                    <option>Авто</option>
+                    <option>Фикс.</option>
+                </select>
+                <input class="ml-rx-bar__spin" id="manual-rx-doppler-val" type="number" step="1" value="1315">
+                <span class="ml-rx-bar__unit">Гц</span>
+            </div>
+
+            <div class="ml-rx-bar__section ml-rx-bar__section--demod">
+                <label class="ml-rx-bar__label" for="manual-rx-pipeline">Демод.</label>
+                <select class="ml-rx-bar__sel" id="manual-rx-pipeline">
+                    <option>FSK 9600 (G3RUH)</option>
+                    <option>FSK 4800</option>
+                    <option>FSK 1200</option>
+                    <option>GMSK 9600</option>
+                    <option>AFSK 1200 (AX.25)</option>
+                    <option>BPSK 1k2</option>
+                    <option>BPSK 9k6</option>
+                    <option>QPSK (CCSDS)</option>
+                    <option>CW</option>
+                    <option>FM</option>
+                    <option>OOK</option>
+                </select>
+                <button type="button" class="ml-rx-bar__pill-toggle" id="manual-rx-panorama" aria-pressed="false">Панорама</button>
+            </div>
+
+            <div class="ml-rx-bar__section ml-rx-bar__section--apply">
+                <button type="button" class="ml-rx-bar__apply" id="manual-rx-apply">Установить</button>
             </div>
         </div>
     </div>
 
-    <!-- Блок 2: Eye/Constellation | Демодулятор | VFO Manager -->
-    <div class="ml-block ml-block--demod">
-        <div class="ml-eye ml-stub">
-            <div class="ml-stub__title">Eye / Constellation</div>
-            <div class="ml-stub__hint">Диаграмма качества демодуляции активного VFO</div>
-        </div>
-        <div class="ml-demod ml-stub">
-            <div class="ml-stub__title">Демодулятор</div>
-            <div class="ml-stub__hint">Lock · SNR · BER · RSSI · AFC · Скорость · Frames · CRC</div>
-        </div>
-        <div class="ml-vfo ml-stub">
-            <div class="ml-stub__title">VFO Manager</div>
-            <div class="ml-stub__hint">Параллельные декодеры по offset от центра SDR</div>
-        </div>
+    <!-- Уровень 3: Eye/Constellation | Демодулятор (ужатый) | Профиль сеанса (doppler+elevation) -->
+    <div class="ml-block ml-block--decode">
+        <section class="ml-panel ml-eye" id="manual-eye-panel">
+            <div class="ml-panel__body ml-eye__canvas-wrap">
+                <div class="ml-eye__overlay" aria-label="Переключатель диаграммы">
+                    <div class="ml-eye__tabs" id="manual-eye-tabs" role="tablist"></div>
+                    <button type="button" class="ml-eye__auto" id="manual-eye-auto" title="Следует за полем «Демод.» в панели приёмника">auto</button>
+                </div>
+                <canvas id="manual-eye-canvas" class="ml-canvas" role="img" aria-label="Диаграмма качества демодуляции"></canvas>
+            </div>
+        </section>
+
+        <section class="ml-panel ml-demod" id="manual-demod-panel">
+            <header class="ml-panel__head">
+                <span class="ml-panel__title">Демодулятор</span>
+                <div class="ml-demod__channel" id="manual-current-channel">
+                    <span class="ml-demod__channel-led ml-demod__channel-led--lock" id="manual-ch-lock" title="Lock">●</span>
+                    <span class="ml-demod__channel-name" id="manual-ch-name">ISS-FSK</span>
+                    <span class="ml-demod__channel-freq" id="manual-ch-freq">437.800</span>
+                    <span class="ml-demod__channel-unit">MHz</span>
+                </div>
+            </header>
+            <div class="ml-panel__body ml-demod__grid" id="manual-demod-metrics">
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Lock</span>
+                    <span class="ml-demod__value ml-demod__value--ok" id="manual-dm-lock" title="Демодулятор удерживает символьную синхронизацию">●</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">SNR</span>
+                    <span class="ml-demod__value" id="manual-dm-snr" title="Signal-to-Noise Ratio в полосе IF">12.4 dB</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Squelch</span>
+                    <span class="ml-demod__value ml-demod__value--ok" id="manual-dm-squelch" title="Состояние шумоподавителя (порог в dB)">Open / −85 dB</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">C/N0</span>
+                    <span class="ml-demod__value" id="manual-dm-cn0" title="Carrier-to-Noise density, dB-Hz">52.3 dB·Hz</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Pipeline</span>
+                    <span class="ml-demod__value" id="manual-dm-pipeline" title="Активный демодулятор / декодер">FSK 9600</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Es/N0</span>
+                    <span class="ml-demod__value" id="manual-dm-esn0" title="Энергия на символ / шум, дБ">8.4 dB</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Скорость</span>
+                    <span class="ml-demod__value" id="manual-dm-rate" title="Символьная скорость">9.6 ksym/s</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">BER</span>
+                    <span class="ml-demod__value" id="manual-dm-ber" title="Bit Error Rate (после FEC)">3.2e-4</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">RSSI</span>
+                    <span class="ml-demod__value" id="manual-dm-rssi" title="Уровень сигнала на входе приёмника">−42 dBm</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">AFC</span>
+                    <span class="ml-demod__value" id="manual-dm-afc" title="Текущая коррекция AFC (Hz)">−18 Hz</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Freq off</span>
+                    <span class="ml-demod__value" id="manual-dm-foff" title="Смещение от номинала до AFC-коррекции">+1.2 kHz</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">FEC corr</span>
+                    <span class="ml-demod__value" id="manual-dm-fec" title="Байт, исправленных FEC за окно">12 B</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Frames</span>
+                    <span class="ml-demod__value" id="manual-dm-frames" title="Принято кадров за сеанс">128</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Sync</span>
+                    <span class="ml-demod__value" id="manual-dm-sync" title="Срабатываний синхро-последовательности">131</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">CRC</span>
+                    <span class="ml-demod__value ml-demod__value--ok" id="manual-dm-crc" title="Статус последней проверки CRC">OK</span>
+                </div>
+                <div class="ml-demod__metric">
+                    <span class="ml-demod__label">Last frame</span>
+                    <span class="ml-demod__value" id="manual-dm-last" title="Время с последнего валидного кадра">0.8 s</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="ml-panel ml-profile" id="manual-pass-profile">
+            <div class="ml-panel__body ml-profile__body">
+                <canvas id="manual-pass-profile-canvas" class="ml-canvas" role="img" aria-label="Профиль пролёта: Elevation + Doppler по времени"></canvas>
+            </div>
+        </section>
     </div>
 
-    <!-- Блок 3: Телеметрия (таблица + VFO-табы) -->
-    <div class="ml-block ml-block--tmi ml-stub">
-        <div class="ml-stub__title">Телеметрия</div>
-        <div class="ml-stub__hint">Таблица принятых пакетов с VFO-табами для переключения между декодерами</div>
-    </div>
-
-    <!-- Блок 4 (низ): Az компас | Pass profile + Rotator panel | El угломер -->
-    <div class="ml-block ml-block--mid">
-        <div class="ml-az">
-            <div class="ml-indicator-canvas">
-                <canvas id="manual-azimuth-view" width="200" height="200" role="img" aria-label="Индикатор азимута КА и антенны"></canvas>
+    <!-- Уровень 4: Телеметрия (широкая, 1 пакет = 1 строка) -->
+    <div class="ml-block ml-block--tmi">
+        <section class="ml-panel ml-tmi" id="manual-tmi-panel">
+            <header class="ml-panel__head">
+                <span class="ml-panel__title">Телеметрия</span>
+            </header>
+            <div class="ml-panel__body ml-tmi__scroll" id="manual-tmi-scroll">
+                <table class="ml-tmi__table">
+                    <thead>
+                        <tr>
+                            <th class="ml-tmi__th">Канал</th>
+                            <th class="ml-tmi__th">Время</th>
+                            <th class="ml-tmi__th">Frame#</th>
+                            <th class="ml-tmi__th">CRC</th>
+                            <th class="ml-tmi__th">Параметры</th>
+                        </tr>
+                    </thead>
+                    <tbody id="manual-tmi-tbody"></tbody>
+                </table>
             </div>
-            <div class="ml-indicator-info">
-                <div class="ml-info-row">
-                    <span class="ml-info-label">Аз. ант.:</span>
-                    <span class="ml-info-value" id="manual-az-info-ant">---°</span>
-                </div>
-                <div class="ml-info-row">
-                    <span class="ml-info-label">Аз. КА:</span>
-                    <span class="ml-info-value" id="manual-az-info-sat">---°</span>
-                </div>
-            </div>
-        </div>
-        <div class="ml-side">
-            <div class="ml-profile ml-stub" id="manual-pass-profile">
-                <div class="ml-stub__title">Pass profile</div>
-                <div class="ml-stub__hint">Elevation + Doppler по времени AOS → TCA → LOS · маркер NOW</div>
-            </div>
-            <div class="ml-rotator ml-stub" id="manual-rotator-panel">
-                <div class="ml-stub__title">Rotator panel</div>
-                <div class="ml-stub__hint">TRACK · STOP · Mode · текущие Az/El · скорость · ручной goto</div>
-            </div>
-        </div>
-        <div class="ml-el">
-            <div class="ml-indicator-canvas">
-                <canvas id="manual-elevation-view" width="200" height="200" role="img" aria-label="Индикатор угла места КА и антенны"></canvas>
-            </div>
-            <div class="ml-indicator-info">
-                <div class="ml-info-row">
-                    <span class="ml-info-label">Уг. ант.:</span>
-                    <span class="ml-info-value" id="manual-el-info-ant">---°</span>
-                </div>
-                <div class="ml-info-row">
-                    <span class="ml-info-label">Уг. КА:</span>
-                    <span class="ml-info-value" id="manual-el-info-sat">---°</span>
-                </div>
-            </div>
-        </div>
+        </section>
     </div>
 </section>
 
@@ -450,8 +568,8 @@
      Логика — auto-link.js (подключается отдельно). -->
 <section class="bottom-panel" id="bottom-panel">
     <div class="bottom-panel__side">
-        <span class="bottom-panel__mode" id="auto-link-tx-title" aria-label="Передатчики"><span>П</span><span>е</span><span>р</span><span>е</span><span>д</span><span>а</span><span>т</span><span>ч</span><span>и</span><span>к</span><span>и</span></span>
         <button class="bottom-panel__layout-btn" id="auto-link-layout-toggle" title="Переключить горизонт./вертик. раскладку">⇄</button>
+        <span class="bottom-panel__mode" id="auto-link-tx-title" aria-label="Передатчики"><span>П</span><span>е</span><span>р</span><span>е</span><span>д</span><span>а</span><span>т</span><span>ч</span><span>и</span><span>к</span><span>и</span></span>
         <button class="panel-collapse-btn" id="bottom-panel-toggle" title="Свернуть">▼</button>
     </div>
     <div class="bottom-panel__body" id="bottom-panel-body">
@@ -468,7 +586,11 @@
                     </span>
                     <span class="auto-link__th-col">Частота</span>
                     <span class="auto-link__th-col">Модуляция</span>
-                    <span class="auto-link__th-col">Детектор пакетов</span>
+                    <span class="auto-link__th-col">Сигнал</span>
+                    <span class="auto-link__th-col">Декод. / Битые</span>
+                    <span class="auto-link__th-col">SNR</span>
+                    <span class="auto-link__th-col">Доплер</span>
+                    <span class="auto-link__th-col">Lock</span>
                     <span class="auto-link__th-col">Водопад</span>
                 </div>
                 <div class="auto-link__tx-list" id="auto-link-tx-list" role="list">

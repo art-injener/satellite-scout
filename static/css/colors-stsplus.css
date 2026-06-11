@@ -188,6 +188,19 @@
     --waterfall-margin-bg: #2a3440;
     --waterfall-cold-bg:   #242c38;
 
+    /* Панорама / профиль сеанса / Eye (canvas Ручного режима) */
+    --panorama-chip-label-text:       #eefcff;
+    --panorama-chip-label-text-muted: #c8d4e0;
+    --panorama-chip-fill:             rgba(6, 10, 18, 0.88);
+    --panorama-tx-1:                  #00ffc8;
+    --panorama-tx-2:                  #d070ff;
+    --panorama-tx-3:                  #ffaa22;
+    --panorama-tx-muted:              #8fa8bc;
+    --pass-profile-el:                #5bcefa;
+    --pass-profile-doppler:           #ffb347;
+    --pass-profile-now:               #00d4aa;
+    --decode-instrument-bg:           var(--spectrum-plot-bg);
+
     --panel-header-title:     #00d4d4;
     --sky-info-value:         #00ff00;
     --bp-info-label:          var(--panel-header-title);
