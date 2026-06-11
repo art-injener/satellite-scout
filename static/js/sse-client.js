@@ -175,11 +175,6 @@ class SSEClient {
             this._handleEvent('satellite_group_update', e);
         });
 
-        // Очередной цикл сканирования передатчиков (Авто-режим).
-        this._eventSource.addEventListener('tx_cycle', (e) => {
-            this._handleEvent('tx_cycle', e);
-        });
-
         // Per-client восстановление наблюдения при подключении.
         this._eventSource.addEventListener('client_state_restore', (e) => {
             this._handleEvent('client_state_restore', e);
@@ -194,6 +189,18 @@ class SSEClient {
                 window.applySatWatchTheme(payload.theme, true);
             } catch (err) {
                 console.error('[SSEClient] theme_changed parse error:', err);
+            }
+        });
+
+        // Mock/live циклы TX для нижней панели Авто (auto-link.js).
+        this._eventSource.addEventListener('tx_cycle', (e) => {
+            try {
+                const payload = JSON.parse(e.data);
+                document.dispatchEvent(new CustomEvent('satellite-scout-tx-cycle', {
+                    detail: payload,
+                }));
+            } catch (err) {
+                console.error('[SSEClient] tx_cycle parse error:', err);
             }
         });
 
@@ -260,9 +267,6 @@ class SSEClient {
                 break;
             case 'satellite_group_update':
                 this._stateManager.setSatelliteGroup(data);
-                break;
-            case 'tx_cycle':
-                this._stateManager.updateTxCycle(data);
                 break;
             case 'client_state_restore':
                 this._handleClientStateRestore(data);

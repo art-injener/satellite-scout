@@ -2,17 +2,11 @@
  * Auto-link — связка нижней панели Авто-режима.
  *
  * Единый список передатчиков всех КА группы (UI-заголовок «Передатчики»):
- * на каждой строке — частота, модуляция, лента «визитов сканера» (квадратики
- * с цифрой пакетов и цветом по уровню сигнала), Σ за пролёт и последний dB.
- * Название панели — столбиком в .bottom-panel__side («Передатчики»).
+ * на каждой строке — частота, модуляция, водопад, доплер.
  *
  * Источники данных:
  *  - Список передатчиков — REST `GET /api/satnogs/transmitters/{norad}`.
- *  - Поток циклов — SSE-событие `tx_cycle` через StateEventType.TX_CYCLE
- *    (рассылается TxCycleMock, см. ADR-004 §3).
- *
- * Один tx_cycle = один «визит сканера» на этом TX. Без оси «секунды»: при
- * переменном dwell time секунды лгут, поэтому ось X — это эпизоды визитов.
+ *  - Состав группы — SSE-событие `satellite_group_update`.
  */
 
 (function () {
@@ -92,6 +86,7 @@
         const modulation = baud ? `${mode} ${baud}`.trim() : mode;
         return {
             id: `tx-${norad}-${uuid || Math.random().toString(36).slice(2, 8)}`,
+            uuid: uuid || '',
             satNoradId: norad,
             satLabel: sat.sat_name || `NORAD ${norad}`,
             freqHz: dl,
@@ -132,6 +127,117 @@
         const v = Math.max(0, Math.min(1, Number(power) || 0));
         if (v <= 0) { return null; }
         return Math.round(-100 + v * 70);
+    }
+
+    /** Скорость света (м/с) — для расчёта доплера. */
+    const C_LIGHT = 299792458;
+
+    /**
+     * Доплеровский сдвиг частоты приёма (Гц) для нисходящей линии.
+     * Положительное значение range_rate (м/с) = спутник удаляется → df < 0 (ниже несущей).
+     */
+    function dopplerHz(freqHz, rangeRateMps) {
+        const f = Number(freqHz) || 0;
+        const rr = Number(rangeRateMps) || 0;
+        if (f <= 0 || rr === 0) { return 0; }
+        return -f * rr / C_LIGHT;
+    }
+
+    /** Формат доплера: "+1.32 кГц" / "−0.85 кГц"; знак Unicode «−». */
+    function formatDopplerKhz(hz) {
+        const k = (Number(hz) || 0) / 1000;
+        if (!Number.isFinite(k) || Math.abs(k) < 0.005) {
+            return '0.00 кГц';
+        }
+        const abs = Math.abs(k).toFixed(2);
+        return (k > 0 ? '+' : '\u2212') + abs + ' кГц';
+    }
+
+    /** Цветовой класс RSSI-бара по нормированной мощности (0..1). */
+    function rssiBarColor(power) {
+        const p = Math.max(0, Math.min(1, Number(power) || 0));
+        if (p < 0.20) { return 'var(--accent-danger, #ff5722)'; }
+        if (p < 0.40) { return 'var(--accent-warning, #ffb300)'; }
+        if (p < 0.60) { return '#cddc39'; }
+        return 'var(--accent-success, #4caf50)';
+    }
+
+    /** Уровень SNR: low / mid / high — управляет цветом текста. */
+    function snrLevel(snrDb) {
+        const v = Number(snrDb) || 0;
+        if (v <= 0) { return 'silent'; }
+        if (v < 8) { return 'low'; }
+        if (v < 14) { return 'mid'; }
+        return 'high';
+    }
+
+    /** CSS-класс LED для Lock (горизонтальная раскладка). */
+    function lockLedClass(lock) {
+        const v = String(lock || '').toUpperCase();
+        if (v === 'OK') { return 'auto-link__tx-lock__led--ok'; }
+        if (v === 'SEARCH') { return 'auto-link__tx-lock__led--search'; }
+        return 'auto-link__tx-lock__led--lost';
+    }
+
+    /** CSS-класс LED для Lock (вертикальная раскладка — мельче, отдельный неймспейс). */
+    function vLockLedClass(lock) {
+        const v = String(lock || '').toUpperCase();
+        if (v === 'OK') { return 'auto-link__v-rssi__led--ok'; }
+        if (v === 'SEARCH') { return 'auto-link__v-rssi__led--search'; }
+        return 'auto-link__v-rssi__led--lost';
+    }
+
+    /**
+     * Решение подсветки строки/группы TX для связки План ↔ auto-link.
+     * @returns {{ group: boolean, tx: boolean }}
+     */
+    function resolveLinkHighlight(hNorad, hTxRowId, selectedNorad, rowNorad, rowTxId) {
+        const norad = Number(rowNorad) || 0;
+        const txId = rowTxId || '';
+        if (hTxRowId) {
+            return { group: false, tx: txId === hTxRowId };
+        }
+        if (hNorad && norad === hNorad) {
+            return { group: true, tx: true };
+        }
+        if (!hNorad && !hTxRowId && selectedNorad && norad === selectedNorad) {
+            return { group: true, tx: true };
+        }
+        return { group: false, tx: false };
+    }
+
+    /** Индекс обновлений tx_cycle по UUID передатчика. */
+    function indexTxCycleUpdates(payload) {
+        const map = new Map();
+        if (!payload || !Array.isArray(payload.satellites)) { return map; }
+        for (const sat of payload.satellites) {
+            if (!sat || !Array.isArray(sat.transmitters)) { continue; }
+            for (const tx of sat.transmitters) {
+                if (tx && tx.uuid) {
+                    map.set(tx.uuid, tx);
+                }
+            }
+        }
+        return map;
+    }
+
+    /** Применить снимок tx_cycle к объекту строки передатчика. */
+    function applyTxCycleUpdate(row, upd) {
+        if (!row || !upd) { return; }
+        row.power = Number(upd.power) || 0;
+        row.lock = upd.lock || 'LOST';
+        row.snrDb = Number(upd.snr_db) || 0;
+        row.totalPackets = Number(upd.total_packets) || 0;
+        row.totalFailed = Number(upd.total_failed) || 0;
+        row.packetsFailed = Number(upd.packets_failed) || 0;
+        row.history = Array.isArray(upd.history) ? upd.history.slice() : [];
+    }
+
+    const LINK_HOVER_EVENT = 'satellite-scout-link-hover';
+    const TX_CYCLE_EVENT = 'satellite-scout-tx-cycle';
+
+    function dispatchLinkHover(detail) {
+        document.dispatchEvent(new CustomEvent(LINK_HOVER_EVENT, { detail: detail || {} }));
     }
 
     /** Заранее создать фиксированный ряд пустых квадратов в ленте. */
@@ -395,18 +501,30 @@
             this._lastCompFP = '';
             /** Сохранённые строки TX (id → объект с wfCell) для инкрементального DOM. */
             this._rowRegistry = new Map();
+            /** Hover-связка с Планом сеансов (временная, без смены selected). */
+            this._linkHoverNorad = null;
+            this._linkHoverTxRowId = null;
+            /** Пауза анимации водопадов в Ручном режиме. */
+            this._paused = false;
 
             this._onGroupUpdateBound = (data) => this._onGroupUpdate(data);
             this._sm.subscribe(window.StateEventType.SATELLITE_GROUP_UPDATE, this._onGroupUpdateBound);
-
-            this._onTxCycleBound = (data) => this._onTxCycle(data);
-            this._sm.subscribe(window.StateEventType.TX_CYCLE, this._onTxCycleBound);
 
             this._onSelectedChangeBound = (state) => this._onSelectedChange(state);
             this._sm.subscribe(window.StateEventType.SELECTED_CHANGE, this._onSelectedChangeBound);
 
             this._onClickBound = (e) => this._onClick(e);
             this._listEl.addEventListener('click', this._onClickBound);
+
+            this._onListPointerBound = (e) => this._onListPointer(e);
+            this._listEl.addEventListener('mouseover', this._onListPointerBound);
+            this._listEl.addEventListener('mouseout', this._onListPointerBound);
+
+            this._onLinkHoverBound = (ev) => this._onLinkHover(ev);
+            document.addEventListener(LINK_HOVER_EVENT, this._onLinkHoverBound);
+
+            this._onTxCycleBound = (ev) => this._onTxCycle(ev);
+            document.addEventListener(TX_CYCLE_EVENT, this._onTxCycleBound);
 
             // Если группа уже была получена до инициализации — отрисовать сразу.
             const existing = this._sm.getSatelliteGroup && this._sm.getSatelliteGroup();
@@ -427,6 +545,7 @@
             let last = 0;
             function frame(ts) {
                 self._wfRaf = requestAnimationFrame(frame);
+                if (self._paused) { return; }
                 if (ts - last < intervalMs) { return; }
                 last = ts;
                 for (const row of self._rows) {
@@ -455,6 +574,16 @@
 
         getLayout() { return this._layout; }
 
+        /** Приостановить анимацию водопадов (Ручной режим). */
+        pause() {
+            this._paused = true;
+        }
+
+        /** Возобновить анимацию водопадов (Авто). */
+        resume() {
+            this._paused = false;
+        }
+
         /** Освободить подписки. */
         destroy() {
             if (this._wfRaf) {
@@ -470,19 +599,28 @@
                 if (this._onGroupUpdateBound) {
                     sm.unsubscribe(window.StateEventType.SATELLITE_GROUP_UPDATE, this._onGroupUpdateBound);
                 }
-                if (this._onTxCycleBound) {
-                    sm.unsubscribe(window.StateEventType.TX_CYCLE, this._onTxCycleBound);
-                }
                 if (this._onSelectedChangeBound) {
                     sm.unsubscribe(window.StateEventType.SELECTED_CHANGE, this._onSelectedChangeBound);
                 }
             }
             this._onGroupUpdateBound = null;
-            this._onTxCycleBound = null;
             this._onSelectedChangeBound = null;
             if (this._onClickBound) {
                 this._listEl.removeEventListener('click', this._onClickBound);
                 this._onClickBound = null;
+            }
+            if (this._onListPointerBound) {
+                this._listEl.removeEventListener('mouseover', this._onListPointerBound);
+                this._listEl.removeEventListener('mouseout', this._onListPointerBound);
+                this._onListPointerBound = null;
+            }
+            if (this._onLinkHoverBound) {
+                document.removeEventListener(LINK_HOVER_EVENT, this._onLinkHoverBound);
+                this._onLinkHoverBound = null;
+            }
+            if (this._onTxCycleBound) {
+                document.removeEventListener(TX_CYCLE_EVENT, this._onTxCycleBound);
+                this._onTxCycleBound = null;
             }
             this._txCache.clear();
             this._rowRegistry.clear();
@@ -935,7 +1073,7 @@
             const selectedId = this._sm.getSelectedSatelliteId
                 ? this._sm.getSelectedSatelliteId()
                 : null;
-            this._applyHighlight(selectedId);
+            this._refreshHighlight(selectedId);
         }
 
         // ──────── Вертикальная раскладка (столбцы = TX) ────────
@@ -1005,7 +1143,7 @@
             const selectedId = this._sm.getSelectedSatelliteId
                 ? this._sm.getSelectedSatelliteId()
                 : null;
-            this._applyHighlight(selectedId);
+            this._refreshHighlight(selectedId);
         }
 
         /** Столбец одного передатчика (вертикальный режим). */
@@ -1035,21 +1173,41 @@
             const footer = document.createElement('div');
             footer.className = 'auto-link__v-footer';
 
-            const elLine = document.createElement('div');
-            elLine.className = 'auto-link__v-el';
-            elLine.textContent = 'El —';
+            // Строка 1: LED статуса Lock + RSSI в dBm.
+            const rssiLine = document.createElement('div');
+            rssiLine.className = 'auto-link__v-rssi auto-link__v-rssi--silent';
+            const rssiLed = document.createElement('span');
+            rssiLed.className = 'auto-link__v-rssi__led auto-link__v-rssi__led--lost';
+            const rssiVal = document.createElement('span');
+            rssiVal.className = 'auto-link__v-rssi__val';
+            rssiVal.textContent = '—';
+            rssiLine.appendChild(rssiLed);
+            rssiLine.appendChild(rssiVal);
 
+            // Строка 2: SNR в дБ.
+            const snrLine = document.createElement('div');
+            snrLine.className = 'auto-link__v-snr auto-link__v-snr--silent';
+            snrLine.textContent = 'SNR —';
+
+            // Строка 3: декодированные / битые пакеты за пролёт.
             const pktLine = document.createElement('div');
             pktLine.className = 'auto-link__v-pkt';
-            pktLine.textContent = '—';
+            const pktOk = document.createElement('span');
+            pktOk.className = 'auto-link__v-pkt__ok';
+            pktOk.textContent = '0';
+            const pktSep = document.createElement('span');
+            pktSep.className = 'auto-link__v-pkt__sep';
+            pktSep.textContent = '/';
+            const pktErr = document.createElement('span');
+            pktErr.className = 'auto-link__v-pkt__err';
+            pktErr.textContent = '0';
+            pktLine.appendChild(pktOk);
+            pktLine.appendChild(pktSep);
+            pktLine.appendChild(pktErr);
 
-            const untilLine = document.createElement('div');
-            untilLine.className = 'auto-link__v-until';
-            untilLine.textContent = '—';
-
-            footer.appendChild(elLine);
+            footer.appendChild(rssiLine);
+            footer.appendChild(snrLine);
             footer.appendChild(pktLine);
-            footer.appendChild(untilLine);
             col.appendChild(footer);
 
             tx.el = col;
@@ -1059,71 +1217,76 @@
                 vertical: true,
                 bandFrac: modulationBandFrac(tx.mode),
             });
-            tx.labelEl = { el: elLine, pkt: pktLine, until: untilLine };
+            tx.labelEl = {
+                rssi: rssiLine, rssiLed, rssiVal,
+                snr: snrLine,
+                pkt: pktLine, pktOk, pktErr,
+            };
+            // AOS/LOS оставлены для tooltip и совместимости (см. _softGroupUpdate).
             tx.satAos = sat && sat.aos ? Number(sat.aos) : 0;
             tx.satLos = sat && sat.los ? Number(sat.los) : 0;
-            tx._prevEl = null;
-            tx.totalEl = null;
-            tx.dbEl = null;
             tx.history = [];
             tx.totalPackets = 0;
+            tx.totalFailed = 0;
+            tx.power = 0;
+            tx.snrDb = 0;
+            tx.lock = 'LOST';
 
             return col;
         }
 
-        /** Обновить подписи футера одной вертикальной колонки. */
+        /** Обновить подписи футера одной вертикальной колонки:
+         *  RSSI+Lock LED, SNR, декодированные/битые. */
         _updateColLabels(row) {
-            if (!row.labelEl) { return; }
+            const lbl = row.labelEl;
+            if (!lbl) { return; }
 
-            const pkt = row.totalPackets > 0 ? `${row.totalPackets} пак.` : '—';
-            if (row.labelEl.pkt.textContent !== pkt) {
-                row.labelEl.pkt.textContent = pkt;
+            // ── RSSI + Lock LED ──
+            const dbm = powerToDbm(row.power);
+            const lock = row.lock || 'LOST';
+            lbl.rssiLed.className = `auto-link__v-rssi__led ${vLockLedClass(lock)}`;
+            if (dbm == null) {
+                lbl.rssi.className = 'auto-link__v-rssi auto-link__v-rssi--silent';
+                lbl.rssiVal.textContent = '—';
+            } else {
+                lbl.rssi.className = 'auto-link__v-rssi';
+                lbl.rssiVal.textContent = `${dbm} dBm`;
             }
-            row.labelEl.pkt.classList.toggle('auto-link__v-pkt--active', row.totalPackets > 0);
+            lbl.rssi.title = `Lock: ${lock}`;
 
-            const st = this._sm.getState && this._sm.getState(row.satNoradId);
-            const elVal = st && st.position ? st.position.el : null;
-            const elFmt = fmtElevationLabel(elVal, row._prevEl);
-            if (elVal != null && !Number.isNaN(elVal)) {
-                row._prevEl = elVal;
-            }
-            if (row.labelEl.el.textContent !== elFmt.text) {
-                row.labelEl.el.textContent = elFmt.text;
-            }
-            row.labelEl.el.className = 'auto-link__v-el';
-            if (elFmt.level === 'high') {
-                row.labelEl.el.classList.add('auto-link__v-el--high');
-            } else if (elFmt.level === 'mid') {
-                row.labelEl.el.classList.add('auto-link__v-el--mid');
-            } else if (elFmt.level === 'low') {
-                row.labelEl.el.classList.add('auto-link__v-el--low');
-            }
+            // ── SNR ──
+            const lvl = snrLevel(row.snrDb);
+            lbl.snr.className = `auto-link__v-snr auto-link__v-snr--${lvl}`;
+            lbl.snr.textContent = lvl === 'silent'
+                ? 'SNR —'
+                : `SNR ${row.snrDb.toFixed(1)} dB`;
 
-            const until = fmtPassUntilLabel(row.satAos, row.satLos);
-            if (row.labelEl.until.textContent !== until.text) {
-                row.labelEl.until.textContent = until.text;
-            }
-            row.labelEl.until.className = 'auto-link__v-until';
-            if (until.kind === 'los') {
-                row.labelEl.until.classList.add('auto-link__v-until--los');
-                const left = row.satLos - Date.now();
-                if (left > 0 && left < 120000) {
-                    row.labelEl.until.classList.add('auto-link__v-until--urgent');
-                }
-            } else if (until.kind === 'aos') {
-                row.labelEl.until.classList.add('auto-link__v-until--aos');
-            }
+            // ── Декодированные / битые ──
+            const ok = row.totalPackets || 0;
+            const err = row.totalFailed || 0;
+            lbl.pktOk.textContent = String(ok);
+            lbl.pktErr.textContent = String(err);
+            lbl.pktErr.className = err > 0
+                ? 'auto-link__v-pkt__err auto-link__v-pkt__err--bad'
+                : 'auto-link__v-pkt__err';
         }
 
-        /** Обновить подписи всех вертикальных колонок. */
+        /** Обновить динамические подписи всех строк: для вертикального режима —
+         *  El/пакеты/until, для горизонтального — доплер (range_rate из state). */
         _updateAllColLabels() {
-            if (this._layout !== 'v') { return; }
+            if (this._layout === 'v') {
+                for (const row of this._rows) {
+                    this._updateColLabels(row);
+                }
+                return;
+            }
             for (const row of this._rows) {
-                this._updateColLabels(row);
+                this._renderRowDoppler(row);
             }
         }
 
-        /** Построить DOM-строку передатчика и привязать буфер истории. */
+        /** Построить DOM-строку передатчика. Колонки: частота | модуляция |
+         *  RSSI | декодированные/битые | SNR | Доплер | Lock | Водопад. */
         _buildTxRow(tx, gridRow) {
             const row = document.createElement('div');
             row.className = 'auto-link__tx';
@@ -1146,27 +1309,78 @@
             mode.textContent = tx.mode || '';
             row.appendChild(mode);
 
-            const strip = document.createElement('div');
-            strip.className = 'auto-link__strip';
-            row.appendChild(strip);
+            // ── Сигнал (RSSI + узкая полоса) ─────────────────────────────
+            const rssi = document.createElement('div');
+            rssi.className = 'auto-link__tx-rssi auto-link__tx-rssi--silent';
+            const rssiBar = document.createElement('span');
+            rssiBar.className = 'auto-link__tx-rssi__bar';
+            const rssiVal = document.createElement('span');
+            rssiVal.className = 'auto-link__tx-rssi__val';
+            rssiVal.textContent = '—';
+            rssi.appendChild(rssiBar);
+            rssi.appendChild(rssiVal);
+            row.appendChild(rssi);
+
+            // ── Декодированные / битые ───────────────────────────────────
+            const pkt = document.createElement('div');
+            pkt.className = 'auto-link__tx-pkt';
+            const pktOk = document.createElement('span');
+            pktOk.className = 'auto-link__tx-pkt__ok';
+            pktOk.textContent = '0';
+            const pktSep = document.createElement('span');
+            pktSep.className = 'auto-link__tx-pkt__sep';
+            pktSep.textContent = '/';
+            const pktErr = document.createElement('span');
+            pktErr.className = 'auto-link__tx-pkt__err';
+            pktErr.textContent = '0';
+            pkt.appendChild(pktOk);
+            pkt.appendChild(pktSep);
+            pkt.appendChild(pktErr);
+            row.appendChild(pkt);
+
+            // ── SNR ──────────────────────────────────────────────────────
+            const snr = document.createElement('div');
+            snr.className = 'auto-link__tx-snr auto-link__tx-snr--silent';
+            snr.textContent = '—';
+            row.appendChild(snr);
+
+            // ── Доплер ───────────────────────────────────────────────────
+            const doppler = document.createElement('div');
+            doppler.className = 'auto-link__tx-doppler auto-link__tx-doppler--silent';
+            doppler.textContent = '—';
+            row.appendChild(doppler);
+
+            // ── Lock LED ─────────────────────────────────────────────────
+            const lock = document.createElement('div');
+            lock.className = 'auto-link__tx-lock';
+            const lockLed = document.createElement('span');
+            lockLed.className = 'auto-link__tx-lock__led auto-link__tx-lock__led--lost';
+            lock.appendChild(lockLed);
+            row.appendChild(lock);
 
             const wf = document.createElement('canvas');
             wf.className = 'auto-link__wf';
             row.appendChild(wf);
 
             tx.el = row;
-            tx.stripEl = strip;
+            tx.stripEl = null;
             tx.wfEl = wf;
             tx.wfCell = new WaterfallCell(wf, {
                 vertical: false,
                 bandFrac: modulationBandFrac(tx.mode),
             });
-            tx.totalEl = null;
-            tx.dbEl = null;
+            tx.cells = {
+                rssi, rssiBar, rssiVal,
+                pkt, pktOk, pktErr,
+                snr, doppler,
+                lock, lockLed,
+            };
             tx.history = [];
             tx.totalPackets = 0;
-
-            renderStrip(strip, tx.history, STRIP_CAPACITY);
+            tx.totalFailed = 0;
+            tx.snrDb = 0;
+            tx.lock = 'LOST';
+            tx.packetsFailed = 0;
 
             return row;
         }
@@ -1210,76 +1424,175 @@
 
         // ----- Поток tx_cycle -----
 
-        /**
-         * Принять очередной цикл сканирования: взять history[] и total_packets
-         * из бэкендового события, перерисовать ленту и обновить кумулятив/dB.
-         */
-        _onTxCycle(data) {
-            if (!this._rows.length) { return; }
-
-            const txDataByRowId = new Map();
-            const sats = data && Array.isArray(data.satellites) ? data.satellites : [];
-            for (const sat of sats) {
-                const norad = Number(sat && sat.norad_id) || 0;
-                if (!norad) { continue; }
-                const txs = Array.isArray(sat.transmitters) ? sat.transmitters : [];
-                for (const tx of txs) {
-                    if (!tx || !tx.uuid) { continue; }
-                    const rowId = `tx-${norad}-${tx.uuid}`;
-                    txDataByRowId.set(rowId, {
-                        packets: Math.max(0, Number(tx.packets) || 0),
-                        power: Math.max(0, Math.min(1, Number(tx.power) || 0)),
-                        totalPackets: Math.max(0, Number(tx.total_packets) || 0),
-                        history: Array.isArray(tx.history) ? tx.history : [],
-                    });
+        _onTxCycle(ev) {
+            const payload = ev && ev.detail ? ev.detail : null;
+            if (!payload) { return; }
+            const updates = indexTxCycleUpdates(payload);
+            if (updates.size === 0) { return; }
+            for (const row of this._rows) {
+                const uuid = row.uuid || '';
+                if (!uuid) { continue; }
+                const upd = updates.get(uuid);
+                if (!upd) { continue; }
+                applyTxCycleUpdate(row, upd);
+                if (row.wfCell) {
+                    row.wfCell.setPower(row.power);
+                }
+                if (this._layout === 'v') {
+                    this._updateColLabels(row);
+                } else {
+                    this._renderHorizontalMetrics(row);
                 }
             }
-
-            for (const row of this._rows) {
-                const txd = txDataByRowId.get(row.id) || {
-                    packets: 0, power: 0, totalPackets: 0, history: [],
-                };
-                row.history = txd.history;
-                row.totalPackets = txd.totalPackets;
-                this._renderRowCycle(row, txd);
-            }
-            this._updateAllColLabels();
         }
 
-        _renderRowCycle(row, cell) {
-            // Яркость полосы водопада задаётся последним замером мощности;
-            // саму текстуру непрерывно рисует анимационный цикл (_wfFrame).
-            if (row.wfCell) {
-                row.wfCell.setPower(cell ? cell.power : 0);
+        /** Обновить метрики одной горизонтальной строки TX из tx_cycle / state. */
+        _renderHorizontalMetrics(row) {
+            if (!row || !row.cells) { return; }
+            const c = row.cells;
+            const power = row.power || 0;
+            const lock = row.lock || 'LOST';
+            const lockActive = lock === 'OK' || lock === 'SEARCH';
+            const dbm = powerToDbm(power);
+
+            if (!lockActive || dbm == null) {
+                c.rssi.className = 'auto-link__tx-rssi auto-link__tx-rssi--silent';
+                c.rssiVal.textContent = '—';
+                c.rssiBar.style.setProperty('--auto-link-rssi-fill', '0%');
+            } else {
+                c.rssi.className = 'auto-link__tx-rssi';
+                c.rssiVal.textContent = `${dbm} dBm`;
+                const pct = Math.round(Math.max(0, Math.min(1, power)) * 100);
+                c.rssiBar.style.setProperty('--auto-link-rssi-fill', `${pct}%`);
+                c.rssiBar.style.setProperty('--auto-link-rssi-color', rssiBarColor(power));
             }
-            // Детектор пакетов остаётся только в горизонтальной раскладке.
-            if (this._layout !== 'v' && row.stripEl) {
-                renderStrip(row.stripEl, row.history, STRIP_CAPACITY);
+
+            const snrLvl = snrLevel(row.snrDb);
+            c.snr.className = `auto-link__tx-snr auto-link__tx-snr--${snrLvl}`;
+            c.snr.textContent = snrLvl === 'silent' ? '—' : `SNR ${row.snrDb.toFixed(1)} dB`;
+
+            c.pktOk.textContent = String(row.totalPackets || 0);
+            c.pktErr.textContent = String(row.totalFailed || 0);
+            c.pktErr.className = (row.totalFailed || 0) > 0
+                ? 'auto-link__tx-pkt__err auto-link__tx-pkt__err--bad'
+                : 'auto-link__tx-pkt__err';
+
+            c.lockLed.className = `auto-link__tx-lock__led ${lockLedClass(lock)}`;
+            c.lock.title = `Lock: ${lock}`;
+
+            this._renderRowDoppler(row);
+        }
+
+        /** Обновить ячейку доплера в одной строке (секундный таймер). */
+        _renderRowDoppler(row) {
+            if (!row || !row.cells || !row.cells.doppler) { return; }
+            const cell = row.cells.doppler;
+            const st = this._sm.getState && this._sm.getState(row.satNoradId);
+            const pos = st && st.position;
+            const rangeRate = pos && typeof pos.range_rate === 'number' ? pos.range_rate : null;
+            // Доплер показываем только когда есть и сигнал, и range_rate.
+            const lockActive = row.lock === 'OK' || row.lock === 'SEARCH';
+            if (!lockActive || rangeRate == null) {
+                cell.className = 'auto-link__tx-doppler auto-link__tx-doppler--silent';
+                cell.textContent = '—';
+                return;
+            }
+            const hz = dopplerHz(row.freqHz, rangeRate);
+            cell.textContent = formatDopplerKhz(hz);
+            if (hz > 5) {
+                cell.className = 'auto-link__tx-doppler auto-link__tx-doppler--pos';
+            } else if (hz < -5) {
+                cell.className = 'auto-link__tx-doppler auto-link__tx-doppler--neg';
+            } else {
+                cell.className = 'auto-link__tx-doppler';
             }
         }
 
-        // ----- Взаимная подсветка -----
+        // ----- Взаимная подсветка План ↔ TX -----
 
-        _applyHighlight(noradId) {
-            const id = (typeof noradId === 'number' && noradId > 0) ? noradId : null;
+        _refreshHighlight(selectedNorad) {
+            const sel = (typeof selectedNorad === 'number' && selectedNorad > 0)
+                ? selectedNorad
+                : (this._sm.getSelectedSatelliteId ? this._sm.getSelectedSatelliteId() : null);
+            const hNorad = this._linkHoverNorad;
+            const hTx = this._linkHoverTxRowId;
             const groups = this._listEl.querySelectorAll('.auto-link__group');
+
             for (const grp of groups) {
-                const matches = id !== null && Number(grp.dataset.norad) === id;
-                grp.classList.toggle('auto-link__group--highlighted', matches);
+                const norad = Number(grp.dataset.norad) || 0;
+                const grpHi = resolveLinkHighlight(hNorad, hTx, sel, norad, '').group;
+                grp.classList.toggle('auto-link__group--highlighted', grpHi);
+
                 const txs = grp.querySelectorAll('.auto-link__tx');
                 for (const tx of txs) {
-                    tx.classList.toggle('auto-link__tx--highlighted', matches);
+                    const rowId = tx.dataset.rowId || '';
+                    const txHi = resolveLinkHighlight(hNorad, hTx, sel, norad, rowId).tx;
+                    tx.classList.toggle('auto-link__tx--highlighted', txHi);
                 }
+
                 const vcols = grp.querySelectorAll('.auto-link__v-col');
                 for (const vc of vcols) {
-                    vc.classList.toggle('auto-link__v-col--highlighted', matches);
+                    const rowId = vc.dataset.rowId || '';
+                    const colHi = resolveLinkHighlight(hNorad, hTx, sel, norad, rowId).tx;
+                    vc.classList.toggle('auto-link__v-col--highlighted', colHi);
                 }
+            }
+        }
+
+        _clearLinkHover() {
+            this._linkHoverNorad = null;
+            this._linkHoverTxRowId = null;
+        }
+
+        _emitLinkHover(noradId, txRowId) {
+            dispatchLinkHover({
+                noradId: noradId || null,
+                txRowId: txRowId || null,
+                source: 'auto-link',
+            });
+        }
+
+        _onLinkHover(ev) {
+            const d = ev && ev.detail ? ev.detail : null;
+            if (!d || d.source === 'auto-link') { return; }
+            this._linkHoverNorad = (typeof d.noradId === 'number' && d.noradId > 0) ? d.noradId : null;
+            this._linkHoverTxRowId = d.txRowId || null;
+            this._refreshHighlight();
+        }
+
+        /** Делегирование hover по строкам TX / v-col. */
+        _onListPointer(e) {
+            const type = e.type;
+            const txEl = e.target && e.target.closest
+                ? e.target.closest('.auto-link__tx, .auto-link__v-col')
+                : null;
+            if (type === 'mouseover') {
+                if (!txEl || txEl.classList.contains('auto-link__tx--empty')) { return; }
+                const norad = Number(txEl.dataset.norad) || 0;
+                const rowId = txEl.dataset.rowId || null;
+                if (!norad) { return; }
+                this._linkHoverNorad = norad;
+                this._linkHoverTxRowId = rowId;
+                this._refreshHighlight();
+                this._emitLinkHover(norad, rowId);
+                return;
+            }
+            if (type === 'mouseout') {
+                if (!txEl) { return; }
+                const related = e.relatedTarget;
+                if (related && txEl.contains(related)) { return; }
+                const stillInside = related && this._listEl.contains(related)
+                    && related.closest('.auto-link__tx, .auto-link__v-col');
+                if (stillInside) { return; }
+                this._clearLinkHover();
+                this._refreshHighlight();
+                this._emitLinkHover(null, null);
             }
         }
 
         _onSelectedChange(state) {
             const id = state && typeof state.noradId === 'number' ? state.noradId : null;
-            this._applyHighlight(id);
+            this._refreshHighlight(id);
         }
 
         _onClick(e) {
@@ -1316,6 +1629,17 @@
         txFromSatnogs,
         getLayoutMode,
         setLayoutMode,
+        dopplerHz,
+        formatDopplerKhz,
+        snrLevel,
+        lockLedClass,
+        rssiBarColor,
+        powerToDbm,
+        resolveLinkHighlight,
+        indexTxCycleUpdates,
+        applyTxCycleUpdate,
+        LINK_HOVER_EVENT,
+        TX_CYCLE_EVENT,
     };
     window.OverviewLink = OverviewLink;
 

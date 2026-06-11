@@ -160,7 +160,7 @@ func TestTxCycleMock_TotalPacketsAccumulates(t *testing.T) {
 	m, hub := newTestMock([]int{25544}, catalog)
 
 	var totalAfter3 int
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		m.tick()
 	}
 
@@ -191,7 +191,7 @@ func TestTxCycleMock_HistoryCapacity(t *testing.T) {
 	m, hub := newTestMock([]int{25544}, catalog)
 
 	// stripCapacity+5 тиков — буфер не должен расти больше stripCapacity
-	for i := 0; i < stripCapacity+5; i++ {
+	for range stripCapacity + 5 {
 		m.tick()
 	}
 
@@ -263,5 +263,72 @@ func TestTxCycleMock_EmptyGroup(t *testing.T) {
 	m.tick()
 	if hub.calls != 0 {
 		t.Fatalf("should not broadcast for empty group, got %d calls", hub.calls)
+	}
+}
+
+// TestTxCycleMock_ActiveTxHasDemodMetrics проверяет, что у активного передатчика
+// (packets > 0) есть валидные SNR и Lock=OK/SEARCH, а также неотрицательный
+// счётчик битых пакетов и накопительный total_failed.
+func TestTxCycleMock_ActiveTxHasDemodMetrics(t *testing.T) {
+	catalog := map[int][]TransmitterRef{
+		25544: {{UUID: "tx-a"}},
+	}
+	m, hub := newTestMock([]int{25544}, catalog)
+	m.silentProbability = 0 // гарантируем активный визит
+
+	for range 5 {
+		m.tick()
+	}
+
+	var ev txCycleEvent
+	if err := json.Unmarshal(hub.lastData, &ev); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	tx := ev.Satellites[0].Transmitters[0]
+
+	if tx.Packets <= 0 {
+		t.Fatalf("packets = %d, want > 0 (silentProbability=0)", tx.Packets)
+	}
+	if tx.Lock != "OK" && tx.Lock != "SEARCH" {
+		t.Errorf("lock = %q, want OK or SEARCH for active tx", tx.Lock)
+	}
+	if tx.SNRDb <= 0 {
+		t.Errorf("snr_db = %.2f, want > 0 for active tx", tx.SNRDb)
+	}
+	if tx.PacketsFailed < 0 {
+		t.Errorf("packets_failed = %d, want >= 0", tx.PacketsFailed)
+	}
+	if tx.TotalFailed < tx.PacketsFailed {
+		t.Errorf("total_failed=%d < packets_failed=%d", tx.TotalFailed, tx.PacketsFailed)
+	}
+}
+
+// TestTxCycleMock_SilentTxIsLost проверяет, что молчащий передатчик имеет Lock=LOST,
+// SNR=0 и не накапливает битые пакеты в текущем визите.
+func TestTxCycleMock_SilentTxIsLost(t *testing.T) {
+	catalog := map[int][]TransmitterRef{
+		25544: {{UUID: "tx-a"}},
+	}
+	m, hub := newTestMock([]int{25544}, catalog)
+	m.silentProbability = 1.0 // гарантируем тишину
+
+	m.tick()
+
+	var ev txCycleEvent
+	if err := json.Unmarshal(hub.lastData, &ev); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	tx := ev.Satellites[0].Transmitters[0]
+	if tx.Packets != 0 {
+		t.Fatalf("packets = %d, want 0 (silent)", tx.Packets)
+	}
+	if tx.Lock != "LOST" {
+		t.Errorf("lock = %q, want LOST for silent tx", tx.Lock)
+	}
+	if tx.SNRDb != 0 {
+		t.Errorf("snr_db = %.2f, want 0 for silent tx", tx.SNRDb)
+	}
+	if tx.PacketsFailed != 0 {
+		t.Errorf("packets_failed = %d, want 0 for silent tx", tx.PacketsFailed)
 	}
 }

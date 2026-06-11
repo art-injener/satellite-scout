@@ -75,6 +75,8 @@
         this._txCountByNorad = new Map();
         /** Кеш запросов SatNOGS: norad → Promise<number>. */
         this._txCountCache = new Map();
+        /** Временная подсветка связки с auto-link (hover). */
+        this._linkHoverNorad = null;
 
         this._trackBtn = document.getElementById('rp-track');
         this._resetBtn = document.getElementById('rp-reset');
@@ -147,6 +149,15 @@
                 ? window._modeManager.getMode()
                 : null
         );
+
+        this._onLinkHoverBound = function(ev) {
+            const d = ev && ev.detail ? ev.detail : null;
+            if (!d || d.source === 'plan') { return; }
+            self._linkHoverNorad = (typeof d.noradId === 'number' && d.noradId > 0) ? d.noradId : null;
+            self._applyLinkHoverClasses();
+        };
+        document.addEventListener('satellite-scout-link-hover', this._onLinkHoverBound);
+
         this._updateControls();
     };
 
@@ -326,6 +337,7 @@
 
         this._tbody.innerHTML = html;
         this._bindRowEvents();
+        this._applyLinkHoverClasses();
         // Убрать фокус с ячейки после перерисовки — иначе в некоторых браузерах мигает текстовая каретка.
         if (this._tbody && document.activeElement && this._tbody.contains(document.activeElement)) {
             document.activeElement.blur();
@@ -427,6 +439,30 @@
             '<div class="pc-col3-dur">' + this._escapeHtml(c.time) + '</div>';
     };
 
+    // ── Связка hover с auto-link (План ↔ TX) ──
+
+    RightPanelTable.prototype._applyLinkHoverClasses = function() {
+        if (!this._tbody) { return; }
+        const hoverId = this._linkHoverNorad;
+        const rows = this._tbody.querySelectorAll('.pc-row');
+        for (let i = 0; i < rows.length; i++) {
+            const row = rows[i];
+            const norad = parseInt(row.getAttribute('data-norad'), 10);
+            const on = hoverId && norad === hoverId;
+            row.classList.toggle('pc-row--link-hover', Boolean(on));
+        }
+    };
+
+    RightPanelTable.prototype._emitPlanLinkHover = function(noradId) {
+        document.dispatchEvent(new CustomEvent('satellite-scout-link-hover', {
+            detail: {
+                noradId: noradId || null,
+                txRowId: null,
+                source: 'plan',
+            },
+        }));
+    };
+
     // ── Привязка кликов по строкам ──
 
     RightPanelTable.prototype._bindRowEvents = function() {
@@ -452,6 +488,18 @@
                         return;
                     }
                     e.preventDefault();
+                });
+                row.addEventListener('mouseenter', function() {
+                    const id = parseInt(row.getAttribute('data-norad'), 10);
+                    if (!id) { return; }
+                    self._linkHoverNorad = id;
+                    self._applyLinkHoverClasses();
+                    self._emitPlanLinkHover(id);
+                });
+                row.addEventListener('mouseleave', function() {
+                    self._linkHoverNorad = null;
+                    self._applyLinkHoverClasses();
+                    self._emitPlanLinkHover(null);
                 });
                 row.addEventListener('click', function() {
                     const id = parseInt(row.getAttribute('data-norad'), 10);

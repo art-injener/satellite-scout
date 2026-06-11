@@ -1,4 +1,4 @@
-// Тесты для auto-link.js: fingerprint, сортировка TX, renderStrip, getPassPacketTotal.
+// Тесты для auto-link.js: fingerprint, сортировка TX, renderStrip, cellLabel.
 // Запуск: node static/js/auto-link.test.js
 
 'use strict';
@@ -63,7 +63,7 @@ global.document = {
 global.window = {
     addEventListener() {},
     _stateManager: null,
-    StateEventType: { TX_CYCLE: 'tx_cycle', SATELLITE_GROUP_UPDATE: 'satellite_group_update' },
+    StateEventType: { SATELLITE_GROUP_UPDATE: 'satellite_group_update' },
 };
 
 // ── Загрузка модуля ──────────────────────────────────────────────────────────
@@ -78,11 +78,15 @@ const {
     powerLevelClass,
     cellLabel,
     STRIP_CAPACITY,
+    dopplerHz,
+    formatDopplerKhz,
+    snrLevel,
+    lockLedClass,
+    powerToDbm,
+    resolveLinkHighlight,
+    indexTxCycleUpdates,
+    applyTxCycleUpdate,
 } = AutoLink;
-
-// ── Также загрузим satellite-state для тестов getPassPacketTotal ──────────────
-
-const { SatelliteStateManager, StateEventType } = require('./satellite-state.js');
 
 // ── groupFingerprint ─────────────────────────────────────────────────────────
 
@@ -229,56 +233,6 @@ const { SatelliteStateManager, StateEventType } = require('./satellite-state.js'
     console.log('PASS: STRIP_CAPACITY = 10');
 })();
 
-// ── getPassPacketTotal (satellite-state.js) ──────────────────────────────────
-
-(function test_getPassPacketTotal_from_backend() {
-    const sm = new SatelliteStateManager();
-    const txCycleData = {
-        ts: Date.now(),
-        satellites: [{
-            norad_id: 25544,
-            transmitters: [
-                { uuid: 'tx-a', packets: 5, power: 0.5, total_packets: 100, history: [] },
-                { uuid: 'tx-b', packets: 3, power: 0.3, total_packets: 50, history: [] },
-            ],
-        }],
-    };
-    sm.updateTxCycle(txCycleData);
-    const total = sm.getPassPacketTotal(25544);
-    assert.strictEqual(total, 150, 'Σ total_packets = 100 + 50');
-    console.log('PASS: getPassPacketTotal from backend total_packets');
-})();
-
-(function test_getPassPacketTotal_unknown_norad() {
-    const sm = new SatelliteStateManager();
-    sm.updateTxCycle({
-        ts: Date.now(),
-        satellites: [{ norad_id: 25544, transmitters: [{ uuid: 'x', total_packets: 10 }] }],
-    });
-    assert.strictEqual(sm.getPassPacketTotal(99999), 0, 'неизвестный NORAD → 0');
-    console.log('PASS: getPassPacketTotal unknown norad');
-})();
-
-(function test_getPassPacketTotal_updates_on_new_event() {
-    const sm = new SatelliteStateManager();
-    sm.updateTxCycle({
-        ts: 1, satellites: [{
-            norad_id: 25544,
-            transmitters: [{ uuid: 'a', total_packets: 10 }],
-        }],
-    });
-    assert.strictEqual(sm.getPassPacketTotal(25544), 10);
-
-    sm.updateTxCycle({
-        ts: 2, satellites: [{
-            norad_id: 25544,
-            transmitters: [{ uuid: 'a', total_packets: 25 }],
-        }],
-    });
-    assert.strictEqual(sm.getPassPacketTotal(25544), 25, 'обновляется по новому событию');
-    console.log('PASS: getPassPacketTotal updates on new event');
-})();
-
 // ── cellLabel ────────────────────────────────────────────────────────────────
 
 (function test_cellLabel() {
@@ -296,6 +250,143 @@ const { SatelliteStateManager, StateEventType } = require('./satellite-state.js'
     assert.ok(powerLevelClass(0.1, 5).includes('lvl1'));
     assert.ok(powerLevelClass(0.9, 5).includes('lvl5'));
     console.log('PASS: powerLevelClass');
+})();
+
+// ── dopplerHz ────────────────────────────────────────────────────────────────
+
+(function test_dopplerHz_zero_rate() {
+    assert.strictEqual(dopplerHz(435e6, 0), 0);
+    console.log('PASS: dopplerHz zero rate');
+})();
+
+(function test_dopplerHz_sign_convention() {
+    // range_rate > 0 (удаляется) → доплер отрицательный (ниже несущей)
+    const df1 = dopplerHz(435e6, 7000);
+    assert.ok(df1 < 0, `df=${df1} ожидался отрицательный при удалении`);
+    // range_rate < 0 (приближается) → доплер положительный
+    const df2 = dopplerHz(435e6, -7000);
+    assert.ok(df2 > 0, `df=${df2} ожидался положительный при приближении`);
+    // Симметрия: |df| примерно равны
+    assert.ok(Math.abs(df1 + df2) < 1e-6, 'симметрия знаков');
+    console.log('PASS: dopplerHz sign convention');
+})();
+
+(function test_dopplerHz_magnitude() {
+    // Типичный LEO UHF: 435 МГц, range_rate ≈ 7 км/с → |df| ≈ 10 кГц
+    const df = dopplerHz(435e6, 7000);
+    assert.ok(Math.abs(df) > 9000 && Math.abs(df) < 11000,
+        `|df|=${Math.abs(df).toFixed(1)} Гц вне ожидаемого диапазона 9–11 кГц`);
+    console.log('PASS: dopplerHz magnitude (UHF/LEO)');
+})();
+
+(function test_dopplerHz_invalid_inputs() {
+    assert.strictEqual(dopplerHz(0, 1000), 0);
+    assert.strictEqual(dopplerHz(NaN, 1000), 0);
+    assert.strictEqual(dopplerHz(435e6, NaN), 0);
+    console.log('PASS: dopplerHz invalid inputs');
+})();
+
+// ── formatDopplerKhz ─────────────────────────────────────────────────────────
+
+(function test_formatDopplerKhz_format() {
+    assert.strictEqual(formatDopplerKhz(0), '0.00 кГц');
+    assert.strictEqual(formatDopplerKhz(1320), '+1.32 кГц');
+    assert.strictEqual(formatDopplerKhz(-850), '\u2212' + '0.85 кГц');
+    console.log('PASS: formatDopplerKhz');
+})();
+
+// ── snrLevel ─────────────────────────────────────────────────────────────────
+
+(function test_snrLevel() {
+    assert.strictEqual(snrLevel(0), 'silent');
+    assert.strictEqual(snrLevel(-1), 'silent');
+    assert.strictEqual(snrLevel(5), 'low');
+    assert.strictEqual(snrLevel(10), 'mid');
+    assert.strictEqual(snrLevel(20), 'high');
+    console.log('PASS: snrLevel');
+})();
+
+// ── lockLedClass ─────────────────────────────────────────────────────────────
+
+(function test_lockLedClass() {
+    assert.ok(lockLedClass('OK').endsWith('--ok'));
+    assert.ok(lockLedClass('SEARCH').endsWith('--search'));
+    assert.ok(lockLedClass('LOST').endsWith('--lost'));
+    assert.ok(lockLedClass('').endsWith('--lost'));
+    assert.ok(lockLedClass(null).endsWith('--lost'));
+    console.log('PASS: lockLedClass');
+})();
+
+// ── powerToDbm ───────────────────────────────────────────────────────────────
+
+(function test_powerToDbm() {
+    assert.strictEqual(powerToDbm(0), null);
+    assert.strictEqual(powerToDbm(0.5), -65);
+    assert.strictEqual(powerToDbm(1), -30);
+    console.log('PASS: powerToDbm');
+})();
+
+// ── resolveLinkHighlight ─────────────────────────────────────────────────────
+
+(function test_resolveLinkHighlight_plan_hover() {
+    const r = resolveLinkHighlight(25544, null, null, 25544, 'tx-25544-a');
+    assert.strictEqual(r.group, true);
+    assert.strictEqual(r.tx, true);
+    const other = resolveLinkHighlight(25544, null, null, 40069, 'tx-40069-a');
+    assert.strictEqual(other.group, false);
+    assert.strictEqual(other.tx, false);
+    console.log('PASS: resolveLinkHighlight plan hover');
+})();
+
+(function test_resolveLinkHighlight_tx_hover() {
+    const hit = resolveLinkHighlight(25544, 'tx-25544-b', null, 25544, 'tx-25544-b');
+    assert.strictEqual(hit.group, false);
+    assert.strictEqual(hit.tx, true);
+    const miss = resolveLinkHighlight(25544, 'tx-25544-b', null, 25544, 'tx-25544-a');
+    assert.strictEqual(miss.tx, false);
+    console.log('PASS: resolveLinkHighlight tx hover');
+})();
+
+(function test_resolveLinkHighlight_selected_fallback() {
+    const r = resolveLinkHighlight(null, null, 25544, 25544, 'tx-1');
+    assert.strictEqual(r.group, true);
+    assert.strictEqual(r.tx, true);
+    console.log('PASS: resolveLinkHighlight selected fallback');
+})();
+
+// ── tx_cycle helpers ─────────────────────────────────────────────────────────
+
+(function test_indexTxCycleUpdates() {
+    const payload = {
+        satellites: [{
+            norad_id: 25544,
+            transmitters: [
+                { uuid: 'abc', packets: 3, power: 0.5 },
+                { uuid: 'def', packets: 0, power: 0 },
+            ],
+        }],
+    };
+    const map = indexTxCycleUpdates(payload);
+    assert.strictEqual(map.size, 2);
+    assert.strictEqual(map.get('abc').packets, 3);
+    console.log('PASS: indexTxCycleUpdates');
+})();
+
+(function test_applyTxCycleUpdate() {
+    const row = { power: 0, lock: 'LOST', totalPackets: 0 };
+    applyTxCycleUpdate(row, {
+        power: 0.8,
+        lock: 'OK',
+        snr_db: 12.5,
+        total_packets: 42,
+        total_failed: 2,
+        packets_failed: 1,
+        history: [{ packets: 3, power: 0.5 }],
+    });
+    assert.strictEqual(row.lock, 'OK');
+    assert.strictEqual(row.totalPackets, 42);
+    assert.strictEqual(row.history.length, 1);
+    console.log('PASS: applyTxCycleUpdate');
 })();
 
 console.log('\nAll auto-link tests passed.');

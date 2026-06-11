@@ -221,6 +221,24 @@ body.mode-manual:not(.station-basic) .right-panel__controls {
     display: flex;
 }
 
+/* ───────────────── Авто (Обзор): карта + нижняя панель auto-link ───────────────── */
+
+body.mode-overview:not(.station-basic) #tracking-layout {
+    display: flex;
+}
+
+body.mode-overview:not(.station-basic) #layout-manual {
+    display: none;
+}
+
+body.mode-overview:not(.station-basic) .bottom-panel {
+    display: flex;
+}
+
+body.mode-overview:not(.station-basic) .main-wrapper.tracking-page {
+    grid-template-rows: 44px 1fr var(--bottom-panel-height);
+}
+
 /* ───────────────── Ручной режим: layout вместо карты, нижняя панель скрыта ─────────────────
    В Авто карта (#tracking-layout) и нижняя панель видны.
    В Ручном карту прячем, нижнюю панель прячем, а #layout-manual растягивается во всю
@@ -740,9 +758,9 @@ body.station-basic .app-header__dropdown {
     display: none;
 }
 
-/* Нижняя панель свёрнута: уменьшаем третью строку main-wrapper (класс выставляет JS) */
+/* Нижняя панель свёрнута: узкая полоска слева (50px), высота под одну кнопку */
 .main-wrapper.bottom-panel-collapsed {
-    grid-template-rows: 44px 1fr 30px;
+    grid-template-rows: 44px 1fr 36px;
 }
 
 /* Свёрнутая нижняя панель: карта как в basic-режиме — 2:1 по центру, без растягивания */
@@ -1125,10 +1143,16 @@ body.station-basic .app-header__dropdown {
     border-radius: var(--radius-sm);
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 10px;
-    padding: 2px 6px;
+    box-sizing: border-box;
+    min-width: 28px;
+    min-height: 28px;
+    padding: 0;
+    font-size: 14px;
     line-height: 1;
     flex-shrink: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     transition: all 0.15s ease;
 }
 
@@ -1153,13 +1177,19 @@ body.station-basic .app-header__dropdown {
     padding-left: 4px;
 }
 
-/* При сворачивании — скрываем тело, в полоске только кнопка */
+/* При сворачивании — скрываем тело; слева узкая полоска с кнопкой ▲ внизу */
 .bottom-panel--collapsed .bottom-panel__body {
     display: none;
 }
 
 .bottom-panel--collapsed .bottom-panel__side {
-    justify-content: center;
+    justify-content: flex-end;
+    padding: 2px 4px 3px;
+    cursor: pointer;
+}
+
+.bottom-panel--collapsed .bottom-panel__layout-btn {
+    display: none;
 }
 
 .bottom-panel--collapsed .bottom-panel__side .panel-collapse-btn {

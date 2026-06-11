@@ -39,6 +39,29 @@
      * Запускается параллельно с инициализацией карты (initCanvasPlaceholders
      * тоже ходит за /api/config — это два независимых потребителя одного ответа).
      */
+    /**
+     * Синхронизация видимости зон страницы и lifecycle виджетов при смене UI-режима.
+     * @param {string|null} mode — 'overview' | 'manual' | null (basic).
+     */
+    function applyTrackingModeLayout(mode) {
+        const isManual = mode === 'manual';
+        const trackingLayout = document.getElementById('tracking-layout');
+        const manualLayout = document.getElementById('layout-manual');
+        if (trackingLayout) {
+            trackingLayout.setAttribute('aria-hidden', isManual ? 'true' : 'false');
+        }
+        if (manualLayout) {
+            manualLayout.setAttribute('aria-hidden', isManual ? 'false' : 'true');
+        }
+        if (window._overviewLink) {
+            if (isManual && typeof window._overviewLink.pause === 'function') {
+                window._overviewLink.pause();
+            } else if (mode === 'overview' && typeof window._overviewLink.resume === 'function') {
+                window._overviewLink.resume();
+            }
+        }
+    }
+
     function initStationModes() {
         if (!window.ModeManager || !window.attachModeBar) {
             return;
@@ -63,8 +86,23 @@
                     }));
                 }
 
+                // Слушатель — до первого notify: иначе при reload с ux.mainMode=manual
+                // событие уходит в пустоту и имитация Ручного режима не стартует.
+                document.addEventListener('satellite-scout-mode-change', function(ev) {
+                    const mode = ev && ev.detail ? ev.detail.mode : null;
+                    applyTrackingModeLayout(mode);
+                    if (window._manualLayout) {
+                        if (mode === 'manual') {
+                            window._manualLayout.activate();
+                        } else {
+                            window._manualLayout.deactivate();
+                        }
+                    }
+                });
+
                 if (manager.getMode()) {
                     document.body.classList.add('mode-' + manager.getMode());
+                    applyTrackingModeLayout(manager.getMode());
                     notifyModeChange(manager.getMode());
                 }
                 manager.onModeChange(function(mode) {
@@ -76,22 +114,16 @@
                         }
                     }
                     cls.add('mode-' + mode);
+                    applyTrackingModeLayout(mode);
                     notifyModeChange(mode);
                 });
 
                 window._modeBar = window.attachModeBar(manager);
 
-                // Реакция на смену режима: активируем/паузим Ручной layout
-                document.addEventListener('satellite-scout-mode-change', function(ev) {
-                    const mode = ev && ev.detail ? ev.detail.mode : null;
-                    if (window._manualLayout) {
-                        if (mode === 'manual') {
-                            window._manualLayout.activate();
-                        } else {
-                            window._manualLayout.deactivate();
-                        }
-                    }
-                });
+                // Если ManualLayout создан раньше, чем пришёл /api/config — догоняем activate.
+                if (window._manualLayout && manager.getMode() === 'manual') {
+                    window._manualLayout.activate();
+                }
             })
             .catch(function(err) {
                 // eslint-disable-next-line no-console
@@ -178,22 +210,32 @@
         const bottomToggle = document.getElementById('bottom-panel-toggle');
         if (mainWrapper && bottomPanel && bottomToggle) {
             const LS_BOTTOM = 'ux.bottomCollapsed';
-            const initiallyCollapsed = localStorage.getItem(LS_BOTTOM) === '1';
-            if (initiallyCollapsed) {
-                bottomPanel.classList.add('bottom-panel--collapsed');
-                mainWrapper.classList.add('bottom-panel-collapsed');
-                bottomToggle.textContent = '▲';
-                bottomToggle.setAttribute('title', 'Развернуть');
-            } else {
-                bottomToggle.setAttribute('title', 'Свернуть');
-            }
-            bottomToggle.addEventListener('click', function() {
-                const collapsed = bottomPanel.classList.toggle('bottom-panel--collapsed');
+
+            function setBottomCollapsed(collapsed) {
+                bottomPanel.classList.toggle('bottom-panel--collapsed', collapsed);
                 mainWrapper.classList.toggle('bottom-panel-collapsed', collapsed);
                 bottomToggle.textContent = collapsed ? '▲' : '▼';
                 bottomToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
+                bottomPanel.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
                 localStorage.setItem(LS_BOTTOM, collapsed ? '1' : '0');
+            }
+
+            setBottomCollapsed(localStorage.getItem(LS_BOTTOM) === '1');
+
+            bottomToggle.addEventListener('click', function(e) {
+                e.stopPropagation();
+                setBottomCollapsed(!bottomPanel.classList.contains('bottom-panel--collapsed'));
             });
+
+            // В свёрнутом виде клик по левой полоске (не по всей ширине) тоже разворачивает
+            var bottomSide = bottomPanel.querySelector('.bottom-panel__side');
+            if (bottomSide) {
+                bottomSide.addEventListener('click', function() {
+                    if (bottomPanel.classList.contains('bottom-panel--collapsed')) {
+                        setBottomCollapsed(false);
+                    }
+                });
+            }
         }
 
         // ── Правая панель: минимизация по ширине (30px), класс на main-wrapper ──
@@ -330,10 +372,11 @@
                 if (state.noradId === selectedId) {
                     window.skyView.setSelectedSatellitePosition(pos.az, pos.el);
                     window.skyView.setSelectedSatelliteInfo(state.name || '', state.noradId);
-                    // Загрузка sky path для selected.
+                    // Загрузка sky path для selected (повтор пока не загрузится).
                     if (state.noradId && loadedSkyPathSelected !== state.noradId) {
-                        loadedSkyPathSelected = state.noradId;
-                        _loadSkyPath(state.noradId, 'selected');
+                        if (loadSkyPathForSatellite(state.noradId, 'selected')) {
+                            loadedSkyPathSelected = state.noradId;
+                        }
                     }
                 }
                 // Tracking в SkyView.
@@ -388,9 +431,20 @@
             if (window.skyView) {
                 window.skyView.setSelectedSatelliteInfo(state.name || '', state.noradId);
                 window.skyView.setSelectedTrack([]);
-                loadedSkyPathSelected = state.noradId;
-                _loadSkyPath(state.noradId, 'selected');
+                if (state.position && state.position.az != null && state.position.el != null) {
+                    window.skyView.setSelectedSatellitePosition(state.position.az, state.position.el);
+                }
+                const loaded = loadSkyPathForSatellite(state.noradId, 'selected');
+                loadedSkyPathSelected = loaded ? state.noradId : null;
+                const trackingId = sm.getTrackingSatelliteId();
+                if (trackingId && trackingId === state.noradId) {
+                    loadSkyPathForSatellite(state.noradId, 'tracking');
+                }
             }
+            // Пересчёт вторичных: бывший selected возвращается в карту вторичных,
+            // ему нужно восстановить sky-трек из данных группы.
+            _updateSecondaryPositions();
+            _refreshSecondarySkyTracks();
         });
 
         // ── TRACKING_CHANGE: смена/сброс наблюдения ──
@@ -413,7 +467,7 @@
                 // Sky path для tracking на SkyView.
                 if (window.skyView) {
                     window.skyView.setSatelliteInfo(state.name || '', state.noradId);
-                    _loadSkyPath(state.noradId, 'tracking');
+                    loadSkyPathForSatellite(state.noradId, 'tracking');
                 }
             } else {
                 console.log('[app.js] Tracking OFF');
@@ -443,7 +497,7 @@
                 const trackingId = sm.getTrackingSatelliteId();
                 const selectedId = sm.getSelectedSatelliteId();
                 if (trackingId) { loadSkyPathForSatellite(trackingId, 'tracking'); }
-                if (selectedId && selectedId !== trackingId) { loadSkyPathForSatellite(selectedId, 'selected'); }
+                if (selectedId) { loadSkyPathForSatellite(selectedId, 'selected'); }
                 _refreshSecondarySkyTracks();
                 window.skyView.draw();
             }
@@ -544,12 +598,6 @@
         }
     }
 
-    // Загрузка sky path для SkyView (selected или tracking).
-    function _loadSkyPath(noradId, target) {
-        if (!noradId || !window.skyView) { return; }
-        loadSkyPathForSatellite(noradId, target);
-    }
-
     // Показ/скрытие оверлея при смене спутника
     let overlayTimer = null;
     let overlayFadeTimer = null;
@@ -603,15 +651,23 @@
      * Установка sky path для SkyView из данных группы (satellite_group_update SSE).
      * @param {number} noradId
      * @param {string} target — 'selected' или 'tracking'
+     * @returns {boolean} true если sky_path применён
      */
     function loadSkyPathForSatellite(noradId, target) {
-        if (!noradId || !window.skyView) { return; }
+        if (!noradId || !window.skyView) { return false; }
         const sm = window._stateManager;
         const group = sm && sm.getSatelliteGroup();
-        if (!group || !group.satellites) { return; }
+        if (!group || !group.satellites) {
+            return false;
+        }
 
         const sat = group.satellites.find(function(s) { return s.norad_id === noradId; });
-        if (!sat || !sat.sky_path || sat.sky_path.length === 0) { return; }
+        if (!sat) {
+            return false;
+        }
+        if (!sat.sky_path || sat.sky_path.length === 0) {
+            return false;
+        }
 
         const track = sat.sky_path.map(function(point) {
             return { az: point.az, el: point.el, time: point.time };
@@ -624,7 +680,7 @@
             window.skyView.setSelectedTrack(track);
             window.skyView.setSelectedPassTimes(sat.aos, sat.los);
         }
-        console.log('[app.js] SkyView', target, 'track для', noradId, ':', track.length, 'точек');
+        return true;
     }
 
     // Инициализация нижней панели: миграция legacy-ключа localStorage
@@ -674,6 +730,12 @@
         window._overviewLink = new window.OverviewLink(window._stateManager, {
             txListEl: txListEl,
         });
+
+        const mm = window._modeManager;
+        const currentMode = mm && typeof mm.getMode === 'function' ? mm.getMode() : null;
+        if (currentMode === 'manual' && typeof window._overviewLink.pause === 'function') {
+            window._overviewLink.pause();
+        }
 
         const layoutBtn = document.getElementById('auto-link-layout-toggle');
         if (layoutBtn) {

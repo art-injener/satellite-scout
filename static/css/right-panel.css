@@ -252,6 +252,13 @@
     background: var(--bg-tertiary);
 }
 
+/* Связка с нижней панелью Авто (hover из auto-link или Плана) */
+.passes-compact__table tbody tr.pc-row--link-hover {
+    background: var(--passes-row-link-hover-bg, rgba(100, 180, 255, 0.14)) !important;
+    outline: 1px solid var(--passes-row-link-hover-border, rgba(100, 180, 255, 0.45));
+    outline-offset: -1px;
+}
+
 /* Выбранный (selected) — цвет из темы (светлая: синяя подсветка) */
 .passes-compact__table tbody tr.pc-row--selected {
     background: var(--passes-row-selected-bg, rgba(255, 215, 0, 0.2)) !important;

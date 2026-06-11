@@ -56,10 +56,11 @@
     gap: 0;
 }
 
-/* Общая сетка колонок: КА | частота | модуляция | детектор | водопад */
+/* Общая сетка колонок:
+   КА | частота | модуляция | сигнал | декод./битые | SNR | доплер | lock | водопад */
 .auto-link__tx-list-header,
 .auto-link__group-grid {
-    --auto-link-cols: 148px 118px 112px 304px minmax(160px, 1fr);
+    --auto-link-cols: 148px 118px 112px 124px 110px 76px 100px 56px minmax(140px, 1fr);
 }
 
 .auto-link__tx-list-header {
@@ -235,6 +236,11 @@
 
 .auto-link__tx-freq,
 .auto-link__tx-mode,
+.auto-link__tx-rssi,
+.auto-link__tx-pkt,
+.auto-link__tx-snr,
+.auto-link__tx-doppler,
+.auto-link__tx-lock,
 .auto-link__strip {
     display: flex;
     align-items: center;
@@ -243,6 +249,7 @@
     background: var(--bg-secondary);
     min-height: 100%;
     min-width: 0;
+    font-variant-numeric: tabular-nums;
 }
 
 .auto-link__tx-freq {
@@ -261,8 +268,148 @@
 
 .auto-link__tx:hover > .auto-link__tx-freq,
 .auto-link__tx:hover > .auto-link__tx-mode,
+.auto-link__tx:hover > .auto-link__tx-rssi,
+.auto-link__tx:hover > .auto-link__tx-pkt,
+.auto-link__tx:hover > .auto-link__tx-snr,
+.auto-link__tx:hover > .auto-link__tx-doppler,
+.auto-link__tx:hover > .auto-link__tx-lock,
 .auto-link__tx:hover > .auto-link__strip {
     background: var(--bg-hover, rgba(255, 255, 255, 0.04));
+}
+
+/* ===== Параметры приёма: RSSI / Пакеты / SNR / Доплер / Lock ===== */
+
+/* RSSI: значение в dBm + узкая полоса заливки (соответствует уровню). */
+.auto-link__tx-rssi {
+    gap: 6px;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.auto-link__tx-rssi__bar {
+    flex: 0 0 38px;
+    height: 4px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+    position: relative;
+}
+
+.auto-link__tx-rssi__bar::after {
+    content: '';
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    width: var(--auto-link-rssi-fill, 0%);
+    background: var(--auto-link-rssi-color, var(--accent-success, #4caf50));
+    transition: width 200ms linear, background-color 200ms linear;
+}
+
+.auto-link__tx-rssi__val {
+    color: inherit;
+    font-size: var(--auto-link-font);
+}
+
+.auto-link__tx-rssi--silent {
+    color: var(--text-muted);
+}
+
+/* Два моноширинных числа через слэш: декодированные слева, битые справа.
+   Правая часть подсвечивается красным при наличии битых пакетов. */
+.auto-link__tx-pkt {
+    gap: 4px;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.auto-link__tx-pkt__ok {
+    color: var(--accent-success, #4caf50);
+}
+
+.auto-link__tx-pkt__sep {
+    color: var(--text-muted);
+}
+
+.auto-link__tx-pkt__err {
+    color: var(--text-muted);
+}
+
+.auto-link__tx-pkt__err--bad {
+    color: var(--accent-danger, #ff5722);
+}
+
+/* SNR — численное значение, цвет по диапазону. */
+.auto-link__tx-snr {
+    justify-content: flex-end;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.auto-link__tx-snr--low {
+    color: var(--accent-danger, #ff5722);
+}
+
+.auto-link__tx-snr--mid {
+    color: var(--accent-warning, #ffb300);
+}
+
+.auto-link__tx-snr--high {
+    color: var(--accent-success, #4caf50);
+}
+
+.auto-link__tx-snr--silent {
+    color: var(--text-muted);
+}
+
+/* Доплер — ±N.NN кГц, знак цветом подкреплён. */
+.auto-link__tx-doppler {
+    justify-content: flex-end;
+    color: var(--text-primary);
+    white-space: nowrap;
+}
+
+.auto-link__tx-doppler--pos {
+    color: var(--accent-warning, #ffb300);
+}
+
+.auto-link__tx-doppler--neg {
+    color: var(--accent-primary, #4dabf7);
+}
+
+.auto-link__tx-doppler--silent {
+    color: var(--text-muted);
+}
+
+/* Lock-индикатор — цветной LED (●) с тонким свечением по статусу. */
+.auto-link__tx-lock {
+    justify-content: center;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.auto-link__tx-lock__led {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--text-muted, #9aa6b2);
+    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.auto-link__tx-lock__led--ok {
+    background: var(--accent-success, #4caf50);
+    box-shadow: 0 0 6px var(--accent-success, #4caf50);
+}
+
+.auto-link__tx-lock__led--search {
+    background: var(--accent-warning, #ffb300);
+    box-shadow: 0 0 6px var(--accent-warning, #ffb300);
+}
+
+.auto-link__tx-lock__led--lost {
+    background: var(--text-muted, #9aa6b2);
+    box-shadow: none;
+    opacity: 0.5;
 }
 
 /* ===== Лента детектора пакетов ===== */
@@ -329,6 +476,11 @@
 .auto-link__group--highlighted .auto-link__sat-cell,
 .auto-link__tx--highlighted > .auto-link__tx-freq,
 .auto-link__tx--highlighted > .auto-link__tx-mode,
+.auto-link__tx--highlighted > .auto-link__tx-rssi,
+.auto-link__tx--highlighted > .auto-link__tx-pkt,
+.auto-link__tx--highlighted > .auto-link__tx-snr,
+.auto-link__tx--highlighted > .auto-link__tx-doppler,
+.auto-link__tx--highlighted > .auto-link__tx-lock,
 .auto-link__tx--highlighted > .auto-link__strip {
     background: var(--bg-hover, rgba(77, 171, 247, 0.12));
 }
@@ -522,7 +674,7 @@
     background: var(--waterfall-cold-bg, #06101a);
 }
 
-/* Футер колонки: угол места, пакеты, до LOS (как в мокапе карточек). */
+/* Футер колонки (3 строки): RSSI+Lock LED, SNR, Декод./Битые. */
 .auto-link--vertical .auto-link__v-footer {
     flex-shrink: 0;
     display: flex;
@@ -537,58 +689,92 @@
     background: var(--bg-tertiary);
 }
 
-.auto-link--vertical .auto-link__v-el {
+/* Строка 1: цветной LED + RSSI в dBm. */
+.auto-link--vertical .auto-link__v-rssi {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
     font-weight: 600;
+}
+
+.auto-link--vertical .auto-link__v-rssi--silent {
     color: var(--text-muted);
+    font-weight: 400;
+}
+
+.auto-link--vertical .auto-link__v-rssi__led {
+    display: inline-block;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-muted, #9aa6b2);
+}
+
+.auto-link--vertical .auto-link__v-rssi__led--ok {
+    background: var(--accent-success, #4caf50);
+    box-shadow: 0 0 4px var(--accent-success, #4caf50);
+}
+
+.auto-link--vertical .auto-link__v-rssi__led--search {
+    background: var(--accent-warning, #ffb300);
+    box-shadow: 0 0 4px var(--accent-warning, #ffb300);
+}
+
+.auto-link--vertical .auto-link__v-rssi__led--lost {
+    background: var(--text-muted, #9aa6b2);
+    opacity: 0.5;
+}
+
+/* Строка 2: SNR в дБ; цвет — по уровню (high/mid/low). */
+.auto-link--vertical .auto-link__v-snr {
+    color: var(--text-primary);
     font-variant-numeric: tabular-nums;
 }
 
-.auto-link--vertical .auto-link__v-el--high {
-    color: #66bb6a;
+.auto-link--vertical .auto-link__v-snr--silent {
+    color: var(--text-muted);
 }
 
-.auto-link--vertical .auto-link__v-el--mid {
-    color: #cddc39;
+.auto-link--vertical .auto-link__v-snr--low {
+    color: var(--accent-danger, #ff5722);
 }
 
-.auto-link--vertical .auto-link__v-el--low {
-    color: #ffb300;
+.auto-link--vertical .auto-link__v-snr--mid {
+    color: var(--accent-warning, #ffb300);
 }
 
+.auto-link--vertical .auto-link__v-snr--high {
+    color: var(--accent-success, #4caf50);
+}
+
+/* Строка 3: декодированные / битые пакеты за пролёт. */
 .auto-link--vertical .auto-link__v-pkt {
     color: var(--text-muted);
     font-variant-numeric: tabular-nums;
+    display: inline-flex;
+    gap: 3px;
 }
 
-.auto-link--vertical .auto-link__v-pkt--active {
-    color: var(--text-primary);
-    font-weight: 600;
+.auto-link--vertical .auto-link__v-pkt__ok {
+    color: var(--accent-success, #4caf50);
 }
 
-.auto-link--vertical .auto-link__v-until {
+.auto-link--vertical .auto-link__v-pkt__sep {
     color: var(--text-muted);
-    font-variant-numeric: tabular-nums;
 }
 
-.auto-link--vertical .auto-link__v-until--los {
-    color: var(--text-primary);
-}
-
-.auto-link--vertical .auto-link__v-until--urgent {
-    color: #ef5350;
-}
-
-.auto-link--vertical .auto-link__v-until--aos {
+.auto-link--vertical .auto-link__v-pkt__err {
     color: var(--text-muted);
+}
+
+.auto-link--vertical .auto-link__v-pkt__err--bad {
+    color: var(--accent-danger, #ff5722);
 }
 
 .auto-link--vertical .auto-link__v-col--highlighted .auto-link__v-footer {
     background: var(--bg-hover, rgba(77, 171, 247, 0.08));
-}
-
-.auto-link--vertical .auto-link__v-col--highlighted .auto-link__v-el--high,
-.auto-link--vertical .auto-link__group--highlighted .auto-link__v-header__name {
-    color: var(--accent-primary, #4dabf7);
 }
 
 /* Заглушка «нет TX» */

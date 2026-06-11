@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"math"
 	"math/rand/v2"
 	"time"
 )
@@ -84,6 +85,7 @@ func (r *txCycleRing) snapshot() []txCycleHistoryItem {
 type txState struct {
 	ring         *txCycleRing
 	totalPackets int
+	totalFailed  int
 }
 
 func newTxState(ringCap int) *txState {
@@ -108,6 +110,11 @@ type txCycleTx struct {
 	Power        float64              `json:"power"`
 	TotalPackets int                  `json:"total_packets"`
 	History      []txCycleHistoryItem `json:"history"`
+	// Параметры демодулятора текущего визита.
+	PacketsFailed int     `json:"packets_failed"` // Не прошли CRC в этом визите.
+	TotalFailed   int     `json:"total_failed"`   // Σ битых пакетов за пролёт.
+	SNRDb         float64 `json:"snr_db"`         // SNR в полосе IF, дБ.
+	Lock          string  `json:"lock"`           // "OK" | "SEARCH" | "LOST".
 }
 
 // TxCycleMock — генератор фейковых событий "tx_cycle" для разработки UI
@@ -257,8 +264,48 @@ func (m *TxCycleMock) getOrCreateTxState(norad int, uuid string) *txState {
 	return st
 }
 
-// generateForSatellite — случайные packets/power для всех передатчиков КА.
-// Обновляет кольцевой буфер и накопительный счётчик каждого передатчика.
+// txVisit — параметры одного визита сканера на передатчик (для одной строки UI).
+type txVisit struct {
+	packets       int
+	power         float64
+	packetsFailed int
+	snrDB         float64
+	lock          string
+}
+
+// generateVisit — случайный визит с согласованными параметрами:
+// активный → SNR>0, Lock=OK/SEARCH, packets_failed ≈ 12%·(1-power);
+// молчащий → Lock=LOST, SNR=0.
+func (m *TxCycleMock) generateVisit() txVisit {
+	if m.rng.Float64() < m.silentProbability {
+		return txVisit{lock: "LOST"}
+	}
+	packets := 1 + m.rng.IntN(m.maxPackets)
+	power := 0.15 + m.rng.Float64()*0.85
+	// SNR ≈ 5…23 дБ, монотонно растёт с power, шум ±1.5 дБ.
+	snrDB := 5.0 + power*18.0 + (m.rng.Float64()-0.5)*3.0
+	// Доля битых пакетов 0…12% — обратно пропорциональна power.
+	failRate := 0.12 * (1.0 - power)
+	if failRate < 0 {
+		failRate = 0
+	}
+	packetsFailed := int(float64(packets) * failRate)
+	// Lock=SEARCH при слабом сигнале (~12% всех визитов), иначе OK.
+	lock := "OK"
+	if power < 0.30 && m.rng.Float64() < 0.4 {
+		lock = "SEARCH"
+	}
+	return txVisit{
+		packets:       packets,
+		power:         power,
+		packetsFailed: packetsFailed,
+		snrDB:         snrDB,
+		lock:          lock,
+	}
+}
+
+// generateForSatellite — случайные параметры визитов для всех передатчиков КА.
+// Обновляет кольцевой буфер и накопительные счётчики каждого передатчика.
 func (m *TxCycleMock) generateForSatellite(norad int) []txCycleTx {
 	refs := m.catalog.ListActiveTransmitters(norad)
 	if len(refs) == 0 {
@@ -269,27 +316,30 @@ func (m *TxCycleMock) generateForSatellite(norad int) []txCycleTx {
 		if ref.UUID == "" {
 			continue
 		}
-		var packets int
-		var power float64
-
-		if m.rng.Float64() < m.silentProbability {
-			packets, power = 0, 0
-		} else {
-			packets = 1 + m.rng.IntN(m.maxPackets)
-			power = 0.15 + m.rng.Float64()*0.85
-		}
+		v := m.generateVisit()
 
 		st := m.getOrCreateTxState(norad, ref.UUID)
-		st.ring.push(txCycleHistoryItem{Packets: packets, Power: power})
-		st.totalPackets += packets
+		st.ring.push(txCycleHistoryItem{Packets: v.packets, Power: v.power})
+		st.totalPackets += v.packets
+		st.totalFailed += v.packetsFailed
 
 		out = append(out, txCycleTx{
-			UUID:         ref.UUID,
-			Packets:      packets,
-			Power:        power,
-			TotalPackets: st.totalPackets,
-			History:      st.ring.snapshot(),
+			UUID:          ref.UUID,
+			Packets:       v.packets,
+			Power:         v.power,
+			TotalPackets:  st.totalPackets,
+			History:       st.ring.snapshot(),
+			PacketsFailed: v.packetsFailed,
+			TotalFailed:   st.totalFailed,
+			SNRDb:         roundFloat(v.snrDB, 1),
+			Lock:          v.lock,
 		})
 	}
 	return out
+}
+
+// roundFloat округляет до заданного числа знаков после запятой.
+func roundFloat(v float64, decimals int) float64 {
+	p := math.Pow(10, float64(decimals))
+	return math.Round(v*p) / p
 }
