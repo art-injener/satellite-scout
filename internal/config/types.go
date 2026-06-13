@@ -1,7 +1,5 @@
 package config
 
-import "time"
-
 // CurrentVersion — текущая версия схемы файла конфигурации.
 // Используется для миграций: при чтении файла сравниваем с этим значением и при
 // расхождении применяем правила миграции в Migrate().
@@ -73,8 +71,8 @@ type TLEConfig struct {
 	// Groups — группы спутников для загрузки с Celestrak (stations, amateur, ...).
 	Groups []string `json:"groups"`
 
-	// UpdateInterval — интервал автообновления TLE.
-	UpdateInterval time.Duration `json:"update_interval"`
+	// UpdateInterval — интервал автообновления TLE ("6h", "30m").
+	UpdateInterval Duration `json:"update_interval"`
 
 	// MaxTLEAgeDays — TLE старше этого значения считаются устаревшими.
 	MaxTLEAgeDays float64 `json:"max_tle_age_days"`
@@ -86,12 +84,12 @@ type SatNOGSConfig struct {
 	// в SSE-событиях пустые.
 	Enabled bool `json:"enabled"`
 
-	// CacheTTL — время жизни записи в кеше передатчиков SatNOGS.
-	CacheTTL time.Duration `json:"cache_ttl"`
+	// CacheTTL — время жизни записи в кеше передатчиков SatNOGS ("24h").
+	CacheTTL Duration `json:"cache_ttl"`
 
-	// Timeout — таймаут одного HTTP-запроса к SatNOGS DB.
+	// Timeout — таймаут одного HTTP-запроса к SatNOGS DB ("12s").
 	// 0 — использовать значение по умолчанию клиента.
-	Timeout time.Duration `json:"timeout"`
+	Timeout Duration `json:"timeout"`
 
 	// MaxRetries — число повторов запроса при быстрых ошибках (5xx/429).
 	// Таймауты не повторяются на уровне клиента. 0 — значение по умолчанию.

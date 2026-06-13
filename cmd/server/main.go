@@ -117,19 +117,19 @@ func main() {
 		// поэтому опции применяем только при положительных значениях из конфига.
 		clientOpts := []satnogs.Option{}
 		if cfg.SatNOGS.Timeout > 0 {
-			clientOpts = append(clientOpts, satnogs.WithTimeout(cfg.SatNOGS.Timeout))
+			clientOpts = append(clientOpts, satnogs.WithTimeout(cfg.SatNOGS.Timeout.Duration()))
 		}
 		if cfg.SatNOGS.MaxRetries > 0 {
 			clientOpts = append(clientOpts, satnogs.WithMaxRetries(cfg.SatNOGS.MaxRetries))
 		}
 		satnogsClient := satnogs.NewClient(clientOpts...)
 		satnogsService = satnogs.NewService(satnogsClient).
-			WithCacheTTL(cfg.SatNOGS.CacheTTL).
+			WithCacheTTL(cfg.SatNOGS.CacheTTL.Duration()).
 			WithWorkers(cfg.SatNOGS.Workers)
 		go satnogsService.Run(svcCtx)
 		satnogsAdapter = newSatnogsTransmitterAdapter(satnogsService)
 		trackingService.SetTransmitterProvider(satnogsAdapter)
-		slog.Info("satnogs integration enabled", "cache_ttl", cfg.SatNOGS.CacheTTL)
+		slog.Info("satnogs integration enabled", "cache_ttl", cfg.SatNOGS.CacheTTL.Duration())
 	} else {
 		slog.Info("satnogs integration disabled (config: satnogs.enabled=false)")
 	}

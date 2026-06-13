@@ -43,8 +43,8 @@ func loadFromLegacyEnv() *Config {
 	}
 
 	cfg.SatNOGS.Enabled = getEnvBool(envSatNOGSEnabled, cfg.SatNOGS.Enabled)
-	cfg.SatNOGS.CacheTTL = getEnvDuration(envSatNOGSCacheTTL, cfg.SatNOGS.CacheTTL)
-	cfg.SatNOGS.Timeout = getEnvDuration(envSatNOGSTimeout, cfg.SatNOGS.Timeout)
+	cfg.SatNOGS.CacheTTL = Duration(getEnvDuration(envSatNOGSCacheTTL, cfg.SatNOGS.CacheTTL.Duration()))
+	cfg.SatNOGS.Timeout = Duration(getEnvDuration(envSatNOGSTimeout, cfg.SatNOGS.Timeout.Duration()))
 	cfg.SatNOGS.MaxRetries = getEnvInt(envSatNOGSMaxRetries, cfg.SatNOGS.MaxRetries)
 	cfg.SatNOGS.Workers = getEnvInt(envSatNOGSWorkers, cfg.SatNOGS.Workers)
 

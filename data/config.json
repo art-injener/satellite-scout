@@ -4,7 +4,7 @@
     "port": "8080"
   },
   "ui": {
-    "theme": "breeze-dark",
+    "theme": "classic",
     "show_all_tracks_on_start": false
   },
   "tle": {
@@ -14,13 +14,13 @@
       "amateur",
       "cubesat"
     ],
-    "update_interval": 21600000000000,
+    "update_interval": "6h",
     "max_tle_age_days": 7
   },
   "satnogs": {
     "enabled": true,
-    "cache_ttl": 86400000000000,
-    "timeout": 12000000000,
+    "cache_ttl": "24h",
+    "timeout": "12s",
     "max_retries": 2,
     "workers": 4
   },

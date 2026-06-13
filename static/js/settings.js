@@ -81,7 +81,7 @@
                 .filter(Boolean);
         }
         if (type === 'duration') {
-            return parseDurationToNanoseconds(input.value);
+            return input.value.trim();
         }
         if (input.type === 'number') {
             const v = parseFloat(input.value);
@@ -104,59 +104,10 @@
             return;
         }
         if (type === 'duration') {
-            input.value = formatNanosecondsToDuration(value);
+            input.value = value == null ? '' : String(value);
             return;
         }
         input.value = value == null ? '' : String(value);
-    }
-
-    /**
-     * Парсит human-friendly запись длительности ("6h", "30m", "1h30m") и
-     * возвращает значение в наносекундах (формат, в котором Go time.Duration
-     * сериализуется в JSON по умолчанию).
-     */
-    function parseDurationToNanoseconds(text) {
-        if (!text || typeof text !== 'string') return 0;
-        const re = /(\d+(?:\.\d+)?)\s*(ns|us|µs|ms|s|m|h)/g;
-        const units = {
-            ns: 1,
-            us: 1e3,
-            'µs': 1e3,
-            ms: 1e6,
-            s: 1e9,
-            m: 60 * 1e9,
-            h: 3600 * 1e9
-        };
-        let total = 0;
-        let matched = false;
-        let m;
-        while ((m = re.exec(text)) !== null) {
-            matched = true;
-            total += parseFloat(m[1]) * units[m[2]];
-        }
-        if (!matched) {
-            const v = parseFloat(text);
-            if (Number.isFinite(v)) return v;
-            return 0;
-        }
-        return total;
-    }
-
-    /**
-     * Форматирует наносекунды в человекочитаемую запись ("6h", "1h30m", "5m").
-     */
-    function formatNanosecondsToDuration(ns) {
-        if (typeof ns !== 'number' || !Number.isFinite(ns) || ns <= 0) return '';
-        const sec = Math.round(ns / 1e9);
-        if (sec < 60) return sec + 's';
-        const min = Math.floor(sec / 60);
-        const remSec = sec % 60;
-        if (min < 60) {
-            return remSec === 0 ? min + 'm' : min + 'm' + remSec + 's';
-        }
-        const h = Math.floor(min / 60);
-        const remMin = min % 60;
-        return remMin === 0 ? h + 'h' : h + 'h' + remMin + 'm';
     }
 
     function SettingsModal(options) {
@@ -1138,9 +1089,7 @@
         module.exports = {
             SettingsModal: SettingsModal,
             getByPath: getByPath,
-            setByPath: setByPath,
-            parseDurationToNanoseconds: parseDurationToNanoseconds,
-            formatNanosecondsToDuration: formatNanosecondsToDuration
+            setByPath: setByPath
         };
     } else {
         window.SettingsModalClass = SettingsModal;

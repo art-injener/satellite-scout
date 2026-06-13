@@ -167,7 +167,7 @@ func TestValidate_SatNOGSCacheTTLZero(t *testing.T) {
 
 func TestValidate_SatNOGSValidTTL(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.SatNOGS.CacheTTL = time.Minute
+	cfg.SatNOGS.CacheTTL = Duration(time.Minute)
 
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("expected valid config with 1m cache TTL, got %v", err)
@@ -176,7 +176,7 @@ func TestValidate_SatNOGSValidTTL(t *testing.T) {
 
 func TestValidate_SatNOGSNegativeParams(t *testing.T) {
 	cfg := DefaultConfig()
-	cfg.SatNOGS.Timeout = -1
+	cfg.SatNOGS.Timeout = Duration(-1)
 	cfg.SatNOGS.MaxRetries = -1
 	cfg.SatNOGS.Workers = -1
 

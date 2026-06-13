@@ -33,11 +33,11 @@ func TestDefaultConfig_Values(t *testing.T) {
 	if !cfg.SatNOGS.Enabled {
 		t.Error("SatNOGS.Enabled = false, want true")
 	}
-	if cfg.SatNOGS.CacheTTL != defaultSatNOGSCacheTTL {
-		t.Errorf("SatNOGS.CacheTTL = %v, want %v", cfg.SatNOGS.CacheTTL, defaultSatNOGSCacheTTL)
+	if cfg.SatNOGS.CacheTTL != Duration(defaultSatNOGSCacheTTL) {
+		t.Errorf("SatNOGS.CacheTTL = %v, want %v", cfg.SatNOGS.CacheTTL, Duration(defaultSatNOGSCacheTTL))
 	}
-	if cfg.SatNOGS.Timeout != defaultSatNOGSTimeout {
-		t.Errorf("SatNOGS.Timeout = %v, want %v", cfg.SatNOGS.Timeout, defaultSatNOGSTimeout)
+	if cfg.SatNOGS.Timeout != Duration(defaultSatNOGSTimeout) {
+		t.Errorf("SatNOGS.Timeout = %v, want %v", cfg.SatNOGS.Timeout, Duration(defaultSatNOGSTimeout))
 	}
 	if cfg.SatNOGS.MaxRetries != defaultSatNOGSMaxRetries {
 		t.Errorf("SatNOGS.MaxRetries = %d, want %d", cfg.SatNOGS.MaxRetries, defaultSatNOGSMaxRetries)
@@ -98,7 +98,7 @@ func TestConfig_TLEStoreConfig(t *testing.T) {
 	if tle.CacheDir != cfg.TLE.CacheDir {
 		t.Errorf("CacheDir mismatch")
 	}
-	if tle.UpdateInterval != cfg.TLE.UpdateInterval {
+	if tle.UpdateInterval != cfg.TLE.UpdateInterval.Duration() {
 		t.Errorf("UpdateInterval mismatch")
 	}
 	if tle.MaxTLEAgeDays != cfg.TLE.MaxTLEAgeDays {
@@ -243,8 +243,8 @@ func TestLoad_SatNOGSDefaults(t *testing.T) {
 	if !cfg.SatNOGS.Enabled {
 		t.Error("SatNOGS.Enabled = false, want true (default)")
 	}
-	if cfg.SatNOGS.CacheTTL != 24*time.Hour {
-		t.Errorf("SatNOGS.CacheTTL = %v, want 24h", cfg.SatNOGS.CacheTTL)
+	if cfg.SatNOGS.CacheTTL != Duration(24*time.Hour) {
+		t.Errorf("SatNOGS.CacheTTL = %v, want 24h", cfg.SatNOGS.CacheTTL.Duration())
 	}
 }
 
@@ -256,16 +256,16 @@ func TestLoad_SatNOGSCustomValues(t *testing.T) {
 	if cfg.SatNOGS.Enabled {
 		t.Error("SatNOGS.Enabled = true, want false")
 	}
-	if cfg.SatNOGS.CacheTTL != 30*time.Minute {
-		t.Errorf("SatNOGS.CacheTTL = %v, want 30m", cfg.SatNOGS.CacheTTL)
+	if cfg.SatNOGS.CacheTTL != Duration(30*time.Minute) {
+		t.Errorf("SatNOGS.CacheTTL = %v, want 30m", cfg.SatNOGS.CacheTTL.Duration())
 	}
 }
 
 func TestLoad_SatNOGSInvalidDurationFallsBackToDefault(t *testing.T) {
 	t.Setenv("SATNOGS_CACHE_TTL", "not-a-duration")
 	cfg := Load()
-	if cfg.SatNOGS.CacheTTL != 24*time.Hour {
-		t.Errorf("SatNOGS.CacheTTL = %v, want 24h (fallback)", cfg.SatNOGS.CacheTTL)
+	if cfg.SatNOGS.CacheTTL != Duration(24*time.Hour) {
+		t.Errorf("SatNOGS.CacheTTL = %v, want 24h (fallback)", cfg.SatNOGS.CacheTTL.Duration())
 	}
 }
 

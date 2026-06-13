@@ -239,6 +239,12 @@ body.mode-overview:not(.station-basic) .main-wrapper.tracking-page {
     grid-template-rows: 44px 1fr var(--bottom-panel-height);
 }
 
+/* Свёрнутая нижняя панель в Авто: правило mode-overview выше по специфичности,
+   чем .bottom-panel-collapsed — без этого override высота строки не уменьшается. */
+body.mode-overview:not(.station-basic) .main-wrapper.tracking-page.bottom-panel-collapsed {
+    grid-template-rows: 44px 1fr 36px;
+}
+
 /* ───────────────── Ручной режим: layout вместо карты, нижняя панель скрыта ─────────────────
    В Авто карта (#tracking-layout) и нижняя панель видны.
    В Ручном карту прячем, нижнюю панель прячем, а #layout-manual растягивается во всю

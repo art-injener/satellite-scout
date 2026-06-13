@@ -51,13 +51,13 @@ func DefaultConfig() *Config {
 		TLE: TLEConfig{
 			CacheDir:       tleDefaults.CacheDir,
 			Groups:         append([]string(nil), tleDefaults.Groups...),
-			UpdateInterval: tleDefaults.UpdateInterval,
+			UpdateInterval: Duration(tleDefaults.UpdateInterval),
 			MaxTLEAgeDays:  tleDefaults.MaxTLEAgeDays,
 		},
 		SatNOGS: SatNOGSConfig{
 			Enabled:    defaultSatNOGSEnabled,
-			CacheTTL:   defaultSatNOGSCacheTTL,
-			Timeout:    defaultSatNOGSTimeout,
+			CacheTTL:   Duration(defaultSatNOGSCacheTTL),
+			Timeout:    Duration(defaultSatNOGSTimeout),
 			MaxRetries: defaultSatNOGSMaxRetries,
 			Workers:    defaultSatNOGSWorkers,
 		},
@@ -85,7 +85,7 @@ func DefaultConfig() *Config {
 func (c *Config) TLEStoreConfig() *tracker.TLEStoreConfig {
 	return &tracker.TLEStoreConfig{
 		Groups:         append([]string(nil), c.TLE.Groups...),
-		UpdateInterval: c.TLE.UpdateInterval,
+		UpdateInterval: c.TLE.UpdateInterval.Duration(),
 		CacheDir:       c.TLE.CacheDir,
 		MaxTLEAgeDays:  c.TLE.MaxTLEAgeDays,
 	}
