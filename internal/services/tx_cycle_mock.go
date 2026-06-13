@@ -49,23 +49,23 @@ type txCycleHistoryItem struct {
 }
 
 type txCycleRing struct {
-	items []txCycleHistoryItem
-	head  int
-	count int
-	cap   int
+	items    []txCycleHistoryItem
+	head     int
+	count    int
+	capacity int
 }
 
-func newTxCycleRing(cap int) *txCycleRing {
-	if cap <= 0 {
-		cap = stripCapacity
+func newTxCycleRing(capacity int) *txCycleRing {
+	if capacity <= 0 {
+		capacity = stripCapacity
 	}
-	return &txCycleRing{items: make([]txCycleHistoryItem, cap), cap: cap}
+	return &txCycleRing{items: make([]txCycleHistoryItem, capacity), capacity: capacity}
 }
 
 func (r *txCycleRing) push(item txCycleHistoryItem) {
 	r.items[r.head] = item
-	r.head = (r.head + 1) % r.cap
-	if r.count < r.cap {
+	r.head = (r.head + 1) % r.capacity
+	if r.count < r.capacity {
 		r.count++
 	}
 }
@@ -73,8 +73,8 @@ func (r *txCycleRing) push(item txCycleHistoryItem) {
 // snapshot возвращает срез от новейшего к старейшему.
 func (r *txCycleRing) snapshot() []txCycleHistoryItem {
 	out := make([]txCycleHistoryItem, r.count)
-	for i := 0; i < r.count; i++ {
-		idx := (r.head - 1 - i + r.cap) % r.cap
+	for i := range r.count {
+		idx := (r.head - 1 - i + r.capacity) % r.capacity
 		out[i] = r.items[idx]
 	}
 	return out
@@ -175,12 +175,12 @@ func NewTxCycleMock(
 // Безопасно вызывать с nil-сервисом: метод просто завершится.
 func (m *TxCycleMock) Run(ctx context.Context) {
 	if m == nil || m.hub == nil || m.source == nil || m.catalog == nil {
-		slog.Info("tx_cycle mock disabled (missing dependencies)")
+		slog.InfoContext(ctx, "tx_cycle mock disabled (missing dependencies)")
 		return
 	}
 	ticker := time.NewTicker(m.interval)
 	defer ticker.Stop()
-	slog.Info("tx_cycle mock started", slog.Duration("interval", m.interval))
+	slog.InfoContext(ctx, "tx_cycle mock started", slog.Duration("interval", m.interval))
 
 	// Первый тик через короткую паузу — чтобы satnogsService успел подгрузить
 	// каталог при первом satellite_group_update; тогда новый клиент сразу
@@ -191,7 +191,7 @@ func (m *TxCycleMock) Run(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			slog.Info("tx_cycle mock stopped")
+			slog.InfoContext(ctx, "tx_cycle mock stopped")
 			return
 		case <-warmup.C:
 			m.tick()

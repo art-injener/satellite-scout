@@ -5,6 +5,7 @@ package satnogs
 import (
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -179,7 +180,7 @@ func formatMHz(hz int64) string {
 // formatBaud форматирует baudrate без лишних нулей: 1200 → "1200", 9.6 → "9.6".
 func formatBaud(b float64) string {
 	if b == float64(int64(b)) {
-		return fmt.Sprintf("%d", int64(b))
+		return strconv.FormatInt(int64(b), 10)
 	}
 	return strings.TrimRight(strings.TrimRight(fmt.Sprintf("%.3f", b), "0"), ".")
 }

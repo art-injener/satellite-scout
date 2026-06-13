@@ -211,14 +211,14 @@
         if (mainWrapper && bottomPanel && bottomToggle) {
             const LS_BOTTOM = 'ux.bottomCollapsed';
 
-            function setBottomCollapsed(collapsed) {
+            const setBottomCollapsed = (collapsed) => {
                 bottomPanel.classList.toggle('bottom-panel--collapsed', collapsed);
                 mainWrapper.classList.toggle('bottom-panel-collapsed', collapsed);
                 bottomToggle.textContent = collapsed ? '▲' : '▼';
                 bottomToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
                 bottomPanel.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
                 localStorage.setItem(LS_BOTTOM, collapsed ? '1' : '0');
-            }
+            };
 
             setBottomCollapsed(localStorage.getItem(LS_BOTTOM) === '1');
 
@@ -228,7 +228,7 @@
             });
 
             // В свёрнутом виде клик по левой полоске (не по всей ширине) тоже разворачивает
-            var bottomSide = bottomPanel.querySelector('.bottom-panel__side');
+            const bottomSide = bottomPanel.querySelector('.bottom-panel__side');
             if (bottomSide) {
                 bottomSide.addEventListener('click', function() {
                     if (bottomPanel.classList.contains('bottom-panel--collapsed')) {
@@ -296,8 +296,8 @@
                 if (window.earthView && typeof window.earthView.setObserver === 'function') {
                     fetch('/api/config').then(function(r) { return r.json(); }).then(function(cfg) {
                         if (cfg && cfg.observer) {
-                            var ev = window.earthView;
-                            var cur = ev.observer;
+                            const ev = window.earthView;
+                            const cur = ev.observer;
                             if (!cur || cur.lon !== cfg.observer.lon || cur.lat !== cfg.observer.lat) {
                                 ev.setObserver(cfg.observer.lon, cfg.observer.lat, cfg.observer.name || cur && cur.name || '');
                                 ev.draw();
@@ -739,7 +739,7 @@
 
         const layoutBtn = document.getElementById('auto-link-layout-toggle');
         if (layoutBtn) {
-            layoutBtn.addEventListener('click', function () {
+            layoutBtn.addEventListener('click', function() {
                 if (window._overviewLink && typeof window._overviewLink.toggleLayout === 'function') {
                     window._overviewLink.toggleLayout();
                 }

@@ -18,12 +18,18 @@ var ErrConfigFileNotFound = errors.New("config file not found")
 // более новой версией приложения; даунгрейд опасен и явно отклоняется.
 var ErrUnsupportedVersion = errors.New("unsupported config version")
 
+var (
+	ErrConfigUpdateFnNil    = errors.New("config update: fn is nil")
+	ErrConfigStoreEmpty     = errors.New("config update: store is empty (call Load or Set first)")
+	ErrConfigSaveStoreEmpty = errors.New("config save: store is empty")
+)
+
 // Subscriber вызывается после успешной записи нового конфига на диск.
 // Получает копии старой и новой конфигурации — подписчик сам определяет, какие
 // поля изменились (например, observer.lat → пересчёт пролётов; ui.theme → SSE
 // рассылка темы). Подписчики вызываются последовательно, под отдельной
 // горутиной — Store не блокируется на их выполнении.
-type Subscriber func(old, new *Config)
+type Subscriber func(old, updated *Config)
 
 // Store — потокобезопасный держатель конфигурации с атомарной записью на диск.
 //
@@ -68,8 +74,8 @@ func (s *Store) Load() error {
 	}
 
 	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return fmt.Errorf("parse config: %w", err)
+	if unmarshalErr := json.Unmarshal(data, &cfg); unmarshalErr != nil {
+		return fmt.Errorf("parse config: %w", unmarshalErr)
 	}
 	if cfg.Version > CurrentVersion {
 		return fmt.Errorf("%w: file %d > supported %d", ErrUnsupportedVersion, cfg.Version, CurrentVersion)
@@ -126,13 +132,13 @@ func (s *Store) Subscribe(sub Subscriber) {
 //   - может вернуть ошибку валидации — Store не запишет файл и не нотифицирует.
 func (s *Store) Update(fn func(*Config) error) error {
 	if fn == nil {
-		return errors.New("config update: fn is nil")
+		return ErrConfigUpdateFnNil
 	}
 
 	s.mu.Lock()
 	if s.cfg == nil {
 		s.mu.Unlock()
-		return errors.New("config update: store is empty (call Load or Set first)")
+		return ErrConfigStoreEmpty
 	}
 	old := cloneConfig(s.cfg)
 	working := cloneConfig(s.cfg)
@@ -165,7 +171,7 @@ func (s *Store) Save() error {
 	cfg := s.cfg
 	s.mu.RUnlock()
 	if cfg == nil {
-		return errors.New("config save: store is empty")
+		return ErrConfigSaveStoreEmpty
 	}
 	return writeConfigAtomic(s.path, cfg)
 }
@@ -179,8 +185,8 @@ func writeConfigAtomic(path string, cfg *Config) error {
 	if dir == "" {
 		dir = "."
 	}
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		return fmt.Errorf("mkdir config dir: %w", err)
+	if mkdirErr := os.MkdirAll(dir, 0o750); mkdirErr != nil {
+		return fmt.Errorf("mkdir config dir: %w", mkdirErr)
 	}
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
@@ -198,23 +204,23 @@ func writeConfigAtomic(path string, cfg *Config) error {
 		_ = os.Remove(tmpPath)
 	}
 
-	if _, err := tmp.Write(data); err != nil {
+	if _, writeErr := tmp.Write(data); writeErr != nil {
 		_ = tmp.Close()
 		cleanup()
-		return fmt.Errorf("write temp config: %w", err)
+		return fmt.Errorf("write temp config: %w", writeErr)
 	}
-	if err := tmp.Sync(); err != nil {
+	if syncErr := tmp.Sync(); syncErr != nil {
 		_ = tmp.Close()
 		cleanup()
-		return fmt.Errorf("sync temp config: %w", err)
+		return fmt.Errorf("sync temp config: %w", syncErr)
 	}
-	if err := tmp.Close(); err != nil {
+	if closeErr := tmp.Close(); closeErr != nil {
 		cleanup()
-		return fmt.Errorf("close temp config: %w", err)
+		return fmt.Errorf("close temp config: %w", closeErr)
 	}
-	if err := os.Rename(tmpPath, path); err != nil {
+	if renameErr := os.Rename(tmpPath, path); renameErr != nil {
 		cleanup()
-		return fmt.Errorf("rename temp config: %w", err)
+		return fmt.Errorf("rename temp config: %w", renameErr)
 	}
 	return nil
 }

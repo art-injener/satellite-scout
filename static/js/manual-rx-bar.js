@@ -4,11 +4,11 @@
 'use strict';
 
 (function() {
-    var STORAGE_PANORAMA = 'ux.manualRxPanorama';
-    var STORAGE_AGC = 'ux.manualRxAgc';
+    const STORAGE_PANORAMA = 'ux.manualRxPanorama';
+    const STORAGE_AGC = 'ux.manualRxAgc';
 
     /** Множитель: значение поля × factor = MHz. */
-    var UNIT_TO_MHZ = {
+    const UNIT_TO_MHZ = {
         mhz: 1,
         khz: 0.001,
         hz: 0.000001,
@@ -26,8 +26,8 @@
         if (typeof freqMHz !== 'number' || !isFinite(freqMHz)) {
             return '';
         }
-        var factor = UNIT_TO_MHZ[unit] || 1;
-        var value = freqMHz / factor;
+        const factor = UNIT_TO_MHZ[unit] || 1;
+        const value = freqMHz / factor;
         if (unit === 'hz') {
             return String(Math.round(value));
         }
@@ -43,7 +43,7 @@
 
     function readBool(key, defaultValue) {
         try {
-            var raw = localStorage.getItem(key);
+            const raw = localStorage.getItem(key);
             if (raw === null) {
                 return defaultValue;
             }
@@ -88,7 +88,7 @@
     };
 
     ManualRxBar.prototype._init = function() {
-        var self = this;
+        const self = this;
 
         if (this._freqInput) {
             this._freqMHz = parseInputToMHz(this._freqInput.value, this._getUnit()) || this._freqMHz;
@@ -100,7 +100,7 @@
         });
 
         this._on(this._freqInput, 'change', function() {
-            var mhz = self.getFreqMHz();
+            const mhz = self.getFreqMHz();
             if (mhz != null) {
                 self._freqMHz = mhz;
             }
@@ -146,7 +146,7 @@
         if (!this._pipelineSelect || !this._pipelineSelect.options) {
             return '';
         }
-        var opt = this._pipelineSelect.options[this._pipelineSelect.selectedIndex];
+        const opt = this._pipelineSelect.options[this._pipelineSelect.selectedIndex];
         return opt && opt.text ? String(opt.text).trim() : '';
     };
 
@@ -155,22 +155,22 @@
         if (!this._pipelineSelect || !pipeline) {
             return;
         }
-        var target = String(pipeline).trim();
-        var targetLower = target.toLowerCase();
-        var targetKey = targetLower.replace(/\s+/g, '');
+        const target = String(pipeline).trim();
+        const targetLower = target.toLowerCase();
+        const targetKey = targetLower.replace(/\s+/g, '');
 
-        for (var i = 0; i < this._pipelineSelect.options.length; i++) {
-            var opt = this._pipelineSelect.options[i];
+        for (let i = 0; i < this._pipelineSelect.options.length; i++) {
+            const opt = this._pipelineSelect.options[i];
             if (opt.text && opt.text.toLowerCase() === targetLower) {
                 this._pipelineSelect.selectedIndex = i;
                 return;
             }
         }
 
-        for (var j = 0; j < this._pipelineSelect.options.length; j++) {
-            var o = this._pipelineSelect.options[j];
+        for (let j = 0; j < this._pipelineSelect.options.length; j++) {
+            const o = this._pipelineSelect.options[j];
             if (!o.text) { continue; }
-            var optKey = o.text.toLowerCase().replace(/\s+/g, '');
+            const optKey = o.text.toLowerCase().replace(/\s+/g, '');
             if (targetKey.indexOf(optKey) >= 0 || optKey.indexOf(targetKey) >= 0) {
                 this._pipelineSelect.selectedIndex = j;
                 return;
@@ -194,7 +194,7 @@
         if (!this._freqUnit) {
             return 'mhz';
         }
-        var unit = this._freqUnit.value;
+        const unit = this._freqUnit.value;
         return UNIT_TO_MHZ[unit] ? unit : 'mhz';
     };
 
@@ -202,7 +202,7 @@
         if (!this._freqInput) {
             return;
         }
-        var unit = this._getUnit();
+        const unit = this._getUnit();
         this._freqInput.step = stepForUnit(unit);
         this._freqInput.value = formatFreqForUnit(this._freqMHz, unit);
     };
@@ -228,19 +228,21 @@
         if (!btn) {
             return;
         }
-        var self = this;
-        var on = readBool(storageKey, defaultOn);
+        const self = this;
+        const on = readBool(storageKey, defaultOn);
         this._reflectToggle(btn, on);
 
         this._on(btn, 'click', function() {
-            var next = btn.getAttribute('aria-pressed') !== 'true';
+            const next = btn.getAttribute('aria-pressed') !== 'true';
             self._reflectToggle(btn, next);
             writeBool(storageKey, next);
             if (btn === self._panBtn) {
-                self._root && self._root.dispatchEvent(new CustomEvent('rx:panorama-toggle', {
-                    bubbles: true,
-                    detail: { enabled: next },
-                }));
+                if (self._root) {
+                    self._root.dispatchEvent(new CustomEvent('rx:panorama-toggle', {
+                        bubbles: true,
+                        detail: { enabled: next },
+                    }));
+                }
             }
         });
     };
@@ -255,19 +257,19 @@
     };
 
     ManualRxBar.prototype.destroy = function() {
-        for (var i = 0; i < this._handlers.length; i++) {
-            var h = this._handlers[i];
+        for (let i = 0; i < this._handlers.length; i++) {
+            const h = this._handlers[i];
             h[0].removeEventListener(h[1], h[2]);
         }
         this._handlers = [];
     };
 
     function parseInputToMHz(raw, unit) {
-        var n = parseNumber(raw);
+        const n = parseNumber(raw);
         if (!isFinite(n)) {
             return null;
         }
-        var factor = UNIT_TO_MHZ[unit] || 1;
+        const factor = UNIT_TO_MHZ[unit] || 1;
         return n * factor;
     }
 

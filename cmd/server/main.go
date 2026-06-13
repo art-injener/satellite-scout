@@ -57,8 +57,8 @@ func main() {
 	// TLEStore — хранилище TLE с автообновлением. Конфиг tracker'а собирается
 	// из единого config.Config через адаптер TLEStoreConfig().
 	tleStore := tracker.NewTLEStore(cfg.TLEStoreConfig())
-	if err := tleStore.Start(svcCtx); err != nil {
-		slog.Error("failed to start TLE store", "error", err)
+	if startErr := tleStore.Start(svcCtx); startErr != nil {
+		slog.Error("failed to start TLE store", "error", startErr)
 	}
 
 	// SSE Hub — единая точка рассылки real-time данных.
@@ -83,17 +83,17 @@ func main() {
 		}
 		clientStore.Touch(clientID)
 		trackingID := clientStore.GetTracking(clientID)
-		data, err := json.Marshal(struct {
+		payload, marshalErr := json.Marshal(struct {
 			TrackingID int   `json:"tracking_id"`
 			TS         int64 `json:"ts"`
 		}{
 			TrackingID: trackingID,
 			TS:         time.Now().UTC().UnixMilli(),
 		})
-		if err != nil {
+		if marshalErr != nil {
 			return nil
 		}
-		return []handlers.SSEEvent{{Type: "client_state_restore", Data: data}}
+		return []handlers.SSEEvent{{Type: "client_state_restore", Data: payload}}
 	})
 
 	// Список исключённых NORAD ID — не попадают в группу, список пролётов и ручное наблюдение.
@@ -165,9 +165,9 @@ func main() {
 			)
 		}
 		if old.UI.Theme != n.UI.Theme {
-			payload, err := json.Marshal(map[string]string{"theme": n.UI.Theme})
-			if err == nil {
-				sseHub.Broadcast("theme_changed", payload)
+			themePayload, marshalErr := json.Marshal(map[string]string{"theme": n.UI.Theme})
+			if marshalErr == nil {
+				sseHub.Broadcast("theme_changed", themePayload)
 				slog.Info("theme hot-reloaded", slog.String("theme", n.UI.Theme))
 			}
 		}
@@ -175,7 +175,18 @@ func main() {
 
 	// Маршруты.
 	mux := http.NewServeMux()
-	setupRoutes(mux, cfg, configStore, sseHub, trackingService, satnogsService, excludeStore, passService, trackingService, templatesFS, staticFS)
+	setupRoutes(mux, &routeDeps{
+		Cfg:         cfg,
+		ConfigStore: configStore,
+		Templates:   templatesFS,
+		Static:      staticFS,
+		SSE:         sseHub,
+		Tracking:    trackingService,
+		SatNOGS:     satnogsService,
+		Exclude:     excludeStore,
+		PassCache:   passService,
+		Group:       trackingService,
+	})
 
 	// HTTP-сервер.
 	// WriteTimeout не устанавливается глобально, т.к. он убивает SSE-соединения.

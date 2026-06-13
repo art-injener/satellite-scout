@@ -393,38 +393,9 @@ function leaderSegmentsOf(marker, placement) {
     const bend = placement.bend;
     const tailX = (card.x > bend.x) ? card.x : (card.x + card.w);
     return [
-        { x1: marker.x, y1: marker.y, x2: bend.x,  y2: bend.y },
-        { x1: bend.x,    y1: bend.y,   x2: tailX,  y2: bend.y },
+        { x1: marker.x, y1: marker.y, x2: bend.x, y2: bend.y },
+        { x1: bend.x, y1: bend.y, x2: tailX, y2: bend.y },
     ];
-}
-
-/**
- * Пересекает ли хотя бы один отрезок leader-линии (stem/tail) любой из
- * заданных запретных сегментов? Быстрее, чем считать все пересечения, —
- * достаточно одного, чтобы забраковать кандидата.
- */
-function leaderHitsAnySegment(leaderSegs, segments) {
-    for (let i = 0; i < leaderSegs.length; i++) {
-        const L = leaderSegs[i];
-        const l1 = { x: L.x1, y: L.y1 };
-        const l2 = { x: L.x2, y: L.y2 };
-        for (let j = 0; j < segments.length; j++) {
-            const S = segments[j];
-            const lxMin = (L.x1 < L.x2) ? L.x1 : L.x2;
-            const lxMax = (L.x1 < L.x2) ? L.x2 : L.x1;
-            const lyMin = (L.y1 < L.y2) ? L.y1 : L.y2;
-            const lyMax = (L.y1 < L.y2) ? L.y2 : L.y1;
-            const sxMin = (S.x1 < S.x2) ? S.x1 : S.x2;
-            const sxMax = (S.x1 < S.x2) ? S.x2 : S.x1;
-            const syMin = (S.y1 < S.y2) ? S.y1 : S.y2;
-            const syMax = (S.y1 < S.y2) ? S.y2 : S.y1;
-            if (lxMax < sxMin || sxMax < lxMin || lyMax < syMin || syMax < lyMin) { continue; }
-            if (segmentsIntersect(l1, l2, { x: S.x1, y: S.y1 }, { x: S.x2, y: S.y2 })) {
-                return true;
-            }
-        }
-    }
-    return false;
 }
 
 /**
@@ -589,15 +560,6 @@ function cardCollidesWithOthers(card, placements, ownIdx, gap) {
         if (!sepX && !sepY) { return true; }
     }
     return false;
-}
-
-/** Нормализация угла в диапазон [-π, π). Используется перед сортировкой слотов. */
-function wrapAngle(theta) {
-    const TAU = 2 * Math.PI;
-    let t = theta;
-    while (t < -Math.PI) { t += TAU; }
-    while (t >= Math.PI) { t -= TAU; }
-    return t;
 }
 
 /** Максимум ширины карточки по группе индексов (per-marker cardWidth → fallback). */
@@ -892,7 +854,7 @@ class CalloutLayout {
             // Для каждого стека формируем «виртуальный маркер» (centroid, max width,
             // увеличенный cardHeight). Порядок id — по возрастанию NORAD (стабильный).
             const virtualMarkers = [];
-            const stackMeta = [];  // параллельный массив: info о стеке
+            const stackMeta = []; // параллельный массив: info о стеке
             for (let si = 0; si < stacksInGroup.length; si++) {
                 const memberIndices = stacksInGroup[si];
                 // Стабильная сортировка по NORAD ID
@@ -1454,7 +1416,7 @@ class CalloutRenderer {
             entry.el.classList.toggle('map-sat-callout--tracked', anyTracked);
 
             const maxVis = this.opts.stackMaxVisible || 4;
-            const isExpanded = !!entry.expanded;
+            const isExpanded = Boolean(entry.expanded);
             const totalRows = stacked.length;
             const showAll = isExpanded || totalRows <= maxVis;
             const visibleCount = showAll ? totalRows : maxVis;
@@ -1499,15 +1461,15 @@ class CalloutRenderer {
                         entry.expanded = !entry.expanded;
                         entry.el.classList.toggle('map-sat-callout--expanded', entry.expanded);
                         // Показать/скрыть строки inline без ожидания layout-цикла.
-                        var allRows = entry.el.querySelectorAll('.map-sat-callout__stack-row');
-                        var max = entry.expanded ? allRows.length : (maxVis - 1);
-                        for (var r = 0; r < allRows.length; r++) {
+                        const allRows = entry.el.querySelectorAll('.map-sat-callout__stack-row');
+                        const max = entry.expanded ? allRows.length : (maxVis - 1);
+                        for (let r = 0; r < allRows.length; r++) {
                             allRows[r].style.display = (r < max) ? '' : 'none';
                         }
                         if (entry.expanded) {
                             entry.moreEl.textContent = '\u25B2 свернуть';
                         } else {
-                            var hid = allRows.length - (maxVis - 1);
+                            const hid = allRows.length - (maxVis - 1);
                             entry.moreEl.textContent = '...+' + hid + ' ещё';
                         }
                     });
@@ -1531,7 +1493,7 @@ class CalloutRenderer {
             // Одиночная карточка
             entry.el.classList.remove('map-sat-callout--stacked');
             const singleInfo = (info && lt.id != null) ? info[lt.id] : null;
-            entry.el.classList.toggle('map-sat-callout--tracked', !!(singleInfo && singleInfo.tracked));
+            entry.el.classList.toggle('map-sat-callout--tracked', Boolean(singleInfo && singleInfo.tracked));
             if (singleInfo) {
                 entry.nameEl.textContent = singleInfo.name || '';
                 const aliasText = singleInfo.alias ? String(singleInfo.alias) : '';

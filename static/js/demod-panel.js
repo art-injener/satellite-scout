@@ -18,10 +18,10 @@
 
     /** Подбор mock-метрик по строке модуляции. */
     function metricsFromTx(tx) {
-        var active = tx.active !== false;
-        var mod = (tx.modulation || '').toLowerCase();
-        var pipeline = tx.modulation || '—';
-        var rate = '—';
+        const active = tx.active !== false;
+        const mod = (tx.modulation || '').toLowerCase();
+        let pipeline = tx.modulation || '—';
+        let rate = '—';
 
         if (mod.indexOf('fsk') >= 0 && (mod.indexOf('1k2') >= 0 || mod.indexOf('1200') >= 0)) {
             pipeline = 'FSK 1200';
@@ -145,8 +145,8 @@
     };
 
     DemodPanel.prototype._renderHeader = function(ch) {
-        var els = this._els;
-        var locked = ch.active !== false;
+        const els = this._els;
+        const locked = ch.active !== false;
 
         if (els.lockHead) {
             els.lockHead.classList.toggle('ml-demod__channel-led--lock', locked);
@@ -166,8 +166,8 @@
 
     DemodPanel.prototype._applyMetrics = function(metrics) {
         this._metrics = metrics;
-        var els = this._els;
-        var locked = metrics.lock === true;
+        const els = this._els;
+        const locked = metrics.lock === true;
 
         if (els.dmLock) {
             els.dmLock.textContent = locked ? '●' : '○';
@@ -202,7 +202,7 @@
             this._setText(els.fec, metrics.fec, locked);
         }
         if (els.squelch) {
-            var squelchOpen = !metrics.squelchClosed && locked;
+            const squelchOpen = !metrics.squelchClosed && locked;
             els.squelch.textContent = metrics.squelch != null ? String(metrics.squelch) : '—';
             els.squelch.classList.toggle('ml-demod__value--ok', squelchOpen);
             els.squelch.classList.toggle('ml-demod__value--idle', !locked || metrics.squelch === '—');
@@ -217,7 +217,7 @@
             this._setText(els.sync, metrics.sync, locked);
         }
         if (els.crc) {
-            var crcOk = metrics.crc === 'OK';
+            const crcOk = metrics.crc === 'OK';
             els.crc.textContent = metrics.crc != null ? String(metrics.crc) : '—';
             els.crc.classList.toggle('ml-demod__value--ok', crcOk);
             els.crc.classList.toggle('ml-demod__value--idle', !locked || metrics.crc === '—');
@@ -239,30 +239,30 @@
     /** Имитация дрейфа метрик при активном канале. */
     DemodPanel.prototype._startMockDrift = function() {
         this._stopMockDrift();
-        var self = this;
+        const self = this;
         this._mockTimer = setInterval(function() {
             if (!self._metrics || self._metrics.lock !== true) {
                 return;
             }
-            var els = self._els;
+            const els = self._els;
 
-            var snrBase = 12.4 + (Math.random() - 0.5) * 1.2;
-            var afcBase = -18 + Math.round((Math.random() - 0.5) * 8);
-            var foffBase = 1.2 + (Math.random() - 0.5) * 0.4;
-            var cn0Base = 52.3 + (Math.random() - 0.5) * 1.5;
-            var esn0Base = snrBase - 4.0 + (Math.random() - 0.5) * 0.3;
-            var rssiBase = -42 + Math.round((Math.random() - 0.5) * 4);
+            const snrBase = 12.4 + (Math.random() - 0.5) * 1.2;
+            const afcBase = -18 + Math.round((Math.random() - 0.5) * 8);
+            const foffBase = 1.2 + (Math.random() - 0.5) * 0.4;
+            const cn0Base = 52.3 + (Math.random() - 0.5) * 1.5;
+            const esn0Base = snrBase - 4.0 + (Math.random() - 0.5) * 0.3;
+            const rssiBase = -42 + Math.round((Math.random() - 0.5) * 4);
 
             if (els.snr) { els.snr.textContent = snrBase.toFixed(1) + ' dB'; }
             if (els.cn0) { els.cn0.textContent = cn0Base.toFixed(1) + ' dB·Hz'; }
             if (els.esn0) { els.esn0.textContent = esn0Base.toFixed(1) + ' dB'; }
             if (els.rssi) { els.rssi.textContent = rssiBase + ' dBm'; }
             if (els.afc) {
-                var afcSign = afcBase >= 0 ? '+' : '';
+                const afcSign = afcBase >= 0 ? '+' : '';
                 els.afc.textContent = afcSign + afcBase + ' Hz';
             }
             if (els.foff) {
-                var foffSign = foffBase >= 0 ? '+' : '';
+                const foffSign = foffBase >= 0 ? '+' : '';
                 els.foff.textContent = foffSign + foffBase.toFixed(2) + ' kHz';
             }
 
@@ -273,7 +273,7 @@
                 if (els.frames) { els.frames.textContent = String(self._frames); }
                 if (els.sync) { els.sync.textContent = String(self._syncCount); }
                 if (els.fec) {
-                    var fecBytes = Math.floor(Math.random() * 18);
+                    const fecBytes = Math.floor(Math.random() * 18);
                     els.fec.textContent = fecBytes + ' B';
                 }
             } else if (Math.random() < 0.2) {
@@ -282,7 +282,7 @@
             }
 
             if (els.last && self._lastFrameAt > 0) {
-                var dt = (Date.now() - self._lastFrameAt) / 1000;
+                const dt = (Date.now() - self._lastFrameAt) / 1000;
                 els.last.textContent = dt < 10 ? dt.toFixed(1) + ' s' : Math.round(dt) + ' s';
             }
         }, 1200);

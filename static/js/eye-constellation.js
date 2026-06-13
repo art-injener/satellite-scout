@@ -26,38 +26,38 @@
 
     // ── Mode / категории модуляций ──────────────────────────────────────
 
-    var MODE_EYE = 'eye';
-    var MODE_CONST = 'constellation';
-    var MODE_ENVELOPE = 'envelope';
-    var MODE_AUDIO = 'audio';
-    var MODE_HISTOGRAM = 'histogram';
+    const MODE_EYE = 'eye';
+    const MODE_CONST = 'constellation';
+    const MODE_ENVELOPE = 'envelope';
+    const MODE_AUDIO = 'audio';
+    const MODE_HISTOGRAM = 'histogram';
 
-    var CAT_NRZ = 'nrz';
-    var CAT_PSK = 'psk';
-    var CAT_CW = 'cw';
-    var CAT_FM = 'fm';
-    var CAT_OOK = 'ook';
+    const CAT_NRZ = 'nrz';
+    const CAT_PSK = 'psk';
+    const CAT_CW = 'cw';
+    const CAT_FM = 'fm';
+    const CAT_OOK = 'ook';
 
     // Доступные диаграммы по категории; первая в списке — по умолчанию.
-    var CATEGORY_TABS = {};
+    const CATEGORY_TABS = {};
     CATEGORY_TABS[CAT_NRZ] = [MODE_EYE, MODE_HISTOGRAM];
     CATEGORY_TABS[CAT_PSK] = [MODE_CONST, MODE_EYE];
     CATEGORY_TABS[CAT_CW] = [MODE_ENVELOPE];
     CATEGORY_TABS[CAT_FM] = [MODE_AUDIO];
     CATEGORY_TABS[CAT_OOK] = [MODE_ENVELOPE, MODE_HISTOGRAM];
 
-    var TAB_LABELS = {};
+    const TAB_LABELS = {};
     TAB_LABELS[MODE_EYE] = 'Eye';
     TAB_LABELS[MODE_CONST] = 'Constellation';
     TAB_LABELS[MODE_ENVELOPE] = 'Envelope';
     TAB_LABELS[MODE_AUDIO] = 'Audio';
     TAB_LABELS[MODE_HISTOGRAM] = 'Histogram';
 
-    var TICK_MS = 80;
+    const TICK_MS = 80;
 
     /** Резолвер строки модуляции в категорию. */
     function categoryOf(modStr) {
-        var m = String(modStr || '').toLowerCase();
+        const m = String(modStr || '').toLowerCase();
         if (!m) { return CAT_NRZ; }
         // Порядок важен: GMSK содержит «sk», поэтому проверяем раньше PSK.
         if (m.indexOf('gmsk') >= 0) { return CAT_NRZ; }
@@ -114,7 +114,7 @@
     // ── Tabs (динамический рендер) ─────────────────────────────────────
 
     EyeConstellationView.prototype._renderTabs = function() {
-        var container = this._tabsContainer;
+        const container = this._tabsContainer;
         if (!container) { return; }
 
         while (container.firstChild) {
@@ -122,10 +122,10 @@
         }
         this._tabButtons = [];
 
-        var self = this;
-        for (var i = 0; i < this._availableModes.length; i++) {
-            var modeId = this._availableModes[i];
-            var btn = document.createElement('button');
+        const self = this;
+        for (let i = 0; i < this._availableModes.length; i++) {
+            const modeId = this._availableModes[i];
+            const btn = document.createElement('button');
             btn.type = 'button';
             btn.textContent = TAB_LABELS[modeId] || modeId;
             btn.dataset.mode = modeId;
@@ -146,16 +146,16 @@
     };
 
     EyeConstellationView.prototype._highlightActiveTab = function() {
-        for (var i = 0; i < this._tabButtons.length; i++) {
-            var btn = this._tabButtons[i];
-            var on = btn.dataset && btn.dataset.mode === this._mode;
+        for (let i = 0; i < this._tabButtons.length; i++) {
+            const btn = this._tabButtons[i];
+            const on = btn.dataset && btn.dataset.mode === this._mode;
             btn.classList.toggle('ml-eye__tab--on', on);
         }
     };
 
     EyeConstellationView.prototype._bindAuto = function() {
         if (!this._autoEl) { return; }
-        var self = this;
+        const self = this;
         this._autoEl.addEventListener('click', function() {
             self._autoMode = true;
             self._updateAutoLabel();
@@ -201,16 +201,16 @@
         this._modulationStr = modStr || '';
         if (!modStr) { return; }
 
-        var cat = categoryOf(modStr);
-        var modes = CATEGORY_TABS[cat] ? CATEGORY_TABS[cat].slice() : [MODE_EYE];
+        const cat = categoryOf(modStr);
+        const modes = CATEGORY_TABS[cat] ? CATEGORY_TABS[cat].slice() : [MODE_EYE];
 
-        var categoryChanged = cat !== this._category;
+        const categoryChanged = cat !== this._category;
         this._category = cat;
         this._availableModes = modes;
 
         // В auto-режиме всегда возвращаемся к дефолту категории.
         // В ручном режиме сохраняем текущий mode, если он доступен.
-        var nextMode;
+        let nextMode;
         if (this._autoMode) {
             nextMode = modes[0];
         } else if (modes.indexOf(this._mode) >= 0) {
@@ -236,7 +236,7 @@
     };
 
     EyeConstellationView.prototype.setAutoMode = function(on) {
-        this._autoMode = !!on;
+        this._autoMode = Boolean(on);
         this._updateAutoLabel();
     };
 
@@ -260,15 +260,15 @@
 
     EyeConstellationView.prototype._initResize = function() {
         if (!this._canvas || typeof ResizeObserver === 'undefined') { return; }
-        var self = this;
+        const self = this;
         this._ro = new ResizeObserver(function() { self._resize(); });
         this._ro.observe(this._canvas.parentElement || this._canvas);
     };
 
     EyeConstellationView.prototype._resize = function() {
         if (!this._canvas || !this._canvas.parentElement) { return; }
-        var w = this._canvas.parentElement.clientWidth;
-        var h = this._canvas.parentElement.clientHeight;
+        const w = this._canvas.parentElement.clientWidth;
+        const h = this._canvas.parentElement.clientHeight;
         if (w > 0 && h > 0 && (this._canvas.width !== w || this._canvas.height !== h)) {
             this._canvas.width = w;
             this._canvas.height = h;
@@ -337,22 +337,22 @@
         ctx.stroke();
         ctx.setLineDash([]);
 
-        var MAX_TRACES = 48;
+        const MAX_TRACES = 48;
         if (this._eyeTraces.length > MAX_TRACES) {
             this._eyeTraces = this._eyeTraces.slice(-MAX_TRACES);
         }
 
-        var color = traceColor();
-        for (var t = 0; t < this._eyeTraces.length; t++) {
-            var trace = this._eyeTraces[t];
-            var age = (this._eyeTraces.length - t) / this._eyeTraces.length;
+        const color = traceColor();
+        for (let t = 0; t < this._eyeTraces.length; t++) {
+            const trace = this._eyeTraces[t];
+            const age = (this._eyeTraces.length - t) / this._eyeTraces.length;
             ctx.globalAlpha = 0.12 + 0.55 * (1 - age);
             ctx.strokeStyle = color;
             ctx.lineWidth = 1;
             ctx.beginPath();
-            for (var i = 0; i < trace.length; i++) {
-                var x = (i / (trace.length - 1)) * w;
-                var y = h / 2 - trace[i] * (h * 0.38);
+            for (let i = 0; i < trace.length; i++) {
+                const x = (i / (trace.length - 1)) * w;
+                const y = h / 2 - trace[i] * (h * 0.38);
                 if (i === 0) { ctx.moveTo(x, y); } else { ctx.lineTo(x, y); }
             }
             ctx.stroke();
@@ -363,22 +363,22 @@
     function eyeLevelStep(from, to, t, edgeWidth) {
         if (t <= 0) { return from; }
         if (t >= edgeWidth) { return to; }
-        var x = 0.5 - 0.5 * Math.cos(Math.PI * t / edgeWidth);
+        const x = 0.5 - 0.5 * Math.cos(Math.PI * t / edgeWidth);
         return from + (to - from) * x;
     }
 
     EyeConstellationView.prototype._generateEyeTrace = function() {
-        var pts = 128;
-        var trace = new Array(pts);
-        var sPrev = Math.random() > 0.5 ? 1 : -1;
-        var sMid = Math.random() > 0.5 ? 1 : -1;
-        var sNext = Math.random() > 0.5 ? 1 : -1;
-        var noise = 0.05;
-        var edge = 0.18;
+        const pts = 128;
+        const trace = new Array(pts);
+        const sPrev = Math.random() > 0.5 ? 1 : -1;
+        const sMid = Math.random() > 0.5 ? 1 : -1;
+        const sNext = Math.random() > 0.5 ? 1 : -1;
+        const noise = 0.05;
+        const edge = 0.18;
 
-        for (var i = 0; i < pts; i++) {
-            var ui = (i / (pts - 1)) * 2;
-            var y;
+        for (let i = 0; i < pts; i++) {
+            const ui = (i / (pts - 1)) * 2;
+            let y;
             if (ui < 1) {
                 if (ui < edge) {
                     y = eyeLevelStep(sPrev, sMid, ui, edge);
@@ -386,7 +386,7 @@
                     y = sMid;
                 }
             } else {
-                var ui2 = ui - 1;
+                const ui2 = ui - 1;
                 if (ui2 < edge) {
                     y = eyeLevelStep(sMid, sNext, ui2, edge);
                 } else {
@@ -404,13 +404,13 @@
         ctx.fillStyle = plotBg();
         ctx.fillRect(0, 0, w, h);
 
-        var ax = axisColor();
-        var grid = gridColor();
+        const ax = axisColor();
+        const grid = gridColor();
 
-        var cx = w / 2;
-        var overlayPad = 28;
-        var cy = h / 2 + Math.min(overlayPad * 0.35, h * 0.04);
-        var r = Math.min(w, h - overlayPad) * 0.44;
+        const cx = w / 2;
+        const overlayPad = 28;
+        const cy = h / 2 + Math.min(overlayPad * 0.35, h * 0.04);
+        const r = Math.min(w, h - overlayPad) * 0.44;
 
         ctx.strokeStyle = ax;
         ctx.lineWidth = 1.5;
@@ -431,7 +431,7 @@
 
         ctx.strokeStyle = ax;
         ctx.lineWidth = 1;
-        var tick = 5;
+        const tick = 5;
         ctx.beginPath();
         ctx.moveTo(cx + r, cy - tick); ctx.lineTo(cx + r, cy + tick);
         ctx.moveTo(cx - r, cy - tick); ctx.lineTo(cx - r, cy + tick);
@@ -439,15 +439,15 @@
         ctx.moveTo(cx - tick, cy + r); ctx.lineTo(cx + tick, cy + r);
         ctx.stroke();
 
-        var MAX_PTS = 300;
+        const MAX_PTS = 300;
         if (this._constPoints.length > MAX_PTS) {
             this._constPoints = this._constPoints.slice(-MAX_PTS);
         }
 
-        var ptColor = accentColor();
-        for (var i = 0; i < this._constPoints.length; i++) {
-            var p = this._constPoints[i];
-            var age = (this._constPoints.length - i) / this._constPoints.length;
+        const ptColor = accentColor();
+        for (let i = 0; i < this._constPoints.length; i++) {
+            const p = this._constPoints[i];
+            const age = (this._constPoints.length - i) / this._constPoints.length;
             ctx.globalAlpha = 0.15 + 0.65 * (1 - age);
             ctx.fillStyle = ptColor;
             ctx.beginPath();
@@ -456,11 +456,11 @@
         }
         ctx.globalAlpha = 1;
 
-        var idealColor = successColor();
+        const idealColor = successColor();
         ctx.fillStyle = idealColor;
         ctx.globalAlpha = 0.45;
-        var ideals = this._constellationIdeals();
-        for (var k = 0; k < ideals.length; k++) {
+        const ideals = this._constellationIdeals();
+        for (let k = 0; k < ideals.length; k++) {
             ctx.beginPath();
             ctx.arc(cx + ideals[k][0] * r, cy - ideals[k][1] * r, 3, 0, Math.PI * 2);
             ctx.fill();
@@ -475,7 +475,7 @@
     };
 
     EyeConstellationView.prototype._constellationIdeals = function() {
-        var m = (this._modulationStr || '').toLowerCase();
+        const m = (this._modulationStr || '').toLowerCase();
         if (m.indexOf('qpsk') >= 0) {
             return [[1, 0], [-1, 0], [0, 1], [0, -1]];
         }
@@ -483,12 +483,12 @@
     };
 
     EyeConstellationView.prototype._generateConstPoints = function() {
-        var noise = 0.26;
-        var ideals = this._constellationIdeals();
-        var batch = [];
-        var count = 6 + Math.floor(Math.random() * 8);
-        for (var i = 0; i < count; i++) {
-            var ideal = ideals[Math.floor(Math.random() * ideals.length)];
+        const noise = 0.26;
+        const ideals = this._constellationIdeals();
+        const batch = [];
+        const count = 6 + Math.floor(Math.random() * 8);
+        for (let i = 0; i < count; i++) {
+            const ideal = ideals[Math.floor(Math.random() * ideals.length)];
             batch.push([
                 ideal[0] + (Math.random() - 0.5) * noise,
                 ideal[1] + (Math.random() - 0.5) * noise,
@@ -500,7 +500,7 @@
     // ── Envelope (CW / OOK) ────────────────────────────────────────────
 
     /** Морзянка: точка — 1 ui, тире — 3 ui, разделитель внутри буквы — 1 ui, между буквами — 3 ui. */
-    var MORSE_ALPHABET = {
+    const MORSE_ALPHABET = {
         A: '.-', B: '-...', C: '-.-.', D: '-..', E: '.', F: '..-.', G: '--.', H: '....',
         I: '..', J: '.---', K: '-.-', L: '.-..', M: '--', N: '-.', O: '---', P: '.--.',
         Q: '--.-', R: '.-.', S: '...', T: '-', U: '..-', V: '...-', W: '.--', X: '-..-',
@@ -508,16 +508,16 @@
     };
 
     function morseSequence(text) {
-        var seq = [];
-        for (var i = 0; i < text.length; i++) {
-            var ch = text.charAt(i).toUpperCase();
+        const seq = [];
+        for (let i = 0; i < text.length; i++) {
+            const ch = text.charAt(i).toUpperCase();
             if (ch === ' ') {
                 seq.push({ on: false, ui: 7 });
                 continue;
             }
-            var code = MORSE_ALPHABET[ch];
+            const code = MORSE_ALPHABET[ch];
             if (!code) { continue; }
-            for (var j = 0; j < code.length; j++) {
+            for (let j = 0; j < code.length; j++) {
                 seq.push({ on: true, ui: code.charAt(j) === '-' ? 3 : 1 });
                 if (j < code.length - 1) {
                     seq.push({ on: false, ui: 1 });
@@ -534,8 +534,8 @@
         ctx.fillStyle = plotBg();
         ctx.fillRect(0, 0, w, h);
 
-        var ax = axisColor();
-        var grid = gridColor();
+        const ax = axisColor();
+        const grid = gridColor();
 
         ctx.strokeStyle = grid;
         ctx.lineWidth = 1;
@@ -555,22 +555,22 @@
         ctx.lineTo(w, h * 0.82);
         ctx.stroke();
 
-        var buf = this._envelopeBuf;
+        const buf = this._envelopeBuf;
         if (!buf || buf.length === 0) { return; }
 
         ctx.strokeStyle = traceColor();
         ctx.fillStyle = traceColor();
         ctx.globalAlpha = 0.18;
 
-        var baseY = h * 0.82;
-        var topY = h * 0.18;
-        var span = baseY - topY;
+        const baseY = h * 0.82;
+        const topY = h * 0.18;
+        const span = baseY - topY;
 
         ctx.beginPath();
         ctx.moveTo(0, baseY);
-        for (var i = 0; i < buf.length; i++) {
-            var x = (i / (buf.length - 1)) * w;
-            var y = baseY - buf[i] * span;
+        for (let i = 0; i < buf.length; i++) {
+            const x = (i / (buf.length - 1)) * w;
+            const y = baseY - buf[i] * span;
             ctx.lineTo(x, y);
         }
         ctx.lineTo(w, baseY);
@@ -579,9 +579,9 @@
 
         ctx.globalAlpha = 1;
         ctx.beginPath();
-        for (var k = 0; k < buf.length; k++) {
-            var xx = (k / (buf.length - 1)) * w;
-            var yy = baseY - buf[k] * span;
+        for (let k = 0; k < buf.length; k++) {
+            const xx = (k / (buf.length - 1)) * w;
+            const yy = baseY - buf[k] * span;
             if (k === 0) { ctx.moveTo(xx, yy); } else { ctx.lineTo(xx, yy); }
         }
         ctx.stroke();
@@ -594,10 +594,10 @@
 
     /** Поток сэмплов огибающей: для CW — морзянка, для OOK — случайные импульсы. */
     EyeConstellationView.prototype._generateEnvelopeChunk = function() {
-        var samplesPerUI = 16;
-        var chunkLen = 96;
-        var noise = 0.04;
-        var edge = 0.20;
+        const samplesPerUI = 16;
+        const chunkLen = 96;
+        const noise = 0.04;
+        const edge = 0.20;
 
         if (this._category === CAT_CW) {
             if (!this._morseSeq || this._morseIdx >= this._morseSeq.length) {
@@ -613,10 +613,10 @@
             }
         }
 
-        var chunk = new Array(chunkLen);
-        var produced = 0;
+        const chunk = new Array(chunkLen);
+        let produced = 0;
         while (produced < chunkLen) {
-            var seq, idxRef;
+            let seq, idxRef;
             if (this._category === CAT_CW) {
                 seq = this._morseSeq;
                 idxRef = '_morseIdx';
@@ -636,14 +636,14 @@
                 }
                 continue;
             }
-            var element = seq[this[idxRef]];
-            var subIdxRef = (this._category === CAT_CW) ? '_morseSubIdx' : '_ookSubIdx';
-            var totalSubSamples = element.ui * samplesPerUI;
-            var target = element.on ? 1 : 0;
-            var prevTarget = this._envLastTarget != null ? this._envLastTarget : 0;
+            const element = seq[this[idxRef]];
+            const subIdxRef = (this._category === CAT_CW) ? '_morseSubIdx' : '_ookSubIdx';
+            const totalSubSamples = element.ui * samplesPerUI;
+            const target = element.on ? 1 : 0;
+            const prevTarget = this._envLastTarget != null ? this._envLastTarget : 0;
             while (this[subIdxRef] < totalSubSamples && produced < chunkLen) {
-                var localT = this[subIdxRef] / samplesPerUI;
-                var y;
+                const localT = this[subIdxRef] / samplesPerUI;
+                let y;
                 if (localT < edge) {
                     y = eyeLevelStep(prevTarget, target, localT, edge);
                 } else {
@@ -664,9 +664,9 @@
 
     /** Случайная OOK-последовательность: 6–14 импульсов с шириной 1–4 ui. */
     EyeConstellationView.prototype._randomOokSeq = function() {
-        var n = 6 + Math.floor(Math.random() * 9);
-        var seq = [];
-        for (var i = 0; i < n; i++) {
+        const n = 6 + Math.floor(Math.random() * 9);
+        const seq = [];
+        for (let i = 0; i < n; i++) {
             seq.push({ on: true, ui: 1 + Math.floor(Math.random() * 4) });
             seq.push({ on: false, ui: 1 + Math.floor(Math.random() * 3) });
         }
@@ -679,15 +679,15 @@
         ctx.fillStyle = plotBg();
         ctx.fillRect(0, 0, w, h);
 
-        var ax = axisColor();
-        var grid = gridColor();
+        const ax = axisColor();
+        const grid = gridColor();
 
         ctx.strokeStyle = grid;
         ctx.lineWidth = 1;
         ctx.setLineDash([3, 4]);
         ctx.beginPath();
-        for (var g = 1; g < 5; g++) {
-            var y = (h * g) / 5;
+        for (let g = 1; g < 5; g++) {
+            const y = (h * g) / 5;
             ctx.moveTo(0, y);
             ctx.lineTo(w, y);
         }
@@ -701,20 +701,20 @@
         ctx.lineTo(w, h * 0.92);
         ctx.stroke();
 
-        var spec = this._audioSpec;
+        const spec = this._audioSpec;
         if (!spec || spec.length === 0) { return; }
 
-        var baseY = h * 0.92;
-        var topY = h * 0.10;
-        var span = baseY - topY;
+        const baseY = h * 0.92;
+        const topY = h * 0.10;
+        const span = baseY - topY;
 
         ctx.fillStyle = accentColor();
         ctx.globalAlpha = 0.22;
         ctx.beginPath();
         ctx.moveTo(0, baseY);
-        for (var i = 0; i < spec.length; i++) {
-            var x = (i / (spec.length - 1)) * w;
-            var yy = baseY - spec[i] * span;
+        for (let i = 0; i < spec.length; i++) {
+            const x = (i / (spec.length - 1)) * w;
+            const yy = baseY - spec[i] * span;
             ctx.lineTo(x, yy);
         }
         ctx.lineTo(w, baseY);
@@ -725,9 +725,9 @@
         ctx.strokeStyle = accentColor();
         ctx.lineWidth = 1.25;
         ctx.beginPath();
-        for (var k = 0; k < spec.length; k++) {
-            var xx = (k / (spec.length - 1)) * w;
-            var yyy = baseY - spec[k] * span;
+        for (let k = 0; k < spec.length; k++) {
+            const xx = (k / (spec.length - 1)) * w;
+            const yyy = baseY - spec[k] * span;
             if (k === 0) { ctx.moveTo(xx, yyy); } else { ctx.lineTo(xx, yyy); }
         }
         ctx.stroke();
@@ -742,25 +742,25 @@
 
     /** Обновление аудио-спектра: шум + один-два узких пика (тоны). */
     EyeConstellationView.prototype._updateAudioSpec = function() {
-        var bins = 192;
+        const bins = 192;
         if (!this._audioSpec || this._audioSpec.length !== bins) {
             this._audioSpec = new Array(bins);
-            for (var i = 0; i < bins; i++) { this._audioSpec[i] = 0.1; }
+            for (let i = 0; i < bins; i++) { this._audioSpec[i] = 0.1; }
         }
-        var spec = this._audioSpec;
+        const spec = this._audioSpec;
 
-        var tonePos = Math.floor(bins * (0.18 + 0.04 * Math.sin(this._phase * 0.05)));
-        var sub = Math.floor(bins * (0.36 + 0.02 * Math.cos(this._phase * 0.03)));
+        const tonePos = Math.floor(bins * (0.18 + 0.04 * Math.sin(this._phase * 0.05)));
+        const sub = Math.floor(bins * (0.36 + 0.02 * Math.cos(this._phase * 0.03)));
 
-        for (var k = 0; k < bins; k++) {
-            var prev = spec[k];
-            var noise = 0.05 + (Math.random() * 0.10);
-            var peak = 0;
-            var d1 = k - tonePos;
+        for (let k = 0; k < bins; k++) {
+            const prev = spec[k];
+            const noise = 0.05 + (Math.random() * 0.10);
+            let peak = 0;
+            const d1 = k - tonePos;
             peak += 0.85 * Math.exp(-(d1 * d1) / 8);
-            var d2 = k - sub;
+            const d2 = k - sub;
             peak += 0.35 * Math.exp(-(d2 * d2) / 14);
-            var target = Math.min(1, noise + peak);
+            const target = Math.min(1, noise + peak);
             spec[k] = prev * 0.5 + target * 0.5;
         }
     };
@@ -778,23 +778,23 @@
         ctx.lineTo(w, h * 0.88);
         ctx.stroke();
 
-        var bins = this._histogramBins;
+        const bins = this._histogramBins;
         if (!bins || bins.length === 0) { return; }
 
-        var max = 1;
-        for (var i = 0; i < bins.length; i++) {
+        let max = 1;
+        for (let i = 0; i < bins.length; i++) {
             if (bins[i] > max) { max = bins[i]; }
         }
 
-        var baseY = h * 0.88;
-        var topPad = h * 0.10;
-        var span = baseY - topPad;
-        var barW = w / bins.length;
+        const baseY = h * 0.88;
+        const topPad = h * 0.10;
+        const span = baseY - topPad;
+        const barW = w / bins.length;
 
         ctx.fillStyle = traceColor();
         ctx.globalAlpha = 0.85;
-        for (var b = 0; b < bins.length; b++) {
-            var bh = (bins[b] / max) * span;
+        for (let b = 0; b < bins.length; b++) {
+            const bh = (bins[b] / max) * span;
             ctx.fillRect(b * barW, baseY - bh, Math.max(1, barW - 1), bh);
         }
         ctx.globalAlpha = 1;
@@ -811,27 +811,27 @@
 
     /** Накопление гистограммы по сэмплам baseband (Eye trace или envelope). */
     EyeConstellationView.prototype._updateHistogramFromTrace = function(samples) {
-        var binsN = 48;
+        const binsN = 48;
         if (!this._histogramBins || this._histogramBins.length !== binsN) {
             this._histogramBins = new Array(binsN);
-            for (var i = 0; i < binsN; i++) { this._histogramBins[i] = 0; }
+            for (let i = 0; i < binsN; i++) { this._histogramBins[i] = 0; }
         }
-        var lo, hi;
+        let lo, hi;
         if (this._category === CAT_OOK) {
             lo = 0; hi = 1;
         } else {
             lo = -1.4; hi = 1.4;
         }
-        var span = hi - lo;
+        const span = hi - lo;
         // Лёгкое затухание, чтобы гистограмма «дышала», а не накапливалась бесконечно.
-        for (var k = 0; k < binsN; k++) {
+        for (let k = 0; k < binsN; k++) {
             this._histogramBins[k] *= 0.92;
         }
-        for (var s = 0; s < samples.length; s++) {
-            var v = samples[s];
-            var t = (v - lo) / span;
+        for (let s = 0; s < samples.length; s++) {
+            const v = samples[s];
+            const t = (v - lo) / span;
             if (t < 0 || t >= 1) { continue; }
-            var bin = Math.floor(t * binsN);
+            let bin = Math.floor(t * binsN);
             if (bin >= binsN) { bin = binsN - 1; }
             this._histogramBins[bin] += 1;
         }
@@ -841,10 +841,10 @@
 
     EyeConstellationView.prototype._draw = function() {
         if (!this._canvas) { return; }
-        var ctx = this._canvas.getContext('2d');
+        const ctx = this._canvas.getContext('2d');
         if (!ctx) { return; }
-        var w = this._canvas.width;
-        var h = this._canvas.height;
+        const w = this._canvas.width;
+        const h = this._canvas.height;
         if (w <= 0 || h <= 0) { return; }
 
         switch (this._mode) {
@@ -866,20 +866,20 @@
                 break;
             }
             case MODE_CONST: {
-                var pts = this._generateConstPoints();
-                for (var i = 0; i < pts.length; i++) {
+                const pts = this._generateConstPoints();
+                for (let i = 0; i < pts.length; i++) {
                     this._constPoints.push(pts[i]);
                 }
                 break;
             }
             case MODE_ENVELOPE: {
-                var chunk = this._generateEnvelopeChunk();
+                const chunk = this._generateEnvelopeChunk();
                 if (!this._envelopeBuf || this._envelopeBuf.length !== chunk.length * 4) {
                     this._envelopeBuf = new Array(chunk.length * 4);
-                    for (var z = 0; z < this._envelopeBuf.length; z++) { this._envelopeBuf[z] = 0; }
+                    for (let z = 0; z < this._envelopeBuf.length; z++) { this._envelopeBuf[z] = 0; }
                     this._envelopeIdx = 0;
                 }
-                for (var c = 0; c < chunk.length; c++) {
+                for (let c = 0; c < chunk.length; c++) {
                     this._envelopeBuf[this._envelopeIdx] = chunk[c];
                     this._envelopeIdx = (this._envelopeIdx + 1) % this._envelopeBuf.length;
                 }
@@ -896,7 +896,7 @@
             }
             case MODE_HISTOGRAM: {
                 // Для NRZ — сэмплируем eye trace; для OOK — envelope.
-                var samples;
+                let samples;
                 if (this._category === CAT_OOK) {
                     samples = this._generateEnvelopeChunk();
                 } else {
@@ -918,7 +918,7 @@
         if (this._active) { return; }
         this._active = true;
         this._resize();
-        var self = this;
+        const self = this;
         this._timer = setInterval(function() { self._tick(); }, TICK_MS);
     };
 

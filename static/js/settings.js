@@ -39,7 +39,7 @@
         const parts = path.split('.');
         let cur = obj;
         for (const p of parts) {
-            if (cur == null) return undefined;
+            if (cur == null) {return undefined;}
             cur = cur[p];
         }
         return cur;
@@ -72,7 +72,7 @@
     function readField(input) {
         const type = input.dataset.bindType;
         if (input.type === 'checkbox') {
-            return !!input.checked;
+            return Boolean(input.checked);
         }
         if (type === 'csv-list') {
             return input.value
@@ -96,7 +96,7 @@
     function writeField(input, value) {
         const type = input.dataset.bindType;
         if (input.type === 'checkbox') {
-            input.checked = !!value;
+            input.checked = Boolean(value);
             return;
         }
         if (type === 'csv-list') {
@@ -176,7 +176,7 @@
     };
 
     SettingsModal.prototype._setActiveTab = function(tab) {
-        if (!tab) return;
+        if (!tab) {return;}
         this._activeTab = tab;
         this._root.setAttribute('data-tab', tab);
         this._root.querySelectorAll('.settings-tab').forEach((btn) => {
@@ -197,7 +197,7 @@
      * исключений (для таба «Исключения»).
      */
     SettingsModal.prototype.open = function() {
-        if (this._isOpen()) return;
+        if (this._isOpen()) {return;}
         this._root.removeAttribute('hidden');
         this._setStatus('', null);
         this._setDirty(false);
@@ -227,10 +227,10 @@
      * запрашивает подтверждение. Сбрасывает live-preview наблюдателя.
      */
     SettingsModal.prototype.close = function(confirmDirty) {
-        if (!this._isOpen()) return;
+        if (!this._isOpen()) {return;}
         if (confirmDirty && this._dirty) {
             const ok = window.confirm('Изменения не сохранены. Закрыть без сохранения?');
-            if (!ok) return;
+            if (!ok) {return;}
         }
         if (this._earthView && typeof this._earthView.clearObserverPreview === 'function') {
             this._earthView.clearObserverPreview();
@@ -259,11 +259,11 @@
      * select остаётся с одной опцией «Свои координаты», UX не ломается.
      */
     SettingsModal.prototype._loadCities = function() {
-        if (this._cities) return Promise.resolve(this._cities);
+        if (this._cities) {return Promise.resolve(this._cities);}
         const self = this;
         return fetch(CITIES_URL)
             .then((r) => {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
+                if (!r.ok) {throw new Error('HTTP ' + r.status);}
                 return r.json();
             })
             .then((data) => {
@@ -280,22 +280,22 @@
      */
     SettingsModal.prototype._renderCitiesSelect = function() {
         const sel = this._root.querySelector('#settings-observer-city');
-        if (!sel) return;
+        if (!sel) {return;}
         // Удаляем все optgroup, оставляя только первую опцию (custom).
         while (sel.lastChild && sel.lastChild.tagName !== 'OPTION') {
             sel.removeChild(sel.lastChild);
         }
         // Удаляем option-ы города от прошлого рендера (всё кроме __custom__).
         Array.from(sel.querySelectorAll('option')).forEach((opt) => {
-            if (opt.value !== CITY_CUSTOM) sel.removeChild(opt);
+            if (opt.value !== CITY_CUSTOM) {sel.removeChild(opt);}
         });
-        if (!this._cities || this._cities.length === 0) return;
+        if (!this._cities || this._cities.length === 0) {return;}
         this._cities.forEach((group) => {
-            if (!group || !Array.isArray(group.cities)) return;
+            if (!group || !Array.isArray(group.cities)) {return;}
             const og = document.createElement('optgroup');
             og.label = group.label || '';
             group.cities.forEach((c) => {
-                if (!c || !c.name) return;
+                if (!c || !c.name) {return;}
                 const opt = document.createElement('option');
                 opt.value = group.label + '/' + c.name;
                 opt.textContent = c.name;
@@ -315,7 +315,7 @@
      */
     SettingsModal.prototype._syncCitySelectFromConfig = function() {
         const sel = this._root.querySelector('#settings-observer-city');
-        if (!sel || !this._workingConfig) return;
+        if (!sel || !this._workingConfig) {return;}
         const obs = this._workingConfig.station && this._workingConfig.station.observer;
         if (!obs) {
             sel.value = CITY_CUSTOM;
@@ -338,12 +338,12 @@
      * Поиск города в курируемом списке по близости координат.
      */
     SettingsModal.prototype._findMatchingCity = function(lat, lon) {
-        if (typeof lat !== 'number' || typeof lon !== 'number') return null;
-        if (!this._cities) return null;
+        if (typeof lat !== 'number' || typeof lon !== 'number') {return null;}
+        if (!this._cities) {return null;}
         for (const group of this._cities) {
-            if (!group || !Array.isArray(group.cities)) continue;
+            if (!group || !Array.isArray(group.cities)) {continue;}
             for (const c of group.cities) {
-                if (!c) continue;
+                if (!c) {continue;}
                 if (Math.abs(c.lat - lat) <= CITY_MATCH_EPS_DEG &&
                     Math.abs(c.lon - lon) <= CITY_MATCH_EPS_DEG) {
                     return { value: group.label + '/' + c.name, city: c };
@@ -359,22 +359,22 @@
      * и блокирует поля до возврата к «Свои координаты».
      */
     SettingsModal.prototype._onCitySelect = function(value) {
-        if (this._suppressCityAutoSwitch) return;
+        if (this._suppressCityAutoSwitch) {return;}
         if (!value || value === CITY_CUSTOM) {
             this._setObserverFieldsDisabled(false);
             return;
         }
         const sel = this._root.querySelector('#settings-observer-city');
-        if (!sel) return;
+        if (!sel) {return;}
         const opt = Array.from(sel.options).find((o) => o.value === value);
-        if (!opt) return;
+        if (!opt) {return;}
         const lat = parseFloat(opt.dataset.lat);
         const lon = parseFloat(opt.dataset.lon);
         const alt = parseFloat(opt.dataset.alt);
         const name = opt.textContent;
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
-        if (!this._workingConfig.station) this._workingConfig.station = {};
-        if (!this._workingConfig.station.observer) this._workingConfig.station.observer = {};
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {return;}
+        if (!this._workingConfig.station) {this._workingConfig.station = {};}
+        if (!this._workingConfig.station.observer) {this._workingConfig.station.observer = {};}
         const obs = this._workingConfig.station.observer;
         obs.name = name;
         obs.lat = lat;
@@ -395,9 +395,9 @@
     SettingsModal.prototype._setObserverFieldsDisabled = function(disabled) {
         OBSERVER_FIELDS.forEach((path) => {
             const input = this._root.querySelector('[data-bind="' + path + '"]');
-            if (!input) return;
-            input.readOnly = !!disabled;
-            input.classList.toggle('is-locked', !!disabled);
+            if (!input) {return;}
+            input.readOnly = Boolean(disabled);
+            input.classList.toggle('is-locked', Boolean(disabled));
         });
     };
 
@@ -405,7 +405,7 @@
         const self = this;
         return fetch('/api/exclusions')
             .then((r) => {
-                if (r.status === 404) return { exclusions: [] };
+                if (r.status === 404) {return { exclusions: [] };}
                 return self._parseJSONOrThrow(r);
             })
             .then((data) => {
@@ -450,7 +450,7 @@
 
     SettingsModal.prototype._renderRadioPaths = function() {
         const container = this._root.querySelector('[data-list="station.radio_paths"]');
-        if (!container) return;
+        if (!container) {return;}
         container.innerHTML = '';
 
         if (!this._workingConfig.station) {
@@ -584,8 +584,8 @@
         sel.addEventListener('change', () => {
             const list = self._workingConfig.station.radio_paths;
             const target = list[idx];
-            if (!target) return;
-            if (!target.antenna) target.antenna = {};
+            if (!target) {return;}
+            if (!target.antenna) {target.antenna = {};}
             target.antenna.type = sel.value;
             if (sel.value === ANTENNA_STATIONARY) {
                 target.rotator = null;
@@ -656,10 +656,10 @@
 
     SettingsModal.prototype._formatReceiverOptionLabel = function(dev, offline) {
         const parts = [];
-        if (dev.driver) parts.push(dev.driver);
-        if (dev.label) parts.push(dev.label);
-        if (dev.serial) parts.push('serial ' + dev.serial);
-        if (dev.device_path) parts.push(dev.device_path);
+        if (dev.driver) {parts.push(dev.driver);}
+        if (dev.label) {parts.push(dev.label);}
+        if (dev.serial) {parts.push('serial ' + dev.serial);}
+        if (dev.device_path) {parts.push(dev.device_path);}
         let text = parts.join(' · ');
         if (offline) {
             text = '(не подключён) · ' + text;
@@ -681,9 +681,9 @@
 
         const seen = {};
         (this._sdrDevices || []).forEach((dev) => {
-            if (!dev || !dev.driver || dev.driver === RECEIVER_SIMULATED) return;
+            if (!dev || !dev.driver || dev.driver === RECEIVER_SIMULATED) {return;}
             const key = this._receiverDeviceKey(dev);
-            if (seen[key]) return;
+            if (seen[key]) {return;}
             seen[key] = true;
             const opt = document.createElement('option');
             opt.value = key;
@@ -712,7 +712,7 @@
     SettingsModal.prototype._applyReceiverSelection = function(idx, key) {
         const list = this._workingConfig.station.radio_paths;
         const target = list[idx];
-        if (!target) return;
+        if (!target) {return;}
         const parsed = this._parseReceiverDeviceKey(key);
         if (key !== RECEIVER_NONE && key !== RECEIVER_SIMULATED) {
             const dev = (this._sdrDevices || []).find((d) => this._receiverDeviceKey(d) === key);
@@ -812,7 +812,7 @@
     SettingsModal.prototype._setRadioPathValue = function(idx, subPath, value) {
         const list = this._workingConfig.station.radio_paths;
         const target = list[idx];
-        if (!target) return;
+        if (!target) {return;}
         const path = subPath.split('.');
         let cur = target;
         for (let i = 0; i < path.length - 1; i++) {
@@ -832,7 +832,7 @@
 
     SettingsModal.prototype._renderExclusions = function() {
         const container = this._root.querySelector('[data-list="exclusions"]');
-        if (!container) return;
+        if (!container) {return;}
         container.innerHTML = '';
 
         if (!this._exclusions || this._exclusions.length === 0) {
@@ -890,11 +890,11 @@
 
     SettingsModal.prototype._onFieldInput = function(e) {
         const target = e.target;
-        if (!target || !target.dataset || !target.dataset.bind) return;
+        if (!target || !target.dataset || !target.dataset.bind) {return;}
         const path = target.dataset.bind;
 
         // Радиотракты — отдельный обработчик в _radioField, тут пропускаем.
-        if (path.indexOf('[') !== -1) return;
+        if (path.indexOf('[') !== -1) {return;}
 
         const value = readField(target);
         setByPath(this._workingConfig, path, value);
@@ -915,28 +915,28 @@
     };
 
     SettingsModal.prototype._updateObserverPreview = function() {
-        if (!this._earthView || typeof this._earthView.setObserverPreview !== 'function') return;
+        if (!this._earthView || typeof this._earthView.setObserverPreview !== 'function') {return;}
         const obs = this._workingConfig.station && this._workingConfig.station.observer;
-        if (!obs) return;
+        if (!obs) {return;}
         const lat = parseFloat(obs.lat);
         const lon = parseFloat(obs.lon);
-        if (!Number.isFinite(lat) || !Number.isFinite(lon)) return;
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) {return;}
         this._earthView.setObserverPreview(lon, lat);
     };
 
     SettingsModal.prototype._setDirty = function(dirty) {
         this._dirty = dirty;
         const saveBtn = this._root.querySelector('[data-action="save-settings"]');
-        if (saveBtn) saveBtn.disabled = !dirty;
+        if (saveBtn) {saveBtn.disabled = !dirty;}
     };
 
     SettingsModal.prototype._setStatus = function(text, kind) {
         const status = this._root.querySelector('[data-role="status"]');
-        if (!status) return;
+        if (!status) {return;}
         status.textContent = text || '';
         status.classList.remove('is-error', 'is-success');
-        if (kind === 'error') status.classList.add('is-error');
-        if (kind === 'success') status.classList.add('is-success');
+        if (kind === 'error') {status.classList.add('is-error');}
+        if (kind === 'success') {status.classList.add('is-success');}
         if (this._statusTimer) {
             clearTimeout(this._statusTimer);
             this._statusTimer = null;
@@ -995,7 +995,7 @@
         const obs = this._workingConfig
             && this._workingConfig.station
             && this._workingConfig.station.observer;
-        if (!obs) return;
+        if (!obs) {return;}
 
         if (this._earthView) {
             if (typeof this._earthView.clearObserverPreview === 'function') {
@@ -1034,7 +1034,7 @@
         body.errors.forEach((e) => {
             messages.push(e.field + ': ' + e.message);
             const input = this._root.querySelector('[data-bind="' + e.field + '"]');
-            if (input) input.classList.add('is-invalid');
+            if (input) {input.classList.add('is-invalid');}
         });
         this._setStatus('Проверьте поля: ' + messages.join('; '), 'error');
     };
@@ -1044,17 +1044,6 @@
             el.classList.remove('is-invalid');
         });
     };
-
-    function escapeHTML(s) {
-        if (s == null) return '';
-        return String(s).replace(/[&<>"']/g, (c) => ({
-            '&': '&amp;',
-            '<': '&lt;',
-            '>': '&gt;',
-            '"': '&quot;',
-            "'": '&#39;'
-        }[c]));
-    }
 
     /**
      * Глобальный bootstrap. Привязывает шестерёнку в footer и обрабатывает
@@ -1085,8 +1074,8 @@
     }
 
     // Экспорт класса для тестов и для возможного программного использования.
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = {
+    if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
+        module.exports = { // eslint-disable-line no-undef
             SettingsModal: SettingsModal,
             getByPath: getByPath,
             setByPath: setByPath

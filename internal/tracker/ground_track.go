@@ -252,7 +252,14 @@ const (
 // double-mapping антимеридиана окна).
 //
 // Дальше — стандартное splitAtAntimeridian (гринвич-антимеридиан) и splitPastFuture.
-func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64, step time.Duration) (*GroundTrack, error) {
+//
+//nolint:gocognit,gocyclo,funlen // lon-window clipping: forward/backward loops с pole-pass
+func GenerateGroundTrackByLonWindow(
+	tle *TLE,
+	now time.Time,
+	observerLon float64,
+	step time.Duration,
+) (*GroundTrack, error) {
 	if tle == nil {
 		return nil, ErrNilTLEForTrack
 	}
@@ -323,7 +330,7 @@ func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64
 
 	// Этап 3+4 forward: пропагация в будущее с lon-clip + time-fallback.
 	futurePoints := []TrackPoint{nowPoint}
-	contLonF, prevRawLonF, prevLatF, prevTsF := satLonAnchor, satLonRaw, satLat, nowMs
+	contLonF, prevRawLonF, prevLatF, prevTSF := satLonAnchor, satLonRaw, satLat, nowMs
 	for i := 1; i <= maxPointsPerSide; i++ {
 		dt := time.Duration(i) * step
 		if dt > timeFallback {
@@ -335,7 +342,7 @@ func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64
 			break
 		}
 		lla := ECEFToLLA(ECIToECEF(eci))
-		rawLon, rawLat, currTs := lla.LonDeg(), lla.LatDeg(), t.UnixMilli()
+		rawLon, rawLat, currTS := lla.LonDeg(), lla.LatDeg(), t.UnixMilli()
 
 		isPolepass := math.Abs(rawLat) > polepassLatDeg || math.Abs(prevLatF) > polepassLatDeg
 		var delta float64
@@ -351,7 +358,7 @@ func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64
 		newContLonF := contLonF + delta
 
 		// Lon-clip: пересечение границы окна → линейная интерполяция к ней.
-		if !isPolepass && delta != 0 {
+		if !isPolepass && delta != 0 { //nolint:nestif // расчёт ratio и граничной точки в одном блоке
 			if targetCont, crossed := clipBoundary(contLonF, newContLonF); crossed {
 				ratio := (targetCont - contLonF) / delta
 				if ratio > 1 {
@@ -361,20 +368,20 @@ func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64
 				}
 				bLon := normalizeLonRaw(targetCont)
 				bLat := prevLatF + (rawLat-prevLatF)*ratio
-				bTs := prevTsF + int64(float64(currTs-prevTsF)*ratio)
-				futurePoints = append(futurePoints, TrackPoint{Lon: bLon, Lat: bLat, TS: bTs})
+				bTS := prevTSF + int64(float64(currTS-prevTSF)*ratio)
+				futurePoints = append(futurePoints, TrackPoint{Lon: bLon, Lat: bLat, TS: bTS})
 				break
 			}
 		}
 
-		contLonF, prevRawLonF, prevLatF, prevTsF = newContLonF, rawLon, rawLat, currTs
-		futurePoints = append(futurePoints, TrackPoint{Lon: rawLon, Lat: rawLat, TS: currTs})
+		contLonF, prevRawLonF, prevLatF, prevTSF = newContLonF, rawLon, rawLat, currTS
+		futurePoints = append(futurePoints, TrackPoint{Lon: rawLon, Lat: rawLat, TS: currTS})
 	}
 
 	// Этап 3+4 backward: симметрично, в прошлое. Точки собираются в обратном
 	// порядке времени (now → t-N), затем разворачиваем.
 	pastPointsRev := []TrackPoint{}
-	contLonB, prevRawLonB, prevLatB, prevTsB := satLonAnchor, satLonRaw, satLat, nowMs
+	contLonB, prevRawLonB, prevLatB, prevTSB := satLonAnchor, satLonRaw, satLat, nowMs
 	for i := 1; i <= maxPointsPerSide; i++ {
 		dt := time.Duration(i) * step
 		if dt > timeFallback {
@@ -386,7 +393,7 @@ func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64
 			break
 		}
 		lla := ECEFToLLA(ECIToECEF(eci))
-		rawLon, rawLat, currTs := lla.LonDeg(), lla.LatDeg(), t.UnixMilli()
+		rawLon, rawLat, currTS := lla.LonDeg(), lla.LatDeg(), t.UnixMilli()
 
 		isPolepass := math.Abs(rawLat) > polepassLatDeg || math.Abs(prevLatB) > polepassLatDeg
 		var delta float64
@@ -401,7 +408,7 @@ func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64
 		}
 		newContLonB := contLonB + delta
 
-		if !isPolepass && delta != 0 {
+		if !isPolepass && delta != 0 { //nolint:nestif // расчёт ratio и граничной точки в одном блоке
 			if targetCont, crossed := clipBoundary(contLonB, newContLonB); crossed {
 				ratio := (targetCont - contLonB) / delta
 				if ratio > 1 {
@@ -411,14 +418,14 @@ func GenerateGroundTrackByLonWindow(tle *TLE, now time.Time, observerLon float64
 				}
 				bLon := normalizeLonRaw(targetCont)
 				bLat := prevLatB + (rawLat-prevLatB)*ratio
-				bTs := prevTsB + int64(float64(currTs-prevTsB)*ratio)
-				pastPointsRev = append(pastPointsRev, TrackPoint{Lon: bLon, Lat: bLat, TS: bTs})
+				bTS := prevTSB + int64(float64(currTS-prevTSB)*ratio)
+				pastPointsRev = append(pastPointsRev, TrackPoint{Lon: bLon, Lat: bLat, TS: bTS})
 				break
 			}
 		}
 
-		contLonB, prevRawLonB, prevLatB, prevTsB = newContLonB, rawLon, rawLat, currTs
-		pastPointsRev = append(pastPointsRev, TrackPoint{Lon: rawLon, Lat: rawLat, TS: currTs})
+		contLonB, prevRawLonB, prevLatB, prevTSB = newContLonB, rawLon, rawLat, currTS
+		pastPointsRev = append(pastPointsRev, TrackPoint{Lon: rawLon, Lat: rawLat, TS: currTS})
 	}
 
 	// past собран в обратном порядке времени — переворачиваем.

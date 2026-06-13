@@ -69,8 +69,8 @@ func TestConfig_DurationFieldsJSONRoundTrip(t *testing.T) {
 		t.Fatalf("Marshal: %v", err)
 	}
 	var raw map[string]any
-	if err := json.Unmarshal(data, &raw); err != nil {
-		t.Fatalf("Unmarshal raw: %v", err)
+	if unmarshalErr := json.Unmarshal(data, &raw); unmarshalErr != nil {
+		t.Fatalf("Unmarshal raw: %v", unmarshalErr)
 	}
 	tle, ok := raw["tle"].(map[string]any)
 	if !ok {

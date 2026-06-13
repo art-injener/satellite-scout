@@ -142,7 +142,7 @@
 
     ManualLayout.prototype._initPassProfile = function() {
         if (typeof window.PassProfileView !== 'function') { return; }
-        var canvas = document.getElementById('manual-pass-profile-canvas');
+        const canvas = document.getElementById('manual-pass-profile-canvas');
         if (!canvas) { return; }
         this._passProfile = new window.PassProfileView(canvas, {
             satName: 'ISS',
@@ -150,9 +150,9 @@
             maxEl: 67,
             maxDopplerHz: 3000,
         });
-        var self = this;
+        const self = this;
         if (typeof ResizeObserver !== 'undefined') {
-            var ro = new ResizeObserver(function() {
+            const ro = new ResizeObserver(function() {
                 if (self._passProfile && self._active) { self._passProfile.draw(); }
             });
             ro.observe(canvas.parentElement || canvas);
@@ -163,9 +163,9 @@
     ManualLayout.prototype._initDemodPanel = function() {
         if (typeof window.DemodPanel !== 'function') { return; }
         this._demodPanel = new window.DemodPanel();
-        var root = this._layoutRoot || document.getElementById('layout-manual');
+        const root = this._layoutRoot || document.getElementById('layout-manual');
         if (!root) { return; }
-        var self = this;
+        const self = this;
         this._onPanoramaTune = function(e) {
             self._tuneChannel(e.detail || {});
         };
@@ -179,7 +179,7 @@
 
     ManualLayout.prototype._initEyeConstellation = function() {
         if (typeof window.EyeConstellationView !== 'function') { return; }
-        var self = this;
+        const self = this;
         this._eyeView = new window.EyeConstellationView();
         this._eyeView._onAutoRestore = function() {
             self._syncEyeFromPipeline();
@@ -198,9 +198,9 @@
         if (this._rxBar && typeof this._rxBar.getPipeline === 'function') {
             return this._rxBar.getPipeline();
         }
-        var sel = document.getElementById('manual-rx-pipeline');
+        const sel = document.getElementById('manual-rx-pipeline');
         if (sel && sel.options && sel.selectedIndex >= 0) {
-            var opt = sel.options[sel.selectedIndex];
+            const opt = sel.options[sel.selectedIndex];
             return opt && opt.text ? String(opt.text).trim() : '';
         }
         return '';
@@ -209,16 +209,16 @@
     /** Диаграмма Eye/Const следует за полем «Демод.», пока не закреплена вручную. */
     ManualLayout.prototype._syncEyeFromPipeline = function() {
         if (!this._eyeView) { return; }
-        var pipeline = this._getPipelineLabel();
+        const pipeline = this._getPipelineLabel();
         if (pipeline) {
             this._eyeView.setModulation(pipeline);
         }
     };
 
     ManualLayout.prototype._bindRxBarEvents = function() {
-        var root = document.getElementById('manual-rx-bar');
+        const root = document.getElementById('manual-rx-bar');
         if (!root) { return; }
-        var self = this;
+        const self = this;
         this._onRxPipelineChange = function() {
             self._syncEyeFromPipeline();
         };
@@ -234,8 +234,8 @@
      * @param {{ freqMHz?: number, tx?: Object }} detail
      */
     ManualLayout.prototype._tuneChannel = function(detail) {
-        var freqMHz = detail.freqMHz;
-        var tx = detail.tx || null;
+        const freqMHz = detail.freqMHz;
+        const tx = detail.tx || null;
         if (typeof freqMHz !== 'number' || !isFinite(freqMHz)) { return; }
 
         if (this._demodPanel && tx) {
@@ -269,7 +269,7 @@
         if (this._rxBar) {
             this._rxBar.setFreqMHz(freqMHz);
         } else {
-            var freqInput = document.getElementById('manual-rx-freq');
+            const freqInput = document.getElementById('manual-rx-freq');
             if (freqInput && typeof window.formatDemodFreqMHz === 'function') {
                 freqInput.value = window.formatDemodFreqMHz(freqMHz);
             }
@@ -279,11 +279,11 @@
             if (this._rxBar && typeof this._rxBar.setPipeline === 'function') {
                 this._rxBar.setPipeline(tx.modulation);
             } else {
-                var pipelineSelect = document.getElementById('manual-rx-pipeline');
+                const pipelineSelect = document.getElementById('manual-rx-pipeline');
                 if (pipelineSelect && pipelineSelect.options) {
-                    var mod = tx.modulation.toLowerCase();
-                    for (var i = 0; i < pipelineSelect.options.length; i++) {
-                        var opt = pipelineSelect.options[i];
+                    const mod = tx.modulation.toLowerCase();
+                    for (let i = 0; i < pipelineSelect.options.length; i++) {
+                        const opt = pipelineSelect.options[i];
                         if (opt.text && mod.indexOf(opt.text.toLowerCase().replace(/\s+/g, '')) >= 0) {
                             pipelineSelect.selectedIndex = i;
                             break;
@@ -294,7 +294,7 @@
         }
 
         if (this._tmiTable) {
-            var label = tx ? (tx.label || 'Unknown') : 'Unknown';
+            const label = tx ? (tx.label || 'Unknown') : 'Unknown';
             this._tmiTable.setChannel(label, freqMHz);
         }
 
@@ -518,7 +518,7 @@
             this._demodPanel.destroy();
             this._demodPanel = null;
         }
-        var root = this._layoutRoot || document.getElementById('layout-manual');
+        const root = this._layoutRoot || document.getElementById('layout-manual');
         if (root && this._onPanoramaTune) {
             root.removeEventListener('panorama:tune', this._onPanoramaTune);
         }
@@ -536,7 +536,7 @@
             this._rxBar.destroy();
             this._rxBar = null;
         }
-        var rxRoot = document.getElementById('manual-rx-bar');
+        const rxRoot = document.getElementById('manual-rx-bar');
         if (rxRoot && this._onRxPipelineChange) {
             rxRoot.removeEventListener('rx:pipeline-change', this._onRxPipelineChange);
         }

@@ -2,6 +2,7 @@ package config
 
 import (
 	"errors"
+	"slices"
 	"testing"
 	"time"
 )
@@ -222,10 +223,5 @@ func hasField(errs ValidationErrors, field string) bool {
 }
 
 func hasString(arr []string, s string) bool {
-	for _, v := range arr {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(arr, s)
 }

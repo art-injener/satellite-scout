@@ -243,10 +243,10 @@ function MockManualRxBar() {
 MockManualRxBar.prototype.getPipeline = function() { return this._pipeline; };
 MockManualRxBar.prototype.setPipeline = function(p) {
     this.calls.push(['setPipeline', p]);
-    var options = ['FSK 9600', 'FSK 1200', 'AFSK 1200', 'BPSK 1k2'];
-    var pl = String(p).toLowerCase().replace(/\s+/g, '');
-    for (var i = 0; i < options.length; i++) {
-        var optKey = options[i].toLowerCase().replace(/\s+/g, '');
+    const options = ['FSK 9600', 'FSK 1200', 'AFSK 1200', 'BPSK 1k2'];
+    const pl = String(p).toLowerCase().replace(/\s+/g, '');
+    for (let i = 0; i < options.length; i++) {
+        const optKey = options[i].toLowerCase().replace(/\s+/g, '');
         if (pl.indexOf(optKey) >= 0 || optKey.indexOf(pl) >= 0) {
             this._pipeline = options[i];
             return;
@@ -267,7 +267,7 @@ MockManualRxBar.prototype.setPipeline = function(p) {
     this._pipeline = p;
 };
 MockManualRxBar.prototype.setFreqMHz = function(mhz) {
-    var el = _domNodes.get('manual-rx-freq');
+    const el = _domNodes.get('manual-rx-freq');
     if (el && global.window.formatDemodFreqMHz) {
         el.value = global.window.formatDemodFreqMHz(mhz);
     }

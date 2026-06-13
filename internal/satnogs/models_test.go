@@ -124,7 +124,14 @@ func TestSelectPrimary_PrefersAmateurOverHighBand(t *testing.T) {
 func TestSelectPrimary_PrefersWithBaud(t *testing.T) {
 	transmitters := []Transmitter{
 		{UUID: "no-baud", Alive: true, Status: "active", DownlinkLow: ptrInt64(145_800_000), Mode: "FM"},
-		{UUID: "with-baud", Alive: true, Status: "active", DownlinkLow: ptrInt64(145_825_000), Mode: "AFSK", Baud: ptrFloat64(1200)},
+		{
+			UUID:        "with-baud",
+			Alive:       true,
+			Status:      "active",
+			DownlinkLow: ptrInt64(145_825_000),
+			Mode:        "AFSK",
+			Baud:        ptrFloat64(1200),
+		},
 	}
 	primary := SelectPrimary(transmitters)
 	if primary == nil {

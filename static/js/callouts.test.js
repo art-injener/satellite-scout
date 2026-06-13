@@ -639,7 +639,7 @@ test('ring: cluster of 6 — cards do not overlap each other', () => {
 test('ring: every card is placed outside the cluster bounding box', () => {
     const layout = new CalloutLayout(RING_OPTS);
     const res = layout.layout(RING_CLUSTER_6, [], BOUNDS);
-    let minX = +Infinity, maxX = -Infinity, minY = +Infinity, maxY = -Infinity;
+    let minX = Number(Infinity), maxX = -Infinity, minY = Number(Infinity), maxY = -Infinity;
     for (const m of RING_CLUSTER_6) {
         if (m.x < minX) { minX = m.x; }
         if (m.x > maxX) { maxX = m.x; }
@@ -698,7 +698,7 @@ test('ring: cluster near canvas edge — every card stays inside bounds', () => 
     const markers = [
         { id: 1, x: 1000, y: 250 },
         { id: 2, x: 1020, y: 268 },
-        { id: 3, x: 980,  y: 235 },
+        { id: 3, x: 980, y: 235 },
     ];
     const res = layout.layout(markers, [], BOUNDS);
     for (const r of res) {
@@ -724,8 +724,8 @@ test('ring: very wide cluster (zoom>1) — semi-axes are clamped, cards do not p
     });
     const layout = new CalloutLayout(opts);
     const markers = [
-        { id: 1, x: 80,  y: 80  },
-        { id: 2, x: 940, y: 90  },
+        { id: 1, x: 80, y: 80 },
+        { id: 2, x: 940, y: 90 },
         { id: 3, x: 100, y: 420 },
         { id: 4, x: 920, y: 430 },
         { id: 5, x: 512, y: 256 },
@@ -734,7 +734,7 @@ test('ring: very wide cluster (zoom>1) — semi-axes are clamped, cards do not p
     // Карточки укладываются в bounds (поведение buildRingPlacement не сломалось).
     for (const r of res) {
         const c = r.card;
-        assert.ok(c.x >= opts.boundsPadding && c.x + c.w <= BOUNDS.width  - opts.boundsPadding,
+        assert.ok(c.x >= opts.boundsPadding && c.x + c.w <= BOUNDS.width - opts.boundsPadding,
             `card.x out of bounds: ${JSON.stringify(c)}`);
         assert.ok(c.y >= opts.boundsPadding && c.y + c.h <= BOUNDS.height - opts.boundsPadding,
             `card.y out of bounds: ${JSON.stringify(c)}`);
@@ -746,9 +746,9 @@ test('ring: very wide cluster (zoom>1) — semi-axes are clamped, cards do not p
     let pinned = 0;
     for (const r of res) {
         const c = r.card;
-        const distLeft   = c.x - opts.boundsPadding;
-        const distRight  = (BOUNDS.width  - opts.boundsPadding) - (c.x + c.w);
-        const distTop    = c.y - opts.boundsPadding;
+        const distLeft = c.x - opts.boundsPadding;
+        const distRight = (BOUNDS.width - opts.boundsPadding) - (c.x + c.w);
+        const distTop = c.y - opts.boundsPadding;
         const distBottom = (BOUNDS.height - opts.boundsPadding) - (c.y + c.h);
         const minDist = Math.min(distLeft, distRight, distTop, distBottom);
         if (minDist <= eps) { pinned++; }
@@ -826,7 +826,7 @@ test('ring: tracked icon + dense cluster — single ellipse, no card overlaps tr
     const markers = [tracked].concat(sideCluster);
     const obstacles = markers.map(m => ({
         x: m.x - m.iconRadius, y: m.y - m.iconRadius,
-        w: 2 * m.iconRadius,    h: 2 * m.iconRadius,
+        w: 2 * m.iconRadius, h: 2 * m.iconRadius,
     }));
     const res = layout.layout(markers, obstacles, BOUNDS);
     // Проверяем именно tracked-иконку: её bbox не должен перекрываться
@@ -952,7 +952,7 @@ test('ring: best-effort — when track covers the whole frame, layout still fini
     let baseSum = 0, optSum = 0;
     for (let i = 0; i < res.length; i++) {
         baseSum += countCardCrossings(baseline[i].card, padding, segments);
-        optSum  += countCardCrossings(res[i].card,      padding, segments);
+        optSum += countCardCrossings(res[i].card, padding, segments);
     }
     assert.ok(optSum <= baseSum,
         `best-effort regressed: baseline=${baseSum}, optimised=${optSum}`);
@@ -976,7 +976,7 @@ test('ring: avoidance does not push cards out of canvas bounds', () => {
     const layout = new CalloutLayout(RING_OPTS);
     const segments = [
         { x1: 100, y1: 100, x2: 900, y2: 400 },
-        { x1: 0,   y1: 256, x2: 1024, y2: 256 },
+        { x1: 0, y1: 256, x2: 1024, y2: 256 },
     ];
     const res = layout.layout(RING_CLUSTER_6, [], BOUNDS, segments);
     const pad = RING_OPTS.boundsPadding;
@@ -984,7 +984,7 @@ test('ring: avoidance does not push cards out of canvas bounds', () => {
         const c = r.card;
         assert.ok(c.x >= pad, `card.x=${c.x} crossed left bound`);
         assert.ok(c.y >= pad, `card.y=${c.y} crossed top bound`);
-        assert.ok(c.x + c.w <= BOUNDS.width  - pad, `card crossed right bound: ${JSON.stringify(c)}`);
+        assert.ok(c.x + c.w <= BOUNDS.width - pad, `card crossed right bound: ${JSON.stringify(c)}`);
         assert.ok(c.y + c.h <= BOUNDS.height - pad, `card crossed bottom bound: ${JSON.stringify(c)}`);
     }
 });
@@ -1043,7 +1043,7 @@ function leaderHitsSegment(lt, seg) {
     const a2 = { x: seg.x2, y: seg.y2 };
     const tail = tailEndOfLayout(lt);
     return segmentsIntersect(lt.marker, lt.bend, a1, a2) ||
-           segmentsIntersect(lt.bend, tail,      a1, a2);
+           segmentsIntersect(lt.bend, tail, a1, a2);
 }
 
 /** Суммарное число пересечений (card bbox + stem + tail) с сегментами. */
@@ -1122,12 +1122,12 @@ test('ring: leader-aware avoidance minimises total (card + stem + tail) hits vs 
         { x1: 0, y1: 340, x2: 1024, y2: 340 },
     ];
     const optimised = layout.layout(RING_CLUSTER_6, [], BOUNDS, segments);
-    const baseline  = layout.layout(RING_CLUSTER_6, [], BOUNDS);
+    const baseline = layout.layout(RING_CLUSTER_6, [], BOUNDS);
     const padding = RING_OPTS.forbiddenPadding != null ? RING_OPTS.forbiddenPadding : 5;
     let baseSum = 0, optSum = 0;
     for (let i = 0; i < optimised.length; i++) {
-        baseSum += countLeaderTrackHits(baseline[i],  padding, segments);
-        optSum  += countLeaderTrackHits(optimised[i], padding, segments);
+        baseSum += countLeaderTrackHits(baseline[i], padding, segments);
+        optSum += countLeaderTrackHits(optimised[i], padding, segments);
     }
     assert.ok(optSum <= baseSum,
         `leader-aware avoidance regressed: baseline=${baseSum}, optimised=${optSum}`);
@@ -1291,11 +1291,11 @@ test('ring: resolveCrossings=false (ring) allows pre-swap crossings on pathologi
         { id: 6, x: 550, y: 272 },
     ];
     const segments = [{ x1: 100, y1: 100, x2: 900, y2: 400 }];
-    const optsOn  = Object.assign({}, RING_OPTS, { resolveCrossings: true  });
+    const optsOn = Object.assign({}, RING_OPTS, { resolveCrossings: true });
     const optsOff = Object.assign({}, RING_OPTS, { resolveCrossings: false });
-    const on  = new CalloutLayout(optsOn ).layout(mk, [], BOUNDS, segments);
+    const on = new CalloutLayout(optsOn ).layout(mk, [], BOUNDS, segments);
     const off = new CalloutLayout(optsOff).layout(mk, [], BOUNDS, segments);
-    const cOn  = countCrossings(on);
+    const cOn = countCrossings(on);
     const cOff = countCrossings(off);
     assert.ok(cOn <= cOff,
         `θ-swap post-pass must not increase crossings (on=${cOn}, off=${cOff})`);
@@ -1353,7 +1353,7 @@ test('ring: large stack (>maxVisible) has capped card height', () => {
     const res = layout.layout(markers, [], BOUNDS);
     const card = res.filter(r => r !== null)[0];
     const maxVis = 4;
-    const expectedH = (maxVis + 1) * 18 + 4;  // 4 строки + 1 строка "...+N"
+    const expectedH = (maxVis + 1) * 18 + 4; // 4 строки + 1 строка "...+N"
     assert.strictEqual(card.card.h, expectedH,
         `large stack height: expected ${expectedH}, got ${card.card.h}`);
     assert.strictEqual(card.stacked.length, 8);
@@ -1498,8 +1498,8 @@ test('ring: cluster of 6 in dense scene with city obstacles — minimises icon h
     // baseline без obstacle-обхода.
     const layout = new CalloutLayout(RING_OPTS);
     const obstacles = [
-        { x: 360, y: 200, w: 90, h: 16 },   // «город» слева-сверху от кластера
-        { x: 600, y: 290, w: 90, h: 16 },   // «город» справа-снизу
+        { x: 360, y: 200, w: 90, h: 16 }, // «город» слева-сверху от кластера
+        { x: 600, y: 290, w: 90, h: 16 }, // «город» справа-снизу
     ];
     const baseline = layout.layout(RING_CLUSTER_6, [], BOUNDS);
     const res = layout.layout(RING_CLUSTER_6, obstacles, BOUNDS);

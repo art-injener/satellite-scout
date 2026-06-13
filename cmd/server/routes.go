@@ -1,91 +1,66 @@
 package main
 
 import (
-	"io/fs"
 	"log/slog"
 	"net/http"
 
-	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
-	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
 // setupRoutes регистрирует все HTTP-маршруты приложения.
-// satnogsService может быть nil — в этом случае REST-маршрут /api/satnogs/* не регистрируется.
-func setupRoutes(
-	mux *http.ServeMux,
-	cfg *config.Config,
-	configStore *config.Store,
-	sseHub *handlers.SSEHub,
-	trackingService handlers.TrackingServiceInterface,
-	satnogsService *satnogs.Service,
-	excludeStore handlers.ExclusionAdder,
-	passCache handlers.PassCacheInvalidator,
-	groupRefresher handlers.GroupRefresher,
-	templatesFS fs.FS,
-	staticFS fs.FS,
-) {
-	// Инициализация обработчиков.
-	pageHandler, err := handlers.NewPageHandler(templatesFS, cfg.DevMode, cfg.UI.Theme, configStore)
+func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
+	pageHandler, err := handlers.NewPageHandler(
+		deps.Templates,
+		deps.Cfg.DevMode,
+		deps.Cfg.UI.Theme,
+		deps.ConfigStore,
+	)
 	if err != nil {
 		slog.Error("failed to initialize page handler", "error", err)
 		panic("page handler init failed: " + err.Error())
 	}
 
-	apiHandler := handlers.NewAPIHandler(cfg)
-	trackingHandler := handlers.NewTrackingHandler(trackingService)
+	apiHandler := handlers.NewAPIHandler(deps.Cfg)
+	trackingHandler := handlers.NewTrackingHandler(deps.Tracking)
+	settingsHandler := handlers.NewSettingsHandler(deps.ConfigStore)
+	sdrHandler := handlers.NewSDRHandler(sdr.NewService())
+	exclusionsHandler := handlers.NewExclusionsHandler(deps.Exclude, deps.PassCache, deps.Group)
 
-	// Статические файлы.
-	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(deps.Static))))
 
-	// Маршруты страниц.
+	// Страницы.
 	mux.HandleFunc("GET /", pageHandler.Index)
 	mux.HandleFunc("GET /tracking", pageHandler.Tracking)
-	mux.HandleFunc("GET /receiver", pageHandler.Receiver)
-	mux.HandleFunc("GET /simulation", pageHandler.Simulation)
+	mux.HandleFunc("GET /settings", redirectFound("/tracking?settings=open"))
 
-	// Deep-link «Настройки»: единый URL для шеринга и автоматической отправки
-	// пользователя в модалку настроек на актуальной странице (без отдельной
-	// HTML-страницы — модалка живёт в base.html).
-	mux.HandleFunc("GET /settings", func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, "/tracking?settings=open", http.StatusFound)
-	})
+	// Legacy URL — единая страница сеанса
+	mux.HandleFunc("GET /receiver", redirectFound("/tracking"))
+	mux.HandleFunc("GET /simulation", redirectFound("/tracking"))
 
-	// API маршруты.
+	// API.
 	mux.HandleFunc("GET /api/health", apiHandler.HealthCheck)
 	mux.HandleFunc("GET /api/config", apiHandler.GetConfig)
-
-	// Полные настройки приложения (модальное окно «Настройки»).
-	settingsHandler := handlers.NewSettingsHandler(configStore)
 	mux.HandleFunc("GET /api/settings", settingsHandler.Get)
 	mux.HandleFunc("PUT /api/settings", settingsHandler.Update)
-
-	// SDR: обнаружение приёмников и проверка для вкладки «Радиотракты».
-	sdrHandler := handlers.NewSDRHandler(sdr.NewService())
 	mux.HandleFunc("GET /api/sdr/devices", sdrHandler.ListDevices)
 	mux.HandleFunc("POST /api/sdr/test", sdrHandler.Test)
-
-	// API управления наблюдением (tracking).
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
-
-	// API списка исключений: скрыть спутник из группы и списка пролётов.
-	// GET/DELETE используются модалкой «Настройки» для просмотра и снятия
-	// записей; POST — старый flow «скрыть через ПКМ».
-	exclusionsHandler := handlers.NewExclusionsHandler(excludeStore, passCache, groupRefresher)
 	mux.HandleFunc("POST /api/exclusions", exclusionsHandler.Add)
 	mux.HandleFunc("GET /api/exclusions", exclusionsHandler.List)
 	mux.HandleFunc("DELETE /api/exclusions/{norad}", exclusionsHandler.Delete)
 
-	// API SatNOGS (полный список передатчиков по NORAD ID — для будущего dropdown).
-	if satnogsService != nil {
-		satnogsHandler := handlers.NewSatNOGSHandler(satnogsService)
+	if deps.SatNOGS != nil {
+		satnogsHandler := handlers.NewSatNOGSHandler(deps.SatNOGS)
 		mux.HandleFunc("GET /api/satnogs/transmitters/{norad}", satnogsHandler.GetTransmitters)
 	}
 
-	// SSE endpoint — EventSource-совместимый поток данных.
-	// WriteTimeout для SSE-соединений отключается per-connection в ServeHTTP.
-	mux.Handle("GET /api/sse", sseHub)
+	mux.Handle("GET /api/sse", deps.SSE)
+}
 
+func redirectFound(path string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, path, http.StatusFound)
+	}
 }

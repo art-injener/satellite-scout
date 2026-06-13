@@ -12,7 +12,7 @@ import (
 // mockFetcher — мок HTTP-клиента для тестов сервиса.
 type mockFetcher struct {
 	mu       sync.Mutex
-	calls    int32
+	calls    atomic.Int32
 	calledBy []int                 // NORAD'ы в порядке вызовов.
 	results  map[int][]Transmitter // что возвращать на конкретный NORAD.
 	errors   map[int]error         // ошибка вместо удачного ответа.
@@ -28,7 +28,7 @@ func newMockFetcher() *mockFetcher {
 }
 
 func (m *mockFetcher) FetchTransmitters(_ context.Context, noradID int) ([]Transmitter, error) {
-	atomic.AddInt32(&m.calls, 1)
+	m.calls.Add(1)
 	m.mu.Lock()
 	m.calledBy = append(m.calledBy, noradID)
 	delay := m.delay
@@ -53,7 +53,7 @@ func (m *mockFetcher) FetchTransmitters(_ context.Context, noradID int) ([]Trans
 }
 
 func (m *mockFetcher) callCount() int32 {
-	return atomic.LoadInt32(&m.calls)
+	return m.calls.Load()
 }
 
 // runService — стартует Service.Run в горутине и возвращает stop-функцию.
@@ -127,7 +127,7 @@ func TestService_GetPrimary_CacheHitNoExtraFetch(t *testing.T) {
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 
 	// Несколько hot-вызовов — fetch не должен повторяться.
-	for i := 0; i < 5; i++ {
+	for range 5 {
 		_ = svc.GetPrimaryTransmitter(1)
 	}
 	if got := mock.callCount(); got != 1 {
@@ -195,7 +195,7 @@ func TestService_GetPrimary_GracefulDegradationOnError(t *testing.T) {
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 
 	// Сразу после ошибки — повторно fetch не вызывается (ждём retryAfter).
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_ = svc.GetPrimaryTransmitter(42)
 	}
 	time.Sleep(20 * time.Millisecond)
@@ -236,12 +236,10 @@ func TestService_RequestFetch_DedupsConcurrentRequests(t *testing.T) {
 
 	// Десять параллельных запросов на тот же NORAD.
 	var wg sync.WaitGroup
-	for i := 0; i < 10; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+	for range 10 {
+		wg.Go(func() {
 			svc.GetPrimaryTransmitter(1)
-		}()
+		})
 	}
 	wg.Wait()
 

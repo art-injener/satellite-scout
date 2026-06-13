@@ -7,26 +7,26 @@
 
 (function() {
 
-    var MAX_ROWS = 200;
-    var MOCK_TICK_MS = 2500;
+    const MAX_ROWS = 200;
+    const MOCK_TICK_MS = 2500;
 
     // Каталог параметров для mock: подпись + единицы + диапазон.
-    var MOCK_PARAMS = [
-        { key: 'темп',     unit: '°C',  min: -15, max: 45,  fmt: 1, sign: true },
-        { key: 'V сети',   unit: 'V',   min: 11.4,max: 12.6,fmt: 1, sign: true },
-        { key: 'I сети',   unit: 'mA',  min: 120, max: 480, fmt: 0 },
-        { key: 'V бат',    unit: 'V',   min: 3.6, max: 4.2, fmt: 2 },
-        { key: 'V солн',   unit: 'V',   min: 0,   max: 5.5, fmt: 2 },
-        { key: 'темп бат', unit: '°C',  min: -10, max: 38,  fmt: 1, sign: true },
-        { key: 'RSSI',     unit: 'dBm', min: -105,max: -60, fmt: 0, sign: true },
-        { key: 'uptime',   unit: 's',   min: 0,   max: 86400, fmt: 0 },
-        { key: 'reboots',  unit: '',    min: 0,   max: 12,  fmt: 0 },
+    const MOCK_PARAMS = [
+        { key: 'темп', unit: '°C', min: -15, max: 45, fmt: 1, sign: true },
+        { key: 'V сети', unit: 'V', min: 11.4,max: 12.6,fmt: 1, sign: true },
+        { key: 'I сети', unit: 'mA', min: 120, max: 480, fmt: 0 },
+        { key: 'V бат', unit: 'V', min: 3.6, max: 4.2, fmt: 2 },
+        { key: 'V солн', unit: 'V', min: 0, max: 5.5, fmt: 2 },
+        { key: 'темп бат', unit: '°C', min: -10, max: 38, fmt: 1, sign: true },
+        { key: 'RSSI', unit: 'dBm', min: -105,max: -60, fmt: 0, sign: true },
+        { key: 'uptime', unit: 's', min: 0, max: 86400, fmt: 0 },
+        { key: 'reboots', unit: '', min: 0, max: 12, fmt: 0 },
     ];
 
-    function pad2(n) { return n < 10 ? '0' + n : '' + n; }
+    function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
     function timeNow() {
-        var d = new Date();
+        const d = new Date();
         return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
     }
 
@@ -39,8 +39,8 @@
 
     /** Форматирует одно значение параметра с возможным знаком и единицей. */
     function formatParamValue(p) {
-        var val = p.min + Math.random() * (p.max - p.min);
-        var str = val.toFixed(p.fmt);
+        const val = p.min + Math.random() * (p.max - p.min);
+        let str = val.toFixed(p.fmt);
         if (p.sign && val >= 0) { str = '+' + str; }
         if (p.unit) { str += p.unit; }
         return str;
@@ -48,12 +48,12 @@
 
     /** Случайный набор параметров (3–6 штук) для одного пакета. */
     function randomParams() {
-        var pool = MOCK_PARAMS.slice();
-        var count = 3 + Math.floor(Math.random() * 4);
-        var out = [];
-        for (var i = 0; i < count && pool.length > 0; i++) {
-            var idx = Math.floor(Math.random() * pool.length);
-            var p = pool.splice(idx, 1)[0];
+        const pool = MOCK_PARAMS.slice();
+        const count = 3 + Math.floor(Math.random() * 4);
+        const out = [];
+        for (let i = 0; i < count && pool.length > 0; i++) {
+            const idx = Math.floor(Math.random() * pool.length);
+            const p = pool.splice(idx, 1)[0];
             out.push({ key: p.key, value: formatParamValue(p) });
         }
         return out;
@@ -79,8 +79,8 @@
     }
 
     TelemetryTable.prototype._channelText = function(pkt) {
-        var label = pkt && pkt.channelLabel ? pkt.channelLabel : this._channelLabel;
-        var freqMHz = pkt && typeof pkt.channelFreqMHz === 'number' && isFinite(pkt.channelFreqMHz)
+        const label = pkt && pkt.channelLabel ? pkt.channelLabel : this._channelLabel;
+        const freqMHz = pkt && typeof pkt.channelFreqMHz === 'number' && isFinite(pkt.channelFreqMHz)
             ? pkt.channelFreqMHz
             : this._channelFreq;
         return label + ' · ' + formatFreqMHz(freqMHz) + ' MHz';
@@ -100,44 +100,44 @@
         if (!this._tbody) { return; }
         pkt = pkt || {};
 
-        var tr = document.createElement('tr');
-        var crcOk = pkt.crc !== 'FAIL';
+        const tr = document.createElement('tr');
+        const crcOk = pkt.crc !== 'FAIL';
         if (!crcOk) {
             tr.className = 'ml-tmi__row--fail';
         }
 
-        var tdChan = document.createElement('td');
+        const tdChan = document.createElement('td');
         tdChan.className = 'ml-tmi__chan';
         tdChan.textContent = this._channelText(pkt);
         tr.appendChild(tdChan);
 
-        var tdTime = document.createElement('td');
+        const tdTime = document.createElement('td');
         tdTime.textContent = pkt.time || timeNow();
         tr.appendChild(tdTime);
 
-        var tdFrame = document.createElement('td');
+        const tdFrame = document.createElement('td');
         tdFrame.textContent = String(pkt.frame != null ? pkt.frame : this._frameSeq);
         tr.appendChild(tdFrame);
 
-        var tdCrc = document.createElement('td');
+        const tdCrc = document.createElement('td');
         tdCrc.textContent = pkt.crc || 'OK';
         tdCrc.className = crcOk ? 'ml-tmi__crc--ok' : 'ml-tmi__crc--fail';
         tr.appendChild(tdCrc);
 
-        var tdParams = document.createElement('td');
+        const tdParams = document.createElement('td');
         tdParams.className = 'ml-tmi__params';
-        var params = pkt.params || [];
-        for (var i = 0; i < params.length; i++) {
+        const params = pkt.params || [];
+        for (let i = 0; i < params.length; i++) {
             if (i > 0) {
-                var comma = document.createElement('span');
+                const comma = document.createElement('span');
                 comma.textContent = ', ';
                 tdParams.appendChild(comma);
             }
-            var keyEl = document.createElement('span');
+            const keyEl = document.createElement('span');
             keyEl.className = 'ml-tmi__param-key';
             keyEl.textContent = params[i].key + ':';
             tdParams.appendChild(keyEl);
-            var valEl = document.createElement('span');
+            const valEl = document.createElement('span');
             valEl.className = 'ml-tmi__param-val';
             valEl.textContent = params[i].value;
             tdParams.appendChild(valEl);
@@ -175,7 +175,7 @@
     TelemetryTable.prototype.startMock = function() {
         this.stopMock();
         this._active = true;
-        var self = this;
+        const self = this;
         this._mockTimer = setInterval(function() {
             self._mockTick();
         }, MOCK_TICK_MS);

@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/art-injener/satellite-scout/internal/config"
@@ -175,10 +176,5 @@ func TestSettingsHandler_UpdateInvalidJSON(t *testing.T) {
 }
 
 func contains(arr []string, s string) bool {
-	for _, v := range arr {
-		if v == s {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(arr, s)
 }

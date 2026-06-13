@@ -1480,7 +1480,7 @@
         if (Array.isArray(track)) {
             polylines.push(track);
         } else if (typeof track === 'object') {
-            if (Array.isArray(track.past))   { Array.prototype.push.apply(polylines, track.past); }
+            if (Array.isArray(track.past)) { Array.prototype.push.apply(polylines, track.past); }
             if (Array.isArray(track.future)) { Array.prototype.push.apply(polylines, track.future); }
         }
         const halfW = this._antimeridianThreshold();
@@ -1533,7 +1533,7 @@
             info[mid] = {
                 name: markers[j].name,
                 alias: markers[j].alias || '',
-                tracked: !!markers[j].isTracked,
+                tracked: Boolean(markers[j].isTracked),
             };
         }
         this._calloutRenderer.update(layouts, bounds, info);
@@ -1557,14 +1557,14 @@
         // излучатель в самой точке наблюдения + две статичные дуги радиоволн
         // симметрично по бокам. Центр значка (излучатель) = гео-координата.
         const dpr = window.devicePixelRatio || 1;
-        const mastH = 16 * dpr;        // высота мачты вниз от точки
-        const mastHalf = 7 * dpr;      // полуширина основания мачты
+        const mastH = 16 * dpr; // высота мачты вниз от точки
+        const mastHalf = 7 * dpr; // полуширина основания мачты
         const crossY = p.y + mastH * 0.55; // уровень поперечины
         const crossHalf = mastHalf * 0.55;
-        const waveR1 = 8 * dpr;        // радиус ближней дуги волн
-        const waveR2 = 13 * dpr;       // радиус дальней дуги волн
+        const waveR1 = 8 * dpr; // радиус ближней дуги волн
+        const waveR2 = 13 * dpr; // радиус дальней дуги волн
         const waveSpread = Math.PI / 4; // ±45° раствор дуг от горизонтали
-        const emitterR = 2.4 * dpr;    // радиус излучателя
+        const emitterR = 2.4 * dpr; // радиус излучателя
 
         const iconColor = this.colors.observer || '#d4a040';
         const haloColor = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
@@ -1616,7 +1616,7 @@
         ctx.arc(p.x, p.y, emitterR, 0, Math.PI * 2);
         ctx.fillStyle = iconColor;
         ctx.strokeStyle = haloColor;
-        ctx.lineWidth = 1 * dpr;
+        ctx.lineWidth = Number(dpr);
         ctx.fill();
         ctx.stroke();
 
@@ -1913,7 +1913,7 @@
 
         // Колбэк синхронизации disabled-состояний на крайних уровнях.
         this.onZoomChange = function(_zoom, idx, total) {
-            if (btnIn)  { btnIn.disabled  = (idx >= total - 1); }
+            if (btnIn) { btnIn.disabled = (idx >= total - 1); }
             if (btnOut) { btnOut.disabled = (idx <= 0); }
         };
         // Установить начальное состояние disabled.
@@ -2107,8 +2107,8 @@
      * @param {number} lat Широта preview, градусы.
      */
     EarthView.prototype.setObserverPreview = function(lon, lat) {
-        if (typeof lon !== 'number' || typeof lat !== 'number') return;
-        if (Number.isNaN(lon) || Number.isNaN(lat)) return;
+        if (typeof lon !== 'number' || typeof lat !== 'number') {return;}
+        if (Number.isNaN(lon) || Number.isNaN(lat)) {return;}
         this._observerPreview = { lon: lon, lat: lat };
         this.draw();
     };
@@ -2227,12 +2227,12 @@
      * @private
      */
     EarthView.PHASED_STAGES = [
-        { key: 'clear',    startFrac: 0.00, endFrac: 0.00 },
-        { key: 'grid',     startFrac: 0.05, endFrac: 0.05 },
-        { key: 'coast',    startFrac: 0.05, endFrac: 0.75 },
-        { key: 'land',     startFrac: 0.78, endFrac: 0.78 },
+        { key: 'clear', startFrac: 0.00, endFrac: 0.00 },
+        { key: 'grid', startFrac: 0.05, endFrac: 0.05 },
+        { key: 'coast', startFrac: 0.05, endFrac: 0.75 },
+        { key: 'land', startFrac: 0.78, endFrac: 0.78 },
         { key: 'observer', startFrac: 0.85, endFrac: 0.85 },
-        { key: 'dynamic',  startFrac: 1.00, endFrac: 1.00 }
+        { key: 'dynamic', startFrac: 1.00, endFrac: 1.00 }
     ];
 
     /** Текущее время (с поддержкой замены в тестах). @private */
@@ -2310,7 +2310,7 @@
         const stages = EarthView.PHASED_STAGES;
 
         // Найти стадию по ключу.
-        let stageByKey = {};
+        const stageByKey = {};
         for (let i = 0; i < stages.length; i++) { stageByKey[stages[i].key] = stages[i]; }
 
         const reached = function(key) {
@@ -2727,14 +2727,14 @@
 
         // Габариты силуэта в logical px (умножаются на dpr внутри).
         // Габарит ≈38×19 — явно различимый на карте, не конкурирует с tracked-иконкой (56×56).
-        const BODY_W   = 14;
-        const BODY_H   = 12;
-        const BOOM_W   = 2;
-        const BOOM_H   = 1.5;
-        const PANEL_W  = 10;
-        const PANEL_H  = 14;
-        const ANT_H    = 3;
-        const ANT_DOT  = 1.5;
+        const BODY_W = 14;
+        const BODY_H = 12;
+        const BOOM_W = 2;
+        const BOOM_H = 1.5;
+        const PANEL_W = 10;
+        const PANEL_H = 14;
+        const ANT_H = 3;
+        const ANT_DOT = 1.5;
         const CORNER_R = 2;
 
         const cx = p.x;
@@ -2754,10 +2754,10 @@
         // На light оставляем чуть «синь», но без насыщенности; на dark — почти чёрный
         // тёплый графит, чтобы не сливалось с водой и не било в глаза неоном.
         const stroke = isLight ? 'rgba(36, 44, 56, 0.78)' : 'rgba(20, 26, 34, 0.85)';
-        const halo   = isLight ? 'rgba(0, 0, 0, 0.18)'    : 'rgba(0, 0, 0, 0.45)';
-        const lwHair  = isLight ? Math.max(1, dpr)          : Math.max(1.1, 1.2 * dpr);
-        const lwPanel = isLight ? Math.max(1.2, 1.3 * dpr)  : Math.max(1.4, 1.6 * dpr);
-        const lwBody  = isLight ? Math.max(1.4, 1.5 * dpr)  : Math.max(1.6, 1.8 * dpr);
+        const halo = isLight ? 'rgba(0, 0, 0, 0.18)' : 'rgba(0, 0, 0, 0.45)';
+        const lwHair = isLight ? Math.max(1, dpr) : Math.max(1.1, 1.2 * dpr);
+        const lwPanel = isLight ? Math.max(1.2, 1.3 * dpr) : Math.max(1.4, 1.6 * dpr);
+        const lwBody = isLight ? Math.max(1.4, 1.5 * dpr) : Math.max(1.6, 1.8 * dpr);
 
         ctx.save();
         ctx.lineCap = 'butt';
@@ -2766,7 +2766,7 @@
         ctx.shadowColor = halo;
         ctx.shadowBlur = 2.5 * dpr;
         ctx.shadowOffsetX = 0;
-        ctx.shadowOffsetY = 1 * dpr;
+        ctx.shadowOffsetY = Number(dpr);
 
         // ─── Антенна (штырь + точка) над корпусом ────────────────────
         ctx.strokeStyle = stroke;
@@ -2786,7 +2786,7 @@
         ctx.fillStyle = stroke;
         const boomY = cy - boomH / 2;
         ctx.fillRect(cx - bodyHalfW - boomW, boomY, boomW, boomH);
-        ctx.fillRect(cx + bodyHalfW,         boomY, boomW, boomH);
+        ctx.fillRect(cx + bodyHalfW, boomY, boomW, boomH);
 
         // ─── Солнечные панели (заливка цветом КА, чуть полупрозрачно) ───
         ctx.globalAlpha = 0.82;
@@ -2794,7 +2794,7 @@
         ctx.strokeStyle = stroke;
         ctx.lineWidth = lwPanel;
         const panelY = cy - panelH / 2;
-        const leftX  = cx - bodyHalfW - boomW - panelW;
+        const leftX = cx - bodyHalfW - boomW - panelW;
         const rightX = cx + bodyHalfW + boomW;
         ctx.beginPath();
         ctx.rect(leftX, panelY, panelW, panelH);
@@ -2826,7 +2826,7 @@
         ctx.globalAlpha = 1;
         ctx.shadowColor = halo;
         ctx.shadowBlur = 2.5 * dpr;
-        ctx.shadowOffsetY = 1 * dpr;
+        ctx.shadowOffsetY = Number(dpr);
         ctx.fillStyle = color;
         ctx.strokeStyle = stroke;
         ctx.lineWidth = lwBody;
@@ -2852,8 +2852,8 @@
     window.MAP_ZOOM_LEVELS = MAP_ZOOM_LEVELS;
 
     // CommonJS-экспорт для node-тестов.
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { EarthView: EarthView, MAP_ZOOM_LEVELS: MAP_ZOOM_LEVELS };
+    if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
+        module.exports = { EarthView: EarthView, MAP_ZOOM_LEVELS: MAP_ZOOM_LEVELS }; // eslint-disable-line no-undef
     }
 
 })();

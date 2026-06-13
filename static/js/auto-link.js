@@ -9,7 +9,7 @@
  *  - Состав группы — SSE-событие `satellite_group_update`.
  */
 
-(function () {
+(function() {
     'use strict';
 
     /**
@@ -283,56 +283,6 @@
         stripEl.scrollLeft = 0;
     }
 
-    /** Короткий обратный отсчёт M:SS (для подписи LOS). */
-    function fmtCountdownShort(deltaMs) {
-        if (deltaMs <= 0) { return '0:00'; }
-        const sec = Math.floor(deltaMs / 1000);
-        const m = Math.floor(sec / 60);
-        const s = sec % 60;
-        return `${m}:${s < 10 ? '0' : ''}${s}`;
-    }
-
-    /**
-     * Подпись до конца сеанса: «-2:14 LOS» или «-5:30 AOS».
-     * @param {number} aos — Unix ms
-     * @param {number} los — Unix ms
-     * @param {number} [nowMs]
-     * @returns {{ text: string, kind: string }}
-     */
-    function fmtPassUntilLabel(aos, los, nowMs) {
-        const now = nowMs != null ? nowMs : Date.now();
-        if (!aos || !los || los <= aos) {
-            return { text: '—', kind: 'none' };
-        }
-        if (now < aos) {
-            return { text: `-${fmtCountdownShort(aos - now)} AOS`, kind: 'aos' };
-        }
-        if (now <= los) {
-            return { text: `-${fmtCountdownShort(los - now)} LOS`, kind: 'los' };
-        }
-        return { text: '—', kind: 'none' };
-    }
-
-    /**
-     * Подпись угла места: «El 45° ↑».
-     * @param {number|null} el — градусы
-     * @param {number|null} prevEl — предыдущее значение для стрелки тренда
-     */
-    function fmtElevationLabel(el, prevEl) {
-        if (el == null || Number.isNaN(el)) {
-            return { text: 'El —', level: 'none', trend: '' };
-        }
-        const v = Math.round(el);
-        let trend = '';
-        if (prevEl != null && !Number.isNaN(prevEl)) {
-            const d = el - prevEl;
-            if (d > 0.15) { trend = ' ↑'; }
-            else if (d < -0.15) { trend = ' ↓'; }
-        }
-        const level = v >= 25 ? 'high' : (v >= 10 ? 'mid' : 'low');
-        return { text: `El ${v}°${trend}`, level, trend };
-    }
-
     /**
      * Толщина яркой полосы сигнала в водопаде как доля высоты строки (0..1).
      * Кодирует тип модуляции: CW — тонкая линия, GMSK/FSK — широкая полоса.
@@ -370,7 +320,7 @@
         constructor(canvas, opts) {
             this.canvas = canvas;
             this.ctx = canvas.getContext('2d');
-            this.vertical = !!(opts && opts.vertical);
+            this.vertical = Boolean(opts && opts.vertical);
             this.bandFrac = (opts && opts.bandFrac) || 0.24;
             this.power = 0;
             this._w = 0;
@@ -740,7 +690,7 @@
 
         _applyGroups(groups, opts) {
             this._lastGroups = groups;
-            const forceFull = !!(opts && opts.forceFull);
+            const forceFull = Boolean(opts && opts.forceFull);
             if (this._layout === 'v') {
                 this._applyGroupsVertical(groups, forceFull);
             } else {

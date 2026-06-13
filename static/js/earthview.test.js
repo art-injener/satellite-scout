@@ -167,7 +167,7 @@ test('zoom=1: X центрируется на center.lon, Y по экватор�
     // На zoom=1 Y не зависит от center.lat: lat=0 → y=H/2.
     assert.ok(approx(p0.y, 200, 1e-3), `y(lat=0)=${p0.y}`);
     // Полный диапазон ±90 на полную высоту независимо от center.lat.
-    assert.ok(approx(ev.project(0,  90).y,   0, 1e-3), `top y(90)=${ev.project(0, 90).y}`);
+    assert.ok(approx(ev.project(0, 90).y, 0, 1e-3), `top y(90)=${ev.project(0, 90).y}`);
     assert.ok(approx(ev.project(0, -90).y, 400, 1e-3), `bot y(-90)=${ev.project(0,-90).y}`);
 });
 
@@ -227,7 +227,7 @@ test('clamp: при zoom>1 карта всегда полностью покры
         // Намеренно «уходящий» центр в Арктику.
         ev.center = { lon: 0, lat: 89 };
         ev.zoom = z;
-        const yTop = ev.project(0,  90).y;
+        const yTop = ev.project(0, 90).y;
         const yBot = ev.project(0, -90).y;
         assert.ok(yTop <= 0 + 1e-6, `zoom=${z} верх (lat=90) y=${yTop} должен быть ≤ 0`);
         assert.ok(yBot >= 400 - 1e-6, `zoom=${z} низ (lat=-90) y=${yBot} должен быть ≥ H`);
@@ -239,8 +239,8 @@ test('round-trip project/unproject при zoom=2.5, center=Moscow', () => {
     ev.center = { lon: 37.62, lat: 55.75 };
     ev.zoom = 2.5;
     const samples = [
-        { lon: 37.62, lat: 55.75 },     // центр
-        { lon: 30, lat: 60 },           // близко к центру
+        { lon: 37.62, lat: 55.75 }, // центр
+        { lon: 30, lat: 60 }, // близко к центру
         { lon: 50, lat: 40 },
         { lon: -10, lat: 30 }
     ];
@@ -943,10 +943,10 @@ test('drawZoneRing: footprint, пересекающий полюс — зали�
     // 1) заменить полярный блок на пары точек у y<0 (за верх canvas);
     // 2) оставить нижнюю дугу как есть; 3) полигон замыкается через clip.
     const ring = [
-        { lon: 30, lat: 88 },   { lon: 60, lat: 88 },   { lon: 90, lat: 87 },
-        { lon: 120, lat: 75 },  { lon: 150, lat: 70 },  { lon: 180, lat: 65 },
+        { lon: 30, lat: 88 }, { lon: 60, lat: 88 }, { lon: 90, lat: 87 },
+        { lon: 120, lat: 75 }, { lon: 150, lat: 70 }, { lon: 180, lat: 65 },
         { lon: -150, lat: 65 }, { lon: -120, lat: 65 }, { lon: -90, lat: 70 },
-        { lon: -60, lat: 75 },  { lon: -30, lat: 87 },  { lon: 0, lat: 88 },
+        { lon: -60, lat: 75 }, { lon: -30, lat: 87 }, { lon: 0, lat: 88 },
     ];
     ev._drawZoneRing(ring, '#0ff', '#0ff', 1);
     const fills = calls.filter(c => c.op === 'fill');

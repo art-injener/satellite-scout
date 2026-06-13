@@ -39,12 +39,12 @@ function makeTr() {
 
 global.document = {
     getElementById: (id) => {
-        if (id === 'manual-tmi-tbody') return _tbody;
-        if (id === 'manual-tmi-scroll') return _scrollEl;
+        if (id === 'manual-tmi-tbody') {return _tbody;}
+        if (id === 'manual-tmi-scroll') {return _scrollEl;}
         return null;
     },
     createElement: (tag) => {
-        if (tag === 'tr') return makeTr();
+        if (tag === 'tr') {return makeTr();}
         return { textContent: '', className: '', appendChild() {} };
     },
 };

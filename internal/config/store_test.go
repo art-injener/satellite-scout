@@ -36,8 +36,8 @@ func TestStore_SaveAtomicCreatesFile(t *testing.T) {
 	}
 
 	var got Config
-	if err := json.Unmarshal(data, &got); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if unmarshalErr := json.Unmarshal(data, &got); unmarshalErr != nil {
+		t.Fatalf("unmarshal: %v", unmarshalErr)
 	}
 	if got.Version != CurrentVersion {
 		t.Errorf("Version = %d, want %d", got.Version, CurrentVersion)
@@ -63,8 +63,8 @@ func TestStore_LoadAfterSaveRestoresSameValues(t *testing.T) {
 	}
 
 	store2 := NewStore(path)
-	if err := store2.Load(); err != nil {
-		t.Fatalf("Load() error = %v", err)
+	if loadErr := store2.Load(); loadErr != nil {
+		t.Fatalf("Load() error = %v", loadErr)
 	}
 
 	got := store2.Get()
@@ -135,8 +135,8 @@ func TestStore_UpdateAppliesAndPersists(t *testing.T) {
 	}
 
 	store2 := NewStore(path)
-	if err := store2.Load(); err != nil {
-		t.Fatalf("Load() error = %v", err)
+	if loadErr := store2.Load(); loadErr != nil {
+		t.Fatalf("Load() error = %v", loadErr)
 	}
 	if store2.Get().UI.Theme != "breeze" {
 		t.Errorf("on-disk theme = %q, want %q", store2.Get().UI.Theme, "breeze")
@@ -168,8 +168,8 @@ func TestStore_UpdateRollbackOnValidationError(t *testing.T) {
 	}
 
 	store2 := NewStore(path)
-	if err := store2.Load(); err != nil {
-		t.Fatalf("Load() error = %v", err)
+	if loadErr := store2.Load(); loadErr != nil {
+		t.Fatalf("Load() error = %v", loadErr)
 	}
 	if store2.Get().Station.Observer.Lat == 200.0 {
 		t.Error("invalid value was persisted to disk despite validation failure")
@@ -284,12 +284,12 @@ func TestStore_AtomicityNoPartialOnExistingFile(t *testing.T) {
 		t.Fatalf("read before: %v", err)
 	}
 	var beforeCfg Config
-	if err := json.Unmarshal(beforeData, &beforeCfg); err != nil {
-		t.Fatalf("unmarshal before: %v", err)
+	if unmarshalErr := json.Unmarshal(beforeData, &beforeCfg); unmarshalErr != nil {
+		t.Fatalf("unmarshal before: %v", unmarshalErr)
 	}
 
-	if err := store.Save(); err != nil {
-		t.Fatalf("second Save: %v", err)
+	if saveErr := store.Save(); saveErr != nil {
+		t.Fatalf("second Save: %v", saveErr)
 	}
 
 	afterData, err := os.ReadFile(path)
@@ -297,8 +297,8 @@ func TestStore_AtomicityNoPartialOnExistingFile(t *testing.T) {
 		t.Fatalf("read after: %v", err)
 	}
 	var afterCfg Config
-	if err := json.Unmarshal(afterData, &afterCfg); err != nil {
-		t.Fatalf("unmarshal after: %v", err)
+	if unmarshalErr := json.Unmarshal(afterData, &afterCfg); unmarshalErr != nil {
+		t.Fatalf("unmarshal after: %v", unmarshalErr)
 	}
 	if afterCfg.Station.Observer.Lat != beforeCfg.Station.Observer.Lat {
 		t.Errorf("file mutated unexpectedly: before %f, after %f",

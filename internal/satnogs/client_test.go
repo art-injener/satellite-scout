@@ -103,9 +103,9 @@ func TestClient_FetchTransmitters_NotFound(t *testing.T) {
 }
 
 func TestClient_FetchTransmitters_NotFoundNoRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusNotFound)
 	}))
 	defer server.Close()
@@ -115,7 +115,7 @@ func TestClient_FetchTransmitters_NotFoundNoRetry(t *testing.T) {
 	if !errors.Is(err, ErrSatNOGSNotFound) {
 		t.Fatalf("err = %v, want ErrSatNOGSNotFound", err)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("attempts = %d, want 1 (no retry on 404)", got)
 	}
 }
@@ -147,9 +147,9 @@ func TestClient_FetchTransmitters_RateLimit429(t *testing.T) {
 }
 
 func TestClient_FetchTransmitters_RetriesOnServerError(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&attempts, 1)
+		n := attempts.Add(1)
 		if n < 3 {
 			w.WriteHeader(http.StatusInternalServerError)
 			return
@@ -167,7 +167,7 @@ func TestClient_FetchTransmitters_RetriesOnServerError(t *testing.T) {
 	if len(transmitters) != 0 {
 		t.Errorf("len = %d, want 0 (empty array)", len(transmitters))
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("attempts = %d, want 3 (retry on 5xx)", got)
 	}
 }
@@ -184,7 +184,7 @@ func TestClient_FetchTransmitters_RateLimitDelay(t *testing.T) {
 	ctx := context.Background()
 
 	start := time.Now()
-	for i := 0; i < 3; i++ {
+	for range 3 {
 		_, _ = c.FetchTransmitters(ctx, 25544)
 	}
 	elapsed := time.Since(start)
@@ -244,9 +244,9 @@ func TestClient_FetchTransmitters_EmptyArrayOK(t *testing.T) {
 }
 
 func TestClient_FetchTransmitters_BadRequest400NoRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusBadRequest)
 		_, _ = w.Write([]byte(`"Enter a number."`))
 	}))
@@ -260,15 +260,15 @@ func TestClient_FetchTransmitters_BadRequest400NoRetry(t *testing.T) {
 	if !errors.Is(err, ErrSatNOGSBadRequest) {
 		t.Errorf("err = %v, want ErrSatNOGSBadRequest", err)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("attempts = %d, want 1 (no retry on 400)", got)
 	}
 }
 
 func TestClient_FetchTransmitters_OtherClientErrorNoRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		w.WriteHeader(http.StatusForbidden) // 403
 	}))
 	defer server.Close()
@@ -281,15 +281,15 @@ func TestClient_FetchTransmitters_OtherClientErrorNoRetry(t *testing.T) {
 	if !errors.Is(err, ErrSatNOGSClientError) {
 		t.Errorf("err = %v, want ErrSatNOGSClientError", err)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("attempts = %d, want 1 (no retry on 403)", got)
 	}
 }
 
 func TestClient_FetchTransmitters_429DoesRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		n := atomic.AddInt32(&attempts, 1)
+		n := attempts.Add(1)
 		if n < 3 {
 			w.WriteHeader(http.StatusTooManyRequests)
 			return
@@ -307,7 +307,7 @@ func TestClient_FetchTransmitters_429DoesRetry(t *testing.T) {
 	if len(transmitters) != 0 {
 		t.Errorf("len = %d, want 0", len(transmitters))
 	}
-	if got := atomic.LoadInt32(&attempts); got != 3 {
+	if got := attempts.Load(); got != 3 {
 		t.Errorf("attempts = %d, want 3 (429 should retry)", got)
 	}
 }
@@ -342,9 +342,9 @@ func TestWithTimeout(t *testing.T) {
 }
 
 func TestClient_FetchTransmitters_TimeoutNoRetry(t *testing.T) {
-	var attempts int32
+	var attempts atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		atomic.AddInt32(&attempts, 1)
+		attempts.Add(1)
 		time.Sleep(300 * time.Millisecond) // дольше таймаута клиента
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -365,7 +365,7 @@ func TestClient_FetchTransmitters_TimeoutNoRetry(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("err = %v, want context.DeadlineExceeded", err)
 	}
-	if got := atomic.LoadInt32(&attempts); got != 1 {
+	if got := attempts.Load(); got != 1 {
 		t.Errorf("attempts = %d, want 1 (timeout must not retry)", got)
 	}
 }

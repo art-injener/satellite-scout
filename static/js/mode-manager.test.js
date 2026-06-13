@@ -4,7 +4,7 @@
 'use strict';
 
 const assert = require('assert');
-const { ModeManager, ModeId, ModeEvent, StationType } = require('./mode-manager.js');
+const { ModeManager, ModeId, StationType } = require('./mode-manager.js');
 
 // ── In-memory localStorage для изоляции тестов ───────────────
 

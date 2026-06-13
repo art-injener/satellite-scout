@@ -34,7 +34,7 @@ function makeElement(tag) {
         setAttribute(k, v) { this._attrs[k] = v; },
         getAttribute(k) { return this._attrs[k] || null; },
         addEventListener(ev, fn) {
-            if (!this._listeners[ev]) this._listeners[ev] = [];
+            if (!this._listeners[ev]) {this._listeners[ev] = [];}
             this._listeners[ev].push(fn);
         },
         querySelector() { return null; },

@@ -20,7 +20,7 @@ function makeButton() {
             _set: new Set(),
             add(cls) { this._set.add(cls); },
             remove(cls) { this._set.delete(cls); },
-            toggle(cls, on) { if (on) this._set.add(cls); else this._set.delete(cls); },
+            toggle(cls, on) { if (on) {this._set.add(cls);} else {this._set.delete(cls);} },
             contains(cls) { return this._set.has(cls); },
         },
         listeners: {},
@@ -84,7 +84,7 @@ const _autoEl = {
     style: { opacity: '1' },
     classList: {
         _set: new Set(),
-        toggle(cls, on) { if (on) this._set.add(cls); else this._set.delete(cls); },
+        toggle(cls, on) { if (on) {this._set.add(cls);} else {this._set.delete(cls);} },
     },
     setAttribute() {},
     addEventListener(type, fn) { this['_on_' + type] = fn; },
@@ -92,9 +92,9 @@ const _autoEl = {
 
 global.document = {
     getElementById: (id) => {
-        if (id === 'manual-eye-canvas') return _canvas;
-        if (id === 'manual-eye-tabs') return _tabsContainer;
-        if (id === 'manual-eye-auto') return _autoEl;
+        if (id === 'manual-eye-canvas') {return _canvas;}
+        if (id === 'manual-eye-tabs') {return _tabsContainer;}
+        if (id === 'manual-eye-auto') {return _autoEl;}
         return null;
     },
     createElement: (tag) => {

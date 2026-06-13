@@ -22,9 +22,9 @@
 
     /** Синтетическая кривая элевации (параболический профиль). */
     function mockElevationCurve(maxEl, points) {
-        var result = new Float32Array(points);
-        for (var i = 0; i < points; i++) {
-            var t = i / (points - 1);
+        const result = new Float32Array(points);
+        for (let i = 0; i < points; i++) {
+            const t = i / (points - 1);
             result[i] = maxEl * Math.sin(t * Math.PI);
         }
         return result;
@@ -32,15 +32,15 @@
 
     /** Синтетическая кривая Допплера (линейная через 0 в TCA). */
     function mockDopplerCurve(maxHz, points) {
-        var result = new Float32Array(points);
-        for (var i = 0; i < points; i++) {
-            var t = i / (points - 1);
+        const result = new Float32Array(points);
+        for (let i = 0; i < points; i++) {
+            const t = i / (points - 1);
             result[i] = maxHz * (1 - 2 * t);
         }
         return result;
     }
 
-    var CURVE_POINTS = 120;
+    const CURVE_POINTS = 120;
 
     /**
      * PassProfileView — canvas split-view.
@@ -56,7 +56,7 @@
         this._noradId = opts.noradId || 0;
 
         // Время пролёта (unix ms)
-        var now = Date.now();
+        const now = Date.now();
         this._aosMs = opts.aosMs || (now - 3 * 60000);
         this._tcaMs = opts.tcaMs || (now + 2 * 60000);
         this._losMs = opts.losMs || (now + 8 * 60000);
@@ -73,9 +73,9 @@
 
     PassProfileView.prototype._resize = function() {
         if (!this._canvas) { return; }
-        var rect = this._canvas.getBoundingClientRect();
-        var w = Math.floor(rect.width) || 300;
-        var h = Math.floor(rect.height) || 200;
+        const rect = this._canvas.getBoundingClientRect();
+        const w = Math.floor(rect.width) || 300;
+        const h = Math.floor(rect.height) || 200;
         if (w < 2 || h < 2) { return; }
         if (this._canvas.width !== w || this._canvas.height !== h) {
             this._canvas.width = w;
@@ -99,33 +99,33 @@
     PassProfileView.prototype.draw = function() {
         this._resize();
         if (!this._canvas || !this._ctx) { return; }
-        var w = this._canvas.width;
-        var h = this._canvas.height;
+        const w = this._canvas.width;
+        const h = this._canvas.height;
         if (w < 60 || h < 60) { return; }
 
-        var ctx = this._ctx;
-        var bg = cssVar('--spectrum-plot-bg', '#0c1420');
-        var gridCol = cssVar('--spectrum-plot-grid', 'rgba(255,255,255,0.08)');
-        var textCol = cssVar('--spectrum-axis-text', '#c8d0d8');
-        var elColor = cssVar('--pass-profile-el', '#5bcefa');
-        var dopColor = cssVar('--pass-profile-doppler', '#ffb347');
-        var nowColor = cssVar('--pass-profile-now', cssVar('--accent-success', '#00d4aa'));
+        const ctx = this._ctx;
+        const bg = cssVar('--spectrum-plot-bg', '#0c1420');
+        const gridCol = cssVar('--spectrum-plot-grid', 'rgba(255,255,255,0.08)');
+        const textCol = cssVar('--spectrum-axis-text', '#c8d0d8');
+        const elColor = cssVar('--pass-profile-el', '#5bcefa');
+        const dopColor = cssVar('--pass-profile-doppler', '#ffb347');
+        const nowColor = cssVar('--pass-profile-now', cssVar('--accent-success', '#00d4aa'));
 
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, w, h);
 
-        var hdr = this._headerH;
-        var ml = 50;
-        var mr = 10;
-        var mb = 22;
-        var plotW = w - ml - mr;
+        const hdr = this._headerH;
+        const ml = 50;
+        const mr = 10;
+        const mb = 22;
+        const plotW = w - ml - mr;
         if (plotW < 20) { return; }
 
-        var totalPlotH = h - hdr - mb;
-        var elH = Math.floor(totalPlotH * this._splitRatio);
-        var dopH = totalPlotH - elH;
-        var elTop = hdr;
-        var dopTop = hdr + elH;
+        const totalPlotH = h - hdr - mb;
+        const elH = Math.floor(totalPlotH * this._splitRatio);
+        const dopH = totalPlotH - elH;
+        const elTop = hdr;
+        const dopTop = hdr + elH;
 
         // ── Шапка ──
         ctx.save();
@@ -135,18 +135,18 @@
         ctx.textAlign = 'left';
         ctx.fillText('ПРОФИЛЬ СЕАНСА — ' + this._satName + '  NORAD ' + this._noradId, 8, hdr / 2);
 
-        var now = Date.now();
-        var tAos = Math.max(0, Math.round((this._aosMs - now) / 60000));
-        var tLos = Math.max(0, Math.round((this._losMs - now) / 60000));
+        const now = Date.now();
+        const tAos = Math.max(0, Math.round((this._aosMs - now) / 60000));
+        const tLos = Math.max(0, Math.round((this._losMs - now) / 60000));
         ctx.textAlign = 'right';
         ctx.fillText('T-AOS ' + this._fmtMM(tAos) + '   T-LOS ' + this._fmtMM(tLos), w - 8, hdr / 2);
         ctx.restore();
 
         // ── Позиция NOW (0..1) ──
-        var passDur = this._losMs - this._aosMs;
-        var nowFrac = passDur > 0 ? Math.max(0, Math.min(1, (now - this._aosMs) / passDur)) : 0.5;
-        var nowX = ml + nowFrac * plotW;
-        var nowIdx = Math.min(CURVE_POINTS - 1, Math.max(0, Math.round(nowFrac * (CURVE_POINTS - 1))));
+        const passDur = this._losMs - this._aosMs;
+        const nowFrac = passDur > 0 ? Math.max(0, Math.min(1, (now - this._aosMs) / passDur)) : 0.5;
+        const nowX = ml + nowFrac * plotW;
+        const nowIdx = Math.min(CURVE_POINTS - 1, Math.max(0, Math.round(nowFrac * (CURVE_POINTS - 1))));
 
         // ── Elevation ──
         this._drawSubPlot(ctx, ml, elTop, plotW, elH, this._elCurve, CURVE_POINTS,
@@ -199,14 +199,14 @@
         ctx.restore();
 
         // ── Маркер-точка на elevation ──
-        var elVal = this._elCurve[nowIdx];
-        var elY = elTop + elH * (1 - elVal / 90);
+        const elVal = this._elCurve[nowIdx];
+        const elY = elTop + elH * (1 - elVal / 90);
         this._drawMarker(ctx, nowX, elY, Math.round(elVal) + '°', elColor);
 
         // ── Маркер-точка на doppler ──
-        var dopVal = this._dopCurve[nowIdx];
-        var dopFrac = (dopVal - (-this._maxDopplerHz)) / (2 * this._maxDopplerHz);
-        var dopY = dopTop + dopH * (1 - dopFrac);
+        const dopVal = this._dopCurve[nowIdx];
+        const dopFrac = (dopVal - (-this._maxDopplerHz)) / (2 * this._maxDopplerHz);
+        const dopY = dopTop + dopH * (1 - dopFrac);
         this._drawMarker(ctx, nowX, dopY, Math.round(dopVal) + ' Hz', dopColor);
 
         // ── Шкала X (AOS / TCA / LOS) ──
@@ -214,13 +214,13 @@
         ctx.font = '10px monospace';
         ctx.fillStyle = textCol;
         ctx.textBaseline = 'top';
-        var labelY = h - mb + 4;
+        const labelY = h - mb + 4;
 
         ctx.textAlign = 'left';
         ctx.fillText('AOS', ml, labelY);
 
-        var tcaFrac = passDur > 0 ? (this._tcaMs - this._aosMs) / passDur : 0.5;
-        var tcaX = ml + tcaFrac * plotW;
+        const tcaFrac = passDur > 0 ? (this._tcaMs - this._aosMs) / passDur : 0.5;
+        const tcaX = ml + tcaFrac * plotW;
         ctx.textAlign = 'center';
         ctx.fillText('TCA', tcaX, labelY);
 
@@ -232,7 +232,7 @@
     /** Рисует один под-график (кривая + сетка + подписи Y). */
     PassProfileView.prototype._drawSubPlot = function(ctx, x, y, w, h, curve, points,
         valMin, valMax, valStep, suffix, lineColor, gridCol, textCol) {
-        var range = valMax - valMin;
+        const range = valMax - valMin;
         if (range === 0) { return; }
 
         // Сетка
@@ -240,8 +240,8 @@
         ctx.strokeStyle = gridCol;
         ctx.setLineDash([3, 3]);
         ctx.lineWidth = 1;
-        for (var v = valMin; v <= valMax; v += valStep) {
-            var gy = y + h * (1 - (v - valMin) / range);
+        for (let v = valMin; v <= valMax; v += valStep) {
+            const gy = y + h * (1 - (v - valMin) / range);
             ctx.beginPath();
             ctx.moveTo(x, gy);
             ctx.lineTo(x + w, gy);
@@ -255,9 +255,9 @@
         ctx.fillStyle = textCol;
         ctx.textAlign = 'right';
         ctx.textBaseline = 'middle';
-        for (var v2 = valMin; v2 <= valMax; v2 += valStep) {
-            var ly = y + h * (1 - (v2 - valMin) / range);
-            var label = v2 > 0 ? '+' + v2 + suffix : v2 + suffix;
+        for (let v2 = valMin; v2 <= valMax; v2 += valStep) {
+            const ly = y + h * (1 - (v2 - valMin) / range);
+            let label = v2 > 0 ? '+' + v2 + suffix : v2 + suffix;
             if (v2 === 0) { label = '0' + suffix; }
             ctx.fillText(label, x - 4, ly);
         }
@@ -269,10 +269,10 @@
         ctx.lineWidth = 2;
         ctx.lineJoin = 'round';
         ctx.beginPath();
-        for (var i = 0; i < points; i++) {
-            var px = x + (i / (points - 1)) * w;
-            var frac = (curve[i] - valMin) / range;
-            var py = y + h * (1 - frac);
+        for (let i = 0; i < points; i++) {
+            const px = x + (i / (points - 1)) * w;
+            const frac = (curve[i] - valMin) / range;
+            const py = y + h * (1 - frac);
             if (i === 0) { ctx.moveTo(px, py); }
             else { ctx.lineTo(px, py); }
         }
@@ -302,8 +302,8 @@
     /** Формат минут в MM:SS (или HH:MM если > 60). */
     PassProfileView.prototype._fmtMM = function(minutes) {
         if (minutes >= 60) {
-            var hh = Math.floor(minutes / 60);
-            var mm = minutes % 60;
+            const hh = Math.floor(minutes / 60);
+            const mm = minutes % 60;
             return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
         }
         return String(minutes).padStart(2, '0') + ':00';
@@ -320,7 +320,7 @@
         window.PassProfileView = PassProfileView;
     }
 
-    if (typeof module !== 'undefined' && module.exports) {
-        module.exports = { PassProfileView };
+    if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
+        module.exports = { PassProfileView }; // eslint-disable-line no-undef
     }
 })();

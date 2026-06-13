@@ -24,8 +24,8 @@ func TestBootstrap_CreatesFileFromEnvWhenMissing(t *testing.T) {
 		t.Fatalf("Bootstrap() error = %v", err)
 	}
 
-	if _, err := os.Stat(path); err != nil {
-		t.Fatalf("config file not created: %v", err)
+	if _, statErr := os.Stat(path); statErr != nil {
+		t.Fatalf("config file not created: %v", statErr)
 	}
 
 	got := store.Get()
@@ -42,8 +42,8 @@ func TestBootstrap_CreatesFileFromEnvWhenMissing(t *testing.T) {
 		t.Fatalf("read file: %v", err)
 	}
 	var fromFile Config
-	if err := json.Unmarshal(raw, &fromFile); err != nil {
-		t.Fatalf("unmarshal: %v", err)
+	if unmarshalErr := json.Unmarshal(raw, &fromFile); unmarshalErr != nil {
+		t.Fatalf("unmarshal: %v", unmarshalErr)
 	}
 	if fromFile.Version != CurrentVersion {
 		t.Errorf("Version on disk = %d, want %d", fromFile.Version, CurrentVersion)

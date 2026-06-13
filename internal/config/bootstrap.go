@@ -47,8 +47,8 @@ func Bootstrap(path string) (*Store, error) {
 	case errors.Is(err, ErrConfigFileNotFound):
 		cfg := loadFromLegacyEnv()
 		store.Set(cfg)
-		if err := store.Save(); err != nil {
-			return nil, fmt.Errorf("save bootstrapped config: %w", err)
+		if saveErr := store.Save(); saveErr != nil {
+			return nil, fmt.Errorf("save bootstrapped config: %w", saveErr)
 		}
 		applyRuntimeEnv(store)
 		slog.Info("configuration bootstrapped from env (file did not exist)",

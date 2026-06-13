@@ -45,6 +45,8 @@ func (errs ValidationErrors) HasErrors() bool {
 //     проверяются уникальные id и параметры поворотки;
 //   - tle.update_interval > 0, satnogs.cache_ttl > 0;
 //   - exclude_norad_file не пустой.
+//
+//nolint:gocognit // единая точка валидации всех секций config.json
 func (c *Config) Validate() error {
 	var errs ValidationErrors
 
@@ -110,7 +112,7 @@ func (c *Config) Validate() error {
 		})
 	}
 
-	if len(c.Station.RadioPaths) > 0 {
+	if len(c.Station.RadioPaths) > 0 { //nolint:nestif // валидация каждого тракта в одном проходе по индексам
 		seenIDs := make(map[int]int, len(c.Station.RadioPaths))
 		for i, rp := range c.Station.RadioPaths {
 			prefix := fmt.Sprintf("station.radio_paths[%d]", i)
@@ -148,34 +150,34 @@ func (c *Config) Validate() error {
 // Hot-reload получают: ui.theme, station.observer.* (через ConfigStore.Subscribe).
 // Restart нужен для server.port, tle.cache_dir/groups/update_interval/max_age,
 // satnogs.enabled, station.radio_paths (инициализация SDR-устройств), DEV_MODE.
-func RestartRequiredFields(old, new *Config) []string {
-	if old == nil || new == nil {
+func RestartRequiredFields(old, next *Config) []string {
+	if old == nil || next == nil {
 		return nil
 	}
 	var fields []string
 
-	if old.Server.Port != new.Server.Port {
+	if old.Server.Port != next.Server.Port {
 		fields = append(fields, "server.port")
 	}
-	if old.TLE.CacheDir != new.TLE.CacheDir {
+	if old.TLE.CacheDir != next.TLE.CacheDir {
 		fields = append(fields, "tle.cache_dir")
 	}
-	if !stringSlicesEqual(old.TLE.Groups, new.TLE.Groups) {
+	if !stringSlicesEqual(old.TLE.Groups, next.TLE.Groups) {
 		fields = append(fields, "tle.groups")
 	}
-	if old.TLE.UpdateInterval != new.TLE.UpdateInterval {
+	if old.TLE.UpdateInterval != next.TLE.UpdateInterval {
 		fields = append(fields, "tle.update_interval")
 	}
-	if old.TLE.MaxTLEAgeDays != new.TLE.MaxTLEAgeDays {
+	if old.TLE.MaxTLEAgeDays != next.TLE.MaxTLEAgeDays {
 		fields = append(fields, "tle.max_tle_age_days")
 	}
-	if old.SatNOGS.Enabled != new.SatNOGS.Enabled {
+	if old.SatNOGS.Enabled != next.SatNOGS.Enabled {
 		fields = append(fields, "satnogs.enabled")
 	}
-	if old.ExcludeNoradFile != new.ExcludeNoradFile {
+	if old.ExcludeNoradFile != next.ExcludeNoradFile {
 		fields = append(fields, "exclude_norad_file")
 	}
-	if !radioPathsEqual(old.Station.RadioPaths, new.Station.RadioPaths) {
+	if !radioPathsEqual(old.Station.RadioPaths, next.Station.RadioPaths) {
 		fields = append(fields, "station.radio_paths")
 	}
 	return fields

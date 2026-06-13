@@ -1,7 +1,6 @@
 package services
 
 import (
-	"context"
 	"sync"
 	"testing"
 	"time"
@@ -31,16 +30,8 @@ func (f *fakeTransmitterProvider) RequestFetch(noradIDs []int) {
 	f.requestedNoradIDs = append(f.requestedNoradIDs, noradIDs...)
 }
 
-// captureSSEHub — обёртка над реальным SSEHub, перехватывающая broadcast-события для проверки.
-type captureSSEHub struct {
-	*handlers.SSEHub
-	mu     sync.Mutex
-	events []handlers.SSEEvent
-}
-
 func TestBroadcastGroupUpdate_IncludesFreqAndModulation(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	hub := handlers.NewSSEHub()
 	go hub.Run(ctx)
@@ -95,8 +86,7 @@ func TestBroadcastGroupUpdate_IncludesFreqAndModulation(t *testing.T) {
 }
 
 func TestBroadcastGroupUpdate_NilProviderDoesNotPanic(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	hub := handlers.NewSSEHub()
 	go hub.Run(ctx)
@@ -125,8 +115,7 @@ func TestBroadcastGroupUpdate_NilProviderDoesNotPanic(t *testing.T) {
 }
 
 func TestBroadcastGroupUpdate_NoPrimaryReturnsEmptyFreq(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	hub := handlers.NewSSEHub()
 	go hub.Run(ctx)

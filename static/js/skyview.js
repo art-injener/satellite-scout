@@ -328,16 +328,16 @@
         const dpr = window.devicePixelRatio || 1;
 
         // Геометрия значка
-        const mastH = 14 * dpr;        // высота мачты вниз от излучателя
+        const mastH = 14 * dpr; // высота мачты вниз от излучателя
         // Сдвигаем излучатель вверх, чтобы визуальный центр значка был в centerY
         const cy = this.centerY - mastH * 0.35;
-        const mastHalf = 6 * dpr;      // полуширина основания мачты
+        const mastHalf = 6 * dpr; // полуширина основания мачты
         const crossY = cy + mastH * 0.55; // уровень поперечины
         const crossHalf = mastHalf * 0.55;
-        const waveR1 = 7 * dpr;        // радиус ближней дуги волн
-        const waveR2 = 11 * dpr;       // радиус дальней дуги волн
+        const waveR1 = 7 * dpr; // радиус ближней дуги волн
+        const waveR2 = 11 * dpr; // радиус дальней дуги волн
         const waveSpread = Math.PI / 4; // ±45° раствор дуг от горизонтали
-        const emitterR = 2 * dpr;      // радиус излучателя
+        const emitterR = 2 * dpr; // радиус излучателя
 
         const iconColor = this.colors.observer || '#ffaa00';
         const haloColor = this.colors.canvasTextStroke || 'rgba(0,0,0,0.9)';
@@ -389,7 +389,7 @@
         ctx.arc(cx, cy, emitterR, 0, Math.PI * 2);
         ctx.fillStyle = iconColor;
         ctx.strokeStyle = haloColor;
-        ctx.lineWidth = 1 * dpr;
+        ctx.lineWidth = Number(dpr);
         ctx.fill();
         ctx.stroke();
     };
@@ -889,7 +889,7 @@
         // Слой 2: выбранный спутник (жёлтый трек + маркер).
         // Рисуем, если selected отличается от tracking ИЛИ tracking-слой без данных.
         if (this._selectedSatellite.noradId) {
-            var sameAsTracking = this.satellite.noradId &&
+            const sameAsTracking = this.satellite.noradId &&
                 this._selectedSatellite.noradId === this.satellite.noradId;
             if (!sameAsTracking || !(this.satellite.track && this.satellite.track.length >= 2)) {
                 this._drawSelectedLayer();

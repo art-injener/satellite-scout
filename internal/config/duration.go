@@ -2,14 +2,20 @@ package config
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
 	"time"
 )
 
+// ErrDurationEmpty — пустая строка в JSON-поле duration.
+var ErrDurationEmpty = errors.New("duration must not be empty")
+
 // Duration — интервал времени в config.json в человекочитаемом виде ("6h", "12s").
 // Синтаксис — time.ParseDuration (единицы: ns, us, µs, ms, s, m, h).
+//
+//nolint:recvcheck // UnmarshalJSON требует pointer receiver; остальные методы — value
 type Duration time.Duration
 
 // Duration возвращает значение как time.Duration для передачи в сервисы.
@@ -25,7 +31,7 @@ func (d *Duration) UnmarshalJSON(data []byte) error {
 	}
 	s = strings.TrimSpace(s)
 	if s == "" {
-		return fmt.Errorf("duration must not be empty")
+		return ErrDurationEmpty
 	}
 	parsed, err := time.ParseDuration(s)
 	if err != nil {
@@ -49,16 +55,16 @@ func formatConfigDuration(d time.Duration) string {
 	if sec < 60 {
 		return strconv.FormatInt(sec, 10) + "s"
 	}
-	min := sec / 60
+	minutes := sec / 60
 	remSec := sec % 60
-	if min < 60 {
+	if minutes < 60 {
 		if remSec == 0 {
-			return strconv.FormatInt(min, 10) + "m"
+			return strconv.FormatInt(minutes, 10) + "m"
 		}
-		return strconv.FormatInt(min, 10) + "m" + strconv.FormatInt(remSec, 10) + "s"
+		return strconv.FormatInt(minutes, 10) + "m" + strconv.FormatInt(remSec, 10) + "s"
 	}
-	h := min / 60
-	remMin := min % 60
+	h := minutes / 60
+	remMin := minutes % 60
 	if remMin == 0 {
 		return strconv.FormatInt(h, 10) + "h"
 	}

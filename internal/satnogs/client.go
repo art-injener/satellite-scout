@@ -49,6 +49,7 @@ var (
 	ErrSatNOGSServerError      = errors.New("satnogs: server error")
 	ErrSatNOGSUnexpectedStatus = errors.New("satnogs: unexpected HTTP status")
 	ErrSatNOGSDecode           = errors.New("satnogs: failed to decode response")
+	ErrSatNOGSInvalidNorad     = errors.New("satnogs: invalid norad id")
 )
 
 // Client — HTTP-клиент SatNOGS DB API.
@@ -130,7 +131,7 @@ func NewClient(opts ...Option) *Client {
 // Возвращает пустой срез без ошибки, если у спутника нет ни одного зарегистрированного передатчика.
 func (c *Client) FetchTransmitters(ctx context.Context, noradID int) ([]Transmitter, error) {
 	if noradID <= 0 {
-		return nil, fmt.Errorf("satnogs: invalid norad id %d", noradID)
+		return nil, fmt.Errorf("%w: %d", ErrSatNOGSInvalidNorad, noradID)
 	}
 
 	q := url.Values{}
@@ -146,7 +147,7 @@ func (c *Client) FetchTransmitters(ctx context.Context, noradID int) ([]Transmit
 
 	var transmitters []Transmitter
 	if decodeErr := json.Unmarshal(body, &transmitters); decodeErr != nil {
-		return nil, fmt.Errorf("%w: %v", ErrSatNOGSDecode, decodeErr)
+		return nil, fmt.Errorf("%w: %w", ErrSatNOGSDecode, decodeErr)
 	}
 	return transmitters, nil
 }

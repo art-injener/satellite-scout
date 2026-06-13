@@ -119,9 +119,9 @@ func (h *ExclusionsHandler) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.store.Remove(noradID); err != nil {
+	if removeErr := h.store.Remove(noradID); removeErr != nil {
 		slog.Error("failed to remove exclusion",
-			slog.Int("norad_id", noradID), slog.String("error", err.Error()))
+			slog.Int("norad_id", noradID), slog.String("error", removeErr.Error()))
 		writeJSON(w, http.StatusInternalServerError, ErrorResponse{Error: "failed to remove exclusion"})
 		return
 	}

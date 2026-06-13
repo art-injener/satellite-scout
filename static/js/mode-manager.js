@@ -162,7 +162,7 @@ class ModeManager {
     /** @returns {boolean} есть ли у текущего тракта поворотная платформа. */
     hasRotator() {
         const rp = this.getRadioPath();
-        return !!(rp && rp.has_rotator);
+        return Boolean(rp && rp.has_rotator);
     }
 
     /**

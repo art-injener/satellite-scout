@@ -525,7 +525,11 @@ func (s *SatelliteTrackingService) updateGroup() {
 	)
 
 	group := BuildConcurrentPassGroup(satellites, newPrimaryID)
-	s.broadcastGroupUpdate(group, now, 0)
+	trackingID := 0
+	if manualSel != nil {
+		trackingID = *manualSel
+	}
+	s.broadcastGroupUpdate(group, now, trackingID)
 
 	s.sendPostGroupNotifications(
 		snap, manualSel, trackingExpired, groupChanged, primaryChanged,

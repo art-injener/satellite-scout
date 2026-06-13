@@ -5,6 +5,7 @@ package exclude
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"os"
 	"sort"
@@ -15,6 +16,9 @@ import (
 
 // fileHeader — шапка файла исключений при полной перезаписи.
 const fileHeader = "# Список исключённых NORAD ID. Один ID на строку, «#» — комментарий.\n"
+
+// ErrInvalidNorad — NORAD ID должен быть положительным.
+var ErrInvalidNorad = errors.New("norad must be positive")
 
 // Store — потокобезопасный набор исключённых NORAD ID.
 type Store struct {
@@ -32,8 +36,9 @@ func NewStore(filePath string) *Store {
 		filePath: filePath,
 	}
 	if filePath != "" {
-		// Отсутствие файла — нормальная ситуация, игнорируем ошибку открытия.
-		_ = s.loadFile()
+		if loadErr := s.loadFile(); loadErr != nil && !errors.Is(loadErr, os.ErrNotExist) {
+			return s
+		}
 	}
 	return s
 }
@@ -57,7 +62,7 @@ func (s *Store) List() []int {
 // Повторное добавление — без эффекта.
 func (s *Store) Add(norad int) error {
 	if norad <= 0 {
-		return fmt.Errorf("norad must be positive, got %d", norad)
+		return fmt.Errorf("%w: got %d", ErrInvalidNorad, norad)
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -115,7 +120,7 @@ func (s *Store) loadFile() error {
 
 // appendLine дописывает один NORAD в конец файла, сохраняя комментарии пользователя.
 func (s *Store) appendLine(norad int) error {
-	f, err := os.OpenFile(s.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	f, err := os.OpenFile(s.filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
 	if err != nil {
 		return err
 	}
@@ -132,7 +137,7 @@ func (s *Store) saveAllLocked() error {
 		b.WriteString(strconv.Itoa(id))
 		b.WriteByte('\n')
 	}
-	return os.WriteFile(s.filePath, []byte(b.String()), 0o644)
+	return os.WriteFile(s.filePath, []byte(b.String()), 0o600)
 }
 
 // parseLine разбирает одну строку файла: отрезает комментарий после «#»,

@@ -74,14 +74,8 @@ func retryDelay(base time.Duration, failCount int) time.Duration {
 	if failCount <= 1 {
 		return base
 	}
-	shift := failCount - 1
-	if shift > 10 {
-		shift = 10
-	}
-	d := base * time.Duration(1<<uint(shift))
-	if d > maxRetryDelay {
-		d = maxRetryDelay
-	}
+	shift := min(failCount-1, 10)
+	d := min(base*time.Duration(1<<uint(shift)), maxRetryDelay)
 	return d
 }
 
@@ -173,7 +167,7 @@ func (s *Service) Run(ctx context.Context) {
 
 	var wg sync.WaitGroup
 	wg.Add(workers)
-	for i := 0; i < workers; i++ {
+	for range workers {
 		go func() {
 			defer wg.Done()
 			s.worker(ctx)
@@ -218,7 +212,7 @@ func (s *Service) GetPrimaryTransmitter(noradID int) *TransmitterSummary {
 		return primary
 	}
 
-	s.maybeEnqueue(noradID, entry)
+	s.maybeEnqueue(noradID)
 
 	if entry != nil {
 		// Возвращаем последний известный primary, даже если запись устарела.
@@ -250,11 +244,11 @@ func (s *Service) GetAllTransmitters(noradID int) []Transmitter {
 	s.mu.RUnlock()
 
 	if entry == nil {
-		s.maybeEnqueue(noradID, nil)
+		s.maybeEnqueue(noradID)
 		return nil
 	}
 	if !fresh {
-		s.maybeEnqueue(noradID, entry)
+		s.maybeEnqueue(noradID)
 	}
 	return out
 }
@@ -266,10 +260,7 @@ func (s *Service) RequestFetch(noradIDs []int) {
 		if id <= 0 {
 			continue
 		}
-		s.mu.RLock()
-		entry := s.cache[id]
-		s.mu.RUnlock()
-		s.maybeEnqueue(id, entry)
+		s.maybeEnqueue(id)
 	}
 }
 
@@ -281,7 +272,7 @@ func (s *Service) RequestFetch(noradIDs []int) {
 //   - запись с ошибкой и retryAfter уже прошёл.
 //
 // При этом проверяем флаг fetching, чтобы не дублировать запросы.
-func (s *Service) maybeEnqueue(noradID int, entry *cacheEntry) {
+func (s *Service) maybeEnqueue(noradID int) {
 	if noradID <= 0 {
 		return
 	}
@@ -356,7 +347,7 @@ func (s *Service) fetchOne(ctx context.Context, noradID int) {
 	entry.failCount = 0
 	entry.transmitters = transmitters
 	entry.primary = SelectPrimary(transmitters)
-	s.logger.Debug("satnogs: fetched transmitters",
+	s.logger.DebugContext(ctx, "satnogs: fetched transmitters",
 		slog.Int("norad_id", noradID),
 		slog.Int("count", len(transmitters)),
 		slog.Bool("has_primary", entry.primary != nil),

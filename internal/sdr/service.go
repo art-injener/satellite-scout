@@ -16,12 +16,11 @@ func NewService() *Service {
 
 // ListDevices возвращает список доступных приёмников (виртуальный + обнаруженные).
 func (s *Service) ListDevices() ListResponse {
-	devices := []Device{
-		{
-			Driver: "simulated",
-			Label:  "Имитатор (simulated)",
-		},
-	}
+	devices := make([]Device, 0, 8)
+	devices = append(devices, Device{
+		Driver: "simulated",
+		Label:  "Имитатор (simulated)",
+	})
 	devices = append(devices, discoverUSBDevices()...)
 	return ListResponse{
 		Devices:   devices,
