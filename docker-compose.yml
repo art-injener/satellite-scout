@@ -5,11 +5,12 @@ services:
     ports:
       - "8080:8080"
     environment:
-      # Единственные переменные окружения: путь к файлу настроек и режим запуска.
-      # Все прочие параметры (порт, координаты, тема, TLE, SatNOGS, схема станции)
-      # хранятся внутри data/config.json и редактируются через UI «Настройки».
+      # Путь к конфигу и режим embed/диск. Остальное — в data/config.json (volume ниже).
       - SS_CONFIG=/app/data/config.json
       - DEV_MODE=false
+    env_file:
+      - path: .env
+        required: false
     volumes:
       # Папка `data` хранит config.json, кеш TLE и список исключений.
       - ./data:/app/data

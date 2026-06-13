@@ -3,18 +3,18 @@
 **Дата создания:** 2026-04-26  
 **Дата исходного решения:** 2026-04-14 (HTTP Chunked Stream, см. `memory-bank/techContext.md` и `memory-bank/activeContext.md`)  
 **Статус:** 🟡 **Draft** — обсуждение не завершено, см. § «Открытые вопросы»  
-**Связанные задачи:** UX-OVERVIEW-BACKEND-001, SDR-001, SDR-002, SDR-003, SDR-005
+**Связанные ADR:** [ADR-004](ADR-004-operation-modes-and-station-schema.md) (режимы Авто/Ручной, виджеты UI)  
+**Связанные задачи:** OVERVIEW-LINK-001, MANUAL-002, SDR-001, SDR-002, SDR-003, SDR-005, DEMOD-001..005
 
 ---
 
 ## Описание задачи
 
-Satellite Scout получает с SDR-приёмника большой бинарный поток (IQ-семплы), на основе которого формируются:
+Satellite Scout получает с SDR-приёмника большой бинарный поток (IQ-семплы). На бэкенде из него формируются DSP-продукты; на UI они доставляются **двумя каналами** (см. карту потоков ниже и ADR-004):
 
-- **FFT-спектр** (для отображения в нижней панели «Обзор» / «Сопровождение»);
-- **Waterfall** (накопительная развёртка спектра во времени);
-- **Демодулированное аудио** (для прослушивания оператором);
-- **Декодированная телеметрия** (через демодулятор → AX.25 → ТМИ).
+- **Режим «Авто»** — таблица передатчиков (`auto-link.js`): метрики и **мини-водопад** по каждому TX через SSE `tx_cycle` (скаляр `power`, без FFT-массива).
+- **Режим «Ручной»** — Панорама, Лупа (FFT + waterfall), аудио, диаграммы демодулятора — через **HTTP Chunked Stream** (бинарные фреймы SSTM).
+- **Телеметрия и статусы** — через SSE (`tmi_packet`, `demod_metrics`, …), не через бинарный транспорт.
 
 Параметры SDR — переменные:
 
@@ -37,6 +37,56 @@ Satellite Scout получает с SDR-приёмника большой бин
 
 ---
 
+## Карта потоков backend → frontend
+
+> Синхронизировано с ADR-004 (2026-06). Heat-grid **снят** — нижняя панель Авто = единая таблица «Передатчики» с колонкой «Водопад».
+
+### Два канала
+
+| Канал | Протокол | Когда |
+|-------|----------|-------|
+| **SSE** | `text/event-stream`, JSON | Пока страница `/tracking` открыта |
+| **HTTP Chunked Stream** | `application/octet-stream`, фреймы SSTM | Только **Ручной** режим, пока активны виджеты Лупы/Панорамы/аудио |
+
+### Режим «Авто» — только SSE + REST (без Chunked Stream)
+
+| Источник | Данные | Виджет |
+|----------|--------|--------|
+| REST `GET /api/satnogs/transmitters/{norad}` | Каталог TX | Строки таблицы |
+| SSE `satellite_group_update` | Состав группы КА | Группировка строк |
+| SSE `satellite_state_update` | `range_rate` | Колонка «Доплер» |
+| SSE **`tx_cycle`** | `power`, `packets`, `snr_db`, `lock`, `history[]` | RSSI, SNR, Lock, Декод/Битые, **мини-водопад** |
+
+События `scan_cycle` / `decoded_frame` / `detection_event` **не используются** — агрегаты цикла сканирования входят в `tx_cycle`.
+
+#### Мини-водопад в Авто (решение MVP)
+
+Колонка «Водопад» — canvas `WaterfallCell` (~140×22 px) на строку TX. С бэка приходит **только скаляр `power` (0…1)** в `tx_cycle`; спектральный массив **не** передаётся.
+
+Клиент (`auto-link.js`):
+- при `tx_cycle` → `setPower(power)`;
+- ~18 FPS локально добавляет столбец: шум + гауссова полоса по центру (ширина от типа модуляции), яркость ∝ `power`;
+- это **индикатор активности**, не настоящий FFT (полоса всегда по центру canvas).
+
+Расширение на реальную FFT-линию в `tx_cycle` — отложено (см. Q-E5).
+
+### Режим «Ручной» — Chunked Stream + SSE
+
+| Канал | Endpoint / событие | Виджет | Payload |
+|-------|-------------------|--------|---------|
+| Chunked | `GET /api/stream/v1/panorama` | Панорама (`manual-panorama.js`) | `FFT_DB`, sweep по диапазонам антенны |
+| Chunked | `GET /api/stream/v1/loupe` | Лупа: спектр + waterfall (`manual-layout.js`) | `FFT_DB`, полоса SDR активного канала |
+| Chunked | `GET /api/stream/v1/audio` | WebAudio + FM audio spectrum | `PCM_I16` |
+| Chunked | `GET /api/stream/v1/demod` *(draft)* | Eye / Constellation (`eye-constellation.js`) | TBD, baseband/IQ-срезы |
+| Chunked | `GET /api/stream/v1/iq` | Диагностика / запись | `IQ_*`, не routine UI |
+| SSE | `tmi_packet` | Таблица телеметрии | JSON |
+| SSE | `unknown_carrier` | Чипы unknown в Панораме | JSON |
+| SSE | `demod_metrics` *(план)* | `demod-panel.js` | JSON, ~1–2 Гц |
+
+Chunked-потоки привязаны к `mainMode=manual` + выбранному `radio_path` (см. Q-C3). При переключении в Авто — все `fetch`-стримы закрываются.
+
+---
+
 ## Принятые решения (сводка)
 
 | # | Тема | Решение | Статус |
@@ -48,7 +98,9 @@ Satellite Scout получает с SDR-приёмника большой бин
 | 5 | Heartbeat | Кадр с `data_type=0xFE`, `payload_len=0` каждые 15 сек простоя | ✅ Принято 2026-04-26 |
 | 6 | Sequence number | `uint32 seq` в заголовке (per-stream, wrap-around) — для детекции потерь | ✅ Принято 2026-04-26 |
 | 7 | Display Reducer | Аккумуляция/децимация на бэкенде; UI получает ≤100 КБ/с | 🟡 **Принят принцип**, детали в обсуждении |
-| 8 | Демодулятор | Живёт **на бэкенде**, потребляет raw IQ напрямую; на UI — только распакованные пакеты ТМИ через SSE | 🟡 К подтверждению |
+| 8 | Демодулятор | Живёт **на бэкенде**; на UI — `tmi_packet` + `demod_metrics` через SSE | ✅ Принято 2026-06-13 |
+| 9 | Авто: мини-водопад | SSE `tx_cycle`: скаляр `power`; отрисовка на клиенте (`WaterfallCell`) | ✅ Принято 2026-06-13 |
+| 10 | Endpoints спектра | `/panorama` + `/loupe` (не единый `/spectrum`) | ✅ Принято 2026-06-13 |
 
 ---
 
@@ -60,8 +112,8 @@ Satellite Scout получает с SDR-приёмника большой бин
 
 | Канал | Протокол | Тип данных | Когда активен |
 |-------|----------|------------|---------------|
-| **SSE** (`EventSource`) | text/event-stream (UTF-8, JSON) | Позиции КА, пролёты, статусы, группа, ТМИ | Всегда, пока страница открыта |
-| **HTTP Chunked Stream** (`fetch` + `ReadableStream`) | application/octet-stream | FFT, IQ, PCM-аудио | По запросу, только пока активна вкладка |
+| **SSE** (`EventSource`) | text/event-stream (UTF-8, JSON) | Позиции КА, группа, `tx_cycle`, ТМИ, `demod_metrics` | Всегда, пока страница открыта |
+| **HTTP Chunked Stream** (`fetch` + `ReadableStream`) | application/octet-stream | FFT, IQ, PCM-аудио, demod-viz | **Ручной** режим, пока нужен соответствующий виджет |
 
 **Отвергнутые альтернативы:**
 
@@ -187,7 +239,7 @@ TCP гарантирует доставку байт в порядке, но **�
 
 **Семантика:**
 
-- **Per-stream:** каждое открытие потока (`/spectrum`, `/iq`, `/audio`) имеет свой счётчик с нуля.
+- **Per-stream:** каждое открытие потока (`/panorama`, `/loupe`, `/audio`, `/demod`, `/iq`) имеет свой счётчик с нуля.
 - **Heartbeat-фреймы тоже инкрементят счётчик** — это «честные» фреймы потока.
 - **Сброс при reconnect:** клиент видит `seq=0` после ожидаемого `seq=N+1` → детектирует сброс сессии.
 
@@ -303,7 +355,43 @@ func downsampleMax(full []float32, targetBins int) []float32 {
 - Логика декодирования (clock recovery, bit stuffing, CRC, AX.25) — сложная математика, которой не место в браузере.
 - Один источник истины: декодированный пакет получается один раз на сервере, рассылается всем подключённым клиентам через SSE.
 
-Связь: SDR-001..004 (бэкенд DSP) → DEMOD-001..004 (демодулятор) → SSE-событие `tmi_packet`.
+Связь: SDR-001..004 (бэкенд DSP) → DEMOD-001..004 (демодулятор) → SSE `tmi_packet`, `demod_metrics`; бинарный `/demod` — опционально для Eye/Constellation (draft).
+
+### 9. Формат SSE `tx_cycle` (Авто, вне wire protocol SSTM)
+
+Одно событие на завершённый цикл сканирования. Структура (mock = live):
+
+```json
+{
+  "ts": 1714065297280,
+  "satellites": [{
+    "norad_id": 25544,
+    "transmitters": [{
+      "uuid": "…",
+      "packets": 12,
+      "power": 0.65,
+      "snr_db": 8.2,
+      "lock": "OK",
+      "packets_failed": 0,
+      "total_packets": 47,
+      "total_failed": 2,
+      "history": [
+        { "packets": 12, "power": 0.65 },
+        { "packets": 8,  "power": 0.41 }
+      ]
+    }]
+  }]
+}
+```
+
+| Поле | Назначение на UI |
+|------|------------------|
+| `power` | RSSI-бар, яркость мини-водопада |
+| `packets` / `total_*` | Колонка «Декод. / Битые» |
+| `snr_db`, `lock` | SNR, Lock |
+| `history[]` | Кольцевой буфер визитов (синхрон с `stripCapacity` на бэке); для мини-водопада в MVP достаточно текущего `power` |
+
+Источник live: `ScanStrategy` / `HopAndDwellStrategy` (ADR-004 §3), заменяет `TxCycleMock`.
 
 ---
 
@@ -402,21 +490,39 @@ Offset Hex                                                   Decoded
 
 ### Маршруты (планируемые)
 
-| Endpoint | Описание | Что в payload |
-|----------|----------|---------------|
-| `GET /api/stream/v1/spectrum` | FFT для отображения (UI-оптимизированный) | `FFT_DB` |
-| `GET /api/stream/v1/iq` | Сырой IQ (для записи / диагностики; ограничен по полосе) | `IQ_I8` / `IQ_I16` / `IQ_C64` |
-| `GET /api/stream/v1/audio` | Демодулированное аудио (PCM) | `PCM_I16` |
+| Endpoint | Режим | Виджет | Payload |
+|----------|-------|--------|---------|
+| `GET /api/stream/v1/panorama` | Ручной | Панорама эфира | `FFT_DB`, медленный sweep |
+| `GET /api/stream/v1/loupe` | Ручной | Лупа (спектр + waterfall) | `FFT_DB`, 15–30 FPS |
+| `GET /api/stream/v1/audio` | Ручной | Прослушивание, FM spectrum | `PCM_I16` |
+| `GET /api/stream/v1/demod` | Ручной | Eye / Constellation *(draft)* | TBD |
+| `GET /api/stream/v1/iq` | Диагностика | Запись / отладка | `IQ_I8` / `IQ_I16` / `IQ_C64` |
 
-### Query-параметры (применимы для `/spectrum`)
+> Legacy `GET /api/stream/v1/spectrum` **не используется** — заменён парой `/panorama` + `/loupe`.
+
+Общие query-параметры (все Chunked-endpoint'ы, где применимо):
+
+| Параметр | Тип | Описание |
+|----------|-----|----------|
+| `radio_path` | string | ID радиотракта из `GET /api/config` (обязателен в Ручном) |
+
+### Query-параметры `/panorama`
 
 | Параметр | Тип | Default | Описание |
 |----------|-----|---------|----------|
-| `bins` | int | 1024 | Целевое число бинов на UI после downsampling. Допустимо 256, 512, 1024, 2048. |
-| `fps` | int | 20 | Частота кадров. Допустимо 10..30. |
-| `mode` | string | `maxhold` | Режим аккумуляции: `current`, `avg`, `maxhold`, `minhold`, `persistence`, `exp_avg`. |
-| `window_ms` | int | `1000/fps` | Длина окна аккумуляции. По умолчанию совпадает с периодом кадра. |
-| `smoothing` | float | 0.5 | Только для `mode=exp_avg`: коэф α экспоненциального сглаживания. |
+| `bins` | int | 1024 | Бинов на диапазон после downsampling |
+| `mode` | string | `avg` | `avg`, `maxhold` (накопление sweep) |
+| `window_ms` | int | 2000 | Окно аккумуляции на сегмент диапазона |
+
+### Query-параметры `/loupe`
+
+| Параметр | Тип | Default | Описание |
+|----------|-----|---------|----------|
+| `bins` | int | 1024 | Бинов FFT на кадр |
+| `fps` | int | 20 | Частота кадров (10..30) |
+| `mode` | string | `avg` | `current`, `avg`, `maxhold`, `minhold`, `exp_avg` |
+| `window_ms` | int | `1000/fps` | Окно аккумуляции |
+| `smoothing` | float | 0.5 | Только для `mode=exp_avg` |
 
 > ⚠️ Параметры `center_hz` / `span_hz` / `gain` через query **НЕ передаются**. Они задаются текущей конфигурацией SDR через REST `POST /api/sdr/tune`. В заголовке каждого фрейма UI получает фактические значения.
 
@@ -437,8 +543,8 @@ GET  /api/sdr/config     ← текущая конфигурация (опцио
 ### Сервер (Go) — скелет handler'а
 
 ```go
-// Handler бинарного потока FFT
-func (s *Server) handleSpectrumStream(w http.ResponseWriter, r *http.Request) {
+// Handler бинарного потока Лупы (FFT + waterfall)
+func (s *Server) handleLoupeStream(w http.ResponseWriter, r *http.Request) {
     flusher, ok := w.(http.Flusher)
     if !ok {
         http.Error(w, "streaming not supported", http.StatusInternalServerError)
@@ -455,7 +561,7 @@ func (s *Server) handleSpectrumStream(w http.ResponseWriter, r *http.Request) {
     mode := parseModeDefault(r.URL.Query().Get("mode"), ModeMaxHold)
 
     // Подписка на DSP-конвейер
-    sub := s.spectrumPipeline.Subscribe(bins, fps, mode)
+    sub := s.loupePipeline.Subscribe(bins, fps, mode)
     defer sub.Close()
 
     var seq uint32 = 0
@@ -586,17 +692,23 @@ class BinaryStreamReader {
 
 ## Часть V. Сценарии работы
 
-### Сценарий 1: Открытие вкладки «Обзор» с активным SDR
+### Сценарий 1: Режим «Авто» — таблица передатчиков
 
-1. Оператор переключился на вкладку «Обзор» (`bottom-panel.js`).
-2. JS создаёт `BinaryStreamReader('/api/stream/v1/spectrum?bins=1024&fps=20&mode=maxhold')`.
-3. `fetch` устанавливает HTTP-соединение с сервером.
-4. Go-handler подписывается на DSP-конвейер с параметрами `bins=1024, fps=20, mode=maxhold`.
-5. Каждые 50 мс DSP выдаёт обработанный кадр → handler формирует фрейм с заголовком, отправляет через `Flush()`.
-6. Клиент получает чанк, парсит заголовок, отдаёт `Float32Array` в `WaterfallView.pushLine()` и `FFTSpectrumView.draw()`.
-7. UI отображает waterfall с подписанной шкалой частот (из `center_hz`/`span_hz`).
+1. Оператор на `/tracking`, `mainMode=overview` (`mode-overview` на `<body>`).
+2. `auto-link.js` грузит TX из SatNOGS REST + `satellite_group_update`.
+3. Подписка на SSE `tx_cycle` (mock `TxCycleMock` → live `ScanStrategy`).
+4. На каждый цикл: обновление метрик строк + `WaterfallCell.setPower(power)`; canvas тикает локально ~18 FPS.
+5. **Chunked Stream не открывается.**
 
-### Сценарий 2: Reconnect после обрыва сети
+### Сценарий 2: Режим «Ручной» — Лупа с live SDR
+
+1. Оператор переключил toggle в **Ручной**, выбран `radio_path`.
+2. `manual-layout.js` создаёт `BinaryStreamReader('/api/stream/v1/loupe?radio_path=…&bins=1024&fps=20&mode=avg')`.
+3. `fetch` устанавливает HTTP-соединение; handler подписан на DSP-конвейер активного канала.
+4. Каждые 50 мс — фрейм `FFT_DB` → `Float32Array` в спектр и waterfall Лупы.
+5. При `mainMode=overview` — `AbortController` закрывает стрим.
+
+### Сценарий 3: Reconnect после обрыва сети (Chunked)
 
 1. Wi-Fi пропал на 5 секунд. `fetch` бросает ошибку.
 2. `BinaryStreamReader._scheduleReconnect()` запускает exponential backoff (1с → 2с → ...).
@@ -605,7 +717,7 @@ class BinaryStreamReader {
 5. Клиент видит: ожидался `seq=N+1`, пришёл `seq=0` → детектирует «новая сессия». Сбрасывает свой `expectedSeq = 1`.
 6. Waterfall на UI просто продолжает рисоваться. Между «потерянными» кадрами на UI визуально появляется промежуток (по timestamp видно).
 
-### Сценарий 3: Оператор сменил частоту
+### Сценарий 4: Оператор сменил частоту (Лупа)
 
 1. Оператор кликнул «Сопровождать» по другому КА. Через REST: `POST /api/sdr/tune {center_hz: 145800000}`.
 2. Бэк перенастроил SDR. Handler стрима **не закрывался** — он по-прежнему отдаёт кадры.
@@ -613,7 +725,7 @@ class BinaryStreamReader {
 4. Клиент получает кадр, парсит заголовок, видит изменение `centerHz` → перерисовывает шкалу частот, очищает waterfall (или плавно скроллит — на усмотрение UI).
 5. **Никакой явной синхронизации между REST и стримом не нужно** — кадр самодостаточен.
 
-### Сценарий 4: Бэкенд рестарт
+### Сценарий 5: Бэкенд рестарт
 
 1. Бэк упал, systemd перезапустил.
 2. Клиент видит обрыв `fetch`, идёт в reconnect. Бэк ещё не поднялся — клиент получает 503.
@@ -621,17 +733,17 @@ class BinaryStreamReader {
 4. SDR на бэке мог настроиться на другую частоту (если конфиг изменился). Первый же фрейм несёт актуальные `center_hz`/`span_hz`.
 5. UI адаптируется автоматически.
 
-### Сценарий 5: Запись потока в файл для офлайн-анализа
+### Сценарий 6: Запись потока в файл для офлайн-анализа
 
 ```bash
-curl http://localhost:8080/api/stream/v1/spectrum?bins=2048\&fps=10 > recording.bin
+curl "http://localhost:8080/api/stream/v1/loupe?radio_path=uhf-1&bins=2048&fps=10" > recording.bin
 ```
 
 1. Получили файл с N фреймами, каждый по 40 + 8192 = 8232 байт.
 2. Скрипт читает файл, парсит заголовки, может построить статистику: распределение по `seq` (есть ли пропуски), `timestamp_ms` (jitter), `center_hz` (менялась ли частота во время записи).
 3. Каждый фрейм самодостаточен — можно начать чтение с произвольной позиции (поиск `magic` в потоке).
 
-### Сценарий 6: Потеря кадров при перегрузке клиента
+### Сценарий 7: Потеря кадров при перегрузке клиента
 
 1. Клиент тормозит (heavy GC, тяжёлая JS-работа). Не успевает читать `fetch`.
 2. На сервере накапливается очередь в `chan []byte`. При переполнении — `drop oldest` (см. § B1, обсуждается).
@@ -639,7 +751,7 @@ curl http://localhost:8080/api/stream/v1/spectrum?bins=2048\&fps=10 > recording.
 4. В лог: `[stream] dropped 3 frames`. В метриках: `frames_dropped++`.
 5. UI рисует waterfall с «зазором» по времени (timestamps видны).
 
-### Сценарий 7: Долгое ожидание AOS (heartbeat)
+### Сценарий 8: Долгое ожидание AOS (heartbeat)
 
 1. Спутник ещё не появился. SDR настроен, но сигнала нет.
 2. DSP-конвейер не выдаёт кадров (или выдаёт с сильным шумом — это уже зависит от настройки).
@@ -657,18 +769,19 @@ curl http://localhost:8080/api/stream/v1/spectrum?bins=2048\&fps=10 > recording.
 
 | ID | Вопрос | Предложение |
 |----|--------|-------------|
-| **Q-DR-1** | Окончательное согласие на архитектуру: Reducer на бэке, параметры через query | Принять |
-| **Q-DR-2** | Какой `display_mode` по умолчанию для FFT-вкладки «Обзор»? | `maxhold` (показывает все сигналы, включая короткие пакеты ТМИ) |
-| **Q-DR-3** | Целевые `bins × fps` по умолчанию | `1024 × 20` → 80 КБ/с |
-| **Q-DR-4** | Подтверждение: демодулятор живёт на бэке, на UI — только декодированные пакеты через SSE | Подтвердить |
-| **Q-DR-5** | Алгоритмы — оператор обещал прислать примеры | Ждём примеры. Особенно интересны: persistence display, peak tracker, adaptive thresholding |
+| **Q-DR-1** | Окончательное согласие на архитектуру: Reducer на бэке, параметры через query | ✅ Принято |
+| **Q-DR-2** | Какой `display_mode` по умолчанию для **Лупы**? | `avg` (мельче накопление, чем Панорама) |
+| **Q-DR-3** | Целевые `bins × fps` по умолчанию (**Лупа**) | `1024 × 20` → ~80 КБ/с |
+| **Q-DR-4** | Демодулятор на бэке; UI — SSE `tmi_packet` + `demod_metrics` | ✅ Принято 2026-06-13 |
+| **Q-DR-5** | Алгоритмы — оператор обещал прислать примеры | Ждём примеры |
+| **Q-DR-6** | Авто: мини-водопад только по `power` (клиент рисует) | ✅ Принято 2026-06-13 |
 
 ### B. Backpressure и операционная устойчивость (бэк)
 
 | ID | Вопрос | Предложение |
 |----|--------|-------------|
 | **Q-B1** | Стратегия при медленном клиенте (канал переполнен) | **drop oldest** в канале сервера (`chan []byte` размером 8). При переполнении сервер выкидывает старый фрейм. Метрика `frames_dropped_server`. |
-| **Q-B2** | Лимит потоков на один `client_id` | **3 потока на client_id** (по одному на тип). Повторный fetch на уже открытый тип — закрывает старый. |
+| **Q-B2** | Лимит потоков на один `client_id` | **4 потока** в Ручном (`panorama`, `loupe`, `audio`, `demod`). Повторный fetch того же типа — закрывает старый. |
 | **Q-B3** | Глобальный лимит активных стримов | **`max_binary_streams = 50`** в конфиге. При превышении — HTTP 503. |
 | **Q-B4** | Тайм-аут handler'а при долгом простое | **Не закрывать со стороны сервера.** Закрытие — только при отключении клиента или shutdown сервера. |
 
@@ -678,7 +791,7 @@ curl http://localhost:8080/api/stream/v1/spectrum?bins=2048\&fps=10 > recording.
 |----|--------|-------------|
 | **Q-C1** | Отписка при `document.hidden` | Отменять `fetch` при `visibilitychange → hidden`, переподключаться при возврате к вкладке. Экономит трафик и CPU. |
 | **Q-C2** | Auto-reconnect стратегия | Exponential backoff 1с → 2с → 4с → ... → 30с max (как у SSE). |
-| **Q-C3** | Координация со SSE | Поток привязан к UI-вкладке, не к КА. Закрытие потока — только при уходе с вкладки или явном action. SSE `tracking_ended` поток не трогает. |
+| **Q-C3** | Координация со SSE | Chunked привязан к `mainMode=manual` + `radio_path`. Переход в Авто — abort всех стримов. SSE `tx_cycle` в Авто независим. |
 | **Q-C4** | Что показывать при разрыве | Последний кадр + полупрозрачная плашка «нет данных». При reconnect плашка исчезает. |
 
 ### D. Тестируемость
@@ -695,7 +808,8 @@ curl http://localhost:8080/api/stream/v1/spectrum?bins=2048\&fps=10 > recording.
 | **Q-E1** | Сжатие | **Не сжимать в v1.** FFT-спектр шумоподобный (low entropy gain). Для PCM-аудио — рассмотрим в будущем. |
 | **Q-E2** | Multiplex (один поток несёт разные `data_type`) | **Не делать в v1.** Если понадобится — в v2 через `data_type` в заголовке (он уже есть). |
 | **Q-E3** | Запись в файл (IQ recording) | **Отдельный механизм**, не часть транспорта. Команда `POST /api/sdr/record/start` → сервер пишет IQ в файл и параллельно стримит. SDR-006 (планируется). |
-| **Q-E4** | `data_type=0xFF` (Error frame) | TBD: специальный фрейм с описанием ошибки (например, «SDR disconnected», «Buffer overrun») — для отображения на UI вместо тихого heartbeat. |
+| **Q-E4** | `data_type=0xFF` (Error frame) | TBD |
+| **Q-E5** | Реальная FFT-линия в `tx_cycle` для мини-водопада Авто | **Отложено.** MVP — только `power`. Phase 2: `spectrum_line[N]` или отдельный endpoint. |
 
 ---
 
@@ -707,21 +821,25 @@ curl http://localhost:8080/api/stream/v1/spectrum?bins=2048\&fps=10 > recording.
 |------|------|
 | `internal/handlers/stream_handler.go` | HTTP handlers `/api/stream/v1/*` |
 | `internal/dsp/frame.go` | Структура фрейма, кодирование/декодирование заголовка |
-| `internal/dsp/reducer.go` | Display Reducer (avg/maxhold/minhold/persistence) |
+| `internal/dsp/reducer.go` | Display Reducer |
 | `internal/dsp/pipeline.go` | DSP-конвейер: SDR → FFT → Reducer → подписчики |
-| `internal/sdr/source.go` | Интерфейс SDR-источника (RTL-SDR, файл, генератор) |
-| `static/js/binary-stream.js` | `BinaryStreamReader` с reconnect + seq tracking |
-| `static/js/bottom-panel.js` | Замена `SpectrumDataSource` на реальный поток |
+| `internal/sdr/source.go` | Интерфейс SDR-источника |
+| `internal/services/tx_cycle_mock.go` | Mock SSE `tx_cycle` (до ScanStrategy) |
+| `static/js/binary-stream.js` | `BinaryStreamReader` |
+| `static/js/auto-link.js` | Авто: таблица TX, `WaterfallCell`, SSE `tx_cycle` |
+| `static/js/manual-layout.js` | Ручной: Лупа, подключение `/loupe` |
+| `static/js/manual-panorama.js` | Ручной: Панорама, `/panorama` |
+| `static/js/eye-constellation.js` | Ручной: Eye/Const, `/demod` (draft) |
 
 ### Связанные задачи
 
 | ID | Задача | Зависимость |
 |----|--------|-------------|
-| **SDR-001** | Интерфейс RTL-SDR через rtl_tcp | (нет) |
-| **SDR-002** | Спектральный анализ (FFT) | SDR-001 |
-| **SDR-003** | Waterfall-визуализация | SDR-002 |
-| **UX-OVERVIEW-BACKEND-001** | Подмена `SpectrumDataSource` на реальный поток через ADR-002 | SDR-001, SDR-002 |
-| **DEMOD-001..004** | Демодуляция ТМИ (на бэке) | SDR-001, COORD-002 |
+| **OVERVIEW-LINK-001** | Live `tx_cycle` от ScanStrategy | SDR-001 |
+| **MANUAL-002** | Подключение Chunked Stream в Ручном layout | SDR-001, SDR-002 |
+| **SDR-001** | Интерфейс SDR | (нет) |
+| **SDR-002** | FFT, Display Reducer | SDR-001 |
+| **DEMOD-001..005** | Демодуляция, `tmi_packet`, `demod_metrics` | SDR-001 |
 
 ---
 
@@ -730,6 +848,6 @@ curl http://localhost:8080/api/stream/v1/spectrum?bins=2048\&fps=10 > recording.
 | Дата | Что | Кто |
 |------|-----|-----|
 | 2026-04-14 | Исходное решение по транспорту: SSE + HTTP Chunked Stream. Зафиксировано в `memory-bank/techContext.md`, `activeContext.md`. | Архитектор |
-| 2026-04-26 | ADR создан как формальный документ. Расширен: self-describing frames (по принципу VITA-49), seq counter, Display Reducer, открытые вопросы зафиксированы. Статус: **Draft**. | Архитектор + AI-ассистент |
-| _(будущее)_ | Закрытие открытых вопросов, переход в статус **Accepted** | TBD |
-| _(будущее)_ | Пересмотр после реализации UX-OVERVIEW-BACKEND-001 | TBD |
+| 2026-04-26 | ADR создан. Self-describing frames, seq, Display Reducer. Статус: **Draft**. | Архитектор + AI |
+| 2026-06-13 | Синхронизация с ADR-004: карта потоков Авто/Ручной; Heat-grid снят; `/panorama`+`/loupe`; мини-водопад Авто = `power` в `tx_cycle`; демодулятор на бэке ✅ | AI + оператор |
+| _(будущее)_ | Закрытие оставшихся открытых вопросов → **Accepted** | TBD |
