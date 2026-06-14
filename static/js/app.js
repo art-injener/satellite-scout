@@ -339,31 +339,9 @@
             const selectedId = sm.getSelectedSatelliteId();
             const trackingId = sm.getTrackingSatelliteId();
 
-            // EarthView: selected satellite (оранжевый + иконка + зона видимости).
+            // EarthView: selected + tracking + вторичные из актуального кеша.
             if (window.earthView) {
-                if (state.noradId === selectedId) {
-                    window.earthView.setSelectedSatellitePosition(pos.lon, pos.lat, pos.alt, pos);
-                    window.earthView.setSelectedSatelliteInfo(state.name || '', state.noradId);
-                    if (state.visibilityZone && state.visibilityZone.segments) {
-                        window.earthView.setSelectedVisibilityZone(state.visibilityZone.segments);
-                    }
-                }
-                // Слой наблюдения: данные только с бэка (tracking_id в group_update, позиции/треки в state_update).
-                if (trackingId) {
-                    const trkState = sm.getState(trackingId);
-                    if (trkState && trkState.position) {
-                        window.earthView.setSatellitePosition(trkState.position.lon, trkState.position.lat, trkState.position.alt, trkState.position);
-                        window.earthView.setSatelliteInfo(trkState.name || '', trackingId);
-                        if (trkState.visibilityZone && trkState.visibilityZone.segments) {
-                            window.earthView.setVisibilityZone(trkState.visibilityZone.segments);
-                        }
-                    }
-                } else {
-                    // Наблюдения нет — полностью очищаем слой tracking, чтобы не рисовать красный/зелёный.
-                    window.earthView.clearTrackingLayer();
-                }
-                _updateSecondaryPositions();
-                _updateSecondaryTracks();
+                _syncEarthViewFromState();
                 window.earthView.draw();
             }
 
@@ -483,6 +461,14 @@
             }
         });
 
+        // ── GROUP_POSITION: batch satellite_state_update завершён ──
+        sm.subscribe(StateEventType.GROUP_POSITION, function() {
+            if (window.earthView) {
+                _syncEarthViewFromState();
+                window.earthView.draw();
+            }
+        });
+
         // ── SATELLITE_GROUP_UPDATE: обновление вторичных, синхронизация часов, sky tracks ──
         sm.subscribe(StateEventType.SATELLITE_GROUP_UPDATE, function(group) {
             if (!group || !group.satellites) { return; }
@@ -491,6 +477,7 @@
             }
             _updateSecondaryPositions();
             _updateSecondaryTracks();
+            if (window.earthView) { window.earthView.draw(); }
 
             // Sky tracks из SSE: tracking, selected, вторичные.
             if (window.skyView) {
@@ -514,6 +501,48 @@
 
         // ── Backward compat: SATELLITE_CHANGE (legacy) — ничего не делаем ──
         // Логика перенесена в SELECTED_CHANGE / TRACKING_CHANGE.
+    }
+
+    // Синхронизировать selected/tracking/вторичные EarthView с кешом StateManager.
+    function _syncEarthViewFromState() {
+        const sm = window._stateManager;
+        if (!sm || !window.earthView) { return; }
+
+        const selectedId = sm.getSelectedSatelliteId();
+        const trackingId = sm.getTrackingSatelliteId();
+
+        if (selectedId) {
+            const selState = sm.getState(selectedId);
+            if (selState) {
+                if (selState.position) {
+                    window.earthView.setSelectedSatellitePosition(
+                        selState.position.lon, selState.position.lat,
+                        selState.position.alt, selState.position
+                    );
+                }
+                window.earthView.setSelectedSatelliteInfo(selState.name || '', selectedId);
+                if (selState.visibilityZone && selState.visibilityZone.segments) {
+                    window.earthView.setSelectedVisibilityZone(selState.visibilityZone.segments);
+                }
+            }
+        }
+        if (trackingId) {
+            const trkState = sm.getState(trackingId);
+            if (trkState && trkState.position) {
+                window.earthView.setSatellitePosition(
+                    trkState.position.lon, trkState.position.lat,
+                    trkState.position.alt, trkState.position
+                );
+                window.earthView.setSatelliteInfo(trkState.name || '', trackingId);
+                if (trkState.visibilityZone && trkState.visibilityZone.segments) {
+                    window.earthView.setVisibilityZone(trkState.visibilityZone.segments);
+                }
+            }
+        } else {
+            window.earthView.clearTrackingLayer();
+        }
+        _updateSecondaryPositions();
+        _updateSecondaryTracks();
     }
 
     // Вспомогательная: обновить позиции вторичных спутников (исключая selected и tracking).

@@ -46,6 +46,8 @@ class SatelliteState {
  * @enum {string}
  */
 const StateEventType = Object.freeze({
+    /** Пакет позиций группы обработан — перерисовать карту со всеми актуальными координатами. */
+    GROUP_POSITION: 'group_position',
     /** Обновление позиции выбранного спутника (для карты/SkyView). */
     POSITION: 'position',
     /** Обновление трека выбранного спутника. */
@@ -465,6 +467,14 @@ class SatelliteStateManager {
         const state = this._satellites.get(this._selectedSatelliteId);
         if (!state) { return; }
         this._notify(StateEventType.TRACK, state);
+    }
+
+    /**
+     * Принудительное уведомление после batch satellite_state_update (позиции).
+     * Все norad_id уже в кеше; подписчики синхронизируют EarthView/SkyView и рисуют карту.
+     */
+    forcePositionRefresh() {
+        this._notify(StateEventType.GROUP_POSITION, null);
     }
 
     // ── Выбранный спутник (selected) ───────────────────────────

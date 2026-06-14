@@ -4,7 +4,7 @@
     "port": "8080"
   },
   "ui": {
-    "theme": "classic",
+    "theme": "breeze-steel",
     "show_all_tracks_on_start": false
   },
   "tle": {
@@ -28,10 +28,10 @@
   "station": {
     "name": "Домашняя станция",
     "observer": {
-      "name": "Владивосток",
-      "lat": 43.1198,
-      "lon": 131.8869,
-      "alt_m": 8
+      "name": "Ростов-на-Дону",
+      "lat": 47.2357,
+      "lon": 39.7015,
+      "alt_m": 70
     },
     "radio_paths": [
       {

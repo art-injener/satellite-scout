@@ -60,7 +60,7 @@
    КА | частота | модуляция | сигнал | декод./битые | SNR | доплер | lock | водопад */
 .auto-link__tx-list-header,
 .auto-link__group-grid {
-    --auto-link-cols: 148px 118px 112px 124px 110px 76px 100px 56px minmax(140px, 1fr);
+    --auto-link-cols: 148px 118px 112px 124px 110px 88px 100px 56px minmax(140px, 1fr);
 }
 
 .auto-link__tx-list-header {
@@ -338,11 +338,13 @@
     color: var(--accent-danger, #ff5722);
 }
 
-/* SNR — численное значение, цвет по диапазону. */
+/* SNR — численное значение, цвет по диапазону (заголовок колонки — «SNR»). */
 .auto-link__tx-snr {
     justify-content: flex-end;
     color: var(--text-primary);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .auto-link__tx-snr--low {

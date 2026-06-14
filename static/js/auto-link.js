@@ -1419,7 +1419,7 @@
 
             const snrLvl = snrLevel(row.snrDb);
             c.snr.className = `auto-link__tx-snr auto-link__tx-snr--${snrLvl}`;
-            c.snr.textContent = snrLvl === 'silent' ? '—' : `SNR ${row.snrDb.toFixed(1)} dB`;
+            c.snr.textContent = snrLvl === 'silent' ? '—' : `${row.snrDb.toFixed(1)} dB`;
 
             c.pktOk.textContent = String(row.totalPackets || 0);
             c.pktErr.textContent = String(row.totalFailed || 0);

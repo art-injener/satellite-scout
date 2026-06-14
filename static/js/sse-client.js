@@ -350,6 +350,8 @@ class SSEClient {
             this._stateManager.updatePosition(pos);
         }
 
+        this._stateManager.forcePositionRefresh();
+
         if (data.tracks_included && Array.isArray(data.tracks)) {
             // Сначала сохраняем ВСЕ треки в кеш (в т.ч. вторичных спутников).
             // updateTrack() внутри тоже стреляет TRACK для primary если изменился,

@@ -11,6 +11,19 @@ const {
     segmentsIntersect,
     leadersIntersect,
     bboxOverlap,
+    placementFromCard,
+    stemPiercesCard,
+    accentOnCardRight,
+    accentOnCardTop,
+    accentOnCardBottom,
+    countLeaderForeignIconHits,
+    countLeaderObstacleHits,
+    totalCollisionScore,
+    computeAnnealEnergy,
+    annealInitialState,
+    runSimulatedAnnealing,
+    buildVirtualStacks,
+    subsampleForbiddenSegments,
 } = require('./callouts.js');
 
 // ── Утилиты тестов ─────────────────────────────────────────
@@ -557,12 +570,18 @@ test('own marker bbox does not block own callout (geometry-guaranteed gap)', () 
 // PCA-эллипсе вокруг кластера маркеров. Иконки и трассы остаются
 // неперекрытыми — кадр с группой КА читается без кучи карточек в центре.
 
-console.log('\nCallouts: ring layout (PCA-ellipse, groupingMode=ring)');
+console.log('\nCallouts: anneal layout (SA, groupingMode=anneal/ring)');
 
 const RING_OPTS = Object.assign({}, OPTS, {
-    groupingMode: 'ring',
-    ringGap: 70, // ≈ 0.5·cardWidth (balanced)
-    clusterDistance: 4 * 18, // примерно 4·iconRadius
+    groupingMode: 'anneal',
+    annealSweeps: 1200,
+    annealStepPx: 14,
+    annealSeedRadius: 100,
+    annealSeed: 42,
+    annealWObstacle: 200,
+    annealWLeaderCross: 400,
+    annealWCardTrack: 150,
+    annealWLeaderTrack: 600,
 });
 
 /** Тесная группа из 6 КА (радиус ≤ stemLength) — типичный кластер пролёта. */
@@ -795,13 +814,22 @@ test('ring: PCA does not degenerate on coincident markers (stacked into one card
     assert.deepStrictEqual(r.stacked, [1, 2, 3]);
 });
 
-test('ring: tail is horizontal (bend.y matches card vertical center)', () => {
+test('ring: stem attaches to nearest card edge (no pierce through bbox)', () => {
     const layout = new CalloutLayout(RING_OPTS);
     const res = layout.layout(RING_CLUSTER_6, [], BOUNDS);
     for (const r of res) {
-        const cardCenterY = r.card.y + r.card.h / 2;
-        assert.ok(Math.abs(r.bend.y - cardCenterY) < 1e-6,
-            `bend.y=${r.bend.y} must match card center Y=${cardCenterY}`);
+        const pl = { bend: r.bend, card: r.card };
+        assert.strictEqual(stemPiercesCard(r.marker, pl), false,
+            `stem pierces card ${r.id}`);
+        if (r.attach === 'horizontal') {
+            const cardCenterY = r.card.y + r.card.h / 2;
+            assert.ok(Math.abs(r.bend.y - cardCenterY) < 1e-6,
+                `horizontal bend.y=${r.bend.y} vs center Y=${cardCenterY}`);
+        } else {
+            const cardCenterX = r.card.x + r.card.w / 2;
+            assert.ok(Math.abs(r.bend.x - cardCenterX) < 1e-6,
+                `vertical bend.x=${r.bend.x} vs center X=${cardCenterX}`);
+        }
     }
 });
 
@@ -883,10 +911,8 @@ function countCardCrossings(card, padding, segments) {
 }
 
 test('ring: layout accepts forbiddenSegments arg without breaking existing contract', () => {
-    const layout = new CalloutLayout(RING_OPTS);
-    // Пустой массив сегментов — поведение не должно отличаться от 3-арочного вызова.
-    const a = layout.layout(RING_CLUSTER_6, [], BOUNDS);
-    const b = layout.layout(RING_CLUSTER_6, [], BOUNDS, []);
+    const a = new CalloutLayout(RING_OPTS).layout(RING_CLUSTER_6, [], BOUNDS);
+    const b = new CalloutLayout(RING_OPTS).layout(RING_CLUSTER_6, [], BOUNDS, []);
     assert.strictEqual(a.length, b.length);
     for (let i = 0; i < a.length; i++) {
         assert.strictEqual(a[i].card.x, b[i].card.x,
@@ -1033,6 +1059,10 @@ console.log('\nCallouts: ring layout — leader line (stem + tail) vs tracks');
 
 /** Извлекает конечную точку хвоста leader-линии из layout-объекта. */
 function tailEndOfLayout(lt) {
+    if (lt.tailEnd) { return lt.tailEnd; }
+    if (lt.attach === 'vertical') {
+        return { x: lt.bend.x, y: lt.bend.y };
+    }
     const x = (lt.card.x > lt.bend.x) ? lt.card.x : (lt.card.x + lt.card.w);
     return { x: x, y: lt.bend.y };
 }
@@ -1056,7 +1086,11 @@ function countLeaderTrackHits(lt, padding, segments) {
 }
 
 test('ring: stem does not cross a horizontal track above the cluster', () => {
-    const layout = new CalloutLayout(RING_OPTS);
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, {
+        annealSweeps: 2000,
+        annealWLeaderTrack: 1500,
+        annealSeed: 55,
+    }));
     // Маркеры «крест» вокруг центра: самый верхний — (512, 228).
     // Горизонтальная трасса y=200 проходит выше всех маркеров; карточка
     // верхнего маркера в старом алгоритме встанет на y<200 (bbox не
@@ -1418,31 +1452,16 @@ test('ring: stacked card id is the smallest NORAD in group', () => {
 console.log('\nCallouts: ring layout — obstacle (icon) avoidance (step 1)');
 
 test('ring: card avoids a foreign obstacle in its default sector', () => {
-    // Два маркера на горизонтальной оси: PCA-эллипс растянут по X.
-    // theta маркера (544, 256) ≈ 0 → карточка по умолчанию идёт ВПРАВО.
-    const layout = new CalloutLayout(RING_OPTS);
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, { annealSeed: 77 }));
     const markers = [
-        { id: 1, x: 480, y: 256 },
-        { id: 2, x: 544, y: 256 },
+        { id: 1, x: 400, y: 256 },
+        { id: 2, x: 560, y: 256 },
     ];
-    // Препятствие ровно справа — там, где встанет карточка маркера id=2,
-    // если игнорировать obstacles. Размеры: ~карточка по высоте.
+    // Препятствие на пути радиального seed для правого маркера.
     const obstacles = [
-        { x: 600, y: 240, w: 120, h: 36 },
+        { x: 620, y: 240, w: 120, h: 36 },
     ];
-    const baseline = layout.layout(markers, [], BOUNDS);
     const res = layout.layout(markers, obstacles, BOUNDS);
-    // Sanity: без obstacles какая-то карточка действительно перекрывает
-    // зону препятствия — иначе тест бы прошёл «случайно».
-    let baselineHits = 0;
-    for (const r of baseline) {
-        for (const ob of obstacles) {
-            if (overlap(bbox(r.card), ob)) { baselineHits++; }
-        }
-    }
-    assert.ok(baselineHits > 0,
-        'sanity: без obstacle-обхода карточка должна попадать в препятствие');
-
     for (let i = 0; i < res.length; i++) {
         const c = res[i].card;
         for (let k = 0; k < obstacles.length; k++) {
@@ -1566,6 +1585,370 @@ test('ring: θ-swap resolves card-to-card overlap when simple exchange fixes it'
     }
     // Свап должен минимизировать/устранить перекрытия (best-effort)
     assert.strictEqual(overlaps, 0, `card-to-card overlaps remain: ${overlaps}`);
+});
+
+test('anneal: SA reduces energy vs radial seed on cluster of 6', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const { virtualMarkers } = buildVirtualStacks(RING_CLUSTER_6, RING_OPTS);
+    const seed = annealInitialState(virtualMarkers, BOUNDS, RING_OPTS, new Map());
+    const eSeed = computeAnnealEnergy(seed, virtualMarkers, [], [], BOUNDS, RING_OPTS);
+    const res = layout.layout(RING_CLUSTER_6, [], BOUNDS);
+    const placements = res.filter((r) => r !== null).map((r) => ({
+        cardX: r.card.x,
+        cardY: r.card.y,
+    }));
+    const eFinal = computeAnnealEnergy(placements, virtualMarkers, [], [], BOUNDS, RING_OPTS);
+    assert.ok(eFinal <= eSeed,
+        `SA regressed energy: seed=${eSeed}, final=${eFinal}`);
+});
+
+test('placementFromCard: vertical attachment when card below marker', () => {
+    const marker = { x: 200, y: 100 };
+    const cardW = 110;
+    const cardH = 28;
+    const cardX = 155;
+    const cardY = 130;
+    const pl = placementFromCard(marker, cardX, cardY, cardW, cardH);
+    assert.strictEqual(pl.attach, 'vertical');
+    assert.strictEqual(pl.bend.x, cardX + cardW / 2);
+    assert.strictEqual(pl.bend.y, cardY);
+    assert.strictEqual(!stemPiercesCard(marker, pl), true);
+});
+
+test('placementFromCard: horizontal attachment when card beside marker', () => {
+    const marker = { x: 100, y: 150 };
+    const cardW = 110;
+    const cardH = 28;
+    const cardX = 220;
+    const cardY = 136;
+    const pl = placementFromCard(marker, cardX, cardY, cardW, cardH);
+    assert.strictEqual(pl.attach, 'horizontal');
+    assert.strictEqual(pl.bend.x, cardX);
+    assert.strictEqual(pl.bend.y, cardY + cardH / 2);
+});
+
+test('accent stripe on same edge as tail (horizontal)', () => {
+    const cardW = 110;
+    const cardH = 28;
+    const leftPl = placementFromCard({ x: 100, y: 150 }, 220, 136, cardW, cardH);
+    const leftLt = {
+        marker: { x: 100, y: 150 },
+        bend: leftPl.bend,
+        tailEnd: leftPl.tailEnd,
+        attach: leftPl.attach,
+        card: leftPl.card,
+    };
+    assert.strictEqual(accentOnCardRight(leftLt), false, 'tail on left → accent left');
+
+    const rightPl = placementFromCard({ x: 400, y: 150 }, 220, 136, cardW, cardH);
+    const rightLt = {
+        marker: { x: 400, y: 150 },
+        bend: rightPl.bend,
+        tailEnd: rightPl.tailEnd,
+        attach: rightPl.attach,
+        card: rightPl.card,
+    };
+    assert.strictEqual(accentOnCardRight(rightLt), true, 'tail on right → accent right');
+});
+
+test('accent stripe on same edge as tail (vertical)', () => {
+    const cardW = 110;
+    const cardH = 28;
+    const topPl = placementFromCard({ x: 200, y: 100 }, 155, 130, cardW, cardH);
+    const topLt = {
+        marker: { x: 200, y: 100 },
+        bend: topPl.bend,
+        tailEnd: topPl.tailEnd,
+        attach: topPl.attach,
+        card: topPl.card,
+    };
+    assert.strictEqual(accentOnCardTop(topLt), true, 'tail on top → accent top');
+    assert.strictEqual(accentOnCardBottom(topLt), false);
+
+    const bottomPl = placementFromCard({ x: 200, y: 200 }, 155, 100, cardW, cardH);
+    const bottomLt = {
+        marker: { x: 200, y: 200 },
+        bend: bottomPl.bend,
+        tailEnd: bottomPl.tailEnd,
+        attach: bottomPl.attach,
+        card: bottomPl.card,
+    };
+    assert.strictEqual(accentOnCardBottom(bottomLt), true, 'tail on bottom → accent bottom');
+    assert.strictEqual(accentOnCardTop(bottomLt), false);
+});
+
+function assertCardDrift(a, b, dx, dy, id) {
+    const tol = 1e-4;
+    assert.ok(
+        Math.abs(b.card.x - (a.card.x + dx)) < tol,
+        `id ${id} card.x drift: got ${b.card.x}, expected ${a.card.x + dx}`
+    );
+    assert.ok(
+        Math.abs(b.card.y - (a.card.y + dy)) < tol,
+        `id ${id} card.y drift: got ${b.card.y}, expected ${a.card.y + dy}`
+    );
+}
+
+test('anneal: stable layout on marker micro-move (skip SA)', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, { annealSeed: 42 }));
+    const markers1 = RING_CLUSTER_6.map((m) => Object.assign({}, m));
+    const res1 = layout.layout(markers1, [], BOUNDS);
+    const markers2 = markers1.map((m) => ({
+        id: m.id,
+        x: m.x + 2,
+        y: m.y - 1,
+        color: m.color,
+    }));
+    const res2 = layout.layout(markers2, [], BOUNDS);
+    const byId1 = {};
+    const byId2 = {};
+    for (const r of res1) {
+        if (r) { byId1[r.id] = r; }
+    }
+    for (const r of res2) {
+        if (r) { byId2[r.id] = r; }
+    }
+    for (const id of Object.keys(byId1)) {
+        const a = byId1[id];
+        const b = byId2[id];
+        assertCardDrift(a, b, 2, -1, id);
+    }
+});
+
+test('anneal: own card never overlaps own tracked icon', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, {
+        annealSeed: 42,
+        iconObstacleGap: 10,
+    }));
+    const trackedR = 24;
+    const m = { id: 99, x: 512, y: 256, iconRadius: trackedR };
+    const iconBox = {
+        x: m.x - trackedR, y: m.y - trackedR, w: 2 * trackedR, h: 2 * trackedR,
+    };
+    const res = layout.layout([m], [iconBox], BOUNDS);
+    const c = res[0].card;
+    const sepX = c.x + c.w <= iconBox.x || iconBox.x + iconBox.w <= c.x;
+    const sepY = c.y + c.h <= iconBox.y || iconBox.y + iconBox.h <= c.y;
+    assert.ok(sepX || sepY, 'single tracked: card overlaps own icon');
+});
+
+test('anneal: leader does not cross foreign satellite icon', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, {
+        annealSeed: 42,
+        iconObstacleGap: 10,
+    }));
+    const r = 22;
+    const top = { id: 1, x: 512, y: 200, iconRadius: r };
+    const middle = { id: 2, x: 512, y: 280, iconRadius: r };
+    const markers = [top, middle];
+    const obstacles = markers.map((m) => ({
+        x: m.x - r - 10, y: m.y - r - 10,
+        w: 2 * (r + 10), h: 2 * (r + 10),
+    }));
+    const res = layout.layout(markers, obstacles, BOUNDS);
+    const topLt = res.find((x) => x && x.id === 1);
+    assert.ok(topLt, 'missing top layout');
+    const pl = {
+        marker: { x: top.x, y: top.y },
+        bend: topLt.bend,
+        tailEnd: topLt.tailEnd,
+        attach: topLt.attach,
+        card: topLt.card,
+    };
+    const hits = countLeaderForeignIconHits(
+        { id: 1, x: top.x, y: top.y, iconRadius: r },
+        pl,
+        [{ id: 1, x: top.x, y: top.y, iconRadius: r },
+            { id: 2, x: middle.x, y: middle.y, iconRadius: r }],
+        10
+    );
+    assert.strictEqual(hits, 0, 'top stem crosses middle icon');
+});
+
+test('anneal: card does not overlap foreign satellite icon', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, {
+        annealSeed: 42,
+        iconObstacleGap: 10,
+    }));
+    const r = 20;
+    const left = { id: 1, x: 400, y: 300, iconRadius: r };
+    const right = { id: 2, x: 430, y: 310, iconRadius: r };
+    const markers = [left, right];
+    const obstacles = markers.map((m) => ({
+        x: m.x - r - 10, y: m.y - r - 10,
+        w: 2 * (r + 10), h: 2 * (r + 10),
+    }));
+    const res = layout.layout(markers, obstacles, BOUNDS);
+    const leftLt = res.find((x) => x && x.id === 1);
+    assert.ok(leftLt, 'missing left layout');
+    const iconBox = {
+        x: right.x - r - 10, y: right.y - r - 10,
+        w: 2 * (r + 10), h: 2 * (r + 10),
+    };
+    const c = leftLt.card;
+    const sepX = c.x + c.w <= iconBox.x || iconBox.x + iconBox.w <= c.x;
+    const sepY = c.y + c.h <= iconBox.y || iconBox.y + iconBox.h <= c.y;
+    assert.ok(sepX || sepY, 'card overlaps foreign icon bbox');
+});
+
+test('anneal: clustered cards do not overlap or sit on foreign leaders', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, {
+        annealSeed: 77,
+        iconObstacleGap: 10,
+        leaderCardPadding: 4,
+    }));
+    const r = 18;
+    const markers = [
+        { id: 1, x: 480, y: 380, iconRadius: r },
+        { id: 2, x: 520, y: 395, iconRadius: r },
+        { id: 3, x: 500, y: 410, iconRadius: r },
+        { id: 4, x: 540, y: 385, iconRadius: r },
+        { id: 5, x: 510, y: 370, iconRadius: r },
+        { id: 6, x: 530, y: 405, iconRadius: r },
+    ];
+    const obstacles = markers.map((m) => ({
+        x: m.x - r - 10, y: m.y - r - 10,
+        w: 2 * (r + 10), h: 2 * (r + 10),
+    }));
+    const res = layout.layout(markers, obstacles, BOUNDS);
+    const gap = RING_OPTS.minCardGap || 4;
+    const leaderPad = 4;
+    for (let i = 0; i < res.length; i++) {
+        if (!res[i]) { continue; }
+        for (let j = i + 1; j < res.length; j++) {
+            if (!res[j]) { continue; }
+            assert.ok(
+                !bboxOverlap(res[i].card, res[j].card, gap),
+                `cards ${res[i].id} and ${res[j].id} overlap`
+            );
+        }
+        const cardOb = {
+            x: res[i].card.x - leaderPad,
+            y: res[i].card.y - leaderPad,
+            w: res[i].card.w + 2 * leaderPad,
+            h: res[i].card.h + 2 * leaderPad,
+        };
+        for (let j = 0; j < res.length; j++) {
+            if (j === i || !res[j]) { continue; }
+            const m = markers.find((x) => x.id === res[j].id);
+            const pl = placementFromCard(
+                { x: m.x, y: m.y },
+                res[j].card.x, res[j].card.y, res[j].card.w, res[j].card.h
+            );
+            const hits = countLeaderObstacleHits(
+                { x: m.x, y: m.y }, pl, [cardOb]
+            );
+            assert.strictEqual(
+                hits, 0,
+                `leader of ${res[j].id} crosses card ${res[i].id}`
+            );
+        }
+    }
+});
+
+test('anneal: sticky layout when obstacles/segments shift with markers', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, { annealSeed: 42 }));
+    const markers1 = RING_CLUSTER_6.map((m) => Object.assign({}, m));
+    const segments = [{ x1: 900, y1: 0, x2: 900, y2: 512 }];
+    const res1 = layout.layout(markers1, [], BOUNDS, segments);
+    const markers2 = markers1.map((m) => ({
+        id: m.id,
+        x: m.x + 3,
+        y: m.y - 2,
+        color: m.color,
+    }));
+    const obstacles = markers2.map((m) => ({
+        x: m.x - 20,
+        y: m.y - 20,
+        w: 40,
+        h: 40,
+    }));
+    const res2 = layout.layout(markers2, obstacles, BOUNDS, segments);
+    for (const r of res1) {
+        if (!r) { continue; }
+        const b = res2.find((x) => x && x.id === r.id);
+        assert.ok(b, `missing id ${r.id}`);
+        assertCardDrift(r, b, 3, -2, r.id);
+    }
+});
+
+test('anneal: sticky with forbidden tracks on marker micro-move (no SA rerun)', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, { annealSeed: 42 }));
+    const markers1 = RING_CLUSTER_6.map((m) => Object.assign({}, m));
+    const segments = [{ x1: 900, y1: 0, x2: 900, y2: 512 }];
+    const res1 = layout.layout(markers1, [], BOUNDS, segments);
+    const markers2 = markers1.map((m) => ({
+        id: m.id,
+        x: m.x + 2,
+        y: m.y - 1,
+        color: m.color,
+    }));
+    const res2 = layout.layout(markers2, [], BOUNDS, segments);
+    const byId1 = {};
+    const byId2 = {};
+    for (const r of res1) {
+        if (r) { byId1[r.id] = r; }
+    }
+    for (const r of res2) {
+        if (r) { byId2[r.id] = r; }
+    }
+    for (const id of Object.keys(byId1)) {
+        assertCardDrift(byId1[id], byId2[id], 2, -1, id);
+    }
+});
+
+test('anneal: sticky stable when forbidden segments shift on screen (no track nudge)', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, { annealSeed: 42 }));
+    const markers1 = RING_CLUSTER_6.map((m) => Object.assign({}, m));
+    const segments1 = [{ x1: 350, y1: 80, x2: 350, y2: 430 }];
+    const res1 = layout.layout(markers1, [], BOUNDS, segments1);
+    const markers2 = markers1.map((m) => ({
+        id: m.id,
+        x: m.x + 2,
+        y: m.y - 1,
+        color: m.color,
+    }));
+    // Трасса сместилась на экране (как при движении КА / обновлении ground track).
+    const segments2 = [{ x1: 358, y1: 85, x2: 358, y2: 435 }];
+    const res2 = layout.layout(markers2, [], BOUNDS, segments2);
+    for (const r of res1) {
+        if (!r) { continue; }
+        const b = res2.find((x) => x && x.id === r.id);
+        assert.ok(b, `missing id ${r.id}`);
+        assertCardDrift(r, b, 2, -1, r.id);
+    }
+});
+
+test('anneal: subsampleForbiddenSegments caps segment count', () => {
+    const segs = [];
+    for (let i = 0; i < 500; i++) {
+        segs.push({ x1: i, y1: 0, x2: i + 1, y2: 10 });
+    }
+    const sub = subsampleForbiddenSegments(segs, 120);
+    assert.strictEqual(sub.length, 120);
+    assert.strictEqual(sub[0].x1, segs[0].x1);
+});
+
+test('anneal: same structure key skips SA on sticky violation (no card jump)', () => {
+    const layout = new CalloutLayout(Object.assign({}, RING_OPTS, {
+        annealSeed: 42,
+        annealMaxSegments: 120,
+    }));
+    const markers = RING_CLUSTER_6.map((m) => Object.assign({}, m));
+    const segments = [{ x1: 900, y1: 0, x2: 900, y2: 512 }];
+    const res1 = layout.layout(markers, [], BOUNDS, segments);
+    // Сегмент сдвинулся, но bucket тот же — SA не должен перезапускаться.
+    const shiftedSeg = [{ x1: 910, y1: 5, x2: 910, y2: 517 }];
+    const res2 = layout.layout(
+        markers.map((m) => ({ id: m.id, x: m.x + 2, y: m.y - 1, color: m.color })),
+        [], BOUNDS, shiftedSeg
+    );
+    for (const r of res1) {
+        if (!r) { continue; }
+        const b = res2.find((x) => x && x.id === r.id);
+        assert.ok(b, `missing id ${r.id}`);
+        assertCardDrift(r, b, 2, -1, r.id);
+    }
 });
 
 // ── Summary ────────────────────────────────────────────────

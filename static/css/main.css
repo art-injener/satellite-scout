@@ -821,6 +821,7 @@ body.station-basic .app-header__dropdown {
     z-index: 25;
     display: block;
     will-change: left, top;
+    /* Позиция синхронна с canvas (SSE ~1 Гц) — без CSS-инерции. */
     transition: none;
 }
 
@@ -849,14 +850,19 @@ body.station-basic .app-header__dropdown {
     z-index: 26;
 }
 
-/* Одна выноска (диагональный стержень + горизонтальный хвост → карточка).
-   Линия рисуется на canvas, здесь — только сама карточка.
-   Цвет КА живёт только в полоске-акценте (3px) — текст использует
-   семантические токены темы, чтобы карточка читалась во всех темах.
-   По умолчанию полоска слева; модификатор --accent-right ставит её справа,
-   чтобы хвост входил именно в цветную метку. */
+/* Линии выносок в SVG — поверх canvas и DOM-маркеров (z-index 25), под карточками. */
+.map-callout-lines {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 0;
+}
+
 .map-sat-callout {
     position: absolute;
+    z-index: 1;
     /* Ширина задаётся inline в CalloutRenderer (proc/cardW canvas-а, %),
        высота согласована с CalloutLayout.opts.cardHeight (logical px).
        min/max — защитная сетка на случай некорректных значений из layout.
@@ -885,12 +891,9 @@ body.station-basic .app-header__dropdown {
     pointer-events: auto;
     cursor: pointer;
     will-change: left, top, transform;
-    /* Якорь scale у tracked-карточки — со стороны примыкания хвоста.
-       Дефолт: accent слева → хвост слева → origin = left center. */
+    /* Карточки следуют маркерам без отставания от SSE. */
     transform-origin: left center;
     transition:
-        left 0.25s ease,
-        top 0.25s ease,
         transform 0.18s ease,
         filter 0.15s ease,
         border-color 0.15s ease;
@@ -912,6 +915,22 @@ body.station-basic .app-header__dropdown {
     transform-origin: right center;
 }
 
+.map-sat-callout--accent-top {
+    padding: 7px 7px 1px 4px;
+    box-shadow:
+        inset 0 3px 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 2px 5px rgba(0, 0, 0, 0.25);
+    transform-origin: center top;
+}
+
+.map-sat-callout--accent-bottom {
+    padding: 1px 7px 7px 4px;
+    box-shadow:
+        inset 0 -3px 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 2px 5px rgba(0, 0, 0, 0.25);
+    transform-origin: center bottom;
+}
+
 /* Карточка «главного» КА (selected/tracking): плотнее фон, толще полоска,
    мягкое свечение цветом КА + увеличение 1.18× для выхода на первый план. */
 .map-sat-callout--tracked {
@@ -927,6 +946,20 @@ body.station-basic .app-header__dropdown {
 .map-sat-callout--tracked.map-sat-callout--accent-right {
     box-shadow:
         inset -5px 0 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 0 12px color-mix(in srgb, var(--callout-accent, var(--sat-label, #ffeb3b)) 30%, transparent),
+        0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.map-sat-callout--tracked.map-sat-callout--accent-top {
+    box-shadow:
+        inset 0 5px 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
+        0 0 12px color-mix(in srgb, var(--callout-accent, var(--sat-label, #ffeb3b)) 30%, transparent),
+        0 3px 10px rgba(0, 0, 0, 0.3);
+}
+
+.map-sat-callout--tracked.map-sat-callout--accent-bottom {
+    box-shadow:
+        inset 0 -5px 0 var(--callout-accent, var(--sat-label, #ffeb3b)),
         0 0 12px color-mix(in srgb, var(--callout-accent, var(--sat-label, #ffeb3b)) 30%, transparent),
         0 3px 10px rgba(0, 0, 0, 0.3);
 }

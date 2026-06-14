@@ -124,6 +124,8 @@
         this.zoom = MAP_ZOOM_LEVELS[this._zoomIdx];
         // Состояние phased-анимации: { startTs, fromIdx, toIdx, raf } или null.
         this._zoomAnim = null;
+        // Coalesce draw(): не чаще одного _drawStatic за кадр (POSITION SSE может приходить пачкой).
+        this._drawCoalesceRaf = 0;
 
         // Спутник под наблюдением (tracking): red/green + dots + footprint.
         this.satellite = {
@@ -437,6 +439,28 @@
      * иначе вызывает «статическое ядро» _drawStatic().
      */
     EarthView.prototype.draw = function() {
+        if (this._zoomAnim) {
+            this._drawPhased(this._now());
+            return;
+        }
+        if (this._drawCoalesceRaf) { return; }
+        const self = this;
+        if (typeof requestAnimationFrame !== 'undefined') {
+            this._drawCoalesceRaf = requestAnimationFrame(function() {
+                self._drawCoalesceRaf = 0;
+                self._drawStatic();
+            });
+        } else {
+            this._drawStatic();
+        }
+    };
+
+    /** Синхронная отрисовка без coalesce (resize, завершение phased-zoom). */
+    EarthView.prototype.drawNow = function() {
+        if (this._drawCoalesceRaf && typeof cancelAnimationFrame !== 'undefined') {
+            cancelAnimationFrame(this._drawCoalesceRaf);
+            this._drawCoalesceRaf = 0;
+        }
         if (this._zoomAnim) {
             this._drawPhased(this._now());
             return;
@@ -1282,7 +1306,12 @@
         // secondary — «киношный» силуэт ~38×19 logical (корпус+бумы+панели+антенна),
         // полуширина 19 + 1 буфер → r=20.
         const ICON_R_MAIN = 18 * dpr;
+        const ICON_R_HIGHLIGHT = Math.round(ICON_R_MAIN * 1.32);
         const ICON_R_SECONDARY = 20 * dpr;
+        const iconRadiusFor = function(nid, isSecondary) {
+            if (isHighlight(nid)) { return ICON_R_HIGHLIGHT; }
+            return isSecondary ? ICON_R_SECONDARY : ICON_R_MAIN;
+        };
         // Карта nid → alias из текущей группы (satellite_group_update от SSE).
         // Используется для второй строки карточки (alias / второе имя КА).
         const aliasMap = {};
@@ -1319,7 +1348,9 @@
             const target = Math.max(wName, wAlias) + innerPad;
             const minW = 56 * dpr;
             const maxW = 130 * dpr;
-            return Math.round(Math.max(minW, Math.min(maxW, target)));
+            const bucket = 8 * dpr;
+            const raw = Math.round(Math.max(minW, Math.min(maxW, target)));
+            return Math.round(raw / bucket) * bucket;
         };
 
         const markers = [];
@@ -1336,7 +1367,7 @@
                 name: name,
                 alias: alias,
                 cardWidth: measure(name, alias),
-                iconRadius: ICON_R_MAIN,
+                iconRadius: iconRadiusFor(trkId, false),
                 isTracked: isHighlight(trkId),
             });
         }
@@ -1353,7 +1384,7 @@
                 name: name,
                 alias: alias,
                 cardWidth: measure(name, alias),
-                iconRadius: ICON_R_MAIN,
+                iconRadius: iconRadiusFor(selId, false),
                 isTracked: isHighlight(selId),
             });
         }
@@ -1376,7 +1407,7 @@
                 name: name,
                 alias: alias,
                 cardWidth: measure(name, alias),
-                iconRadius: ICON_R_SECONDARY,
+                iconRadius: iconRadiusFor(nid, true),
                 isTracked: isHighlight(nid),
             });
         }
@@ -1421,11 +1452,12 @@
                 const m = markers[i];
                 const r = m.iconRadius;
                 if (typeof r !== 'number' || !isFinite(r) || r <= 0) { continue; }
+                const iconGap = 10 * dpr;
                 obstacles.push({
-                    x: m.x - r,
-                    y: m.y - r,
-                    w: 2 * r,
-                    h: 2 * r,
+                    x: m.x - r - iconGap,
+                    y: m.y - r - iconGap,
+                    w: 2 * (r + iconGap),
+                    h: 2 * (r + iconGap),
                 });
             }
         }
@@ -1433,19 +1465,9 @@
     };
 
     /**
-     * Сегменты «запретных» трасс для пост-прохода CalloutLayout (ring-режим).
-     *
-     * Возвращает массив `{x1, y1, x2, y2}` в physical px:
-     *   1. Трасса selected (оранжевая) — `_selectedSatellite.groundTrack`.
-     *   2. Трасса tracking (синяя) — `this.satellite.groundTrack` (если она
-     *      отличается от selected, т.е. когда КА выбран и одновременно ведётся).
-     *
-     * Поддерживаем оба формата: массив точек `[{lon,lat,...}]` или объект
-     * `{past:[[seg],...], future:[[seg],...]}`. Антимеридиан рвёт полилинию на
-     * сегменты — пропускаем «прыжки» больше width/2 (так же, как в `_drawTrackSegment`).
-     *
-     * Вторичные пунктиры из `TRACK_COLOR_PALETTE` сюда НЕ включаются:
-     * иначе плотный кадр блокирует размещение карточек по всему кольцу.
+     * Запретные сегменты трасс для layout выносок.
+     * Все видимые на карте трассы (selected, tracking, вторичные с «глазом»),
+     * чтобы карточки и leader-линии не пересекали орбитальные линии.
      *
      * @private
      */
@@ -1453,15 +1475,15 @@
         const out = [];
         const selSm = this._selectedSatellite ? this._selectedSatellite.noradId : null;
         const trkSm = this.satellite ? this.satellite.noradId : null;
-        // selected (оранжевая) — главный «герой» кадра.
+
         if (selSm) {
             this._appendTrackSegments(out, this._selectedSatellite.groundTrack);
         }
-        // tracking (синяя) — добавляем только если он отличен от selected,
-        // иначе тот же набор сегментов посчитался бы дважды.
         if (trkSm && (!selSm || String(trkSm) !== String(selSm))) {
             this._appendTrackSegments(out, this.satellite.groundTrack);
         }
+        // Вторичные пунктиры не включаем: при группе из N КА сегментов тысячи,
+        // SA callout-layout блокирует main thread и замирают водопады TX в Авто.
         return out;
     };
 
@@ -1525,8 +1547,7 @@
         // карточки не должны их пересекать — это «герой»-трассы кадра.
         const forbiddenSegments = this._collectForbiddenSegments();
         const layouts = this._calloutLayout.layout(markers, obstacles, bounds, forbiddenSegments);
-        const dpr = window.devicePixelRatio || 1;
-        this._calloutRenderer.drawLines(this.ctx, layouts, dpr);
+        this._calloutRenderer.drawLinesOverlay(layouts, bounds);
         const info = {};
         for (let j = 0; j < markers.length; j++) {
             const mid = markers[j].id;
@@ -1943,29 +1964,24 @@
         const dpr = window.devicePixelRatio || 1;
         // Размеры карточек уменьшены, чтобы иконки КА не терялись на фоне
         // плотной группы выносок (UX: карточки 110×30 logical px, шрифты 11/9).
-        // clusterDistance — конечный, чтобы при zoom>1 разлетающиеся маркеры
-        // образовывали отдельные мелкие кольца, а не один гигантский эллипс
-        // с карточками, прижатыми к краям canvas.
-        const clusterDistance = Math.min(this.width, this.height) * 0.4;
         this._calloutLayout = new window.CalloutLayout({
-            stemLength:    64 * dpr,
+            stemLength:    72 * dpr,
             tailLength:    18 * dpr,
             cardWidth:    110 * dpr,
             cardHeight:    28 * dpr,
             minCardGap:     6 * dpr,
             boundsPadding:  8 * dpr,
-            // Размещение карточек на расширенном PCA-эллипсе кластера КА.
-            // При zoom>1 разрозненные группы получают свои отдельные кольца
-            // (благодаря конечному clusterDistance); полуоси кольца дополнительно
-            // ограничиваются размером canvas внутри `_layoutRing` — карточки
-            // никогда не уходят прижатыми к краям при широко расходящихся
-            // маркерах.
-            groupingMode: 'ring',
-            ringGap:       60 * dpr,
-            clusterDistance: clusterDistance,
-            // Зазор от запретных трасс (selected оранжевая, tracking синяя):
-            // карточки уводятся от линии, чтобы не «прилипать» к ней визуально.
-            forbiddenPadding: 5 * dpr,
+            groupingMode: 'anneal',
+            annealSweeps: 200,
+            annealMaxSegments: 120,
+            annealStepPx: 12 * dpr,
+            annealSeedRadius: (72 + 18 + 55) * dpr,
+            annealCacheThreshold: 8 * dpr,
+            annealSeed: 42,
+            forbiddenPadding: 8 * dpr,
+            iconObstacleGap: 10 * dpr,
+            leaderCardPadding: 4 * dpr,
+            cardWidthBucket: 8 * dpr,
         });
         const container = document.getElementById('map-callouts');
         if (container) {
@@ -2153,6 +2169,9 @@
         const fromIdx = this._zoomIdx;
         this._zoomIdx = clamped;
         this.zoom = MAP_ZOOM_LEVELS[clamped];
+        if (this._calloutLayout && typeof this._calloutLayout.reset === 'function') {
+            this._calloutLayout.reset();
+        }
         if (this.options.animStyle === 'phased') {
             this._startZoomAnim(fromIdx, clamped);
         } else {
@@ -2361,12 +2380,24 @@
             }
         }
 
-        // Прячем DOM-маркеры selected/tracking и DOM-карточки выносок, чтобы они
-        // не висели на старых пиксельных координатах. На стадии observer они
-        // вернутся через draw().
-        this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label', null, '', 'tracking', null);
-        this._positionDomMarker('map-sat-selected', 'map-sat-selected-label', null, '', 'selected', null);
+        // Прячем DOM-маркеры и карточки выносок без сброса orientReady
+        // (временное скрытие на стадиях phased-анимации zoom).
+        this._hideDomMarkersForZoom();
         this._setCalloutsLayerVisible(false);
+    };
+
+    /**
+     * Скрыть DOM-маркеры selected/tracking на время phased-анимации zoom.
+     * Не трогает _domMarkerState — после zoom ориентация и позиция сохраняются.
+     * @private
+     */
+    EarthView.prototype._hideDomMarkersForZoom = function() {
+        if (typeof document === 'undefined') { return; }
+        const ids = ['map-sat-tracking', 'map-sat-selected'];
+        for (let i = 0; i < ids.length; i++) {
+            const el = document.getElementById(ids[i]);
+            if (el) { el.style.display = 'none'; }
+        }
     };
 
     /**
