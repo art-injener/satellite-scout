@@ -94,6 +94,10 @@ const DEFAULTS = {
     annealSeed: null,
     // Лимит сегментов трасс в SA (полный набор может быть тысячи — блокирует UI).
     annealMaxSegments: 120,
+    // Порог single-linkage кластеризации (px): близкие КА — общий «венок» карточек.
+    clusterDistance: 72,
+    // Радиальный отступ карточки от bounding-эллипса кластера (px).
+    ringGap: 70,
     // Порог стекинга co-located КА (px). Маркеры ближе этого расстояния
     // объединяются в одну «стопку» — одна карточка с несколькими строками.
     // Отдельно от clusterDistance (PCA-эллипс): стек — это «одна точка»,
@@ -214,6 +218,238 @@ function clusterMarkers(markers, threshold) {
         groups.get(r).push(i);
     }
     return Array.from(groups.values());
+}
+
+/** Максимальная ширина карточки среди маркеров группы. */
+function maxCardWidth(markers, indices, defaultW) {
+    let max = defaultW;
+    for (let k = 0; k < indices.length; k++) {
+        const m = markers[indices[k]];
+        if (typeof m.cardWidth === 'number' && isFinite(m.cardWidth) && m.cardWidth > max) {
+            max = m.cardWidth;
+        }
+    }
+    return max;
+}
+
+/**
+ * Bounding-эллипс кластера маркеров через PCA.
+ * Полуоси масштабируются так, чтобы накрыть все иконки (с iconRadius).
+ */
+function pcaEllipse(markers, indices) {
+    const n = indices.length;
+    let cx = 0;
+    let cy = 0;
+    for (let k = 0; k < n; k++) {
+        cx += markers[indices[k]].x;
+        cy += markers[indices[k]].y;
+    }
+    cx /= n;
+    cy /= n;
+
+    let sxx = 0;
+    let syy = 0;
+    let sxy = 0;
+    for (let k = 0; k < n; k++) {
+        const dx = markers[indices[k]].x - cx;
+        const dy = markers[indices[k]].y - cy;
+        sxx += dx * dx;
+        syy += dy * dy;
+        sxy += dx * dy;
+    }
+    sxx /= n;
+    syy /= n;
+    sxy /= n;
+
+    let phi = 0;
+    if (Math.abs(sxy) > 1e-9 || Math.abs(sxx - syy) > 1e-9) {
+        phi = 0.5 * Math.atan2(2 * sxy, sxx - syy);
+    }
+    const cosPhi = Math.cos(phi);
+    const sinPhi = Math.sin(phi);
+
+    let aBase = 0;
+    let bBase = 0;
+    for (let k = 0; k < n; k++) {
+        const m = markers[indices[k]];
+        const dx = m.x - cx;
+        const dy = m.y - cy;
+        const u = cosPhi * dx + sinPhi * dy;
+        const v = -sinPhi * dx + cosPhi * dy;
+        const r = (typeof m.iconRadius === 'number' && isFinite(m.iconRadius))
+            ? m.iconRadius : 0;
+        const au = Math.abs(u) + r;
+        const bv = Math.abs(v) + r;
+        if (au > aBase) { aBase = au; }
+        if (bv > bBase) { bBase = bv; }
+    }
+    aBase = Math.max(aBase, 1);
+    bBase = Math.max(bBase, 1);
+
+    let kMax = 1;
+    for (let k = 0; k < n; k++) {
+        const m = markers[indices[k]];
+        const dx = m.x - cx;
+        const dy = m.y - cy;
+        const u = cosPhi * dx + sinPhi * dy;
+        const v = -sinPhi * dx + cosPhi * dy;
+        const ku = u / aBase;
+        const kv = v / bBase;
+        const norm = Math.sqrt(ku * ku + kv * kv);
+        if (norm > kMax) { kMax = norm; }
+    }
+
+    return {
+        cx, cy, phi, cosPhi, sinPhi,
+        a: aBase * kMax,
+        b: bBase * kMax,
+    };
+}
+
+/** Разнести углы θ соседних слотов на кольце (wrap-around на 2π). */
+function distributeAnglesAround(slots, minStep) {
+    const n = slots.length;
+    if (n < 2) { return; }
+    const maxPasses = 16;
+    for (let pass = 0; pass < maxPasses; pass++) {
+        let moved = false;
+        for (let i = 0; i < n; i++) {
+            const j = (i + 1) % n;
+            let dt = slots[j].theta - slots[i].theta;
+            if (j === 0) { dt += 2 * Math.PI; }
+            if (dt < minStep - 1e-9) {
+                const need = minStep - dt;
+                slots[i].theta -= need / 2;
+                slots[j].theta += need / 2;
+                moved = true;
+            }
+        }
+        if (!moved) { break; }
+    }
+}
+
+/**
+ * Позиция карточки на расширенном PCA-эллипсе кластера под углом θ.
+ * Якорь bend — на эллипсе; хвост и карточка — наружу от маркера.
+ */
+function buildRingPlacement(theta, ellipse, a2, b2, marker, opts, bounds) {
+    const cardW = (typeof marker.cardWidth === 'number' && isFinite(marker.cardWidth))
+        ? marker.cardWidth : opts.cardWidth;
+    const cardH = (typeof marker.cardHeight === 'number' && isFinite(marker.cardHeight))
+        ? marker.cardHeight : opts.cardHeight;
+    const uOut = a2 * Math.cos(theta);
+    const vOut = b2 * Math.sin(theta);
+    const ax = ellipse.cx + ellipse.cosPhi * uOut - ellipse.sinPhi * vOut;
+    const ay = ellipse.cy + ellipse.sinPhi * uOut + ellipse.cosPhi * vOut;
+
+    let tailSign = (ax > marker.x) ? +1 : -1;
+    if (Math.abs(ax - marker.x) < 1e-6) {
+        tailSign = (Math.cos(theta) >= 0) ? +1 : -1;
+    }
+    const cardX = (tailSign > 0) ? ax + opts.tailLength : ax - opts.tailLength - cardW;
+    const cardY = ay - cardH / 2;
+
+    const c = clampCardInBounds(cardX, cardY, cardW, cardH, bounds, opts.boundsPadding);
+    return { cardX: c.x, cardY: c.y };
+}
+
+/**
+ * Стартовые позиции SA: кольцo вокруг каждого кластера КА (PCA-эллипс + ringGap).
+ * Одиночные и далёкие группы получают отдельные венки.
+ */
+function clusterRingSeedState(virtualMarkers, bounds, opts, cacheMap, pendingIndices) {
+    const clusterDist = opts.clusterDistance;
+    const ringGap = opts.ringGap != null ? opts.ringGap : 70;
+    if (!clusterDist || clusterDist <= 0 || virtualMarkers.length === 0) {
+        return null;
+    }
+
+    const pendingSet = pendingIndices ? new Set(pendingIndices) : null;
+    const allGroups = clusterMarkers(virtualMarkers, clusterDist);
+    const out = new Map();
+
+    for (let gi = 0; gi < allGroups.length; gi++) {
+        const group = allGroups[gi];
+        const seedIndices = [];
+        for (let k = 0; k < group.length; k++) {
+            const idx = group[k];
+            if (!pendingSet || pendingSet.has(idx)) { seedIndices.push(idx); }
+        }
+        if (seedIndices.length === 0) { continue; }
+
+        const ellipse = pcaEllipse(virtualMarkers, group);
+        let a2 = Math.max(ellipse.a, 1) + ringGap;
+        let b2 = Math.max(ellipse.b, 1) + ringGap;
+
+        const cardW = maxCardWidth(virtualMarkers, group, opts.cardWidth);
+        const pad = opts.boundsPadding;
+        const aMaxByBounds = Math.max(
+            1,
+            bounds.width / 2 - cardW / 2 - opts.tailLength - pad
+        );
+        const bMaxByBounds = Math.max(
+            1,
+            bounds.height / 2 - opts.cardHeight / 2 - pad
+        );
+        if (a2 > aMaxByBounds) { a2 = aMaxByBounds; }
+        if (b2 > bMaxByBounds) { b2 = bMaxByBounds; }
+
+        const slots = [];
+        for (let k = 0; k < seedIndices.length; k++) {
+            const idx = seedIndices[k];
+            const vm = virtualMarkers[idx];
+            const dx = vm.x - ellipse.cx;
+            const dy = vm.y - ellipse.cy;
+            const u = ellipse.cosPhi * dx + ellipse.sinPhi * dy;
+            const v = -ellipse.sinPhi * dx + ellipse.cosPhi * dy;
+            let theta = Math.atan2(v, u);
+            if (!isFinite(theta)) { theta = 0; }
+            slots.push({ idx: idx, theta: theta });
+        }
+
+        if (slots.length > 1) {
+            const Reff = Math.max((a2 + b2) / 2, 1);
+            const maxH = virtualMarkers.reduce(
+                (m, v) => Math.max(m, cardDims(v, opts).h), opts.cardHeight
+            );
+            const angleByH = (maxH + opts.minCardGap) / Reff;
+            const angleByW = cardW / (2 * Reff);
+            const minStep = Math.min(
+                2 * Math.PI / slots.length,
+                Math.max(angleByH, angleByW)
+            );
+            slots.sort((p, q) => p.theta - q.theta);
+            distributeAnglesAround(slots, minStep);
+        }
+
+        for (let k = 0; k < slots.length; k++) {
+            const slot = slots[k];
+            const vm = virtualMarkers[slot.idx];
+            const pos = buildRingPlacement(
+                slot.theta, ellipse, a2, b2, vm, opts, bounds
+            );
+            out.set(slot.idx, pos);
+        }
+    }
+
+    return out;
+}
+
+/** Fallback: радиальный seed от общего centroid (если clusterDistance не задан). */
+function globalRadialSeedPos(marker, cx, cy, bounds, opts) {
+    let R = opts.annealSeedRadius;
+    if (!R || R <= 0) {
+        R = opts.stemLength + opts.tailLength + opts.cardWidth * 0.45;
+    }
+    const dims = cardDims(marker, opts);
+    const angle = Math.atan2(marker.y - cy, marker.x - cx);
+    const centerX = cx + R * Math.cos(angle);
+    const centerY = cy + R * Math.sin(angle);
+    const c = clampCardInBounds(
+        centerX - dims.w / 2, centerY - dims.h / 2,
+        dims.w, dims.h, bounds, opts.boundsPadding
+    );
+    return { cardX: c.x, cardY: c.y };
 }
 
 /** Размеры карточки виртуального маркера. */
@@ -339,7 +575,7 @@ function computeAnnealStructureKey(virtualMarkers, segmentCount, opts) {
 }
 
 /** Bbox-ы иконок маркеров для проверки зазора карточек. */
-function markerIconObstacles(markers) {
+function _markerIconObstacles(markers) {
     const out = [];
     for (let i = 0; i < markers.length; i++) {
         const m = markers[i];
@@ -393,7 +629,7 @@ function allVirtualMarkersCached(virtualMarkers, cacheMap) {
 }
 
 /** Позиции карточек из кэша + сдвиг маркера (без повторного SA). */
-function stateFromCacheRelative(virtualMarkers, bounds, opts, cacheMap) {
+function _stateFromCacheRelative(virtualMarkers, bounds, opts, cacheMap) {
     const pad = opts.boundsPadding;
     const state = [];
     for (let i = 0; i < virtualMarkers.length; i++) {
@@ -542,24 +778,15 @@ function makeAnnealRng(seed) {
     };
 }
 
-/** Радиальный seed или позиция из кэша при микродвижении маркера. */
+/** Радиальный seed: кольцо вокруг кластера или позиция из кэша при микродвижении. */
 function annealInitialState(virtualMarkers, bounds, opts, cacheMap) {
     const n = virtualMarkers.length;
     if (n === 0) { return []; }
-    let cx = 0, cy = 0;
-    for (let i = 0; i < n; i++) {
-        cx += virtualMarkers[i].x;
-        cy += virtualMarkers[i].y;
-    }
-    cx /= n;
-    cy /= n;
-    let R = opts.annealSeedRadius;
-    if (!R || R <= 0) {
-        R = opts.stemLength + opts.tailLength + opts.cardWidth * 0.45;
-    }
     const cacheTh2 = (opts.annealCacheThreshold || 8) * (opts.annealCacheThreshold || 8);
     const pad = opts.boundsPadding;
-    const state = [];
+    const state = new Array(n);
+    const pending = [];
+
     for (let i = 0; i < n; i++) {
         const m = virtualMarkers[i];
         const dims = cardDims(m, opts);
@@ -574,19 +801,42 @@ function annealInitialState(virtualMarkers, bounds, opts, cacheMap) {
                     cached.cardX + dx, cached.cardY + dy,
                     dims.w, dims.h, bounds, pad
                 );
-                state.push({ cardX: c.x, cardY: c.y });
+                state[i] = { cardX: c.x, cardY: c.y };
                 continue;
             }
         }
-        const angle = Math.atan2(m.y - cy, m.x - cx);
-        const centerX = cx + R * Math.cos(angle);
-        const centerY = cy + R * Math.sin(angle);
-        const c = clampCardInBounds(
-            centerX - dims.w / 2, centerY - dims.h / 2,
-            dims.w, dims.h, bounds, pad
-        );
-        state.push({ cardX: c.x, cardY: c.y });
+        pending.push(i);
     }
+
+    if (pending.length === 0) { return state; }
+
+    const ringSeeds = clusterRingSeedState(virtualMarkers, bounds, opts, cacheMap, pending);
+    if (ringSeeds && ringSeeds.size > 0) {
+        for (let pi = 0; pi < pending.length; pi++) {
+            const i = pending[pi];
+            const seeded = ringSeeds.get(i);
+            if (seeded) {
+                state[i] = seeded;
+            }
+        }
+    }
+
+    const stillPending = pending.filter((i) => !state[i]);
+    if (stillPending.length > 0) {
+        let cx = 0;
+        let cy = 0;
+        for (let i = 0; i < n; i++) {
+            cx += virtualMarkers[i].x;
+            cy += virtualMarkers[i].y;
+        }
+        cx /= n;
+        cy /= n;
+        for (let pi = 0; pi < stillPending.length; pi++) {
+            const i = stillPending[pi];
+            state[i] = globalRadialSeedPos(virtualMarkers[i], cx, cy, bounds, opts);
+        }
+    }
+
     return state;
 }
 
@@ -826,7 +1076,7 @@ function nudgeStateOffForbiddenSegments(state, virtualMarkers, segments, bounds,
             }
         }
 
-        let card = { x: cardX, y: cardY, w: dims.w, h: dims.h };
+        const card = { x: cardX, y: cardY, w: dims.w, h: dims.h };
         let hits = countCardCrossings(card, pad, segments);
         const maxPasses = 48;
         for (let pass = 0; pass < maxPasses && hits > 0; pass++) {
@@ -1150,7 +1400,7 @@ function nudgeStateResolveLeaderCrossings(state, virtualMarkers, bounds, opts, s
 }
 
 /** Лёгкий проход: только отвести карточки и leader от трасс (без полного repair). */
-function nudgeTracksOnly(state, virtualMarkers, segments, bounds, opts) {
+function _nudgeTracksOnly(state, virtualMarkers, segments, bounds, opts) {
     if (!segments || segments.length === 0) { return state; }
     let out = nudgeStateOffForbiddenSegments(
         state, virtualMarkers, segments, bounds, opts
@@ -1216,7 +1466,7 @@ function totalCollisionScore(state, virtualMarkers, bounds, opts, segments, scor
 }
 
 /** Sticky-layout: карточки, иконки и leader-линии (трассы — только при первичном SA). */
-function stickyLayoutValid(state, virtualMarkers, bounds, opts, segments) {
+function _stickyLayoutValid(state, virtualMarkers, bounds, opts, segments) {
     return totalCollisionScore(
         state, virtualMarkers, bounds, opts, segments, { ignoreTracks: true }
     ) === 0;
@@ -1333,8 +1583,8 @@ function nudgeCardOffForeignIcons(vm, cardX, cardY, cardW, cardH, virtualMarkers
     if (!foreign) {
         return { cardX: cx, cardY: cy };
     }
-    let mccx = cx + cardW / 2;
-    let mccy = cy + cardH / 2;
+    const mccx = cx + cardW / 2;
+    const mccy = cy + cardH / 2;
     let dx = mccx - foreign.x;
     let dy = mccy - foreign.y;
     let len = Math.hypot(dx, dy);
@@ -1517,7 +1767,7 @@ function nudgeStateResolveCollisions(state, virtualMarkers, bounds, opts, segmen
         { dx: step, dy: -step },
         { dx: -step, dy: -step },
     ];
-    let out = state.map((s) => ({ cardX: s.cardX, cardY: s.cardY }));
+    const out = state.map((s) => ({ cardX: s.cardX, cardY: s.cardY }));
 
     for (let round = 0; round < 8; round++) {
         let changed = false;
@@ -1993,10 +2243,40 @@ class CalloutLayout {
 
 // ─────────────────────────────────────────────────────────────────────────
 // CalloutRenderer — отрисовка результата CalloutLayout на canvas + DOM.
-// Линия (стержень + хвост) рисуется на canvas; карточка с именем КА и
-// дополнительной строкой (alias / второе имя) — DOM-элемент
-// `.map-sat-callout`, позиционируется в процентах от контейнера.
+// Линия (стержень + хвост) — SVG в physical px; карточка — DOM `.map-sat-callout`.
 // ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Спецификация SVG-слоя линий в координатах physical px (как у CalloutLayout).
+ * Проценты + preserveAspectRatio=none давали «белые прямоугольники» на вертикальных stem.
+ */
+function buildCalloutLinesOverlaySpec(layouts, canvasSize, opts) {
+    const w = canvasSize.width;
+    const h = canvasSize.height;
+    const fallback = (opts && opts.fallbackColor) || '#ffeb3b';
+    const ratio = (typeof window !== 'undefined' && window.devicePixelRatio)
+        ? window.devicePixelRatio : 1;
+    const lineWidth = ((opts && opts.lineWidth) || 1.5) * ratio;
+    const lines = [];
+    if (!layouts || layouts.length === 0 || !w || !h) {
+        return { viewBox: `0 0 ${w || 1} ${h || 1}`, lines };
+    }
+    for (let i = 0; i < layouts.length; i++) {
+        const lt = layouts[i];
+        if (!lt) { continue; }
+        const tail = lt.tailEnd || tailEndOf(lt);
+        let pts = `${lt.marker.x},${lt.marker.y} ${lt.bend.x},${lt.bend.y}`;
+        if (tail.x !== lt.bend.x || tail.y !== lt.bend.y) {
+            pts += ` ${tail.x},${tail.y}`;
+        }
+        lines.push({
+            points: pts,
+            color: lt.color || fallback,
+            lineWidth: lineWidth,
+        });
+    }
+    return { viewBox: `0 0 ${w} ${h}`, lines };
+}
 
 const RENDERER_DEFAULTS = {
     // В logical px (умножается на dpr внутри)
@@ -2056,8 +2336,7 @@ class CalloutRenderer {
                 svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
                 svg.setAttribute('class', 'map-callout-lines');
                 svg.setAttribute('aria-hidden', 'true');
-                svg.setAttribute('viewBox', '0 0 100 100');
-                svg.setAttribute('preserveAspectRatio', 'none');
+                svg.setAttribute('viewBox', '0 0 1 1');
                 this.container.insertBefore(svg, this.container.firstChild);
             }
             this._linesSvg = svg;
@@ -2069,12 +2348,6 @@ class CalloutRenderer {
         return this._linesSvg;
     }
 
-    /** Координата physical px → % от размера canvas. */
-    _pctCoord(px, total) {
-        if (!total || total <= 0) { return 0; }
-        return (px / total) * 100;
-    }
-
     /**
      * Линии выносок в SVG-слое #map-callouts (поверх DOM-маркеров, под карточками).
      * @param {Array} layouts
@@ -2082,37 +2355,21 @@ class CalloutRenderer {
      */
     drawLinesOverlay(layouts, canvasSize) {
         const svg = this._linesSvg;
-        if (!svg || !layouts || layouts.length === 0) {
-            if (svg) { svg.innerHTML = ''; }
+        const spec = buildCalloutLinesOverlaySpec(layouts, canvasSize, this.opts);
+        if (!svg) { return; }
+        svg.setAttribute('viewBox', spec.viewBox);
+        if (spec.lines.length === 0) {
+            svg.innerHTML = '';
             return;
         }
-        const w = canvasSize.width;
-        const h = canvasSize.height;
-        if (!w || !h) { return; }
-        const ratio = (typeof window !== 'undefined' && window.devicePixelRatio)
-            ? window.devicePixelRatio : 1;
-        const lw = (this.opts.lineWidth || 1.5) * ratio;
         const parts = [];
-        for (let i = 0; i < layouts.length; i++) {
-            const lt = layouts[i];
-            if (!lt) { continue; }
-            const color = lt.color || this.opts.fallbackColor;
-            const mx = this._pctCoord(lt.marker.x, w);
-            const my = this._pctCoord(lt.marker.y, h);
-            const bx = this._pctCoord(lt.bend.x, w);
-            const by = this._pctCoord(lt.bend.y, h);
-            const tail = lt.tailEnd || tailEndOf(lt);
-            const tx = this._pctCoord(tail.x, w);
-            const ty = this._pctCoord(tail.y, h);
-            let pts = `${mx},${my} ${bx},${by}`;
-            if (tail.x !== lt.bend.x || tail.y !== lt.bend.y) {
-                pts += ` ${tx},${ty}`;
-            }
+        for (let i = 0; i < spec.lines.length; i++) {
+            const line = spec.lines[i];
             parts.push(
-                '<polyline points="' + pts +
-                '" fill="none" stroke="' + color +
-                '" stroke-width="' + lw +
-                '" stroke-linecap="round" stroke-linejoin="round" vector-effect="non-scaling-stroke"/>'
+                '<polyline points="' + line.points +
+                '" fill="none" stroke="' + line.color +
+                '" stroke-width="' + line.lineWidth +
+                '" stroke-linecap="round" stroke-linejoin="round"/>'
             );
         }
         svg.innerHTML = parts.join('');
@@ -2402,14 +2659,14 @@ if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no
         segmentsIntersect,
         leadersIntersect,
         bboxOverlap,
-    placementFromCard,
+        placementFromCard,
         stemPiercesCard,
         accentOnCardRight,
         accentOnCardTop,
         accentOnCardBottom,
-    countLeaderForeignIconHits,
-    countLeaderObstacleHits,
-    totalCollisionScore,
+        countLeaderForeignIconHits,
+        countLeaderObstacleHits,
+        totalCollisionScore,
         annealLayoutHasViolations,
         annealViolationScore,
         computeAnnealStructureKey,
@@ -2417,8 +2674,12 @@ if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no
         subsampleForbiddenSegments,
         computeAnnealEnergy,
         annealInitialState,
-        runSimulatedAnnealing,
+        clusterRingSeedState,
         buildVirtualStacks,
+        buildRingPlacement,
+        pcaEllipse,
+        runSimulatedAnnealing,
+        buildCalloutLinesOverlaySpec,
     };
 }
 

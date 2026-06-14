@@ -4,7 +4,15 @@
 'use strict';
 
 const assert = require('assert');
-const { SatelliteStateManager, SatelliteState, StateEventType } = require('./satellite-state.js');
+const {
+    SatelliteStateManager,
+    SatelliteState,
+    StateEventType,
+    getTrackColorPalette,
+    pickTrackColorFromPalette,
+    trackColorDistance,
+    paletteMinHueSeparation,
+} = require('./satellite-state.js');
 
 // ── Вспомогательные данные ────────────────────────────────
 
@@ -1171,6 +1179,82 @@ test('multiple tracks hidden in showAll — all survive group update', () => {
     assert.ok(!m.getVisibleTrackIds().includes(200), 'B still hidden');
     assert.ok(!m.getVisibleTrackIds().includes(400), 'D still hidden');
     assert.ok(m.getVisibleTrackIds().includes(300), 'C still visible');
+});
+
+// ── Палитра и назначение цветов трасс ─────────────────────
+
+console.log('\nSatelliteStateManager — track color palette');
+
+test('dark palette has 12 unique hues with min separation >= 24°', () => {
+    const palette = getTrackColorPalette();
+    assert.strictEqual(palette.length, 12);
+    const unique = new Set(palette);
+    assert.strictEqual(unique.size, 12);
+    assert.ok(paletteMinHueSeparation(palette) >= 24,
+        `min hue separation ${paletteMinHueSeparation(palette)}°`);
+});
+
+test('pickTrackColorFromPalette returns first color when none used', () => {
+    const palette = getTrackColorPalette();
+    const picked = pickTrackColorFromPalette(new Set(), palette);
+    assert.strictEqual(picked, palette[0]);
+});
+
+test('pickTrackColorFromPalette maximizes distance from used colors', () => {
+    const palette = getTrackColorPalette();
+    const used = new Set([palette[0]]);
+    const picked = pickTrackColorFromPalette(used, palette);
+    let pickedMin = Infinity;
+    for (const c of used) {
+        pickedMin = Math.min(pickedMin, trackColorDistance(picked, c));
+    }
+    for (let i = 0; i < palette.length; i++) {
+        const cand = palette[i];
+        if (used.has(cand)) { continue; }
+        let candMin = Infinity;
+        for (const c of used) {
+            candMin = Math.min(candMin, trackColorDistance(cand, c));
+        }
+        assert.ok(pickedMin >= candMin - 0.01,
+            `suboptimal pick ${picked} vs ${cand}`);
+    }
+});
+
+test('setSatelliteGroup assigns well-separated colors to 6 satellites', () => {
+    const m = new SatelliteStateManager();
+    const sats = [];
+    for (let i = 0; i < 6; i++) {
+        sats.push({ norad_id: 50000 + i, name: `SAT-${i}` });
+    }
+    m.setSatelliteGroup({ satellites: sats, primary_id: 50000 });
+    const colors = sats.map((s) => m.getMarkerColor(s.norad_id));
+    assert.strictEqual(new Set(colors).size, 6);
+    let minPair = Infinity;
+    for (let i = 0; i < colors.length; i++) {
+        for (let j = i + 1; j < colors.length; j++) {
+            minPair = Math.min(minPair, trackColorDistance(colors[i], colors[j]));
+        }
+    }
+    assert.ok(minPair >= 0.5, `min pairwise distance ${minPair} (ожидаем ≥ одного шага палитры 30°)`);
+});
+
+test('setSatelliteGroup keeps stable color for existing satellite', () => {
+    const m = new SatelliteStateManager();
+    const group = {
+        satellites: [{ norad_id: 60001, name: 'A' }, { norad_id: 60002, name: 'B' }],
+        primary_id: 60001,
+    };
+    m.setSatelliteGroup(group);
+    const colorA = m.getMarkerColor(60001);
+    m.setSatelliteGroup({
+        satellites: [
+            { norad_id: 60001, name: 'A' },
+            { norad_id: 60002, name: 'B' },
+            { norad_id: 60003, name: 'C' },
+        ],
+        primary_id: 60001,
+    });
+    assert.strictEqual(m.getMarkerColor(60001), colorA);
 });
 
 // ── Итоги ─────────────────────────────────────────────────

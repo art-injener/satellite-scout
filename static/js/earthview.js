@@ -1541,6 +1541,8 @@
             this._calloutRenderer.clear();
             return;
         }
+        // clusterDistance зависит от размера canvas (physical px).
+        this._calloutLayout.opts.clusterDistance = Math.min(this.width, this.height) * 0.4;
         const obstacles = this._collectCalloutObstacles(markers);
         const bounds = { width: this.width, height: this.height };
         // Запретные сегменты трасс selected (оранжевая) + tracking (синяя):
@@ -1978,6 +1980,8 @@
             annealSeedRadius: (72 + 18 + 55) * dpr,
             annealCacheThreshold: 8 * dpr,
             annealSeed: 42,
+            clusterDistance: Math.min(this.width, this.height) * 0.4,
+            ringGap: 70 * dpr,
             forbiddenPadding: 8 * dpr,
             iconObstacleGap: 10 * dpr,
             leaderCardPadding: 4 * dpr,

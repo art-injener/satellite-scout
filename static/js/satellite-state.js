@@ -68,60 +68,146 @@ const StateEventType = Object.freeze({
     SATELLITE_CHANGE: 'satellite_change',
 });
 
-/**
- * Палитра 20 цветов для трасс вторичных спутников (UX-TABLE-TRACK-GROUP-MODE-001).
- * Подобраны для читаемости на тёмной карте и в таблице.
- * Не используется для tracking (красно-зелёный) и selected (циан/жёлтый).
- * Цвет назначается случайно при формировании группы через _colorMap.
- */
-const _PALETTE_DARK = Object.freeze([
-    '#ff6b6b', // коралловый
-    '#51cf66', // зелёный
-    '#339af0', // голубой
-    '#ff922b', // оранжевый
-    '#cc5de8', // фиолетовый
-    '#22b8cf', // бирюзовый
-    '#fcc419', // жёлтый
-    '#ff8787', // розово-красный
-    '#20c997', // мятный
-    '#748ffc', // индиго
-    '#f06595', // розовый
-    '#94d82d', // лаймовый
-    '#e599f7', // лавандовый
-    '#fd7e14', // тёмно-оранжевый
-    '#66d9e8', // светло-бирюзовый
-    '#ffa94d', // абрикосовый
-    '#69db7c', // светло-зелёный
-    '#da77f2', // пурпурный
-    '#a9e34b', // салатовый
-    '#74c0fc', // небесный
-]);
+/** HSL → #rrggbb (h: 0–360, s/l: 0–100). */
+function hslToHex(h, s, l) {
+    const sn = s / 100;
+    const ln = l / 100;
+    const c = (1 - Math.abs(2 * ln - 1)) * sn;
+    const x = c * (1 - Math.abs(((h / 60) % 2) - 1));
+    const m = ln - c / 2;
+    let r = 0;
+    let g = 0;
+    let b = 0;
+    if (h < 60) {
+        r = c; g = x;
+    } else if (h < 120) {
+        r = x; g = c;
+    } else if (h < 180) {
+        g = c; b = x;
+    } else if (h < 240) {
+        g = x; b = c;
+    } else if (h < 300) {
+        r = x; b = c;
+    } else {
+        r = c; b = x;
+    }
+    const toByte = (v) => {
+        const n = Math.round((v + m) * 255);
+        return Math.max(0, Math.min(255, n)).toString(16).padStart(2, '0');
+    };
+    return '#' + toByte(r) + toByte(g) + toByte(b);
+}
 
 /**
- * Насыщенная палитра для светлой темы — контрастные цвета на светлом фоне карты.
+ * Палитра 12 цветов для трасс — равномерный шаг hue 30° (HSL).
+ * Приглушённые пастели с умеренной яркостью: читаемы на тёмной карте, без кислотности.
+ * Не для tracking/selected. Назначение — greedy по дистанции от занятых.
  */
-const _PALETTE_LIGHT = Object.freeze([
-    '#c62828',
-    '#1565c0',
-    '#2e7d32',
-    '#d84315',
-    '#7b1fa2',
-    '#00838f',
-    '#c2185b',
-    '#283593',
-    '#558b2f',
-    '#6a1b9a',
-    '#00796b',
-    '#bf360c',
-    '#0277bd',
-    '#8e24aa',
-    '#e65100',
-    '#1b5e20',
-    '#4a148c',
-    '#01579b',
-    '#b71c1c',
-    '#004d40',
-]);
+const _PALETTE_DARK = Object.freeze(
+    Array.from({ length: 12 }, (_, i) => hslToHex(i * 30, 52, 61))
+);
+
+/** Светлая тема: те же hue, чуть насыщеннее для контраста на сером холсте. */
+const _PALETTE_LIGHT = Object.freeze(
+    Array.from({ length: 12 }, (_, i) => hslToHex(i * 30, 54, 47))
+);
+
+/** @returns {{ h: number, s: number, l: number }} h в [0, 360), s/l в [0, 100]. */
+function hexToHsl(hex) {
+    const raw = String(hex || '').replace('#', '');
+    const norm = raw.length === 3
+        ? raw.split('').map((c) => c + c).join('')
+        : raw;
+    const n = parseInt(norm, 16);
+    let r = ((n >> 16) & 255) / 255;
+    let g = ((n >> 8) & 255) / 255;
+    let b = (n & 255) / 255;
+    const max = Math.max(r, g, b);
+    const min = Math.min(r, g, b);
+    let h = 0;
+    let s = 0;
+    const l = (max + min) / 2;
+    if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        if (max === r) {
+            h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        } else if (max === g) {
+            h = ((b - r) / d + 2) / 6;
+        } else {
+            h = ((r - g) / d + 4) / 6;
+        }
+    }
+    return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
+/** Кратчайшая разница двух hue в градусах, [0, 180]. */
+function hueDiffDeg(h1, h2) {
+    let d = Math.abs(h1 - h2) % 360;
+    if (d > 180) { d = 360 - d; }
+    return d;
+}
+
+/**
+ * Перцептальная дистанция двух hex-цветов для подбора трасс.
+ * Hue доминирует — на карте пунктиром оттенки внутри одного семейства неразличимы.
+ */
+function trackColorDistance(hex1, hex2) {
+    const a = hexToHsl(hex1);
+    const b = hexToHsl(hex2);
+    const dh = hueDiffDeg(a.h, b.h) / 180;
+    const ds = Math.abs(a.s - b.s) / 100;
+    const dl = Math.abs(a.l - b.l) / 100;
+    return dh * 3.0 + ds * 0.5 + dl * 0.5;
+}
+
+/** Минимальная hue-дистанция (°) между любыми двумя цветами палитры. */
+function paletteMinHueSeparation(palette) {
+    let minHue = 360;
+    for (let i = 0; i < palette.length; i++) {
+        const hi = hexToHsl(palette[i]).h;
+        for (let j = i + 1; j < palette.length; j++) {
+            const hj = hexToHsl(palette[j]).h;
+            const d = hueDiffDeg(hi, hj);
+            if (d < minHue) { minHue = d; }
+        }
+    }
+    return minHue;
+}
+
+/**
+ * Выбор цвета трассы: из свободных в палитре (или из всей при исчерпании)
+ * с максимальной дистанцией до уже назначенных в группе.
+ * @param {Set<string>|Iterable<string>} usedColors
+ * @param {readonly string[]} palette
+ * @returns {string}
+ */
+function pickTrackColorFromPalette(usedColors, palette) {
+    const used = [];
+    if (usedColors) {
+        for (const c of usedColors) { used.push(c); }
+    }
+    const available = palette.filter((c) => !used.includes(c));
+    const pool = available.length > 0 ? available : palette.slice();
+    if (used.length === 0) {
+        return pool[0];
+    }
+    let best = pool[0];
+    let bestScore = -1;
+    for (let i = 0; i < pool.length; i++) {
+        const candidate = pool[i];
+        let minDist = Infinity;
+        for (let j = 0; j < used.length; j++) {
+            const d = trackColorDistance(candidate, used[j]);
+            if (d < minDist) { minDist = d; }
+        }
+        if (minDist > bestScore) {
+            bestScore = minDist;
+            best = candidate;
+        }
+    }
+    return best;
+}
 
 /** Палитра трасс группы: зависит от темы — вызывать при назначении цветов (в т.ч. после смены темы). */
 function getTrackColorPalette() {
@@ -855,20 +941,12 @@ class SatelliteStateManager {
             if (!groupIds.has(id)) { this._hiddenInShowAll.delete(id); }
         }
 
-        // Назначить цвета новым КА (случайный выбор из палитры).
-        const usedColors = new Set(this._colorMap.values());
+        // Назначить цвета новым КА: greedy по дистанции от уже занятых.
         const palette = getTrackColorPalette();
-        const available = palette.filter(c => !usedColors.has(c));
         for (const sat of data.satellites) {
             const nid = sat.norad_id;
             if (!this._colorMap.has(nid)) {
-                let color;
-                if (available.length > 0) {
-                    const ri = Math.floor(Math.random() * available.length);
-                    color = available.splice(ri, 1)[0];
-                } else {
-                    color = palette[Math.floor(Math.random() * palette.length)];
-                }
+                const color = pickTrackColorFromPalette(this._colorMap.values(), palette);
                 this._colorMap.set(nid, color);
             }
         }
@@ -1022,7 +1100,15 @@ class SatelliteStateManager {
 
 // Экспорт для использования в других модулях и тестах.
 if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-    module.exports = { SatelliteStateManager, SatelliteState, StateEventType, getTrackColorPalette }; // eslint-disable-line no-undef
+    module.exports = { // eslint-disable-line no-undef
+        SatelliteStateManager,
+        SatelliteState,
+        StateEventType,
+        getTrackColorPalette,
+        pickTrackColorFromPalette,
+        trackColorDistance,
+        paletteMinHueSeparation,
+    };
 }
 
 if (typeof window !== 'undefined') {

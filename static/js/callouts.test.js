@@ -18,12 +18,12 @@ const {
     accentOnCardBottom,
     countLeaderForeignIconHits,
     countLeaderObstacleHits,
-    totalCollisionScore,
     computeAnnealEnergy,
     annealInitialState,
-    runSimulatedAnnealing,
     buildVirtualStacks,
     subsampleForbiddenSegments,
+    clusterRingSeedState,
+    buildCalloutLinesOverlaySpec,
 } = require('./callouts.js');
 
 // ── Утилиты тестов ─────────────────────────────────────────
@@ -1949,6 +1949,67 @@ test('anneal: same structure key skips SA on sticky violation (no card jump)', (
         assert.ok(b, `missing id ${r.id}`);
         assertCardDrift(r, b, 2, -1, r.id);
     }
+});
+
+test('anneal: cluster ring seed places cards outside icon bbox (before SA)', () => {
+    const opts = Object.assign({}, RING_OPTS, {
+        annealSeed: 42,
+        clusterDistance: 72,
+        ringGap: 70,
+    });
+    const { virtualMarkers } = buildVirtualStacks(RING_CLUSTER_6, opts);
+    const cache = new Map();
+    const pending = virtualMarkers.map((_, i) => i);
+    const seeds = clusterRingSeedState(virtualMarkers, BOUNDS, opts, cache, pending);
+    assert.ok(seeds && seeds.size === virtualMarkers.length);
+
+    let minX = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const m of RING_CLUSTER_6) {
+        if (m.x < minX) { minX = m.x; }
+        if (m.x > maxX) { maxX = m.x; }
+        if (m.y < minY) { minY = m.y; }
+        if (m.y > maxY) { maxY = m.y; }
+    }
+
+    for (let i = 0; i < virtualMarkers.length; i++) {
+        const pos = seeds.get(i);
+        assert.ok(pos, `missing seed for index ${i}`);
+        const dims = { w: opts.cardWidth, h: opts.cardHeight };
+        const cx = pos.cardX + dims.w / 2;
+        const cy = pos.cardY + dims.h / 2;
+        const inside = (cx >= minX && cx <= maxX && cy >= minY && cy <= maxY);
+        assert.ok(!inside,
+            `seed ${i} center (${cx},${cy}) inside cluster bbox`);
+    }
+});
+
+// ── SVG overlay линий (physical px viewBox) ─────────────────
+
+test('buildCalloutLinesOverlaySpec: viewBox совпадает с размером canvas в px', () => {
+    const spec = buildCalloutLinesOverlaySpec([], { width: 1600, height: 800 }, {});
+    assert.strictEqual(spec.viewBox, '0 0 1600 800');
+    assert.strictEqual(spec.lines.length, 0);
+});
+
+test('buildCalloutLinesOverlaySpec: вертикальный stem в physical px, не в процентах', () => {
+    const layouts = [{
+        id: 1,
+        color: '#cf6868',
+        marker: { x: 820, y: 200 },
+        bend: { x: 820, y: 120 },
+        tailEnd: { x: 820, y: 120 },
+        attach: 'vertical',
+        card: { x: 750, y: 90, w: 110, h: 28 },
+    }];
+    const spec = buildCalloutLinesOverlaySpec(
+        layouts, { width: 1600, height: 800 }, { lineWidth: 1.5 }
+    );
+    assert.strictEqual(spec.lines.length, 1);
+    assert.strictEqual(spec.lines[0].points, '820,200 820,120');
+    assert.ok(!spec.lines[0].points.includes('51.25'), 'не должны быть проценты');
 });
 
 // ── Summary ────────────────────────────────────────────────
