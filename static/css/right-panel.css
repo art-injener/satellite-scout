@@ -132,8 +132,8 @@
     line-height: 1.2;
 }
 
-/* Колонка «Кол-во TX» — число активных передатчиков (SatNOGS) */
-.passes-compact__table th.pc-th-tx {
+/* Колонка «max El / Выс.» — TCA и средняя высота орбиты по TLE */
+.passes-compact__table th.pc-th-orbit {
     width: 52px;
     white-space: normal;
     text-align: center;
@@ -144,7 +144,7 @@
     font-size: 13px;
 }
 
-.pc-th-tx__stack {
+.pc-th-orbit__stack {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -156,7 +156,7 @@
     font-weight: 600;
 }
 
-.pc-th-tx__line {
+.pc-th-orbit__line {
     display: block;
     white-space: nowrap;
 }
@@ -361,23 +361,24 @@
     white-space: nowrap;
 }
 
-/* Колонка «Кол-во TX»: активные передатчики SatNOGS. */
-.pc-tx-cell {
+/* Колонка «max El / Выс.»: TCA и средняя высота орбиты по TLE. */
+.pc-orbit-cell {
     font-variant-numeric: tabular-nums;
     text-align: center;
     vertical-align: middle;
+    padding: 4px 4px !important;
+    line-height: 1.3;
 }
 
-.pc-tx-val {
-    font-size: 13px;
-    color: var(--text-muted);
-    line-height: 1.4;
+.pc-orbit-el,
+.pc-orbit-alt {
+    font-size: 12px;
+    color: var(--text-primary);
     white-space: nowrap;
 }
 
-.pc-tx-cell--has-data .pc-tx-val {
-    color: var(--text-primary);
-    font-weight: 600;
+.pc-orbit-alt {
+    color: var(--text-muted);
 }
 
 /* Колонка 3: верх — до AOS / «ЗРВ»; низ — длит. пролёта до AOS или остаток до LOS (см. right-panel.js) */

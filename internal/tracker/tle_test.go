@@ -556,3 +556,24 @@ func TestParseTLE_Alpha5_Starlink(t *testing.T) {
 		t.Errorf("Name = %q, want %q", tle.Name, "STARLINK-99999")
 	}
 }
+
+// TestMeanAltitudeKm_ISS — средняя высота орбиты ISS в типичном диапазоне LEO.
+func TestMeanAltitudeKm_ISS(t *testing.T) {
+	lines := strings.Split(issTLE, "\n")
+
+	tle, err := ParseTLE(lines)
+	if err != nil {
+		t.Fatalf("ParseTLE() error = %v", err)
+	}
+
+	mean := tle.MeanAltitudeKm()
+	if mean < 350 || mean > 450 {
+		t.Errorf("MeanAltitudeKm() = %.1f, want ISS LEO range 350..450 km", mean)
+	}
+
+	apogee := tle.Apogee()
+	perigee := tle.Perigee()
+	if math.Abs(mean-(apogee+perigee)/2) > 0.01 {
+		t.Errorf("MeanAltitudeKm() = %.3f, want (apogee+perigee)/2 = %.3f", mean, (apogee+perigee)/2)
+	}
+}

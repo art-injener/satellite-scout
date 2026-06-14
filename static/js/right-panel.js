@@ -1,7 +1,7 @@
 // План сеансов наблюдения в правой панели (компактная таблица) + кнопки управления.
 // Данные приходят из SSE-события satellite_group_update,
 // не из polling GET /api/passes.
-// Колонки: [глаз — видимость трассы] | NORAD/имя | AOS/LOS | До AOS / До LOS (подписи в шапке) | Кол-во TX.
+// Колонки: [глаз — видимость трассы] | NORAD/имя | Az/El | ЗРВ/AOS/LOS | max El / Выс.
 // Логика значений колонки 3 совпадает с internal/services/session_table_ui.go (FormatSessionTableColumns).
 
 (function() {
@@ -71,10 +71,6 @@
         this._countdownTimer = null;
         /** Смещение клиентских часов относительно server ts из satellite_group_update (мс). */
         this._serverSkewMs = 0;
-        /** NORAD → число активных TX (SatNOGS). */
-        this._txCountByNorad = new Map();
-        /** Кеш запросов SatNOGS: norad → Promise<number>. */
-        this._txCountCache = new Map();
         /** Временная подсветка связки с auto-link (hover). */
         this._linkHoverNorad = null;
 
@@ -194,72 +190,6 @@
         }
         this._render();
         this._updateControls();
-        const satellites = (data && Array.isArray(data.satellites)) ? data.satellites : [];
-        this._refreshTxCounts(satellites);
-    };
-
-    /** Число активных передатчиков КА по SatNOGS (кэш Promise). */
-    RightPanelTable.prototype._fetchTxCount = function(norad) {
-        if (!norad) { return Promise.resolve(0); }
-        if (this._txCountCache.has(norad)) {
-            return this._txCountCache.get(norad);
-        }
-        const self = this;
-        const p = fetch('/api/satnogs/transmitters/' + norad, {
-            headers: { Accept: 'application/json' },
-        })
-            .then(function(resp) {
-                if (!resp.ok) { return 0; }
-                return resp.json();
-            })
-            .then(function(data) {
-                const txs = data && Array.isArray(data.transmitters) ? data.transmitters : [];
-                const txFromSatnogs = window.AutoLink && window.AutoLink.txFromSatnogs;
-                if (!txFromSatnogs) { return txs.length > 0 ? txs.length : 0; }
-                let count = 0;
-                const satStub = { norad_id: norad, sat_name: '' };
-                for (let i = 0; i < txs.length; i++) {
-                    if (txFromSatnogs(satStub, txs[i])) { count++; }
-                }
-                return count;
-            })
-            .catch(function(err) {
-                console.warn('[RightPanel] SatNOGS TX count ' + norad + ':', err);
-                self._txCountCache.delete(norad);
-                return 0;
-            });
-        this._txCountCache.set(norad, p);
-        return p;
-    };
-
-    /** Подгрузить количество TX для всех КА группы и обновить ячейки. */
-    RightPanelTable.prototype._refreshTxCounts = function(satellites) {
-        const self = this;
-        if (!Array.isArray(satellites)) { return; }
-        for (let i = 0; i < satellites.length; i++) {
-            const norad = satellites[i] && satellites[i].norad_id;
-            if (!norad) { continue; }
-            this._fetchTxCount(norad).then(function(count) {
-                self._txCountByNorad.set(norad, count);
-                self._updateTxCountCell(norad, count);
-            });
-        }
-    };
-
-    /** Обновить ячейку «Кол-во TX» одной строки. */
-    RightPanelTable.prototype._updateTxCountCell = function(noradId, count) {
-        if (!this._tbody) { return; }
-        const row = this._tbody.querySelector('.pc-row[data-norad="' + noradId + '"]');
-        if (!row) { return; }
-        const txTd = row.querySelector('.pc-tx-cell');
-        const txEl = row.querySelector('.pc-tx-val');
-        if (!txTd || !txEl) { return; }
-        txEl.textContent = count > 0 ? String(count) : '\u2014';
-        txTd.classList.toggle('pc-tx-cell--has-data', count > 0);
-        const hint = count > 0
-            ? (count + ' активных передатчиков (SatNOGS)')
-            : 'Активные передатчики не найдены';
-        txTd.title = hint;
     };
 
     // ── Рендер ──
@@ -302,16 +232,7 @@
             const trackCls = 'pc-track-cell' + (trackVisible ? ' pc-track-cell--on' : ' pc-track-cell--off');
             const trackIcon = trackVisible ? eyeVisibleSvg(markerColor) : eyeHiddenSvg(markerColor);
 
-            const txCount = this._txCountByNorad.has(sat.norad_id)
-                ? this._txCountByNorad.get(sat.norad_id)
-                : null;
-            const txVal = txCount != null ? (txCount > 0 ? String(txCount) : '\u2014') : '\u2026';
-            const txCellCls = 'pc-tx-cell' + (txCount > 0 ? ' pc-tx-cell--has-data' : '');
-            const txHint = txCount != null
-                ? (txCount > 0
-                    ? (txCount + ' активных передатчиков (SatNOGS)')
-                    : 'Активные передатчики не найдены')
-                : 'Загрузка списка передатчиков…';
+            const orbitHtml = this._renderOrbitCellHtml(sat);
 
             html += '<tr class="' + cls + '" data-norad="' + sat.norad_id + '"' +
                 ' data-aos="' + sat.aos + '" data-los="' + sat.los + '" data-dur="' + sat.duration + '">' +
@@ -329,9 +250,7 @@
                     '<div class="pc-azel-el">' + azel.el + '</div>' +
                 '</td>' +
                 '<td class="pc-col3-cell">' + col3 + '</td>' +
-                '<td class="' + txCellCls + '" title="' + this._escapeHtml(txHint) + '">' +
-                    '<div class="pc-tx-val">' + txVal + '</div>' +
-                '</td>' +
+                '<td class="pc-orbit-cell"' + orbitHtml.titleAttr + '>' + orbitHtml.body + '</td>' +
                 '</tr>';
         }
 
@@ -343,6 +262,36 @@
             document.activeElement.blur();
         }
         this._syncThTrackEye();
+    };
+
+    /** Форматирование высоты орбиты для компактной ячейки; «км» в значении, не в шапке. */
+    RightPanelTable.prototype._fmtOrbitAltKm = function(km) {
+        const v = Number(km);
+        if (!isFinite(v) || v <= 0) { return '\u2014'; }
+        if (v >= 10000) {
+            const k = v / 1000;
+            const rounded = Math.round(k * 10) / 10;
+            const num = rounded % 1 === 0 ? String(Math.round(rounded)) : rounded.toFixed(1);
+            return num + 'k км';
+        }
+        return String(Math.round(v)) + ' км';
+    };
+
+    /** Двухстрочная ячейка: макс. El (TCA) и средняя высота орбиты. */
+    RightPanelTable.prototype._renderOrbitCellHtml = function(sat) {
+        const tcaEl = sat && typeof sat.tca_el === 'number' ? sat.tca_el : NaN;
+        const altKm = sat && typeof sat.orbit_alt_km === 'number' ? sat.orbit_alt_km : NaN;
+        const elVal = isFinite(tcaEl) && tcaEl > 0
+            ? tcaEl.toFixed(1) + '\u00b0'
+            : '\u2014';
+        const altVal = this._fmtOrbitAltKm(altKm);
+        const hint = (isFinite(tcaEl) && tcaEl > 0 ? 'Макс. угол места: ' + tcaEl.toFixed(1) + '\u00b0' : 'Макс. угол места: нет данных') +
+            (isFinite(altKm) && altKm > 0 ? '; средняя высота орбиты: ' + Math.round(altKm) + ' км' : '');
+        return {
+            body: '<div class="pc-orbit-el">' + this._escapeHtml(elVal) + '</div>' +
+                '<div class="pc-orbit-alt">' + this._escapeHtml(altVal) + '</div>',
+            titleAttr: hint ? ' title="' + this._escapeHtml(hint) + '"' : '',
+        };
     };
 
     // ── Тикер обратного отсчёта ──

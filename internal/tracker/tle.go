@@ -604,6 +604,11 @@ func (tle *TLE) Perigee() float64 {
 	return a*(1-tle.Eccentricity) - earthRadius
 }
 
+// MeanAltitudeKm возвращает среднюю высоту орбиты над эллипсоидом, км.
+func (tle *TLE) MeanAltitudeKm() float64 {
+	return (tle.Apogee() + tle.Perigee()) / 2
+}
+
 // Age возвращает возраст TLE (время с эпохи).
 func (tle *TLE) Age() time.Duration {
 	return time.Since(tle.Epoch)

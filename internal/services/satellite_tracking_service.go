@@ -70,6 +70,10 @@ type groupSatInfo struct {
 	// Modulation — короткая подпись для UI: "FM" или "AFSK 1200".
 	FreqMHz    string `json:"freq_mhz,omitempty"`
 	Modulation string `json:"modulation,omitempty"`
+	// TCAEl — максимальный угол места пролёта (градусы).
+	TCAEl float64 `json:"tca_el"`
+	// OrbitAltKm — средняя высота орбиты по TLE (апогей+перигей)/2, км.
+	OrbitAltKm float64 `json:"orbit_alt_km"`
 }
 
 // groupTimeWin — временное окно группы для SSE-события.
@@ -787,6 +791,10 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 			UIColDuration: uiDur,
 			UIColUntil:    uiUntil,
 			SkyPath:       sat.Pass.SkyPath,
+			TCAEl:         roundTo(sat.Pass.TCAEl, 1),
+		}
+		if tle, ok := s.store.Get(sat.NoradID); ok && tle != nil {
+			info.OrbitAltKm = roundTo(tle.MeanAltitudeKm(), 0)
 		}
 		if txProvider != nil {
 			if tx := txProvider.GetPrimaryTransmitter(sat.NoradID); tx != nil {

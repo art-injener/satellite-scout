@@ -4,6 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -592,4 +596,66 @@ func TestRoundTo(t *testing.T) {
 			t.Errorf("roundTo(%.5f, %d) = %.5f, expected %.5f", tt.val, tt.decimals, result, tt.expected)
 		}
 	}
+}
+
+func TestBroadcastGroupUpdate_OrbitMetricsFields(t *testing.T) {
+	ctx := t.Context()
+
+	hub := handlers.NewSSEHub()
+	go hub.Run(ctx)
+
+	store := setupTLEStore(t)
+	observer := tracker.NewObserver(47.315813, 39.788243, 0.070)
+	svc := NewSatelliteTrackingService(hub, store, observer)
+
+	tle, ok := store.Get(issNoradID)
+	if !ok {
+		t.Fatal("ISS TLE missing in store")
+	}
+	wantAlt := roundTo(tle.MeanAltitudeKm(), 0)
+
+	now := time.Now().UTC()
+	group := ConcurrentPassGroup{
+		Satellites: []PassInfo{
+			{
+				NoradID: issNoradID,
+				SatName: "ISS",
+				Pass: tracker.Pass{
+					NoradID:  issNoradID,
+					SatName:  "ISS",
+					AOS:      now.UnixMilli(),
+					LOS:      now.Add(10 * time.Minute).UnixMilli(),
+					Duration: 600,
+					TCAEl:    51.3,
+				},
+				IsVisible: true,
+			},
+		},
+		PrimarySatID: issNoradID,
+		TimeWindow: TimeWindow{
+			Start: now.UnixMilli(),
+			End:   now.Add(10 * time.Minute).UnixMilli(),
+		},
+	}
+
+	svc.broadcastGroupUpdate(group, now, 0)
+
+	// Проверяем кеш Hub: последний satellite_group_update должен содержать orbit metrics.
+	req := httptest.NewRequest(http.MethodGet, "/api/sse", nil)
+	rec := httptest.NewRecorder()
+	go hub.ServeHTTP(rec, req)
+
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		body := rec.Body.String()
+		if strings.Contains(body, `"tca_el":51.3`) && strings.Contains(body, `"orbit_alt_km":`) {
+			if !strings.Contains(body, fmt.Sprintf(`"orbit_alt_km":%.0f`, wantAlt)) &&
+				!strings.Contains(body, fmt.Sprintf(`"orbit_alt_km":%g`, wantAlt)) {
+				t.Errorf("orbit_alt_km in payload, want ~%.0f; body fragment: %s", wantAlt, body)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("satellite_group_update with tca_el/orbit_alt_km not received; body=%q", rec.Body.String())
 }
