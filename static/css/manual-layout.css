@@ -293,6 +293,7 @@
     box-sizing: border-box;
     display: grid;
     grid-template-columns:
+        auto
         minmax(0, 1.35fr)
         minmax(0, 1fr)
         minmax(0, 1.05fr)
@@ -339,6 +340,11 @@
 .ml-rx-bar__section--doppler,
 .ml-rx-bar__section--demod {
     padding-right: 6px;
+}
+
+.ml-rx-bar__section--panorama {
+    justify-content: center;
+    padding: 0 8px;
 }
 
 .ml-rx-bar__section--apply {

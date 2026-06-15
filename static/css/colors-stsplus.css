@@ -45,11 +45,10 @@
     --accent-warning:   #ffff00;
 
     /* ══════════════════════════════════════════════════════════════
-       Карта (EarthView) — главная «фишка» темы:
-       суша = океан (заливки нет, только контуры берегов)
+       Карта (EarthView) — ретро-стиль: суша = океан, контуры берегов
        ══════════════════════════════════════════════════════════════ */
-    --map-ocean:       #000010;
-    --map-land:        #000010;
+    --map-ocean:       #080818;
+    --map-land:        #080818;
     --map-coast:       #00d4d4;
     --map-grid:        #0044aa;
     --map-grid-major:  #0066cc;
@@ -60,27 +59,27 @@
     /* ══════════════════════════════════════════════════════════════
        Орбита / трек спутника (EarthView)
        ══════════════════════════════════════════════════════════════ */
-    --orbit-future:  #00ff00;
-    --orbit-past:    #ff4444;
-    --orbit-dots:    #ffff00;
+    --orbit-future:  #22ee88;
+    --orbit-past:    #ee4444;
+    --orbit-dots:    #ffee44;
 
     /* ══════════════════════════════════════════════════════════════
        Маркер спутника (EarthView)
        ══════════════════════════════════════════════════════════════ */
     --sat-marker:        #ffffff;
     --sat-glow:          #00ffff;
-    --sat-label:         #ffeb3b;
+    --sat-label:         #ffee44;
     --sat-label-stroke:  rgba(0, 0, 16, 0.92);
 
     --map-icon-stroke:           rgba(0, 0, 16, 0.94);
-    --map-icon-tracking-fill:    var(--accent-primary);
-    --map-icon-selected-fill:    var(--accent-warning);
-    --map-icon-neutral-fill:     #e0e0e8;
-    --map-icon-led-off:          #5566aa;
-    --map-icon-boom-fill:        #7788aa;
-    --map-icon-logo-dots:        var(--accent-warning);
-    --map-icon-flash-tracking:   #ccffff;
-    --map-icon-flash-selected:   #ffffcc;
+    --map-icon-tracking-fill:    #20e8a8;
+    --map-icon-selected-fill:    #f5920a;
+    --map-icon-neutral-fill:     #f0f2f5;
+    --map-icon-led-off:          #445588;
+    --map-icon-boom-fill:        #c8d0d8;
+    --map-icon-logo-dots:        #f5920a;
+    --map-icon-flash-tracking:   #e8fff8;
+    --map-icon-flash-selected:   #fff0e0;
 
     /* Карточка-выноска подписи КА — тёмный «терминал» вместо стеклянного жетона */
     --map-callout-bg:         rgba(0, 0, 20, 0.82);
@@ -91,7 +90,7 @@
     /* ══════════════════════════════════════════════════════════════
        Выбранный спутник (selected, EarthView)
        ══════════════════════════════════════════════════════════════ */
-    --selected-track:          #ffff00;
+    --selected-track:          #ffee44;
     --selected-marker:         #00ff00;
     --selected-footprint:      rgba(0, 255, 255, 0.55);
     --selected-footprint-fill: rgba(0, 255, 255, 0.12);
@@ -227,9 +226,11 @@
     --simulation-badge-color:  var(--accent-danger);
     --simulation-badge-shadow: 0 0 8px rgba(255, 68, 68, 0.6);
 
-    --map-track-line-width:     1.5;
+    --map-track-line-width:     2.5;
+    --map-selected-track-line-width: 3;
+    --map-secondary-track-line-width: 1.5;
     --map-footprint-line-width: 1.5;
-    --map-secondary-track-fallback: rgba(200, 220, 240, 0.90);
+    --map-secondary-track-fallback: #ffffff;
 
     --sky-grid-line-width:  1;
     --sky-grid-outer-width: 2;

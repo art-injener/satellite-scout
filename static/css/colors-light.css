@@ -57,8 +57,8 @@
     --map-footprint-fill:   rgba(175, 48, 32, 0.23);
 
     /* Трассы: насыщенные для читаемости на светлом фоне */
-    --orbit-future:  #00aa00;
-    --orbit-past:    #cc3030;
+    --orbit-future:  #00bb00;
+    --orbit-past:    #ee3030;
     --orbit-dots:    #cc8800;
 
     --sat-marker:        #2a3038;
@@ -72,7 +72,7 @@
     --map-icon-selected-fill:    #5eead4;
     /* Акцентные точки на панелях логотипа — лайм к бирюзе */
     --map-icon-logo-dots:        #84cc16;
-    --map-icon-flash-tracking:   #ccfbf1;
+    --map-icon-flash-tracking:   #ffffff;
     --map-icon-flash-selected:   #ecfeff;
     --map-icon-neutral-fill:     #dde1ea;
     --map-icon-led-off:          #7d8a9a;
@@ -93,7 +93,7 @@
     --map-sat-label-shadow:          0 1px 2px rgba(0, 0, 0, 0.18);
 
     /* Выбранный КА — синий трек на карте/небе; шкала Az/El отдельно (графит, вариант 1) */
-    --selected-track:          #1a72b8;
+    --selected-track:          #0066cc;
     --selected-marker:         var(--selected-track);
     --selected-footprint:      rgba(26, 114, 184, 0.68);
     --selected-footprint-fill: rgba(26, 114, 184, 0.26);
@@ -109,9 +109,11 @@
     --map-city-marker:    #a03830;
     --map-text-secondary: #0a5878;
 
-    --map-track-line-width:     2.5;
+    --map-track-line-width:     2.75;
+    --map-selected-track-line-width: 3;
+    --map-secondary-track-line-width: 1.75;
     --map-footprint-line-width: 2.5;
-    --map-secondary-track-fallback: rgba(26, 114, 184, 0.92);
+    --map-secondary-track-fallback: #004488;
 
     /* SkyView: холст = общий фон; диск неба чуть прохладнее */
     --sky-bg:            #ccd0d8;

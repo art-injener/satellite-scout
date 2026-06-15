@@ -49,13 +49,24 @@
      */
     const TRACK_LAT_JUMP_DEG = 15;
 
-    // Палитра вторичных спутников без включённой трассы: крупные маркеры + высокая яркость
-    // (почти белый / ледяной / мягкий акцент), чтобы не терялись на тёмной карте.
-    // Используется как в _drawSecondaryMarker, так и в _collectCalloutMarkers.
+    // Палитра вторичных спутников: цветные, но не кислотные.
     const SECONDARY_SAT_COLORS = [
-        '#ffffff', '#f0fcff', '#e8ffff', '#fffef0',
-        '#f5fff8', '#ffe8f5', '#e8f4ff', '#fffff0'
+        '#66ccaa', '#dd8899', '#7799dd', '#ddbb55',
+        '#dd9955', '#55bbdd', '#aa77dd', '#99dd66'
     ];
+
+    /** #rrggbb → rgba(r,g,b,a) для radialGradient на canvas. */
+    function _hexToRgba(hex, alpha) {
+        let h = String(hex || '#20e8a8').replace('#', '').trim();
+        if (h.length === 3) {
+            h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+        }
+        const n = parseInt(h, 16);
+        if (isNaN(n)) {
+            return 'rgba(32,232,168,' + alpha + ')';
+        }
+        return 'rgba(' + ((n >> 16) & 255) + ',' + ((n >> 8) & 255) + ',' + (n & 255) + ',' + alpha + ')';
+    }
 
     /** Кратчайший доворот от currentDeg к targetDeg (градусы, в [-180, 180]). */
     function _shortestRotDeltaDeg(currentDeg, targetDeg) {
@@ -424,6 +435,8 @@
         };
         this._mapTrackLineWidth = parseFloat(cssVar('--map-track-line-width', '1.5')) || 1.5;
         this._mapFootprintLineWidth = parseFloat(cssVar('--map-footprint-line-width', '1.5')) || 1.5;
+        this._mapSelectedTrackLineWidth = parseFloat(cssVar('--map-selected-track-line-width', '2.5')) || 2.5;
+        this._mapSecondaryTrackLineWidth = parseFloat(cssVar('--map-secondary-track-line-width', '1.5')) || 1.5;
     };
 
     /** Вызов после смены colors-*.css (theme-switcher): обновить кэш и перерисовать. */
@@ -542,6 +555,9 @@
         if (this.satellite.noradId && this._hasGroundTrack()) {
             this._drawGroundTrack();
         }
+
+        // Мягкий оранжевый ореол выбранного КА — на canvas под DOM-иконкой.
+        this._drawSelectedGlow();
 
         // Выноски (линии на canvas + DOM-карточки).
         // Между трассами и SVG-маркерами: линии получаются под иконкой,
@@ -1257,6 +1273,18 @@
         el.style.left = 'calc(' + pctX + '% - ' + h + 'px)';
         el.style.top = 'calc(' + pctY + '% - ' + h + 'px)';
         el.style.display = (st.orientReady && inView) ? 'block' : 'none';
+        if (markerKey === 'tracking' || markerKey === 'selected') {
+            const sm = window._stateManager;
+            const selSm = sm && typeof sm.getSelectedSatelliteId === 'function'
+                ? sm.getSelectedSatelliteId() : null;
+            const trkSm = sm && typeof sm.getTrackingSatelliteId === 'function'
+                ? sm.getTrackingSatelliteId() : null;
+            const sameHero = selSm != null && trkSm != null && String(selSm) === String(trkSm);
+            const heroGlow = markerKey === 'selected' ||
+                (markerKey === 'tracking' && sameHero && noradId != null &&
+                    String(noradId) === String(selSm));
+            el.classList.toggle('map-sat-marker--hero-glow', heroGlow && el.style.display !== 'none');
+        }
         const lbl = document.getElementById(labelId);
         if (lbl) {
             lbl.textContent = name ? _shortName(name) : '';
@@ -1269,6 +1297,57 @@
     EarthView.prototype._drawSatellite = function() {
         this._positionDomMarker('map-sat-tracking', 'map-sat-tracking-label',
             this.satellite.position, this.satellite.name, 'tracking', this.satellite.noradId);
+    };
+
+    /**
+     * Мягкий оранжевый ореол вокруг выбранного КА (selected).
+     * На canvas под DOM-иконкой; цвет — --map-icon-selected-fill.
+     * @private
+     */
+    EarthView.prototype._drawSelectedGlow = function() {
+        const sm = window._stateManager;
+        const selSm = sm && typeof sm.getSelectedSatelliteId === 'function'
+            ? sm.getSelectedSatelliteId() : null;
+        const trkSm = sm && typeof sm.getTrackingSatelliteId === 'function'
+            ? sm.getTrackingSatelliteId() : null;
+        const sameHero = selSm != null && trkSm != null && String(selSm) === String(trkSm);
+
+        let pos = null;
+        if (selSm != null && this._selectedSatellite.noradId &&
+            String(this._selectedSatellite.noradId) === String(selSm) &&
+            this._selectedSatellite.position) {
+            pos = this._selectedSatellite.position;
+        } else if (sameHero && this.satellite.position) {
+            pos = this.satellite.position;
+        }
+        if (!pos) { return; }
+
+        const p = this.project(pos.lon, pos.lat);
+        const ctx = this.ctx;
+        const dpr = window.devicePixelRatio || 1;
+        const cx = p.x;
+        const cy = p.y;
+        const fill = this.colors.mapIconSelectedFill || '#f5920a';
+
+        ctx.save();
+        const layers = [
+            { r: 50 * dpr, a0: 0.2, a1: 0.07, a2: 0 },
+            { r: 34 * dpr, a0: 0.32, a1: 0.12, a2: 0 },
+            { r: 20 * dpr, a0: 0.42, a1: 0.16, a2: 0 }
+        ];
+        for (let i = 0; i < layers.length; i++) {
+            const layer = layers[i];
+            const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, layer.r);
+            grad.addColorStop(0, _hexToRgba(fill, layer.a0));
+            grad.addColorStop(0.55, _hexToRgba(fill, layer.a1));
+            grad.addColorStop(1, _hexToRgba(fill, layer.a2));
+            ctx.fillStyle = grad;
+            ctx.beginPath();
+            ctx.arc(cx, cy, layer.r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.restore();
     };
 
     // ========== Выноски (callouts) ==========
@@ -1352,6 +1431,10 @@
             const raw = Math.round(Math.max(minW, Math.min(maxW, target)));
             return Math.round(raw / bucket) * bucket;
         };
+        const cardHeightFor = (alias) => {
+            const h = alias ? 34 : 28;
+            return h * dpr;
+        };
 
         const markers = [];
         const trkId = this.satellite.noradId;
@@ -1367,6 +1450,7 @@
                 name: name,
                 alias: alias,
                 cardWidth: measure(name, alias),
+                cardHeight: cardHeightFor(alias),
                 iconRadius: iconRadiusFor(trkId, false),
                 isTracked: isHighlight(trkId),
             });
@@ -1384,6 +1468,7 @@
                 name: name,
                 alias: alias,
                 cardWidth: measure(name, alias),
+                cardHeight: cardHeightFor(alias),
                 iconRadius: iconRadiusFor(selId, false),
                 isTracked: isHighlight(selId),
             });
@@ -1407,6 +1492,7 @@
                 name: name,
                 alias: alias,
                 cardWidth: measure(name, alias),
+                cardHeight: cardHeightFor(alias),
                 iconRadius: iconRadiusFor(nid, true),
                 isTracked: isHighlight(nid),
             });
@@ -1971,6 +2057,7 @@
             tailLength:    18 * dpr,
             cardWidth:    110 * dpr,
             cardHeight:    28 * dpr,
+            stackLineHeight: 14 * dpr,
             minCardGap:     6 * dpr,
             boundsPadding:  8 * dpr,
             groupingMode: 'anneal',
@@ -2492,7 +2579,7 @@
         const futureColor = trackColor;
         const dpr = window.devicePixelRatio || 1;
 
-        ctx.lineWidth = 2 * dpr;
+        ctx.lineWidth = this._mapSelectedTrackLineWidth * dpr;
 
         // Сегменты уже разрезаны на бэке по антимеридиану. Bridge'м past↔future,
         // чтобы не было «дыры» в районе текущей позиции КА. Дополнительно к
@@ -2679,13 +2766,10 @@
         const dpr = window.devicePixelRatio || 1;
         const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
 
-        /* Светлая тема: тоньше пунктир, больше «воздуха» — меньше шума на карте */
+        /* Светлая тема: больше «воздуха» в пунктире — меньше шума на карте */
         ctx.setLineDash(isLight ? [4, 7] : [5, 5]);
         ctx.strokeStyle = color;
-        const lw = isLight
-            ? Math.max(1, this._mapTrackLineWidth * 0.62)
-            : Math.max(1.5, this._mapTrackLineWidth);
-        ctx.lineWidth = lw * dpr;
+        ctx.lineWidth = this._mapSecondaryTrackLineWidth * dpr;
 
         // Каждый сегмент рисуется отдельным sub-path (бэк уже разрезал по
         // антимеридиану через splitAtAntimeridian); bridge'м past↔future для
@@ -2823,8 +2907,8 @@
         ctx.fillRect(cx - bodyHalfW - boomW, boomY, boomW, boomH);
         ctx.fillRect(cx + bodyHalfW, boomY, boomW, boomH);
 
-        // ─── Солнечные панели (заливка цветом КА, чуть полупрозрачно) ───
-        ctx.globalAlpha = 0.82;
+        // ─── Солнечные панели (заливка цветом КА) ───
+        ctx.globalAlpha = 1;
         ctx.fillStyle = color;
         ctx.strokeStyle = stroke;
         ctx.lineWidth = lwPanel;

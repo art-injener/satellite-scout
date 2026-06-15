@@ -814,6 +814,24 @@ test('ring: PCA does not degenerate on coincident markers (stacked into one card
     assert.deepStrictEqual(r.stacked, [1, 2, 3]);
 });
 
+test('ring: anneal layout has angled leader (stem diagonal + horizontal tail)', () => {
+    const layout = new CalloutLayout(RING_OPTS);
+    const res = layout.layout(RING_CLUSTER_6, [], BOUNDS);
+    for (const r of res) {
+        const tail = r.tailEnd || { x: r.bend.x, y: r.bend.y };
+        assert.notStrictEqual(r.bend.x, r.marker.x,
+            `id ${r.id}: stem must not be strictly vertical`);
+        assert.notStrictEqual(r.bend.y, r.marker.y,
+            `id ${r.id}: stem must not be strictly horizontal`);
+        if (r.attach === 'horizontal') {
+            assert.notStrictEqual(tail.x, r.bend.x,
+                `id ${r.id}: horizontal tail must exist`);
+            assert.strictEqual(tail.y, r.bend.y,
+                `id ${r.id}: tail must stay horizontal`);
+        }
+    }
+});
+
 test('ring: stem attaches to nearest card edge (no pierce through bbox)', () => {
     const layout = new CalloutLayout(RING_OPTS);
     const res = layout.layout(RING_CLUSTER_6, [], BOUNDS);
@@ -1371,8 +1389,8 @@ test('ring: stacked card height = N × stackLineHeight + 4', () => {
     ];
     const res = layout.layout(markers, [], BOUNDS);
     const card = res.filter(r => r !== null)[0];
-    // stackLineHeight=18 (DEFAULTS), N=3 → 3×18+4 = 58
-    const expectedH = 3 * 18 + 4;
+    // stackLineHeight=14 (DEFAULTS), N=3 → 3×14+4 = 46
+    const expectedH = 3 * 14 + 4;
     assert.strictEqual(card.card.h, expectedH,
         `stacked card height: expected ${expectedH}, got ${card.card.h}`);
 });
@@ -1387,7 +1405,7 @@ test('ring: large stack (>maxVisible) has capped card height', () => {
     const res = layout.layout(markers, [], BOUNDS);
     const card = res.filter(r => r !== null)[0];
     const maxVis = 4;
-    const expectedH = (maxVis + 1) * 18 + 4; // 4 строки + 1 строка "...+N"
+    const expectedH = (maxVis + 1) * 14 + 4; // 4 строки + 1 строка "...+N"
     assert.strictEqual(card.card.h, expectedH,
         `large stack height: expected ${expectedH}, got ${card.card.h}`);
     assert.strictEqual(card.stacked.length, 8);
@@ -1608,10 +1626,12 @@ test('placementFromCard: vertical attachment when card below marker', () => {
     const cardH = 28;
     const cardX = 155;
     const cardY = 130;
-    const pl = placementFromCard(marker, cardX, cardY, cardW, cardH);
+    const pl = placementFromCard(marker, cardX, cardY, cardW, cardH, OPTS);
     assert.strictEqual(pl.attach, 'vertical');
+    assert.strictEqual(pl.tailEnd.x, cardX + cardW / 2);
+    assert.strictEqual(pl.tailEnd.y, cardY);
     assert.strictEqual(pl.bend.x, cardX + cardW / 2);
-    assert.strictEqual(pl.bend.y, cardY);
+    assert.ok(pl.bend.y <= cardY - OPTS.tailLength + 1e-6);
     assert.strictEqual(!stemPiercesCard(marker, pl), true);
 });
 
@@ -1621,10 +1641,25 @@ test('placementFromCard: horizontal attachment when card beside marker', () => {
     const cardH = 28;
     const cardX = 220;
     const cardY = 136;
-    const pl = placementFromCard(marker, cardX, cardY, cardW, cardH);
+    const pl = placementFromCard(marker, cardX, cardY, cardW, cardH, OPTS);
     assert.strictEqual(pl.attach, 'horizontal');
-    assert.strictEqual(pl.bend.x, cardX);
+    assert.strictEqual(pl.tailEnd.x, cardX);
+    assert.strictEqual(pl.tailEnd.y, cardY + cardH / 2);
+    assert.strictEqual(pl.bend.x, cardX - OPTS.tailLength);
     assert.strictEqual(pl.bend.y, cardY + cardH / 2);
+});
+
+test('placementFromCard: distant card attaches to nearest edge', () => {
+    const marker = { x: 720, y: 120 };
+    const cardW = 110;
+    const cardH = 28;
+    const cardX = 280;
+    const cardY = 420;
+    const pl = placementFromCard(marker, cardX, cardY, cardW, cardH, OPTS);
+    assert.strictEqual(pl.attach, 'horizontal');
+    assert.strictEqual(pl.tailEnd.x, cardX + cardW);
+    assert.notStrictEqual(pl.tailEnd.x, pl.bend.x);
+    assert.strictEqual(pl.tailEnd.y, pl.bend.y);
 });
 
 test('accent stripe on same edge as tail (horizontal)', () => {

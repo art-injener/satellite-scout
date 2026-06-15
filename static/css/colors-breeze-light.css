@@ -73,9 +73,9 @@
     /* ══════════════════════════════════════════════════════════════
        Орбита / трек — насыщенные для читаемости на светлом
        ══════════════════════════════════════════════════════════════ */
-    --orbit-future:  #1caa55;
-    --orbit-past:    #da4453;
-    --orbit-dots:    #e06800;
+    --orbit-future:  #00aa44;
+    --orbit-past:    #ee4050;
+    --orbit-dots:    #cc7700;
 
     /* ══════════════════════════════════════════════════════════════
        Маркер спутника
@@ -92,8 +92,8 @@
     --map-icon-led-off:          #8b97a8;
     --map-icon-boom-fill:        #7f8c8d;
     --map-icon-logo-dots:        #f67400;
-    --map-icon-flash-tracking:   #d0eaf7;
-    --map-icon-flash-selected:   #fde8d2;
+    --map-icon-flash-tracking:   #ffffff;
+    --map-icon-flash-selected:   #ffffff;
 
     /* Карточка-выноска подписи КА (callout) — серебристо-серый прозрачный
        «жетон» поверх светлой карты, чуть темнее land/ocean для контраста. */
@@ -111,7 +111,7 @@
     /* ══════════════════════════════════════════════════════════════
        Выбранный спутник
        ══════════════════════════════════════════════════════════════ */
-    --selected-track:          #2980b9;
+    --selected-track:          #0066cc;
     --selected-marker:         var(--selected-track);
     --selected-footprint:      rgba(41, 128, 185, 0.65);
     --selected-footprint-fill: rgba(41, 128, 185, 0.22);
@@ -132,9 +132,11 @@
     --map-city-marker:    #da4453;
     --map-text-secondary: #2980b9;
 
-    --map-track-line-width:     2.5;
+    --map-track-line-width:     2.75;
+    --map-selected-track-line-width: 3;
+    --map-secondary-track-line-width: 1.75;
     --map-footprint-line-width: 2.5;
-    --map-secondary-track-fallback: rgba(41, 128, 185, 0.88);
+    --map-secondary-track-fallback: #004488;
 
     /* ══════════════════════════════════════════════════════════════
        SkyView — прохладный небесный диск на общем фоне

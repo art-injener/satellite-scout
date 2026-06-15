@@ -46,24 +46,25 @@
     --accent-success:  #50b868;   /* online, подключено */
 
     /* ══════════════════════════════════════════════════════════════
-       Карта (EarthView) — увеличен контраст суша/океан/сетка
+       Карта (EarthView) — тёмно-синий холст, суша на ступень светлее океана
+       (читаемость маркеров КА без ухода от стиля ЦУП)
        ══════════════════════════════════════════════════════════════ */
-    --map-ocean:       #0a1018;
-    --map-land:        #1a2c3c;
-    --map-coast:       #5a9aac;
-    --map-grid:        #2a4050;
-    --map-grid-major:  #385868;
-    --map-grid-text:   #7890a0;
+    --map-ocean:       #1c2834;
+    --map-land:        #344048;
+    --map-coast:       #6ab0c4;
+    --map-grid:        #3c4850;
+    --map-grid-major:  #4a6878;
+    --map-grid-text:   #98a8b8;
     --map-footprint:        rgba(255, 100, 50, 0.90);
     --map-footprint-fill:   rgba(255, 100, 50, 0.19);
 
     /* ══════════════════════════════════════════════════════════════
        Орбита / трек спутника
        ══════════════════════════════════════════════════════════════ */
-    --orbit-future:  #00cc00;
-    --orbit-past:    #d94848;
+    --orbit-future:  #22ee88;
+    --orbit-past:    #ee4444;
     /* Минутные точки орбиты на карте — как в классической схеме (жёлтый) */
-    --orbit-dots:    #ffff00;
+    --orbit-dots:    #ffee44;
 
     /* ══════════════════════════════════════════════════════════════
        Маркер спутника
@@ -71,25 +72,25 @@
     --sat-marker:        #c8d0d8;
     --sat-glow:          #7ab8d0;
     /* Подпись КА на карте — жёлтая, единая для всех тёмных тем (UX-COLORS-DARK-001). */
-    --sat-label:         #ffeb3b;
+    --sat-label:         #ffee44;
     --sat-label-stroke:  rgba(0, 0, 0, 0.85);
 
     /* Значок КА на карте (корпус + панели + тарелка): наблюдение vs выбранный в таблице */
     --map-icon-stroke:           rgba(10, 14, 20, 0.94);
-    --map-icon-tracking-fill:    var(--accent-primary);
-    /* Иконка selected (КА из таблицы) — амбер #ffb347, единый для тёмных тем. */
-    --map-icon-selected-fill:    #ffb347;
-    --map-icon-neutral-fill:     #c8d0dc;
+    --map-icon-tracking-fill:    #20e8a8;
+    /* Иконка selected (КА из таблицы) — тёплый оранж, без кислотного неона. */
+    --map-icon-selected-fill:    #f5920a;
+    --map-icon-neutral-fill:     #f0f2f5;
     /* Погасшие LED на карте (маркер КА) */
-    --map-icon-led-off:          #5f6e80;
-    --map-icon-boom-fill:        #8896a8;
-    --map-icon-logo-dots:        #ffb347;
+    --map-icon-led-off:          #566674;
+    --map-icon-boom-fill:        #c8d0d8;
+    --map-icon-logo-dots:        #f5920a;
     --map-icon-flash-tracking:   #e8fff8;
-    --map-icon-flash-selected:   #fff5e8;
+    --map-icon-flash-selected:   #fff0e0;
 
     /* Карточка-выноска подписи КА (callout) — «стеклянный жетон» над картой.
        Светло-серебристый полупрозрачный фон + тёмный текст: контраст с
-       --map-land #1a2c3c и --map-ocean #0a1018 одинаково высокий. */
+       --map-land и --map-ocean одинаково высокий. */
     --map-callout-bg:         rgba(220, 230, 245, 0.65);
     --map-callout-bg-tracked: rgba(220, 230, 245, 0.88);
     --map-callout-text:       #1c2532;
@@ -98,7 +99,7 @@
     /* ══════════════════════════════════════════════════════════════
        Выбранный спутник (selected) — трасса на карте жёлтая, как в Classic
        ══════════════════════════════════════════════════════════════ */
-    --selected-track:          #ffff00;
+    --selected-track:          #ffee44;
     --selected-marker:         #50b868;
     --selected-footprint:      rgba(100, 160, 210, 0.60);
     --selected-footprint-fill: rgba(100, 160, 210, 0.19);
@@ -250,9 +251,11 @@
     --simulation-badge-shadow: 0 0 8px rgba(208, 85, 69, 0.55);
 
     /* Карта: толщина линий (читаемость на светлой теме — в colors-light) */
-    --map-track-line-width:     1.5;
+    --map-track-line-width:     2.5;
+    --map-selected-track-line-width: 3;
+    --map-secondary-track-line-width: 1.5;
     --map-footprint-line-width: 1.5;
-    --map-secondary-track-fallback: rgba(200, 220, 235, 0.92);
+    --map-secondary-track-fallback: #ffffff;
 
     /* SkyView: толщина линий сетки */
     --sky-grid-line-width:  1;

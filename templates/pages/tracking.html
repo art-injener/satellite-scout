@@ -11,38 +11,9 @@
             <div class="map-sat-marker map-sat-marker--tracking" id="map-sat-tracking" style="display:none">
                 <div class="map-sat-flip" aria-hidden="true">
                 <svg class="map-sat-icon" viewBox="-20 -20 140 140" width="56" height="56" overflow="visible" aria-hidden="true">
-                    <style>
-                        @keyframes map-sat-orbit { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(0) rotate(2deg)} }
-                        /* Волны, рупоры и полосы — 3.8s; индикаторы без свечения, только смена fill в тон маркера. */
-                        @keyframes map-horn-blink {
-                            0%, 45%, 100% { fill: var(--map-icon-tracking-fill,#00d4aa); }
-                            22% { fill: var(--map-icon-flash-tracking,#e8fff8); }
-                        }
-                        @keyframes map-wave-pulse {
-                            0%, 100% { opacity: 0; stroke-width: 2; }
-                            4% { opacity: 1; stroke-width: 4.5; }
-                            12% { opacity: 0; stroke-width: 2; }
-                        }
-                        @keyframes map-trk-led-row {
-                            0%, 100% { fill: var(--map-icon-led-off,#7a8a9c); }
-                            4% { fill: var(--map-icon-tracking-fill,#00d4aa); }
-                            12% { fill: var(--map-icon-led-off,#7a8a9c); }
-                        }
-                        #map-sat-tracking .map-sat-icon { animation: map-sat-orbit 8s ease-in-out infinite; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.35)); }
-                        #map-sat-tracking .map-sat-ant-l .mhorn { animation: map-horn-blink 3.6s ease-in-out infinite; }
-                        #map-sat-tracking .map-sat-ant-r .mhorn { animation: map-horn-blink 3.6s ease-in-out infinite 1.8s; }
-                        #map-sat-tracking .map-sat-ant-l .mw1 { animation: map-wave-pulse 3.8s ease-out infinite 0s; }
-                        #map-sat-tracking .map-sat-ant-l .mw2 { animation: map-wave-pulse 3.8s ease-out infinite 0.14s; }
-                        #map-sat-tracking .map-sat-ant-l .mw3 { animation: map-wave-pulse 3.8s ease-out infinite 0.28s; }
-                        #map-sat-tracking .map-sat-ant-r .mw1 { animation: map-wave-pulse 3.8s ease-out infinite 1.05s; }
-                        #map-sat-tracking .map-sat-ant-r .mw2 { animation: map-wave-pulse 3.8s ease-out infinite 1.19s; }
-                        #map-sat-tracking .map-sat-ant-r .mw3 { animation: map-wave-pulse 3.8s ease-out infinite 1.33s; }
-                        #map-sat-tracking .map-sat-led--t1 { animation: map-trk-led-row 3.8s ease-out infinite 1.05s; }
-                        #map-sat-tracking .map-sat-led--b1 { animation: map-trk-led-row 3.8s ease-out infinite 0s; }
-                    </style>
                     <g transform="rotate(45 50 50)">
                         <!-- Бум -->
-                        <rect x="4" y="47" width="92" height="6" rx="1" fill="var(--map-icon-boom-fill,#8b919a)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <rect x="4" y="47" width="92" height="6" rx="1" fill="var(--map-icon-boom-fill,#c8d0d8)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
                         <!-- Левая солнечная панель + сетка (как до экспериментов с обводкой) -->
                         <rect x="-6" y="24" width="30" height="52" rx="3" fill="var(--map-icon-tracking-fill,#00d4aa)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
                         <path d="M -6 40 L 24 40 M -6 56 L 24 56 M 4 24 L 4 76 M 14 24 L 14 76" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
@@ -83,36 +54,8 @@
             <div class="map-sat-marker map-sat-marker--selected" id="map-sat-selected" style="display:none">
                 <div class="map-sat-flip" aria-hidden="true">
                 <svg class="map-sat-icon" viewBox="-20 -20 140 140" width="56" height="56" overflow="visible" aria-hidden="true">
-                    <style>
-                        @keyframes map-sat-orbit-sel { 0%,100%{transform:translateY(0) rotate(0deg)} 50%{transform:translateY(0) rotate(1deg)} }
-                        @keyframes map-horn-blink-sel {
-                            0%, 45%, 100% { fill: var(--map-icon-selected-fill,#ffb347); }
-                            22% { fill: var(--map-icon-flash-selected,#fff5e8); }
-                        }
-                        @keyframes map-wave-pulse-sel {
-                            0%, 100% { opacity: 0; stroke-width: 2; }
-                            4% { opacity: 1; stroke-width: 4.5; }
-                            12% { opacity: 0; stroke-width: 2; }
-                        }
-                        @keyframes map-sel-led-row {
-                            0%, 100% { fill: var(--map-icon-led-off,#7a8a9c); }
-                            4% { fill: var(--map-icon-selected-fill,#ffb347); }
-                            12% { fill: var(--map-icon-led-off,#7a8a9c); }
-                        }
-                        #map-sat-selected .map-sat-icon { animation: map-sat-orbit-sel 9s ease-in-out infinite; filter: drop-shadow(0 4px 8px rgba(0,0,0,0.35)); }
-                        #map-sat-selected .map-sat-ant-l .mhorn { animation: map-horn-blink-sel 3.6s ease-in-out infinite; }
-                        #map-sat-selected .map-sat-ant-r .mhorn { animation: map-horn-blink-sel 3.6s ease-in-out infinite 1.8s; }
-                        #map-sat-selected .map-sat-ant-l .mw1 { animation: map-wave-pulse-sel 3.8s ease-out infinite 0.05s; }
-                        #map-sat-selected .map-sat-ant-l .mw2 { animation: map-wave-pulse-sel 3.8s ease-out infinite 0.19s; }
-                        #map-sat-selected .map-sat-ant-l .mw3 { animation: map-wave-pulse-sel 3.8s ease-out infinite 0.33s; }
-                        #map-sat-selected .map-sat-ant-r .mw1 { animation: map-wave-pulse-sel 3.8s ease-out infinite 1.1s; }
-                        #map-sat-selected .map-sat-ant-r .mw2 { animation: map-wave-pulse-sel 3.8s ease-out infinite 1.24s; }
-                        #map-sat-selected .map-sat-ant-r .mw3 { animation: map-wave-pulse-sel 3.8s ease-out infinite 1.38s; }
-                        #map-sat-selected .map-sat-led--t1 { animation: map-sel-led-row 3.8s ease-out infinite 1.1s; }
-                        #map-sat-selected .map-sat-led--b1 { animation: map-sel-led-row 3.8s ease-out infinite 0.05s; }
-                    </style>
                     <g transform="rotate(45 50 50)">
-                        <rect x="4" y="47" width="92" height="6" rx="1" fill="var(--map-icon-boom-fill,#8b919a)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
+                        <rect x="4" y="47" width="92" height="6" rx="1" fill="var(--map-icon-boom-fill,#c8d0d8)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
                         <rect x="-6" y="24" width="30" height="52" rx="3" fill="var(--map-icon-selected-fill,#ffb347)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
                         <path d="M -6 40 L 24 40 M -6 56 L 24 56 M 4 24 L 4 76 M 14 24 L 14 76" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2"/>
                         <rect x="76" y="24" width="30" height="52" rx="3" fill="var(--map-icon-selected-fill,#ffb347)" stroke="var(--map-icon-stroke,#0a0e14)" stroke-width="2.5"/>
@@ -287,6 +230,10 @@
 
         <!-- Управление приёмником — стиль секций как в app-header -->
         <div class="ml-rx-bar" id="manual-rx-bar">
+            <div class="ml-rx-bar__section ml-rx-bar__section--panorama">
+                <button type="button" class="ml-rx-bar__pill-toggle" id="manual-rx-panorama" aria-pressed="false">Панорама</button>
+            </div>
+
             <div class="ml-rx-bar__section">
                 <label class="ml-rx-bar__label" for="manual-rx-freq">Частота</label>
                 <input class="ml-rx-bar__spin ml-rx-bar__spin--freq" id="manual-rx-freq" type="number" step="0.001" value="435.641694">
@@ -338,7 +285,6 @@
                     <option>FM</option>
                     <option>OOK</option>
                 </select>
-                <button type="button" class="ml-rx-bar__pill-toggle" id="manual-rx-panorama" aria-pressed="false">Панорама</button>
             </div>
 
             <div class="ml-rx-bar__section ml-rx-bar__section--apply">

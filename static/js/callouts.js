@@ -49,6 +49,8 @@ const DEFAULTS = {
     tailLength: 18,
     cardWidth: 110,
     cardHeight: 28,
+    // Имя + alias (две строки в DOM); задаётся per-marker через cardHeight.
+    cardHeightTwoLine: 34,
     // Минимальный зазор между карточками
     minCardGap: 6,
     // Отступ от края canvas
@@ -103,9 +105,8 @@ const DEFAULTS = {
     // Отдельно от clusterDistance (PCA-эллипс): стек — это «одна точка»,
     // кластер — «группа близких точек, но различимых на экране».
     stackDistance: 15,
-    // Высота одной строки в стековой карточке (px). Между строками нет gap —
-    // они разделены визуально только фоновым цветом / цветным маркером строки.
-    stackLineHeight: 18,
+    // Высота одной строки в стековой карточке (logical px, ≈ 10px × line-height 1.4 в CSS).
+    stackLineHeight: 14,
     // Максимум видимых строк в свёрнутом стеке. Остальные скрыты за "...+N ещё".
     stackMaxVisible: 4,
 };
@@ -126,6 +127,9 @@ function computeGeometry(marker, sector, opts) {
     const cardW = (marker && typeof marker.cardWidth === 'number' && isFinite(marker.cardWidth))
         ? marker.cardWidth
         : opts.cardWidth;
+    const cardH = (marker && typeof marker.cardHeight === 'number' && isFinite(marker.cardHeight))
+        ? marker.cardHeight
+        : opts.cardHeight;
     const a = sector.slopeDeg * Math.PI / 180;
     const stemDx = sector.dxSign * opts.stemLength * Math.cos(a);
     const stemDy = sector.dySign * opts.stemLength * Math.sin(a);
@@ -139,11 +143,11 @@ function computeGeometry(marker, sector, opts) {
     } else {
         cardX = tailEndX - cardW;
     }
-    const cardY = bendY - opts.cardHeight / 2;
+    const cardY = bendY - cardH / 2;
 
     return {
         bend: { x: bendX, y: bendY },
-        card: { x: cardX, y: cardY, w: cardW, h: opts.cardHeight },
+        card: { x: cardX, y: cardY, w: cardW, h: cardH },
     };
 }
 
@@ -474,30 +478,53 @@ function clampCardInBounds(cardX, cardY, cardW, cardH, bounds, pad) {
     return { x, y };
 }
 
-/**
- * Геометрия выноски из позиции карточки.
- * Крепление на ближайшую к маркеру грань: горизонтальная (лево/право) или
- * вертикальная (верх/низ), чтобы stem не проходил через bbox карточки.
- */
-function placementFromCard(marker, cardX, cardY, cardW, cardH) {
+/** Кандидаты крепления хвоста — центр каждой из четырёх граней карточки. */
+function attachmentCandidates(cardX, cardY, cardW, cardH) {
     const cy = cardY + cardH / 2;
     const cx = cardX + cardW / 2;
-    const dx = cx - marker.x;
-    const dy = cy - marker.y;
-    const card = { x: cardX, y: cardY, w: cardW, h: cardH };
+    return [
+        { attach: 'horizontal', tailEnd: { x: cardX, y: cy }, tailSign: -1 },
+        { attach: 'horizontal', tailEnd: { x: cardX + cardW, y: cy }, tailSign: +1 },
+        { attach: 'vertical', tailEnd: { x: cx, y: cardY }, tailSign: -1 },
+        { attach: 'vertical', tailEnd: { x: cx, y: cardY + cardH }, tailSign: +1 },
+    ];
+}
 
-    if (Math.abs(dy) > Math.abs(dx)) {
-        if (dy > 0) {
-            const bend = { x: cx, y: cardY };
-            return { bend, card, tailEnd: { x: cx, y: cardY }, attach: 'vertical' };
+/** Грань, ближайшая к маркеру (не по dx/dy центра — по расстоянию до ребра). */
+function pickNearestAttachment(marker, cardX, cardY, cardW, cardH) {
+    const candidates = attachmentCandidates(cardX, cardY, cardW, cardH);
+    let best = candidates[0];
+    let bestD = Infinity;
+    for (let i = 0; i < candidates.length; i++) {
+        const te = candidates[i].tailEnd;
+        const d = Math.hypot(te.x - marker.x, te.y - marker.y);
+        if (d < bestD) {
+            bestD = d;
+            best = candidates[i];
         }
-        const bend = { x: cx, y: cardY + cardH };
-        return { bend, card, tailEnd: { x: cx, y: cardY + cardH }, attach: 'vertical' };
     }
+    return best;
+}
 
-    const bendX = (dx >= 0) ? cardX : (cardX + cardW);
-    const bend = { x: bendX, y: cy };
-    return { bend, card, tailEnd: { x: bendX, y: cy }, attach: 'horizontal' };
+/** Bend на tailLength от точки крепления хвоста к карточке. */
+function idealBendFromTail(att, tailEnd, tailLength) {
+    if (att.attach === 'horizontal') {
+        return { x: tailEnd.x + att.tailSign * tailLength, y: tailEnd.y };
+    }
+    return { x: tailEnd.x, y: tailEnd.y + att.tailSign * tailLength };
+}
+
+/**
+ * Геометрия выноски из позиции карточки (2 сегмента: stem + хвост).
+ * Крепление на ближайшую грань; bend на tailLength от карточки.
+ */
+function placementFromCard(marker, cardX, cardY, cardW, cardH, opts) {
+    const tailLength = (opts && opts.tailLength) || DEFAULTS.tailLength;
+    const card = { x: cardX, y: cardY, w: cardW, h: cardH };
+    const att = pickNearestAttachment(marker, cardX, cardY, cardW, cardH);
+    const tailEnd = att.tailEnd;
+    const bend = idealBendFromTail(att, tailEnd, tailLength);
+    return { bend, card, tailEnd, attach: att.attach };
 }
 
 /** Акцентная полоска на стороне примыкания хвоста (не на противоположной). */
@@ -847,7 +874,7 @@ function placementsFromState(state, virtualMarkers, opts) {
         const m = virtualMarkers[i];
         const dims = cardDims(m, opts);
         const s = state[i];
-        out.push(placementFromCard(m, s.cardX, s.cardY, dims.w, dims.h));
+        out.push(placementFromCard(m, s.cardX, s.cardY, dims.w, dims.h, opts));
     }
     return out;
 }
@@ -1224,7 +1251,7 @@ function cardCollisionScoreFor(k, cardX, cardY, state, virtualMarkers, bounds, o
     const dims = cardDims(vm, opts);
     const boundsPad = opts.boundsPadding;
     const c = clampCardInBounds(cardX, cardY, dims.w, dims.h, bounds, boundsPad);
-    const pl = placementFromCard(vm, c.x, c.y, dims.w, dims.h);
+    const pl = placementFromCard(vm, c.x, c.y, dims.w, dims.h, opts);
     const card = pl.card;
     const gap = opts.minCardGap || 0;
     const leaderPad = opts.leaderCardPadding != null ? opts.leaderCardPadding : 4;
@@ -1247,7 +1274,7 @@ function cardCollisionScoreFor(k, cardX, cardY, state, virtualMarkers, bounds, o
         const dimsJ = cardDims(virtualMarkers[j], opts);
         const sJ = state[j];
         const plJ = placementFromCard(
-            virtualMarkers[j], sJ.cardX, sJ.cardY, dimsJ.w, dimsJ.h
+            virtualMarkers[j], sJ.cardX, sJ.cardY, dimsJ.w, dimsJ.h, opts
         );
         if (bboxOverlap(card, plJ.card, gap)) { score += 280; }
         score += countLeaderObstacleHits(virtualMarkers[j], plJ, [cardOb]) * 110;
@@ -1262,7 +1289,7 @@ function cardCollisionScoreFor(k, cardX, cardY, state, virtualMarkers, bounds, o
 function countMarkerLeaderCrossings(k, cardX, cardY, state, virtualMarkers, opts) {
     const vm = virtualMarkers[k];
     const dims = cardDims(vm, opts);
-    const pl = placementFromCard(vm, cardX, cardY, dims.w, dims.h);
+    const pl = placementFromCard(vm, cardX, cardY, dims.w, dims.h, opts);
     const ltK = {
         marker: { x: vm.x, y: vm.y },
         bend: pl.bend,
@@ -1276,7 +1303,7 @@ function countMarkerLeaderCrossings(k, cardX, cardY, state, virtualMarkers, opts
         const vmJ = virtualMarkers[j];
         const dimsJ = cardDims(vmJ, opts);
         const sJ = state[j];
-        const plJ = placementFromCard(vmJ, sJ.cardX, sJ.cardY, dimsJ.w, dimsJ.h);
+        const plJ = placementFromCard(vmJ, sJ.cardX, sJ.cardY, dimsJ.w, dimsJ.h, opts);
         const ltJ = {
             marker: { x: vmJ.x, y: vmJ.y },
             bend: plJ.bend,
@@ -1296,10 +1323,10 @@ function totalLeaderCrossings(state, virtualMarkers, opts) {
             const dimsI = cardDims(virtualMarkers[i], opts);
             const dimsJ = cardDims(virtualMarkers[j], opts);
             const plI = placementFromCard(
-                virtualMarkers[i], state[i].cardX, state[i].cardY, dimsI.w, dimsI.h
+                virtualMarkers[i], state[i].cardX, state[i].cardY, dimsI.w, dimsI.h, opts
             );
             const plJ = placementFromCard(
-                virtualMarkers[j], state[j].cardX, state[j].cardY, dimsJ.w, dimsJ.h
+                virtualMarkers[j], state[j].cardX, state[j].cardY, dimsJ.w, dimsJ.h, opts
             );
             const ltI = {
                 marker: { x: virtualMarkers[i].x, y: virtualMarkers[i].y },
@@ -1333,10 +1360,10 @@ function nudgeStateResolveLeaderCrossings(state, virtualMarkers, bounds, opts, s
                 const dimsI = cardDims(virtualMarkers[i], opts);
                 const dimsJ = cardDims(virtualMarkers[j], opts);
                 const plI = placementFromCard(
-                    virtualMarkers[i], out[i].cardX, out[i].cardY, dimsI.w, dimsI.h
+                    virtualMarkers[i], out[i].cardX, out[i].cardY, dimsI.w, dimsI.h, opts
                 );
                 const plJ = placementFromCard(
-                    virtualMarkers[j], out[j].cardX, out[j].cardY, dimsJ.w, dimsJ.h
+                    virtualMarkers[j], out[j].cardX, out[j].cardY, dimsJ.w, dimsJ.h, opts
                 );
                 const ltI = {
                     marker: { x: virtualMarkers[i].x, y: virtualMarkers[i].y },
@@ -1427,14 +1454,14 @@ function applyAnnealPostPasses(state, virtualMarkers, segments, bounds, opts, pa
             const vm = virtualMarkers[k];
             const dims = cardDims(vm, opts);
             const s = out[k];
-            const pl = placementFromCard(vm, s.cardX, s.cardY, dims.w, dims.h);
+            const pl = placementFromCard(vm, s.cardX, s.cardY, dims.w, dims.h, opts);
             const hitsBefore = countLeaderOnlyCrossings(vm, pl, segments);
             if (hitsBefore === 0) { continue; }
             const flipped = flipCardAcrossMarker(
                 vm, s.cardX, s.cardY, dims.w, dims.h, bounds, pad
             );
             const pl2 = placementFromCard(
-                vm, flipped.cardX, flipped.cardY, dims.w, dims.h
+                vm, flipped.cardX, flipped.cardY, dims.w, dims.h, opts
             );
             const hitsAfter = countLeaderOnlyCrossings(vm, pl2, segments);
             if (hitsAfter < hitsBefore) {
@@ -1672,7 +1699,7 @@ function nudgeStateClearLeaderTracks(state, virtualMarkers, segments, bounds, op
 
         const trackHits = function(cx, cy) {
             const c = clampCardInBounds(cx, cy, dims.w, dims.h, bounds, pad);
-            const pl = placementFromCard(vm, c.x, c.y, dims.w, dims.h);
+            const pl = placementFromCard(vm, c.x, c.y, dims.w, dims.h, opts);
             return countLeaderOnlyCrossings(vm, pl, segments) +
                 countCardCrossings(pl.card, trackPad, segments);
         };
@@ -2214,7 +2241,7 @@ class CalloutLayout {
                 angle: polar.angle,
                 dist: polar.dist,
             });
-            const placement = placementFromCard(vm, s.cardX, s.cardY, dims.w, dims.h);
+            const placement = placementFromCard(vm, s.cardX, s.cardY, dims.w, dims.h, opts);
             const markerOut = { x: vm.x, y: vm.y };
             if (typeof vm.cardWidth === 'number' && isFinite(vm.cardWidth)) {
                 markerOut.cardWidth = vm.cardWidth;
@@ -2283,6 +2310,24 @@ const RENDERER_DEFAULTS = {
     lineWidth: 1.5,
     fallbackColor: '#ffeb3b',
 };
+
+/** Высота карточки в CSS px из layout (physical px canvas). */
+function cardHeightCss(layoutH, canvasSize, container) {
+    const cw = container && container.clientWidth;
+    if (cw && canvasSize && canvasSize.width) {
+        return layoutH * cw / canvasSize.width;
+    }
+    const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
+    return layoutH / dpr;
+}
+
+/** Оценка высоты развёрнутого стека (logical px). */
+function expandedStackHeightCss(rowCount) {
+    const rowH = 14;
+    const moreH = 13;
+    const pad = 6;
+    return rowCount * rowH + moreH + pad;
+}
 
 class CalloutRenderer {
     /**
@@ -2487,6 +2532,9 @@ class CalloutRenderer {
         entry.el.style.left = pctX + '%';
         entry.el.style.top = pctY + '%';
         entry.el.style.width = pctW + '%';
+        if (lt.card && typeof lt.card.h === 'number') {
+            entry.collapsedHeightCss = cardHeightCss(lt.card.h, canvasSize, this.container);
+        }
         const accent = lt.color || this.opts.fallbackColor;
         entry.el.style.setProperty('--callout-accent', accent);
         entry.el.classList.toggle('map-sat-callout--accent-right', accentOnCardRight(lt));
@@ -2495,7 +2543,9 @@ class CalloutRenderer {
 
         // Стековая карточка: несколько строк (имён КА).
         const stacked = lt.stacked;
-        if (stacked && stacked.length > 1 && info) {
+        const isStacked = stacked && stacked.length > 1 && info;
+        if (isStacked) {
+            entry.stackedIds = stacked;
             entry.el.classList.add('map-sat-callout--stacked');
             entry.el.classList.remove('map-sat-callout--single-line');
             // Проверяем tracked — хотя бы один КА в стеке tracked
@@ -2559,9 +2609,14 @@ class CalloutRenderer {
                         }
                         if (entry.expanded) {
                             entry.moreEl.textContent = '\u25B2 свернуть';
+                            const n = entry.stackedIds ? entry.stackedIds.length : allRows.length + 1;
+                            entry.el.style.height = expandedStackHeightCss(n) + 'px';
                         } else {
                             const hid = allRows.length - (maxVis - 1);
                             entry.moreEl.textContent = '...+' + hid + ' ещё';
+                            if (typeof entry.collapsedHeightCss === 'number') {
+                                entry.el.style.height = entry.collapsedHeightCss + 'px';
+                            }
                         }
                     });
                     entry.el.appendChild(entry.moreEl);
@@ -2598,6 +2653,18 @@ class CalloutRenderer {
                     entry.extraRows[ri].style.display = 'none';
                 }
             }
+        }
+
+        if (isStacked) {
+            if (entry.expanded) {
+                entry.el.style.height = expandedStackHeightCss(stacked.length) + 'px';
+            } else if (typeof entry.collapsedHeightCss === 'number') {
+                entry.el.style.height = entry.collapsedHeightCss + 'px';
+            }
+        } else if (typeof entry.collapsedHeightCss === 'number') {
+            entry.el.style.height = entry.collapsedHeightCss + 'px';
+        } else {
+            entry.el.style.height = '';
         }
     }
 }

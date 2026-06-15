@@ -46,24 +46,24 @@
     --accent-success:  #27ae60;
 
     /* ══════════════════════════════════════════════════════════════
-       Карта (EarthView) — темнее панелей (приборная вставка)
+       Карта (EarthView) — океан ≈ bg-primary, суша светлее
        ══════════════════════════════════════════════════════════════ */
-    --map-ocean:       #141618;
-    --map-land:        #22262a;
-    --map-coast:       #4a8890;
-    --map-grid:        #303438;
-    --map-grid-major:  #404448;
-    --map-grid-text:   #8a9096;
+    --map-ocean:       #222a30;
+    --map-land:        #384038;
+    --map-coast:       #5a9ea8;
+    --map-grid:        #404848;
+    --map-grid-major:  #525860;
+    --map-grid-text:   #98a4ac;
     --map-footprint:        rgba(61, 174, 233, 0.80);
     --map-footprint-fill:   rgba(61, 174, 233, 0.16);
 
     /* ══════════════════════════════════════════════════════════════
        Орбита / трек спутника
        ══════════════════════════════════════════════════════════════ */
-    --orbit-future:  #27ae60;
-    --orbit-past:    #da4453;
+    --orbit-future:  #22ee88;
+    --orbit-past:    #ee4444;
     /* Минутные точки трассы — жёлтые, единые для всех тёмных тем (UX-COLORS-DARK-001). */
-    --orbit-dots:    #ffff00;
+    --orbit-dots:    #ffee44;
 
     /* ══════════════════════════════════════════════════════════════
        Маркер спутника
@@ -71,19 +71,19 @@
     --sat-marker:        #e4e6e8;
     --sat-glow:          #3daee9;
     /* Подпись КА на карте — жёлтая, единая для всех тёмных тем. */
-    --sat-label:         #ffeb3b;
+    --sat-label:         #ffee44;
     --sat-label-stroke:  rgba(0, 0, 0, 0.85);
 
-    --map-icon-stroke:           rgba(20, 22, 24, 0.94);
-    --map-icon-tracking-fill:    var(--accent-primary);
-    /* Иконка selected — амбер #ffb347, единый для тёмных тем. */
-    --map-icon-selected-fill:    #ffb347;
-    --map-icon-neutral-fill:     #d0d4d8;
-    --map-icon-led-off:          #6d7a8a;
-    --map-icon-boom-fill:        #8a9096;
-    --map-icon-logo-dots:        #ffb347;
+    --map-icon-stroke:           rgba(10, 14, 20, 0.94);
+    --map-icon-tracking-fill:    #20e8a8;
+    /* Иконка selected — тёплый оранж, без кислотного неона. */
+    --map-icon-selected-fill:    #f5920a;
+    --map-icon-neutral-fill:     #f0f2f5;
+    --map-icon-led-off:          #566674;
+    --map-icon-boom-fill:        #c8d0d8;
+    --map-icon-logo-dots:        #f5920a;
     --map-icon-flash-tracking:   #e8fff8;
-    --map-icon-flash-selected:   #fff5e8;
+    --map-icon-flash-selected:   #fff0e0;
 
     /* Карточка-выноска подписи КА (callout) — «стеклянный жетон» над картой.
        Светло-серебристый полупрозрачный фон + тёмный текст. */
@@ -96,7 +96,7 @@
        Выбранный спутник (selected)
        ══════════════════════════════════════════════════════════════ */
     /* Трасса selected КА — жёлтая, единая для всех тёмных тем. */
-    --selected-track:          #ffff00;
+    --selected-track:          #ffee44;
     --selected-marker:         #27ae60;
     --selected-footprint:      rgba(61, 174, 233, 0.60);
     --selected-footprint-fill: rgba(61, 174, 233, 0.18);
@@ -242,9 +242,11 @@
     --simulation-badge-color:  var(--accent-danger);
     --simulation-badge-shadow: 0 0 8px rgba(218, 68, 83, 0.55);
 
-    --map-track-line-width:     1.5;
+    --map-track-line-width:     2.5;
+    --map-selected-track-line-width: 3;
+    --map-secondary-track-line-width: 1.5;
     --map-footprint-line-width: 1.5;
-    --map-secondary-track-fallback: rgba(200, 220, 235, 0.92);
+    --map-secondary-track-fallback: #ffffff;
 
     --sky-grid-line-width:  1;
     --sky-grid-outer-width: 2;
