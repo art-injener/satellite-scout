@@ -25,7 +25,7 @@ type TxCycleGroupSource interface {
 
 // TransmitterRef — узкая ссылка на передатчик для mock/SSE.
 // Содержит только то, что нужно фронту для сопоставления (UUID — стабильный
-// идентификатор от SatNOGS, используется как rowId в auto-link/heat-grid).
+// идентификатор от SatNOGS, в auto-link совпадает с rowId строки).
 type TransmitterRef struct {
 	UUID string
 }
@@ -117,8 +117,8 @@ type txCycleTx struct {
 	Lock          string  `json:"lock"`           // "OK" | "SEARCH" | "LOST".
 }
 
-// TxCycleMock — генератор фейковых событий "tx_cycle" для разработки UI
-// нижней панели Авто-режима (auto-link + heat-grid TX × циклы).
+// TxCycleMock — генератор фейковых событий "tx_cycle" для auto-link
+// в нижней панели Авто-режима.
 //
 // На каждом тике:
 //  1. Берёт NORAD ID активной группы из TxCycleGroupSource.

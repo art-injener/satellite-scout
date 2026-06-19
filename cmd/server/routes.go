@@ -1,12 +1,30 @@
 package main
 
 import (
+	"io/fs"
 	"log/slog"
 	"net/http"
 
+	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
+
+type routeDeps struct {
+	Cfg         *config.Config
+	ConfigStore *config.Store
+	Templates   fs.FS
+	Static      fs.FS
+
+	SSE      *handlers.SSEHub
+	Tracking handlers.TrackingServiceInterface
+	SatNOGS  *satnogs.Service
+
+	Exclude   handlers.ExclusionAdder
+	PassCache handlers.PassCacheInvalidator
+	Group     handlers.GroupRefresher
+}
 
 // setupRoutes регистрирует все HTTP-маршруты приложения.
 func setupRoutes(mux *http.ServeMux, deps *routeDeps) {

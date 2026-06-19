@@ -1481,6 +1481,95 @@ function applyAnnealPostPasses(state, virtualMarkers, segments, bounds, opts, pa
     return out;
 }
 
+/**
+ * Совпадает ли циклический порядок индексов (сдвиг или разворот).
+ */
+function clusterCyclicIndexOrderMatches(markerOrder, cardOrder) {
+    const n = markerOrder.length;
+    if (n !== cardOrder.length || n < 2) { return true; }
+    for (let dir = 0; dir < 2; dir++) {
+        const seq = (dir === 0) ? cardOrder : cardOrder.slice().reverse();
+        for (let shift = 0; shift < n; shift++) {
+            let ok = true;
+            for (let i = 0; i < n; i++) {
+                if (markerOrder[i] !== seq[(i + shift) % n]) { ok = false; break; }
+            }
+            if (ok) { return true; }
+        }
+    }
+    return false;
+}
+
+/**
+ * В кластере переставляет позиции карточек так, чтобы их порядок по углу
+ * совпадал с порядком маркеров — иначе leader-линии пересекаются.
+ */
+function enforceClusterCyclicCardOrder(state, virtualMarkers, opts) {
+    const clusterDist = opts.clusterDistance;
+    if (!clusterDist || clusterDist <= 0 || virtualMarkers.length < 2) {
+        return state;
+    }
+    const out = state.map((s) => ({ cardX: s.cardX, cardY: s.cardY }));
+    const groups = clusterMarkers(virtualMarkers, clusterDist);
+    for (let gi = 0; gi < groups.length; gi++) {
+        const group = groups[gi];
+        if (group.length < 2) { continue; }
+
+        let mx = 0;
+        let my = 0;
+        for (let k = 0; k < group.length; k++) {
+            mx += virtualMarkers[group[k]].x;
+            my += virtualMarkers[group[k]].y;
+        }
+        mx /= group.length;
+        my /= group.length;
+
+        const byMarkerAngle = group.slice().sort((a, b) => {
+            const ta = Math.atan2(virtualMarkers[a].y - my, virtualMarkers[a].x - mx);
+            const tb = Math.atan2(virtualMarkers[b].y - my, virtualMarkers[b].x - mx);
+            return ta - tb;
+        });
+
+        let cx = 0;
+        let cy = 0;
+        for (let k = 0; k < group.length; k++) {
+            const idx = group[k];
+            const dims = cardDims(virtualMarkers[idx], opts);
+            cx += out[idx].cardX + dims.w / 2;
+            cy += out[idx].cardY + dims.h / 2;
+        }
+        cx /= group.length;
+        cy /= group.length;
+
+        const byCardAngle = group.slice().sort((a, b) => {
+            const dimsA = cardDims(virtualMarkers[a], opts);
+            const dimsB = cardDims(virtualMarkers[b], opts);
+            const ta = Math.atan2(
+                out[a].cardY + dimsA.h / 2 - cy,
+                out[a].cardX + dimsA.w / 2 - cx
+            );
+            const tb = Math.atan2(
+                out[b].cardY + dimsB.h / 2 - cy,
+                out[b].cardX + dimsB.w / 2 - cx
+            );
+            return ta - tb;
+        });
+
+        if (clusterCyclicIndexOrderMatches(byMarkerAngle, byCardAngle)) {
+            continue;
+        }
+
+        const positions = byCardAngle.map((idx) => ({
+            cardX: out[idx].cardX,
+            cardY: out[idx].cardY,
+        }));
+        for (let r = 0; r < byMarkerAngle.length; r++) {
+            out[byMarkerAngle[r]] = positions[r];
+        }
+    }
+    return out;
+}
+
 function totalCollisionScore(state, virtualMarkers, bounds, opts, segments, scoreOpts) {
     let total = 0;
     for (let k = 0; k < virtualMarkers.length; k++) {
@@ -2220,6 +2309,12 @@ class CalloutLayout {
                 );
                 finalState = applyAnnealPostPasses(
                     finalState, virtualMarkers, layoutSegments, bounds, opts
+                );
+                finalState = enforceClusterCyclicCardOrder(
+                    finalState, virtualMarkers, opts
+                );
+                finalState = nudgeStateResolveLeaderCrossings(
+                    finalState, virtualMarkers, bounds, opts, layoutSegments
                 );
                 this._annealStructureKey = structureKey;
             }

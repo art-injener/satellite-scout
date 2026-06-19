@@ -6,8 +6,8 @@ services:
       - "8080:8080"
     environment:
       # Путь к конфигу и режим embed/диск. Остальное — в data/config.json (volume ниже).
-      - SS_CONFIG=/app/data/config.json
-      - DEV_MODE=false
+      - SCOUT_CONFIG_PATH=/app/data/config.json
+      - SCOUT_DEV_MODE=false
     env_file:
       - path: .env
         required: false

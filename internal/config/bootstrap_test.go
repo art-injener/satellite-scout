@@ -7,17 +7,12 @@ import (
 	"testing"
 )
 
-// TestBootstrap_CreatesFileFromEnvWhenMissing — ключевой кейс миграции:
-// если файла на диске нет, Bootstrap собирает конфиг из устаревших ENV и
-// записывает его в указанный путь. Повторный запуск уже найдёт файл.
-func TestBootstrap_CreatesFileFromEnvWhenMissing(t *testing.T) {
+// TestBootstrap_CreatesDefaultFileWhenMissing — при отсутствии файла Bootstrap
+// записывает на диск дефолтный конфиг (DefaultConfig). Повторный запуск уже
+// найдёт файл.
+func TestBootstrap_CreatesDefaultFileWhenMissing(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
-
-	clearLegacyEnv()
-	t.Setenv("OBSERVER_LAT", "55.75")
-	t.Setenv("OBSERVER_LON", "37.62")
-	t.Setenv("THEME", "classic")
 
 	store, err := Bootstrap(path)
 	if err != nil {
@@ -29,11 +24,16 @@ func TestBootstrap_CreatesFileFromEnvWhenMissing(t *testing.T) {
 	}
 
 	got := store.Get()
-	if got.Station.Observer.Lat != 55.75 {
-		t.Errorf("Lat = %f, want 55.75", got.Station.Observer.Lat)
+	want := DefaultConfig()
+
+	if got.Server.Port != want.Server.Port {
+		t.Errorf("Server.Port = %q, want %q", got.Server.Port, want.Server.Port)
 	}
-	if got.UI.Theme != "classic" {
-		t.Errorf("Theme = %q, want %q", got.UI.Theme, "classic")
+	if got.UI.Theme != want.UI.Theme {
+		t.Errorf("UI.Theme = %q, want %q", got.UI.Theme, want.UI.Theme)
+	}
+	if got.Station.Observer.Lat != want.Station.Observer.Lat {
+		t.Errorf("Observer.Lat = %f, want %f", got.Station.Observer.Lat, want.Station.Observer.Lat)
 	}
 
 	// Проверяем содержимое файла на диске.
@@ -48,13 +48,10 @@ func TestBootstrap_CreatesFileFromEnvWhenMissing(t *testing.T) {
 	if fromFile.Version != CurrentVersion {
 		t.Errorf("Version on disk = %d, want %d", fromFile.Version, CurrentVersion)
 	}
-	if fromFile.Station.Observer.Lon != 37.62 {
-		t.Errorf("Lon on disk = %f, want 37.62", fromFile.Station.Observer.Lon)
-	}
 }
 
-// TestBootstrap_UsesExistingFile — повторный запуск: ENV игнорируются, читаем
-// только файл. Это и есть «уход» от смешения env+file (пункт пользователя 1).
+// TestBootstrap_UsesExistingFile — при наличии файла Bootstrap читает только
+// его, не подменяя значения дефолтами.
 func TestBootstrap_UsesExistingFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
@@ -67,10 +64,6 @@ func TestBootstrap_UsesExistingFile(t *testing.T) {
 		t.Fatalf("seed file: %v", err)
 	}
 
-	clearLegacyEnv()
-	t.Setenv("OBSERVER_LAT", "99.0")
-	t.Setenv("THEME", "light")
-
 	store, err := Bootstrap(path)
 	if err != nil {
 		t.Fatalf("Bootstrap() error = %v", err)
@@ -78,21 +71,20 @@ func TestBootstrap_UsesExistingFile(t *testing.T) {
 	got := store.Get()
 
 	if got.Station.Observer.Lat != 1.234 {
-		t.Errorf("Lat = %f, want 1.234 (from file, not env)", got.Station.Observer.Lat)
+		t.Errorf("Lat = %f, want 1.234 (from file)", got.Station.Observer.Lat)
 	}
 	if got.UI.Theme != "breeze" {
 		t.Errorf("Theme = %q, want %q (from file)", got.UI.Theme, "breeze")
 	}
 }
 
-// TestBootstrap_RuntimeDevModeFromEnv — DevMode не сериализуется в файл и читается
-// из env на каждом запуске.
+// TestBootstrap_RuntimeDevModeFromEnv — DevMode не сериализуется в файл и
+// читается из env SCOUT_DEV_MODE на каждом запуске.
 func TestBootstrap_RuntimeDevModeFromEnv(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")
 
-	clearLegacyEnv()
-	t.Setenv("DEV_MODE", "false")
+	t.Setenv("SCOUT_DEV_MODE", "false")
 
 	store, err := Bootstrap(path)
 	if err != nil {
@@ -100,10 +92,10 @@ func TestBootstrap_RuntimeDevModeFromEnv(t *testing.T) {
 	}
 
 	if store.Get().DevMode {
-		t.Error("DevMode = true, want false (from env DEV_MODE=false)")
+		t.Error("DevMode = true, want false (from env SCOUT_DEV_MODE=false)")
 	}
 
-	// На диске поля DevMode нет — секрет Json:"-".
+	// На диске поля DevMode нет — json:"-".
 	raw, _ := os.ReadFile(path)
 	if string(raw) == "" {
 		t.Fatal("file empty after bootstrap")
@@ -114,14 +106,14 @@ func TestBootstrap_RuntimeDevModeFromEnv(t *testing.T) {
 }
 
 // TestResolveConfigPath_DefaultAndOverride — путь по умолчанию и переопределение
-// через SS_CONFIG.
+// через SCOUT_CONFIG_PATH.
 func TestResolveConfigPath_DefaultAndOverride(t *testing.T) {
-	_ = os.Unsetenv("SS_CONFIG")
+	_ = os.Unsetenv("SCOUT_CONFIG_PATH")
 	if got := ResolveConfigPath(); got != DefaultConfigPath {
 		t.Errorf("ResolveConfigPath default = %q, want %q", got, DefaultConfigPath)
 	}
 
-	t.Setenv("SS_CONFIG", "/etc/satellite-scout/config.json")
+	t.Setenv("SCOUT_CONFIG_PATH", "/etc/satellite-scout/config.json")
 	if got := ResolveConfigPath(); got != "/etc/satellite-scout/config.json" {
 		t.Errorf("ResolveConfigPath override = %q", got)
 	}

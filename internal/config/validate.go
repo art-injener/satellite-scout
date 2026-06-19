@@ -149,7 +149,7 @@ func (c *Config) Validate() error {
 //
 // Hot-reload получают: ui.theme, station.observer.* (через ConfigStore.Subscribe).
 // Restart нужен для server.port, tle.cache_dir/groups/update_interval/max_age,
-// satnogs.enabled, station.radio_paths (инициализация SDR-устройств), DEV_MODE.
+// satnogs.enabled, station.radio_paths (инициализация SDR-устройств), SCOUT_DEV_MODE.
 func RestartRequiredFields(old, next *Config) []string {
 	if old == nil || next == nil {
 		return nil

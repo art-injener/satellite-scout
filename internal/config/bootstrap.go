@@ -5,14 +5,20 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strconv"
+)
+
+// Имена переменных окружения для пути к файлу конфигурации и режима разработки
+const (
+	envConfigPath = "SCOUT_CONFIG_PATH"
+	envDevMode    = "SCOUT_DEV_MODE"
 )
 
 // DefaultConfigPath — путь к файлу конфигурации по умолчанию.
 const DefaultConfigPath = "data/config.json"
 
-// ResolveConfigPath возвращает путь к файлу конфигурации. Источник —
-// единственная переменная окружения SS_CONFIG; при её отсутствии используется
-// путь по умолчанию (data/config.json внутри рабочей директории).
+// ResolveConfigPath возвращает путь к файлу конфигурации из переменной SCOUT_CONFIG_PATH,
+// либо путь по умолчанию (data/config.json), если переменная не задана.
 func ResolveConfigPath() string {
 	if p := os.Getenv(envConfigPath); p != "" {
 		return p
@@ -20,17 +26,8 @@ func ResolveConfigPath() string {
 	return DefaultConfigPath
 }
 
-// Bootstrap инициализирует ConfigStore при старте приложения.
-//
-// Алгоритм:
-//  1. Открываем существующий файл config.json (если он есть) — основной путь.
-//  2. Если файла нет — собираем конфиг из устаревших переменных окружения
-//     (PORT, OBSERVER_*, THEME, …) поверх дефолтов и сохраняем в файл.
-//     Это однократная миграция: повторный запуск уже найдёт файл.
-//  3. Поле DevMode читается из env DEV_MODE на каждом старте — это режим
-//     запуска, а не настройка приложения, и в файл не сохраняется.
-//
-// Возвращает Store, готовый к использованию (Get / Update / Subscribe).
+// Bootstrap загружает конфиг при старте: читает файл по указанному пути,
+// а если файла нет — создаёт его с дефолтами. Поле DevMode добавляется из переменной окружения SCOUT_DEV_MODE
 func Bootstrap(path string) (*Store, error) {
 	if path == "" {
 		path = ResolveConfigPath()
@@ -45,13 +42,12 @@ func Bootstrap(path string) (*Store, error) {
 		return store, nil
 
 	case errors.Is(err, ErrConfigFileNotFound):
-		cfg := loadFromLegacyEnv()
-		store.Set(cfg)
+		store.Set(DefaultConfig())
 		if saveErr := store.Save(); saveErr != nil {
-			return nil, fmt.Errorf("save bootstrapped config: %w", saveErr)
+			return nil, fmt.Errorf("save default config: %w", saveErr)
 		}
 		applyRuntimeEnv(store)
-		slog.Info("configuration bootstrapped from env (file did not exist)",
+		slog.Info("configuration initialized with defaults (file did not exist)",
 			slog.String("path", path))
 		return store, nil
 
@@ -60,14 +56,22 @@ func Bootstrap(path string) (*Store, error) {
 	}
 }
 
-// applyRuntimeEnv проставляет в загруженный конфиг runtime-поля, которые не
-// сериализуются в файл, — сейчас это только DevMode.
+// applyRuntimeEnv добавляет в конфиг значения из env, которые не записываются в файл
 func applyRuntimeEnv(store *Store) {
-	devMode := getEnvBool(envDevMode, true)
 	cfg := store.Get()
 	if cfg == nil {
 		return
 	}
-	cfg.DevMode = devMode
+	cfg.DevMode = envBool(envDevMode, true) // пока что только DevMode
 	store.Set(cfg)
+}
+
+// envBool возвращает значение env-переменной, или defaultVal
+func envBool(key string, defaultVal bool) bool {
+	if val := os.Getenv(key); val != "" {
+		if b, err := strconv.ParseBool(val); err == nil {
+			return b
+		}
+	}
+	return defaultVal
 }

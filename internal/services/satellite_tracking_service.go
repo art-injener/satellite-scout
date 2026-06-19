@@ -19,8 +19,8 @@ const (
 	// Интервал обновления позиций по умолчанию (1 раз/сек).
 	DefaultTrackingInterval = 1 * time.Second
 
-	// Интервал обновления наземных трасс по умолчанию (1 раз/30 сек).
-	DefaultTrackInterval = 30 * time.Second
+	// Интервал обновления наземных трасс по умолчанию (1 раз/2 мин).
+	DefaultTrackInterval = 2 * time.Minute
 
 	// Интервал обновления группы (проверка скользящего окна и смена primary).
 	DefaultGroupUpdateInterval = 5 * time.Second
@@ -176,9 +176,9 @@ type trackedSatellite struct {
 // SatelliteTrackingService отслеживает спутники в реальном времени:
 // рассчитывает позиции, AER, зону видимости и наземные трассы,
 // рассылает данные через SSE Hub.
-// Три тикера: positions (1/сек), tracks (1/30 сек), group update (5/сек).
+// Три тикера (дефолтные интервалы): positions (1/сек), tracks (1/2 мин), group (раз в 5 сек).
 type SatelliteTrackingService struct {
-	hub   *handlers.SSEHub
+	hub   *handlers.SSEHub // модуль рассылки real-time данных
 	store *tracker.TLEStore
 	// observer хранится в atomic.Pointer для горячей смены координат из UI
 	// настроек: тиковые горутины читают через Load(), модалка настроек
@@ -224,7 +224,9 @@ type SatelliteTrackingService struct {
 	// pendingDirectedClientID — clientID для направленного уведомления вместо broadcast.
 	pendingDirectedClientID string
 
-	// notifyOnConnect — при получении сигнала выполняем немедленный updateGroup + broadcast.
+	// notifyOnConnect — сигнал от SSE Hub при подключении клиента: немедленный
+	// satellite_state_update с пересчётом трасс (без повторного updateGroup).
+	// Пока nil — ветка select неактивна; подключение: make(chan) + SSEHub.SetNotifyOnConnect.
 	notifyOnConnect chan struct{}
 
 	// forceUpdate — сигнал немедленного пересчёта группы (например, после изменения исключений).
@@ -353,11 +355,12 @@ func (s *SatelliteTrackingService) ForceGroupUpdate() {
 
 // Run запускает основной цикл отслеживания спутников.
 // Три тикера:
-//   - positionTicker (1/сек) — текущие позиции спутников, AER, зона видимости
-//   - trackTicker (1/30 сек) — наземные трассы орбит
-//   - groupTicker (5 сек) — обновление группы скользящего окна, смена primary
+//   - posTicker (1/сек) — позиции, AER, зона видимости
+//   - trackTicker (1/2 мин) — пересчёт наземных трасс
+//   - groupTicker (5 сек) — скользящее окно, смена primary
 //
-// Трассы отправляются немедленно при старте, затем по тикеру.
+// Трассы пересчитываются при старте, по trackTicker и после updateGroup.
+// forceUpdate и notifyOnConnect — пересчёт без ожидания тикера.
 // Завершается при отмене ctx.
 func (s *SatelliteTrackingService) Run(ctx context.Context) {
 	slog.InfoContext(ctx, "satellite tracking service started",
@@ -874,7 +877,7 @@ func (s *SatelliteTrackingService) broadcastSatelliteChange(noradID int, name, r
 // computeAndBroadcastState рассчитывает позиции (и опционально треки)
 // всех отслеживаемых спутников, собирает в одно групповое событие
 // "satellite_state_update" и отправляет через SSE Hub.
-// refreshTracks=true — пересчитать наземные трассы (каждые 30 секунд).
+// refreshTracks=true — пересчитать наземные трассы (каждые 2 минуты).
 // Кешированные треки включаются в каждое событие, чтобы Hub-кеш
 // всегда содержал полные данные для вновь подключающихся клиентов.
 func (s *SatelliteTrackingService) computeAndBroadcastState(refreshTracks bool) {
@@ -889,7 +892,7 @@ func (s *SatelliteTrackingService) computeAndBroadcastState(refreshTracks bool) 
 
 	positions := make([]positionData, 0, len(s.tracked))
 
-	// Пересчёт трасс при запросе (каждые 30 секунд или при смене спутника).
+	// Пересчёт трасс при запросе (каждые 2 минуты или при смене спутника).
 	if refreshTracks {
 		freshTracks := make([]*tracker.GroundTrack, 0, len(s.tracked))
 		for _, sat := range s.tracked {

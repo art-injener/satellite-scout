@@ -25,10 +25,8 @@ COPY --from=builder /satellite-scout /usr/local/bin/satellite-scout
 WORKDIR /app
 RUN mkdir -p /app/data/tle_cache
 
-# Только две переменные окружения, признанных архитектурой долгосрочно. Все
-# прочие настройки живут в /app/data/config.json и редактируются через UI.
-ENV DEV_MODE=false
-ENV SS_CONFIG=/app/data/config.json
+ENV SCOUT_DEV_MODE=false
+ENV SCOUT_CONFIG_PATH=/app/data/config.json
 
 EXPOSE 8080
 

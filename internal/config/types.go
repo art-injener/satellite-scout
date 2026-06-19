@@ -34,7 +34,7 @@ type Config struct {
 	Station StationConfig `json:"station"`
 
 	// DevMode — режим разработки: шаблоны и статика читаются с диска. В production
-	// (Docker) — embed.FS. Не сериализуется, читается только из env DEV_MODE.
+	// (Docker) — embed.FS. Не сериализуется, читается только из env SCOUT_DEV_MODE.
 	DevMode bool `json:"-"`
 }
 

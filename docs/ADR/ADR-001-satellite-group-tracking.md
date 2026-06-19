@@ -33,7 +33,7 @@
 
 Бэкенд работает в трёх циклах:
 - **Каждую секунду** — пересчёт позиций всех КА в группе (SGP4 → координаты + AER + зона видимости) → SSE-событие `satellite_state_update`.
-- **Каждые 30 секунд** — пересчёт наземных трасс (past/future сегменты) → включаются в тот же `satellite_state_update`.
+- **Каждые 2 минуты** — пересчёт наземных трасс (past/future сегменты) → включаются в тот же `satellite_state_update`.
 - **Каждые 5 секунд** — проверка скользящего окна, пересчёт группы и primary → SSE-события `satellite_group_update` и `satellite_change` при изменениях.
 
 На фронтенде единственный `SatelliteStateManager` принимает все данные от SSE и раздаёт UI-компонентам через Observer pattern: EarthView (карта), SkyView (азимутальная проекция), Az/El (индикаторы), RightPanelTable (таблица группы).
@@ -169,7 +169,7 @@ RightPanelTable перерисовывает подсветку строки, Ea
 2. `ECIToECEF` → `ECEFToLLA` → широта, долгота, высота.
 3. `Observer.GetAER(eci)` → азимут, элевация, дальность от станции.
 4. `GenerateVisibilityZoneFromLLA()` → 72 точки контура зоны видимости.
-5. Раз в 30 сек: `GenerateDefaultGroundTrack()` → наземная трасса (past/future, сегменты с разрывами на антимеридиане).
+5. Раз в 2 мин: `GenerateGroundTrackByLonWindow()` → наземная трасса (past/future, сегменты с разрывами на антимеридиане).
 
 Всё собирается в `satellite_state_update {positions[], tracks[]}` и уходит в Hub.
 
@@ -247,7 +247,7 @@ SSE-соединение обрывается. `SSEClient` обнаружива�
 
 | Событие | Частота / триггер | Кешируется Hub | Содержание |
 |---------|-------------------|---------------|------------|
-| `satellite_state_update` | 1/сек (позиции), 1/30 сек (+ трассы) | Да | `positions[]`, `tracks[]`, `ts` |
+| `satellite_state_update` | 1/сек (позиции), 1/2 мин (+ трассы) | Да | `positions[]`, `tracks[]`, `ts` |
 | `satellite_group_update` | При изменении группы или primary (≤ 1/5 сек) | Да | `satellites[]`, `primary_id`, `tracking_id`, `time_window` |
 | `satellite_change` | При смене primary или сбросе tracking | Нет | `norad_id`, `name`, `reason`, `inclination`, `period` |
 | `client_state_restore` | При подключении клиента или смене tracking | Нет (directed) | `tracking_id` |
