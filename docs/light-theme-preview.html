@@ -1,0 +1,327 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Satellite Scout — превью светлой темы</title>
+<style>
+/* ══ Палитра LIGHT (прохладный серо-голубой, острова светлее холста) ══ */
+:root, .theme-light {
+    --bg-primary:   #dfe4ea;  /* тело/холст */
+    --bg-secondary: #eef1f6;  /* панели-острова, почти белые */
+    --bg-tertiary:  #cfd6e0;  /* шапки, thead */
+    --bg-elevated:  #f6f8fb;  /* pop */
+    --bg-hover:     #dbe1e9;
+    --border-color: #b3bcc8;
+    --border-focus: #0a6e8c;
+
+    --text-primary: #1a2430;
+    --text-heading: #14243a;
+    --text-label:   #45505f;
+    --text-muted:   #566270;
+    --text-accent:  #0a5878;
+
+    --accent-primary:  #0a6e8c;
+    --accent-secondary:#154a8a;
+    --accent-warning:  #a06800;
+    --accent-danger:   #b01818;
+    --accent-success:  #0d7035;
+    --btn-primary-text:#f0f4f8;
+    --btn-primary-hover-bg:#123a72;
+
+    /* Карта */
+    --map-ocean:#b8c8d4; --map-land:#d0c8bc; --map-coast:#6a7a88;
+    --map-grid:#8a96a4; --sat-label:#1a2430;
+    --map-icon-tracking-fill:#0d9488; --map-icon-selected-fill:#5eead4;
+    --selected-track:#0066cc; --orbit-future:#00aa00; --orbit-past:#ee3030;
+
+    /* Спектр/водопад — светлая приборка */
+    --spectrum-plot-bg:#f4f7fb;
+    --spectrum-grid:rgba(20,36,58,0.10);
+    --spectrum-axis-text:#45505f;
+    --spectrum-trace:#0d7a3a;
+    --spectrum-crosshair:#b06800;
+    --waterfall-cold:#eef2f7;
+
+    --panel-header-title:#143a6e;
+    --passes-row-selected-bg:rgba(25,90,160,0.14);
+    --passes-row-selected-border:#1565c0;
+    --passes-row-tracking-bg:rgba(176,24,24,0.08);
+    --passes-row-tracking-border:#b01818;
+
+    --font-mono:'JetBrains Mono','Fira Code','SF Mono',monospace;
+    --font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+    --shadow-island:0 1px 3px rgba(20,30,45,0.10),0 1px 2px rgba(20,30,45,0.06);
+}
+
+/* ══ Палитра BREEZE-LIGHT (KDE Breeze) ══ */
+.theme-breeze {
+    --bg-primary:#eef0f2; --bg-secondary:#fcfcfc; --bg-tertiary:#e2e6ea;
+    --bg-elevated:#ffffff; --bg-hover:#e3e8ee;
+    --border-color:#bcc2c9; --border-focus:#3daee9;
+    --text-primary:#232629; --text-heading:#1b2529; --text-label:#475057; --text-muted:#5a636b; --text-accent:#1d6fb8;
+    --accent-primary:#2980b9; --accent-secondary:#1d6fb8; --accent-warning:#b26a00; --accent-danger:#da4453; --accent-success:#27ae60;
+    --btn-primary-hover-bg:#1c6ba0;
+    --map-ocean:#c4d2dc; --map-land:#d8d2c6;
+    --map-icon-tracking-fill:#16a085; --map-icon-selected-fill:#48dbb4;
+    --selected-track:#2980b9;
+    --spectrum-plot-bg:#fcfcfc; --spectrum-trace:#16a085; --waterfall-cold:#f0f3f6;
+    --panel-header-title:#1d6fb8;
+    --passes-row-selected-border:#3daee9;
+    --shadow-island:0 1px 3px rgba(30,35,40,0.09),0 1px 2px rgba(30,35,40,0.05);
+}
+
+* { box-sizing:border-box; }
+body {
+    margin:0; font-family:var(--font-sans); background:var(--bg-primary);
+    color:var(--text-primary); padding:0; transition:background .2s;
+}
+
+/* App header */
+.app-header {
+    background:var(--bg-tertiary); border-bottom:1px solid var(--border-color);
+    padding:10px 18px; display:flex; align-items:center; gap:14px;
+}
+.app-header .logo { width:22px;height:22px;border-radius:5px;
+    background:linear-gradient(135deg,var(--map-icon-tracking-fill),var(--map-icon-selected-fill)); }
+.app-header h1 { font-size:15px; margin:0; color:var(--text-heading); font-weight:600; letter-spacing:.2px; }
+.mode-bar { margin-left:auto; display:flex; gap:6px; }
+.mode-bar button {
+    font-size:12px; padding:5px 12px; border-radius:6px; cursor:pointer;
+    border:1px solid var(--border-color); background:var(--bg-secondary); color:var(--text-label);
+}
+.mode-bar button.active { background:var(--accent-primary); color:var(--btn-primary-text); border-color:var(--accent-primary); }
+
+.wrap { padding:18px; display:grid; grid-template-columns:1.4fr 1fr; gap:16px; align-items:start; }
+.col { display:flex; flex-direction:column; gap:16px; }
+
+/* Panel = island */
+.panel { background:var(--bg-secondary); border:1px solid var(--border-color);
+    border-radius:10px; box-shadow:var(--shadow-island); overflow:hidden; }
+.panel-header { background:var(--bg-tertiary); padding:9px 14px; font-size:12px; font-weight:600;
+    letter-spacing:.4px; text-transform:uppercase; color:var(--panel-header-title);
+    border-bottom:1px solid var(--border-color); box-shadow:inset 0 -1px 0 rgba(26,36,48,0.05); }
+.panel-body { padding:14px; }
+
+/* Table */
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+thead th { background:var(--bg-tertiary); color:var(--text-label); text-align:left;
+    padding:7px 10px; font-weight:600; border-bottom:1px solid var(--border-color); }
+tbody td { padding:7px 10px; border-bottom:1px solid var(--border-color); color:var(--text-primary); }
+tbody tr.sel { background:var(--passes-row-selected-bg); box-shadow:inset 3px 0 0 var(--passes-row-selected-border); }
+tbody tr.trk { background:var(--passes-row-tracking-bg); box-shadow:inset 3px 0 0 var(--passes-row-tracking-border); }
+td .mono { font-family:var(--font-mono); }
+.aos { color:var(--accent-success); } .los { color:var(--accent-danger); }
+
+/* Buttons + chips */
+.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-top:4px; }
+.btn { font-size:12.5px; padding:7px 14px; border-radius:7px; cursor:pointer; border:1px solid var(--border-color); }
+.btn-primary { background:var(--accent-primary); color:var(--btn-primary-text); border-color:var(--accent-primary); }
+.btn-ghost { background:var(--bg-elevated); color:var(--text-primary); }
+.chip { font-size:11px; padding:3px 9px; border-radius:20px; font-weight:600; color:#fff; }
+.c-warn{background:var(--accent-warning);} .c-danger{background:var(--accent-danger);}
+.c-success{background:var(--accent-success);} .c-info{background:var(--accent-primary);}
+
+/* Text specimens */
+.spec { display:grid; gap:6px; font-size:13px; }
+.spec .heading{color:var(--text-heading);font-weight:600;font-size:15px;}
+.spec .label{color:var(--text-label);} .spec .muted{color:var(--text-muted);} .spec .accent{color:var(--text-accent);}
+
+/* Map + sky mock */
+.zones { display:flex; gap:12px; }
+.map-mock { flex:1; height:140px; border-radius:8px; border:1px solid var(--border-color);
+    background:
+      radial-gradient(circle at 30% 40%, var(--map-land) 0 18%, transparent 19%),
+      radial-gradient(circle at 68% 62%, var(--map-land) 0 22%, transparent 23%),
+      var(--map-ocean);
+    position:relative; overflow:hidden; }
+.map-mock .grid { position:absolute; inset:0;
+    background-image:linear-gradient(var(--map-grid) 1px,transparent 1px),linear-gradient(90deg,var(--map-grid) 1px,transparent 1px);
+    background-size:28px 28px; opacity:.35; }
+.map-mock .sat { position:absolute; width:10px;height:10px;border-radius:50%;
+    background:var(--map-icon-tracking-fill); box-shadow:0 0 0 3px rgba(13,148,136,.25); top:38%;left:32%; }
+.map-mock .satlabel{ position:absolute; top:32%; left:36%; font:600 10px var(--font-mono); color:var(--sat-label);
+    background:rgba(255,255,255,.85); padding:1px 4px; border-radius:3px; }
+.map-mock .track{ position:absolute; height:2px; width:40%; top:55%; left:20%;
+    background:linear-gradient(90deg,var(--orbit-past),var(--selected-track)); transform:rotate(-18deg); border-radius:2px; }
+.sky-mock { width:140px;height:140px;border-radius:50%; border:2px solid var(--border-color);
+    background:radial-gradient(circle,var(--bg-elevated),var(--bg-secondary)); position:relative; }
+.sky-mock::before,.sky-mock::after{content:"";position:absolute;border:1px solid var(--map-grid);border-radius:50%;opacity:.5;}
+.sky-mock::before{inset:22px;} .sky-mock::after{inset:48px;}
+
+/* Spectrum + waterfall (canvas) */
+.instrument { border-radius:8px; overflow:hidden; border:1px solid var(--border-color); }
+canvas{display:block;width:100%;}
+
+.note{font-size:11.5px;color:var(--text-muted);margin:2px 0 0;}
+.switcher{position:fixed;top:12px;right:16px;z-index:10;display:flex;gap:6px;
+    background:var(--bg-secondary);padding:6px;border-radius:8px;border:1px solid var(--border-color);box-shadow:var(--shadow-island);}
+.switcher button{font-size:12px;padding:6px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--border-color);background:var(--bg-elevated);color:var(--text-primary);}
+.switcher button.on{background:var(--accent-primary);color:var(--btn-primary-text);border-color:var(--accent-primary);}
+</style>
+</head>
+<body class="theme-light">
+
+<div class="switcher">
+    <button id="b-light" class="on" onclick="setTheme('light')">light</button>
+    <button id="b-breeze" onclick="setTheme('breeze')">breeze-light</button>
+</div>
+
+<header class="app-header">
+    <div class="logo"></div>
+    <h1>Satellite Scout</h1>
+    <div class="mode-bar">
+        <button class="active">Авто</button>
+        <button>Ручной</button>
+        <button>⚙</button>
+    </div>
+</header>
+
+<div class="wrap">
+    <div class="col">
+        <div class="panel">
+            <div class="panel-header">Карта · Earth View</div>
+            <div class="panel-body">
+                <div class="zones">
+                    <div class="map-mock">
+                        <div class="grid"></div>
+                        <div class="track"></div>
+                        <div class="sat"></div>
+                        <div class="satlabel">NORAD 25544</div>
+                    </div>
+                    <div class="sky-mock"></div>
+                </div>
+                <p class="note">Слева — карта (океан/суша/сетка/трасса/маркер КА), справа — SkyView.</p>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">Спектр (FFT) — светлая приборка</div>
+            <div class="instrument"><canvas id="fft" height="130"></canvas></div>
+            <div class="panel-header" style="border-top:1px solid var(--border-color)">Водопад — светлая colormap</div>
+            <div class="instrument"><canvas id="wf" height="120"></canvas></div>
+            <div class="panel-body" style="padding-top:8px">
+                <p class="note">Холодный сигнал = pale near-white → бирюза → зелёный → янтарь → тёмно-красный.
+                   Яркость падает с ростом сигнала (в отличие от тёмной темы).</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="col">
+        <div class="panel">
+            <div class="panel-header">План сеансов</div>
+            <table>
+                <thead><tr><th>КА</th><th>AOS</th><th>LOS</th><th>Max El</th></tr></thead>
+                <tbody>
+                    <tr><td>ISS (ZARYA)</td><td class="mono aos">14:02:10</td><td class="mono los">14:11:48</td><td class="mono">62°</td></tr>
+                    <tr class="sel"><td>NOAA 19</td><td class="mono aos">14:20:03</td><td class="mono los">14:33:51</td><td class="mono">81°</td></tr>
+                    <tr class="trk"><td>METEOR-M2</td><td class="mono aos">14:41:19</td><td class="mono los">14:52:07</td><td class="mono">45°</td></tr>
+                    <tr><td>CUBEBEL-2</td><td class="mono aos">15:03:44</td><td class="mono los">15:12:30</td><td class="mono">28°</td></tr>
+                </tbody>
+            </table>
+            <div class="panel-body">
+                <p class="note">Выбранная строка — синяя подсветка; наблюдаемая — красная.</p>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">Элементы управления</div>
+            <div class="panel-body">
+                <div class="row">
+                    <button class="btn btn-primary">Начать наблюдение</button>
+                    <button class="btn btn-ghost">Отмена</button>
+                </div>
+                <div class="row" style="margin-top:12px">
+                    <span class="chip c-info">SSE online</span>
+                    <span class="chip c-success">TRACKING</span>
+                    <span class="chip c-warn">WARNING</span>
+                    <span class="chip c-danger">SIMULATION</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="panel">
+            <div class="panel-header">Типографика</div>
+            <div class="panel-body spec">
+                <div class="heading">Заголовок панели (text-heading)</div>
+                <div class="label">Метка поля · text-label</div>
+                <div>Основной текст значения · text-primary</div>
+                <div class="muted">Приглушённый текст · text-muted</div>
+                <div class="accent">Акцентные данные · text-accent</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function setTheme(t){
+    document.body.className = t==='breeze' ? 'theme-breeze' : 'theme-light';
+    document.getElementById('b-light').classList.toggle('on', t==='light');
+    document.getElementById('b-breeze').classList.toggle('on', t==='breeze');
+    draw();
+}
+function cssv(n){ return getComputedStyle(document.body).getPropertyValue(n).trim(); }
+
+// Светлая colormap водопада (прототип hotColorLight): pale -> бирюза -> зелёный -> янтарь -> тёмно-красный.
+function hotColorLight(v){
+    v=Math.max(0,Math.min(1,v));
+    const stops=[
+        [0.00,[238,242,247]], // pale near-white (cold)
+        [0.25,[120,196,206]], // бирюза
+        [0.50,[ 45,158, 96]], // зелёный
+        [0.75,[176,104,  0]], // янтарь
+        [1.00,[150, 24, 24]]  // тёмно-красный (hot)
+    ];
+    for(let i=0;i<stops.length-1;i++){
+        if(v<=stops[i+1][0]){
+            const t=(v-stops[i][0])/(stops[i+1][0]-stops[i][0]);
+            const a=stops[i][1], b=stops[i+1][1];
+            return [Math.round(a[0]+t*(b[0]-a[0])),Math.round(a[1]+t*(b[1]-a[1])),Math.round(a[2]+t*(b[2]-a[2]))];
+        }
+    }
+    return stops[stops.length-1][1];
+}
+
+function draw(){
+    // FFT
+    const c=document.getElementById('fft'); const w=c.clientWidth; c.width=w; const h=c.height;
+    const ctx=c.getContext('2d');
+    ctx.fillStyle=cssv('--spectrum-plot-bg'); ctx.fillRect(0,0,w,h);
+    ctx.strokeStyle=cssv('--spectrum-grid'); ctx.lineWidth=1;
+    for(let x=0;x<w;x+=w/10){ctx.beginPath();ctx.moveTo(x,0);ctx.lineTo(x,h);ctx.stroke();}
+    for(let y=0;y<h;y+=h/5){ctx.beginPath();ctx.moveTo(0,y);ctx.lineTo(w,y);ctx.stroke();}
+    // трейс
+    ctx.strokeStyle=cssv('--spectrum-trace'); ctx.lineWidth=1.6; ctx.beginPath();
+    for(let x=0;x<=w;x++){
+        let n=Math.sin(x*0.05)*3+Math.sin(x*0.13)*2+(Math.random()*4);
+        let peak = Math.exp(-Math.pow((x-w*0.55)/12,2))*38 + Math.exp(-Math.pow((x-w*0.25)/8,2))*22;
+        let y=h-14-(n+peak);
+        x===0?ctx.moveTo(x,y):ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+    // crosshair
+    ctx.strokeStyle=cssv('--spectrum-crosshair'); ctx.setLineDash([4,3]);
+    ctx.beginPath();ctx.moveTo(w*0.55,0);ctx.lineTo(w*0.55,h);ctx.stroke();ctx.setLineDash([]);
+    ctx.fillStyle=cssv('--spectrum-axis-text'); ctx.font='10px monospace';
+    ctx.fillText('435.500 MHz',6,14); ctx.fillText('-84 dBm',w-64,14);
+
+    // Waterfall
+    const cw=document.getElementById('wf'); const W=cw.clientWidth; cw.width=W; const H=cw.height;
+    const wx=cw.getContext('2d'); const img=wx.createImageData(W,H);
+    for(let y=0;y<H;y++){
+        for(let x=0;x<W;x++){
+            // сигнал: два «трека» доплера + шум
+            let s = Math.exp(-Math.pow((x-W*0.55+ (y-H/2)*0.3)/9,2))
+                  + 0.7*Math.exp(-Math.pow((x-W*0.28+ (y-H/2)*0.15)/6,2));
+            let v = Math.min(1, s + Math.random()*0.12);
+            const [r,g,b]=hotColorLight(v);
+            const idx=(y*W+x)*4; img.data[idx]=r;img.data[idx+1]=g;img.data[idx+2]=b;img.data[idx+3]=255;
+        }
+    }
+    wx.putImageData(img,0,0);
+}
+window.addEventListener('resize',draw);
+draw();
+</script>
+</body>
+</html>

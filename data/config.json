@@ -4,7 +4,7 @@
     "port": "8080"
   },
   "ui": {
-    "theme": "breeze-steel",
+    "theme": "breeze-light",
     "show_all_tracks_on_start": false
   },
   "tle": {

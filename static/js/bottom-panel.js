@@ -58,6 +58,43 @@
         return hotColorMuted(v);
     }
 
+    /**
+     * Светлая палитра водопада для светлых тем.
+     * Холодный сигнал = pale near-white, дальше бирюза → зелёный → янтарь →
+     * тёмно-красный. Яркость падает с ростом сигнала (обратно тёмной теме),
+     * поэтому пятна сигнала читаются как тёмные на светлом поле.
+     */
+    function hotColorLight(v) {
+        v = Math.max(0, Math.min(1, v));
+        // Опорные точки [позиция, [r,g,b]] — линейная интерполяция между ними.
+        const stops = [
+            [0.00, 238, 242, 247],  // pale near-white (холод)
+            [0.25, 120, 196, 206],  // бирюза
+            [0.50,  45, 158,  96],  // зелёный
+            [0.75, 176, 104,   0],  // янтарь
+            [1.00, 150,  24,  24]   // тёмно-красный (горячо)
+        ];
+        for (let i = 0; i < stops.length - 1; i++) {
+            if (v <= stops[i + 1][0]) {
+                const a = stops[i];
+                const b = stops[i + 1];
+                const t = (v - a[0]) / (b[0] - a[0]);
+                return [
+                    Math.round(a[1] + t * (b[1] - a[1])),
+                    Math.round(a[2] + t * (b[2] - a[2])),
+                    Math.round(a[3] + t * (b[3] - a[3]))
+                ];
+            }
+        }
+        const last = stops[stops.length - 1];
+        return [last[1], last[2], last[3]];
+    }
+
+    /** Выбор colormap водопада по теме: токен --waterfall-colormap (light | dark). */
+    function waterfallColormap() {
+        return cssVar('--waterfall-colormap', 'dark') === 'light' ? hotColorLight : hotColorMuted;
+    }
+
     /** RGB из CSS-переменной вида #rrggbb (водопад, поля canvas). */
     function cssVarRgbHex(name, fallbackHex) {
         const raw = typeof window.cssVar === 'function' ? window.cssVar(name, fallbackHex) : fallbackHex;
@@ -307,8 +344,10 @@
         let plotW = w - ml - mr;
         if (plotW < 2) { plotW = w; ml = 0; mr = 0; }
 
-        // Область отступов — чёрный фон (rgba 0,0,0,255)
+        // Область отступов — фон полей водопада
         const marginRgb = cssVarRgbHex('--waterfall-margin-bg', '#000000');
+        // Colormap выбираем раз на строку (по теме), не на каждый пиксель
+        const cmap = waterfallColormap();
         const bins = buf.length;
         for (let x = 0; x < w; x++) {
             const idx = x * 4;
@@ -319,7 +358,7 @@
                 data[idx + 3] = 255;
             } else {
                 const srcIdx = Math.min(Math.floor(((x - ml) / plotW) * bins), bins - 1);
-                const col = hotColor(buf[srcIdx]);
+                const col = cmap(buf[srcIdx]);
                 data[idx] = col[0];
                 data[idx + 1] = col[1];
                 data[idx + 2] = col[2];
@@ -592,6 +631,8 @@
     window.SpectrumDataSource = SpectrumDataSource;
     // hotColor и cssVarRgbHex нужны построчному водопаду в auto-link.js
     window.hotColor = hotColor;
+    // Тема-зависимая colormap (light/dark) — для мини-водопада Авто-режима
+    window.waterfallColormap = waterfallColormap;
     window.cssVarRgbHex = cssVarRgbHex;
 
 })();

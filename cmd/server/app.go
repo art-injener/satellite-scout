@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"log/slog"
 	"net"
@@ -18,9 +19,14 @@ import (
 	"github.com/art-injener/satellite-scout/internal/exclude"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
+	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sdr/imitator"
 	"github.com/art-injener/satellite-scout/internal/services"
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
+
+// Ключ атрибута slog для ошибок.
+const slogKeyError = "error"
 
 // app собирает все ключевые модули приложения в одном месте.
 type app struct {
@@ -35,6 +41,9 @@ type app struct {
 	tracking *services.SatelliteTrackingService // отслеживание спутников
 	pass     *services.PassService              // расчёт пролётов
 	exclude  *exclude.Store                     // исключённые NORAD ID
+
+	sdrService  *sdr.Service     // обнаружение и проверка SDR-приёмников
+	receiverHub *sdr.ReceiverHub // приёмники по радиотрактам из конфига
 
 	satnogs        *satnogs.Service           // интеграция с SatNOGS
 	satnogsAdapter *satnogsTransmitterAdapter // адаптер SatNOGS → services
@@ -105,6 +114,23 @@ func NewApp(configStore *config.Store) *app {
 	trackingService.SetPassProvider(passService)
 	trackingService.WithExcluder(excludeStore)
 
+	// В конфиге у нас описаны настройки станции. Я сразу закладываю вариант, что на станции может быть несколько
+	// антенн с приемниками (радиотракт), а значит при старте нам надо пройтись по конфигу и зарегистрировать приемники.
+	//  Реально работа с приемником будет только когда пользователь выберет соответствующий радиотракт.
+	receiverHub := sdr.NewReceiverHub()
+	for _, rp := range cfg.Station.RadioPaths {
+		rc := rp.Receiver
+		pathID := fmt.Sprintf("radio_path_%d", rp.ID)
+		receiverHub.Register(pathID, func() (sdr.Receiver, error) {
+			switch rc.Driver {
+			case "imitator", "simulated", "":
+				return imitator.New(imitator.DefaultOptions()), nil
+			default:
+				return nil, fmt.Errorf("%w: %q", sdr.ErrDriverNotImplemented, rc.Driver)
+			}
+		})
+	}
+
 	return &app{
 		cfg:         cfg,
 		configStore: configStore,
@@ -115,6 +141,8 @@ func NewApp(configStore *config.Store) *app {
 		tracking:    trackingService,
 		pass:        passService,
 		exclude:     excludeStore,
+		sdrService:  sdr.NewService(),
+		receiverHub: receiverHub,
 	}
 }
 
@@ -131,13 +159,13 @@ func (a *app) Run() error {
 	var lc net.ListenConfig
 	ln, listenErr := lc.Listen(ctx, "tcp", server.Addr)
 	if listenErr != nil {
-		slog.Error("server error", "error", listenErr)
+		slog.Error("failed to listen", slogKeyError, listenErr)
 		return listenErr
 	}
 
 	// TLEStore — фоновое обновление орбит.
 	if startErr := a.tleStore.Start(ctx); startErr != nil {
-		slog.Error("failed to start TLE store", "error", startErr)
+		slog.Error("failed to start TLE store", slogKeyError, startErr)
 	}
 	go a.sseHub.Run(ctx)
 	a.setupClientState()
@@ -157,7 +185,7 @@ func (a *app) Run() error {
 	// Ждём: либо сигнал (ctx отменится), либо ошибку сервера.
 	select {
 	case serveErr := <-serverErr:
-		slog.Error("server error", "error", serveErr)
+		slog.Error("HTTP server failed", slogKeyError, serveErr)
 		stop()
 		a.shutdown(server)
 		return serveErr
@@ -172,6 +200,11 @@ func (a *app) Run() error {
 // shutdown останавливает всё в правильном порядке.
 func (a *app) shutdown(server *http.Server) {
 	slog.Info("shutting down...")
+
+	if err := a.receiverHub.CloseAll(); err != nil {
+		slog.Error("failed to close receiver hub", slogKeyError, err)
+	}
+	slog.Info("receiver hub stopped")
 
 	a.tleStore.Stop()
 	slog.Info("TLE store stopped")
@@ -189,7 +222,7 @@ func (a *app) shutdown(server *http.Server) {
 	defer shutdownCancel()
 
 	if err := server.Shutdown(shutdownCtx); err != nil {
-		slog.Error("server shutdown error", "error", err)
+		slog.Error("failed to shut down HTTP server", slogKeyError, err)
 		return
 	}
 	slog.Info("server stopped gracefully")
@@ -288,6 +321,7 @@ func (a *app) routeDeps() *routeDeps {
 		SSE:         a.sseHub,
 		Tracking:    a.tracking,
 		SatNOGS:     a.satnogs,
+		SDR:         a.sdrService,
 		Exclude:     a.exclude,
 		PassCache:   a.pass,
 		Group:       a.tracking,
@@ -320,12 +354,12 @@ func resolveAssets(devMode bool) (fs.FS, fs.FS) {
 
 	templatesFS, err := fs.Sub(assets.TemplatesFS, "templates")
 	if err != nil {
-		slog.Error("failed to create templates sub-FS", "error", err)
+		slog.Error("failed to create templates sub-FS", slogKeyError, err)
 		os.Exit(1)
 	}
 	staticFS, err := fs.Sub(assets.StaticFS, "static")
 	if err != nil {
-		slog.Error("failed to create static sub-FS", "error", err)
+		slog.Error("failed to create static sub-FS", slogKeyError, err)
 		os.Exit(1)
 	}
 	return templatesFS, staticFS

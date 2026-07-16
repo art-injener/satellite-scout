@@ -20,6 +20,7 @@ type routeDeps struct {
 	SSE      *handlers.SSEHub
 	Tracking handlers.TrackingServiceInterface
 	SatNOGS  *satnogs.Service
+	SDR      *sdr.Service
 
 	Exclude   handlers.ExclusionAdder
 	PassCache handlers.PassCacheInvalidator
@@ -35,14 +36,14 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 		deps.ConfigStore,
 	)
 	if err != nil {
-		slog.Error("failed to initialize page handler", "error", err)
+		slog.Error("failed to initialize page handler", slogKeyError, err)
 		panic("page handler init failed: " + err.Error())
 	}
 
 	apiHandler := handlers.NewAPIHandler(deps.Cfg)
 	trackingHandler := handlers.NewTrackingHandler(deps.Tracking)
 	settingsHandler := handlers.NewSettingsHandler(deps.ConfigStore)
-	sdrHandler := handlers.NewSDRHandler(sdr.NewService())
+	sdrHandler := handlers.NewSDRHandler(deps.SDR)
 	exclusionsHandler := handlers.NewExclusionsHandler(deps.Exclude, deps.PassCache, deps.Group)
 
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(deps.Static))))

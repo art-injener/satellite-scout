@@ -1,9 +1,8 @@
 /*
- * Satellite Scout — тема «Breeze Light».
- * Настоящая палитра KDE Breeze (светлая): #eff0f1 фоны, #232629 текст,
- * акцент #3daee9 (голубой), прохладный стальной серый без тёплого подтона.
- * Приборные вставки (карта, спектр) — тёмные.
- * Активируется: THEME=breeze-light
+ * Satellite Scout — тема «Breeze Light» (редизайн 2026-07).
+ * Палитра KDE Breeze (светлая): холст #eef0f2, острова #fcfcfc (светлее),
+ * текст #232629, акцент #3daee9 (голубой). Спектр/водопад — светлая «приборка»
+ * (--waterfall-colormap: light). Активируется: THEME=breeze-light
  *
  * Контрастность: соседние слои ≥ 1.3:1, текст ≥ 4.5:1 (WCAG AA).
  */
@@ -12,14 +11,14 @@
     --theme-id: breeze-light;
 
     /* ══════════════════════════════════════════════════════════════
-       Фоны — оригинал KDE Breeze:
-       Window #eff0f1, View #fcfcfc, Button #eff0f1
+       Фоны — KDE Breeze, модель «острова светлее холста»:
+       холст = Window #eef0f2; острова = View #fcfcfc; крышка #e2e6ea
        ══════════════════════════════════════════════════════════════ */
-    --bg-primary:   #eff0f1;
-    --bg-secondary: #eff0f1;
-    --bg-tertiary:  #e3e5e7;
-    --bg-elevated:  #fcfcfc;
-    --bg-hover:     #d7d9dc;
+    --bg-primary:   #eef0f2;
+    --bg-secondary: #fcfcfc;
+    --bg-tertiary:  #e2e6ea;
+    --bg-elevated:  #ffffff;
+    --bg-hover:     #e3e8ee;
 
     /* ══════════════════════════════════════════════════════════════
        Границы — KDE Breeze separator/border
@@ -196,28 +195,30 @@
     --ind-out-of-view:    rgba(218, 68, 83, 0.50);
 
     /* ══════════════════════════════════════════════════════════════
-       Спектр / водопад — единый «приборный» палитр (UX-COLORS-INSTRUMENT-001).
-       Идентично всем остальным темам (темо-зависимы только --spectrum-bg
-       и --spectrum-text, остальное унифицировано: slate-фон, видимая сетка,
-       мягкий зелёный трейс, тёплый жёлтый crosshair).
+       Спектр / водопад — СВЕТЛАЯ «приборка» (редизайн 2026-07).
+       Поле FFT/водопада почти белое; сетка и подписи — тёмные на светлом.
+       Водопад: холодный сигнал = pale, горячий = насыщенный/тёмный
+       (colormap hotColorLight, переключается токеном --waterfall-colormap).
        ══════════════════════════════════════════════════════════════ */
-    --spectrum-bg:         #eff0f1;
-    --spectrum-grid:       #3a4550;
-    --spectrum-plot-bg:    #2a3440;
-    --spectrum-instrument-bg: #2a3440;
+    --spectrum-bg:         #eef0f2;
+    --spectrum-grid:       rgba(26, 34, 42, 0.12);
+    --spectrum-plot-bg:    #fcfcfc;
+    --spectrum-instrument-bg: #fcfcfc;
     --bp-overview-freq-scale-bg: var(--bg-tertiary);
-    --spectrum-plot-grid:  rgba(255, 255, 255, 0.14);
-    --spectrum-axis-text:  #e4e8ec;
-    --spectrum-trace:      #5ee878;
-    --spectrum-crosshair:  #ffcc66;
-    --spectrum-peak-label: #ffffff;
+    --spectrum-plot-grid:  rgba(26, 34, 42, 0.10);
+    --spectrum-axis-text:  #475057;
+    --spectrum-trace:      #16843f;
+    --spectrum-crosshair:  #b26a00;
+    --spectrum-peak-label: #1a1c1e;
     --spectrum-text:       #5c6166;
     --spectrum-signal:     #a06800;
     --spectrum-peak:       #6a4800;
     --spectrum-peak-dot:   #da4453;
-    --waterfall-bg:        #2a3440;
-    --waterfall-margin-bg: #2a3440;
-    --waterfall-cold-bg:   #242c38;
+    --waterfall-bg:        #fcfcfc;
+    --waterfall-margin-bg: #f0f3f6;
+    --waterfall-cold-bg:   #f0f3f6;
+    /* Схема colormap водопада: light = pale→бирюза→зелёный→янтарь→тёмно-красный */
+    --waterfall-colormap:  light;
 
     /* Панорама / профиль сеанса / Eye (canvas Ручного режима) */
     --panorama-chip-label-text:       #eefcff;

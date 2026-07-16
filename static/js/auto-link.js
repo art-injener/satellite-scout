@@ -374,7 +374,7 @@
             const center = cross / 2;
             const sigma = Math.max(1.2, this.bandFrac * cross * 0.3);
             const p = this.power;
-            const hot = window.hotColor;
+            const hot = window.waterfallColormap ? window.waterfallColormap() : window.hotColor;
 
             for (let c = 0; c < cross; c++) {
                 const noise = 0.05 + Math.random() * 0.07;
