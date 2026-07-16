@@ -10,7 +10,7 @@ import (
 // Дефолтные значения единого конфига.
 const (
 	defaultPort         = "8080"
-	defaultTheme        = "default"
+	defaultTheme        = "classic"
 	defaultStationName  = "Станция Ростов-на-Дону"
 	defaultObserverName = "Ростов-на-Дону"
 

@@ -8,15 +8,20 @@
     const STORAGE_KEY = 'ss-ui-theme';
 
     const THEMES = [
-        { id: 'default', label: 'Operations Center' },
         { id: 'classic', label: 'Classic' },
+        { id: 'default', label: 'Operations Center' },
         { id: 'stsplus', label: 'STSPLUS' },
         { id: 'light', label: 'Светлая' },
-        { id: 'breeze-light', label: 'Breeze' },
-        { id: 'breeze', label: 'Breeze (серый)' },
+        { id: 'breeze', label: 'Breeze' },
         { id: 'breeze-steel', label: 'Breeze Steel' },
         { id: 'breeze-dark', label: 'Breeze Dark' }
     ];
+
+    /** Устаревшие id → актуальные (breeze-light слит в light). */
+    function migrateThemeId(id) {
+        if (id === 'breeze-light') { return 'light'; }
+        return id;
+    }
 
     /** Regex для замены имени темы в href: colors-XXXX.css (с сохранением ?v= и пр.) */
     const RE_THEME_IN_HREF = /(colors-)[a-z0-9-]+(\.css)/;
@@ -32,8 +37,9 @@
     }
 
     function isAllowed(id) {
+        const tid = migrateThemeId(id);
         for (let i = 0; i < THEMES.length; i++) {
-            if (THEMES[i].id === id) { return true; }
+            if (THEMES[i].id === tid) { return true; }
         }
         return false;
     }
@@ -63,16 +69,20 @@
         try {
             const tid = parseThemeFromHref(document.getElementById('theme-colorsheet').href);
             window.dispatchEvent(new CustomEvent('satwatch-theme-applied', { detail: { fileTheme: tid } }));
+            if (window._stateManager && typeof window._stateManager.reassignTrackColorsForTheme === 'function') {
+                window._stateManager.reassignTrackColorsForTheme();
+            }
         } catch (_e) { /* ignore */ }
     }
 
     /**
-     * Применить тему по имени файла (default, classic, light, breeze, …).
+     * Применить тему по имени файла (classic, light, breeze, …).
      * @param {string} id
      * @param {boolean} [save=true] — писать в localStorage
      */
     function applyTheme(id, save) {
         const link = document.getElementById('theme-colorsheet');
+        id = migrateThemeId(id);
         if (!link || !isAllowed(id)) { return; }
 
         const currentHref = link.getAttribute('href') || '';
@@ -109,7 +119,7 @@
     function syncSelectValue(sel) {
         const link = document.getElementById('theme-colorsheet');
         if (!link || !sel) { return; }
-        const cur = parseThemeFromHref(link.href);
+        const cur = migrateThemeId(parseThemeFromHref(link.href) || '');
         if (cur && isAllowed(cur)) {
             sel.value = cur;
         }
@@ -118,6 +128,22 @@
     function init() {
         const sel = document.getElementById('theme-select');
         if (!sel) { return; }
+
+        // Миграция устаревших id в localStorage
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            const stored = migrateThemeId(raw || '');
+            if (stored && stored !== raw && isAllowed(stored)) {
+                localStorage.setItem(STORAGE_KEY, stored);
+            }
+        } catch (_e) { /* ignore */ }
+
+        const link = document.getElementById('theme-colorsheet');
+        const hrefTheme = link ? parseThemeFromHref(link.href) : null;
+        const migratedHref = hrefTheme ? migrateThemeId(hrefTheme) : null;
+        if (migratedHref && migratedHref !== hrefTheme && isAllowed(migratedHref)) {
+            applyTheme(migratedHref, true);
+        }
 
         sel.innerHTML = '';
         for (let i = 0; i < THEMES.length; i++) {

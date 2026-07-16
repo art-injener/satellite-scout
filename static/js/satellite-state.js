@@ -107,9 +107,15 @@ const _PALETTE_DARK = Object.freeze(
     Array.from({ length: 12 }, (_, i) => hslToHex(i * 30, 68, 64))
 );
 
-/** Светлая тема: те же hue, чуть насыщеннее для контраста на сером холсте. */
+/** Светлая тема: живые mid-тона; жёлто-зелёно-бирюзовый ряд чуть темнее для читаемости. */
 const _PALETTE_LIGHT = Object.freeze(
-    Array.from({ length: 12 }, (_, i) => hslToHex(i * 30, 54, 47))
+    Array.from({ length: 12 }, (_, i) => {
+        const h = i * 30;
+        const hardBand = (h >= 30 && h <= 180);
+        const l = hardBand ? 36 : 50;
+        const s = hardBand ? 74 : 70;
+        return hslToHex(h, s, l);
+    })
 );
 
 /** @returns {{ h: number, s: number, l: number }} h в [0, 360), s/l в [0, 100]. */
@@ -957,6 +963,21 @@ class SatelliteStateManager {
             this._applyShowAll();
         }
 
+        this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+    }
+
+    /**
+     * Переназначить цвета трасс под текущую тему (после смены light ↔ dark).
+     * Сохраняет порядок КА в colorMap, подбирает новые оттенки из актуальной палитры.
+     */
+    reassignTrackColorsForTheme() {
+        const ids = Array.from(this._colorMap.keys());
+        this._colorMap.clear();
+        const palette = getTrackColorPalette();
+        for (let i = 0; i < ids.length; i++) {
+            const color = pickTrackColorFromPalette(this._colorMap.values(), palette);
+            this._colorMap.set(ids[i], color);
+        }
         this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
     }
 

@@ -47,35 +47,35 @@
     --accent-danger:   #b01818;
     --accent-success:  #0d7035;
 
-    /* Карта — приглушённый океан/суша, заметные трассы и ЗРВ (см. themeRgba в css-vars.js) */
-    --map-ocean:       #b8c8d4;
-    --map-land:        #d0c8bc;
-    --map-coast:       #6a7a88;
-    --map-grid:        #8a96a4;
-    --map-grid-major:  #6a7688;
-    --map-grid-text:   #3a4858;
+    /* Карта — светлее и насыщеннее: чистая вода / тёплый песок */
+    --map-ocean:       #a2c7e2;
+    --map-land:        #e4d6be;
+    --map-coast:       #58809d;
+    --map-grid:        #7a96b0;
+    --map-grid-major:  #5a7a98;
+    --map-grid-text:   #3a556e;
     /* Дубли для справки; canvas берёт rgba через themeRgba() */
     --map-footprint:        rgba(175, 48, 32, 0.88);
     --map-footprint-fill:   rgba(175, 48, 32, 0.23);
 
-    /* Трассы: насыщенные для читаемости на светлом фоне */
-    --orbit-future:  #00bb00;
-    --orbit-past:    #ee3030;
-    --orbit-dots:    #cc8800;
+    /* Трассы: живые mid-тона (не мрачные, но читаемые на ocean/land) */
+    --orbit-future:  #2e9e4f;
+    --orbit-past:    #e53935;
+    --orbit-dots:    #e67e22;
 
-    --sat-marker:        #2a3038;
+    --sat-marker:        #1a2430;
     --sat-glow:          #0a6e8c;
     --sat-label:         #1a2430;
     --sat-label-stroke:  rgba(238, 241, 246, 0.95);
 
     --map-icon-stroke:           rgba(26, 36, 48, 0.92);
-    /* Маркеры на карте: живая бирюза/мятная, как в оригинальном логотипе */
+    /* Маркеры: бирюза tracking; selected — чистый оранж как в Classic */
     --map-icon-tracking-fill:    #0d9488;
-    --map-icon-selected-fill:    #5eead4;
+    --map-icon-selected-fill:    #f5920a;
     /* Акцентные точки на панелях логотипа — лайм к бирюзе */
     --map-icon-logo-dots:        #84cc16;
     --map-icon-flash-tracking:   #ffffff;
-    --map-icon-flash-selected:   #ecfeff;
+    --map-icon-flash-selected:   #fff7ed;
     --map-icon-neutral-fill:     #eef1f6;
     --map-icon-led-off:          #7d8a9a;
     --map-icon-boom-fill:        #7a8494;
@@ -91,31 +91,32 @@
     --map-sat-label-pill-bg:         rgba(255, 255, 255, 0.94);
     --map-sat-label-pill-shadow:     0 0 0 1px rgba(15, 23, 42, 0.1), 0 2px 8px rgba(15, 23, 42, 0.12);
     --map-sat-label-color:           #0f172a;
-    --map-sat-label-selected-color:  #0d4f4a;
+    --map-sat-label-selected-color:  #c2410c;
     --map-sat-label-shadow:          0 1px 2px rgba(0, 0, 0, 0.18);
 
-    /* Выбранный КА — синий трек на карте/небе; шкала Az/El отдельно (графит) */
-    --selected-track:          #0066cc;
+    /* Выбранный КА — яркий синий трек */
+    --selected-track:          #1e88e5;
     --selected-marker:         var(--selected-track);
-    --selected-footprint:      rgba(26, 114, 184, 0.68);
-    --selected-footprint-fill: rgba(26, 114, 184, 0.26);
+    /* ЗРВ выбранного КА — фиолет (голубой теряется на ocean) */
+    --selected-footprint:      rgba(123, 31, 162, 0.75);
+    --selected-footprint-fill: rgba(123, 31, 162, 0.22);
 
-    /* Наблюдатель: тёмно-зелёный — не спутник и не вода */
-    --observer-marker:        #15803d;
+    /* Наблюдатель — оранжевый, как в остальных темах */
+    --observer-marker:        #f67400;
     --observer-marker-stroke: rgba(255, 255, 255, 0.95);
     --observer-label:         #0f172a;
 
     --map-russia-border:  #5a6878;
-    --map-russia-label:   #cc8800;
+    --map-russia-label:   #f67400;
     --map-city-label:     #2a3038;
     --map-city-marker:    #a03830;
     --map-text-secondary: #0a5878;
 
-    --map-track-line-width:     2.75;
-    --map-selected-track-line-width: 3;
-    --map-secondary-track-line-width: 1.75;
+    --map-track-line-width:     3;
+    --map-selected-track-line-width: 3.25;
+    --map-secondary-track-line-width: 2.25;
     --map-footprint-line-width: 2.5;
-    --map-secondary-track-fallback: #004488;
+    --map-secondary-track-fallback: #1e88e5;
 
     /* SkyView: холст = общий фон; диск неба чуть светлее и прохладнее */
     --sky-bg:            #dfe4ea;
@@ -125,8 +126,8 @@
     --sky-grid-text:     #3a4858;
     --sky-elevation-label: #4a5a6a;
     --sky-azimuth-label: #3a4858;
-    --sky-track:         #00aa00;
-    --sky-track-arrow:   #008800;
+    --sky-track:         #2e9e4f;
+    --sky-track-arrow:   #249143;
     --sky-aos:           #00aa00;
     --sky-los:           #cc3030;
     /* Подписи AOS/LOS в таблице и SkyView — сквозные с --sky-aos / --sky-los */
@@ -139,13 +140,13 @@
     --sky-satellite-label: #1a2830;
     --sky-satellite-aura: rgba(176, 24, 24, 0.55);
     --sky-satellite-aura-border: #a01414;
-    --sky-observer:      #cc8800;
-    --sky-observer-secondary: #aa6600;
+    --sky-observer:      #f67400;
+    --sky-observer-secondary: #e65c00;
     --sky-info-text:     #0a6e8c;
     --sky-info-label:    #1e2832;
     --sky-time-text:     #3d4754;
     --sky-selected-track:  var(--selected-track);
-    --sky-selected-sat-label: #125892;
+    --sky-selected-sat-label: #1565c0;
     --sky-selected-marker: var(--selected-track);
     --sky-grid-line-width:  1.0;
     --sky-grid-outer-width: 2.0;

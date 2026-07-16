@@ -50,6 +50,10 @@ type PageHandler struct {
 // cfg — поставщик актуального конфига (наблюдатель, тема). Может быть nil
 // для тестов; тогда подставляются пустые значения.
 func NewPageHandler(fsys fs.FS, devMode bool, theme string, cfg ConfigGetter) (*PageHandler, error) {
+	theme = normalizeTheme(theme)
+	if !allowedThemes[theme] {
+		theme = "classic"
+	}
 	h := &PageHandler{
 		devMode: devMode,
 		fsys:    fsys,
@@ -84,8 +88,16 @@ type PageData struct {
 
 // Допустимые имена тем (совпадают с файлами colors-*.css).
 var allowedThemes = map[string]bool{
-	"default": true, "classic": true, "stsplus": true, "light": true,
-	"breeze-light": true, "breeze": true, "breeze-steel": true, "breeze-dark": true,
+	"classic": true, "default": true, "stsplus": true, "light": true,
+	"breeze": true, "breeze-steel": true, "breeze-dark": true,
+}
+
+// normalizeTheme подменяет устаревшие имена тем (breeze-light → light).
+func normalizeTheme(theme string) string {
+	if theme == "breeze-light" {
+		return "light"
+	}
+	return theme
 }
 
 // themeFromCookie возвращает тему из cookie ss-theme, если она допустима.
@@ -94,8 +106,9 @@ func themeFromCookie(r *http.Request) string {
 	if err != nil || c.Value == "" {
 		return ""
 	}
-	if allowedThemes[c.Value] {
-		return c.Value
+	theme := normalizeTheme(c.Value)
+	if allowedThemes[theme] {
+		return theme
 	}
 	return ""
 }
@@ -122,6 +135,10 @@ func (h *PageHandler) pageData(title, tab string, r *http.Request) PageData {
 	}
 	if ct := themeFromCookie(r); ct != "" {
 		theme = ct
+	}
+	theme = normalizeTheme(theme)
+	if !allowedThemes[theme] {
+		theme = "classic"
 	}
 	return PageData{
 		Title:                title,

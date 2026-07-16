@@ -1194,6 +1194,21 @@ test('dark palette has 12 unique hues with min separation >= 24°', () => {
         `min hue separation ${paletteMinHueSeparation(palette)}°`);
 });
 
+test('light palette has 12 unique colors with min separation >= 18°', () => {
+    const prev = global.getThemeId;
+    global.getThemeId = () => 'light';
+    try {
+        const palette = getTrackColorPalette();
+        assert.strictEqual(palette.length, 12);
+        assert.strictEqual(new Set(palette).size, 12);
+        assert.ok(paletteMinHueSeparation(palette) >= 18,
+            `min hue separation ${paletteMinHueSeparation(palette)}°`);
+    } finally {
+        if (prev === undefined) { delete global.getThemeId; }
+        else { global.getThemeId = prev; }
+    }
+});
+
 test('pickTrackColorFromPalette returns first color when none used', () => {
     const palette = getTrackColorPalette();
     const picked = pickTrackColorFromPalette(new Set(), palette);

@@ -2766,8 +2766,8 @@
         const dpr = window.devicePixelRatio || 1;
         const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
 
-        /* Светлая тема: больше «воздуха» в пунктире — меньше шума на карте */
-        ctx.setLineDash(isLight ? [4, 7] : [5, 5]);
+        /* Светлая тема: плотнее пунктир — иначе трассы «пропадают» на светлой карте */
+        ctx.setLineDash(isLight ? [5, 4] : [5, 5]);
         ctx.strokeStyle = color;
         ctx.lineWidth = this._mapSecondaryTrackLineWidth * dpr;
 

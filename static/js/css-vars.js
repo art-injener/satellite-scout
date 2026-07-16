@@ -97,22 +97,6 @@
             'ind-satellite-line': 'rgba(224, 228, 232, 0.35)',
             'ind-out-of-view':    'rgba(218, 68, 83, 0.50)'
         },
-        // Breeze Light (оригинальный KDE Breeze, светлый фон #eff0f1)
-        'breeze-light': {
-            'map-footprint':            'rgba(218, 68, 83, 0.85)',
-            'map-footprint-fill':       'rgba(218, 68, 83, 0.19)',
-            'map-selected-footprint':      'rgba(41, 128, 185, 0.65)',
-            'map-selected-footprint-fill': 'rgba(41, 128, 185, 0.22)',
-            'map-observer-label-stroke': 'rgba(252, 252, 252, 0.95)',
-            'map-observer-label-bg':     'rgba(252, 252, 252, 0.92)',
-            'map-sat-label-stroke':      'rgba(252, 252, 252, 0.95)',
-            'map-sat-label-bg':          'rgba(252, 252, 252, 0.90)',
-            'sky-satellite-glow':   'rgba(41, 128, 185, 0.28)',
-            'sky-satellite-signal': 'rgba(39, 174, 96, 0.35)',
-            'sky-satellite-aura':   'rgba(218, 68, 83, 0.55)',
-            'ind-satellite-line': 'rgba(65, 75, 90, 0.40)',
-            'ind-out-of-view':    'rgba(218, 68, 83, 0.50)'
-        },
         // STSPLUS: ретро-палитра, footprint серый (как в оригинале), яркие DOS-акценты
         'stsplus': {
             'map-footprint':            'rgba(180, 180, 180, 0.60)',
@@ -133,8 +117,8 @@
         'light': {
             'map-footprint':            'rgba(175, 48, 32, 0.88)',
             'map-footprint-fill':       'rgba(175, 48, 32, 0.23)',
-            'map-selected-footprint':      'rgba(26, 114, 184, 0.68)',
-            'map-selected-footprint-fill': 'rgba(26, 114, 184, 0.26)',
+            'map-selected-footprint':      'rgba(123, 31, 162, 0.75)',
+            'map-selected-footprint-fill': 'rgba(123, 31, 162, 0.22)',
             'map-observer-label-stroke': 'rgba(255, 255, 255, 0.92)',
             'map-observer-label-bg':     'rgba(238, 241, 246, 0.92)',
             'map-sat-label-stroke':      'rgba(238, 241, 246, 0.95)',
@@ -167,7 +151,7 @@
 
     /**
      * Возвращает текущий идентификатор темы (кешируется).
-     * @returns {string} значение --theme-id из CSS (classic, ops-center, light, breeze, breeze-steel, breeze-dark, breeze-light, …)
+     * @returns {string} значение --theme-id из CSS (classic, ops-center, light, breeze, …)
      */
     window.getThemeId = function getThemeId() {
         if (!_themeId) {
