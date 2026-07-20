@@ -631,14 +631,14 @@
         ctx.font = '11px monospace';
         ctx.fillStyle = this.colors.textGrid || this.colors.textSecondary;
 
-        // Подписи долготы (внизу) — только для меридианов, попадающих в видимую область.
+        // Подписи долготы (вверху) — только для меридианов, попадающих в видимую область.
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         for (let lon = -150; lon <= 180; lon += step) {
-            const p = this.project(lon, -90);
+            const p = this.project(lon, 90);
             if (p.x < 0 || p.x > this.width) { continue; }
             const label = lon.toString();
-            ctx.fillText(label, p.x, this.height - 14);
+            ctx.fillText(label, p.x, 4);
         }
 
         // Подписи широты (слева)

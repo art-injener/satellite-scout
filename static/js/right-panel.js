@@ -1,7 +1,7 @@
 // План сеансов наблюдения в правой панели (компактная таблица) + кнопки управления.
 // Данные приходят из SSE-события satellite_group_update,
 // не из polling GET /api/passes.
-// Колонки: [глаз — видимость трассы] | NORAD/имя | Az/El | ЗРВ/AOS/LOS | max El / Выс.
+// Колонки: [глаз — видимость трассы] | NORAD/имя | AZ/EL | ЗРВ/AOS/LOS | max EL / ALT.
 // Логика значений колонки 3 совпадает с internal/services/session_table_ui.go (FormatSessionTableColumns).
 
 (function() {
@@ -264,7 +264,7 @@
         this._syncThTrackEye();
     };
 
-    /** Форматирование высоты орбиты для компактной ячейки; «км» в значении, не в шапке. */
+    /** Форматирование высоты орбиты для компактной ячейки; единицы «км» в значении. */
     RightPanelTable.prototype._fmtOrbitAltKm = function(km) {
         const v = Number(km);
         if (!isFinite(v) || v <= 0) { return '\u2014'; }
@@ -277,7 +277,7 @@
         return String(Math.round(v)) + ' км';
     };
 
-    /** Двухстрочная ячейка: макс. El (TCA) и средняя высота орбиты. */
+    /** Двухстрочная ячейка: max EL (TCA) и ALT (средняя высота орбиты). */
     RightPanelTable.prototype._renderOrbitCellHtml = function(sat) {
         const tcaEl = sat && typeof sat.tca_el === 'number' ? sat.tca_el : NaN;
         const altKm = sat && typeof sat.orbit_alt_km === 'number' ? sat.orbit_alt_km : NaN;

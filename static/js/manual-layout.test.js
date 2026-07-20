@@ -541,7 +541,7 @@ test('constructor creates DemodPanel and subscribes to panorama:tune', () => {
     m.destroy();
 });
 
-test('panorama:tune updates demod, loupe center and freq field', () => {
+test('panorama:tune updates demod, spectrum center and freq field', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
     const layoutEl = _domNodes.get('layout-manual');

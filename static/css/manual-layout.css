@@ -4,7 +4,7 @@
 
    Структура (4 строки grid):
      1) Панорама эфира — FFT с метками передатчиков (+ инфо-панель по клику)
-     2) Азимут | Лупа (FFT + Waterfall) | Угол места; приёмник — строка снизу
+     2) Азимут | Спектр (FFT + Waterfall) | Угол места; приёмник — строка снизу
      3) Eye/Const | Демодулятор (ужатый) | Профиль сеанса (El + Doppler)
      4) Телеметрия (на всю ширину, 1 пакет = 1 строка)
 
@@ -20,7 +20,7 @@
     height: 100%;
     padding: 4px;
     gap: 4px;
-    /* Порядок: Панорама | RF (az|лупа|el + rx-bar) | Декодер | Телеметрия */
+    /* Порядок: Панорама | RF (az|спектр|el + rx-bar) | Декодер | Телеметрия */
     grid-template-rows:
         minmax(90px, 0.72fr)
         calc(var(--indicator-block-height) + var(--ml-rx-bar-outer-height) + 4px)
@@ -219,7 +219,7 @@
     font-variant-numeric: tabular-nums;
 }
 
-/* ───────────── Уровень 2: Az | Лупа | El + приёмник на всю ширину ───────────── */
+/* ───────────── Уровень 2: Az | Спектр | El + приёмник на всю ширину ───────────── */
 
 .ml-block--rf {
     grid-template-columns:
@@ -242,7 +242,7 @@
     max-height: var(--indicator-block-height);
 }
 
-.ml-block--rf > .ml-loupe {
+.ml-block--rf > .ml-spectrum {
     grid-column: 2;
     grid-row: 1;
     display: flex;
@@ -267,21 +267,21 @@
     max-height: var(--ml-rx-bar-outer-height);
 }
 
-/* Лупа — только спектр + шкала + водопад */
-.ml-loupe__fft {
+/* Спектр — только FFT + шкала + водопад */
+.ml-spectrum__fft {
     flex: 4;
     min-height: 0;
     overflow: hidden;
 }
 
-.ml-loupe__scale-wrap {
+.ml-spectrum__scale-wrap {
     height: 18px;
     flex-shrink: 0;
     background: var(--bp-overview-freq-scale-bg, var(--bg-tertiary));
     overflow: hidden;
 }
 
-.ml-loupe__wf {
+.ml-spectrum__wf {
     flex: 6;
     min-height: 0;
     overflow: hidden;

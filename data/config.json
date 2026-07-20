@@ -4,7 +4,7 @@
     "port": "8080"
   },
   "ui": {
-    "theme": "light",
+    "theme": "default",
     "show_all_tracks_on_start": false
   },
   "tle": {

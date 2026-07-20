@@ -156,32 +156,22 @@
             });
         }
 
-        // Overlay-панель: сохраняем ссылку ДО инициализации SSE,
-        // чтобы ensureSSEAndSubscriptions мог создать InfoPanel и OverlayPanel.
-        const infoPanelEl = document.getElementById('sat-overlay-panel');
-        if (infoPanelEl) {
-            window._infoPanelEl = infoPanelEl;
+        // Overlay «КА» временно отключён; оперативные данные — Map HUD.
+        // Map HUD до initCanvasPlaceholders: ensureSSE успевает вызвать setStateManager.
+        if (typeof window.MapHud === 'function') {
+            const hudRoot = document.getElementById('map-hud');
+            if (hudRoot) {
+                window._mapHud = new window.MapHud(hudRoot, window._stateManager || null);
+            }
         }
 
         // Initialize canvas placeholders
         initCanvasPlaceholders();
 
-        // Часы в app-header: UTC и местное время (обновление каждую секунду)
-        const headerUtc = document.getElementById('app-header-utc');
-        const headerLocal = document.getElementById('app-header-local');
-        if (headerUtc || headerLocal) {
-            const pad2 = function(n) { return n < 10 ? '0' + n : String(n); };
-            const updateHeaderClocks = function() {
-                const now = new Date();
-                if (headerUtc) {
-                    headerUtc.textContent = pad2(now.getUTCHours()) + ':' + pad2(now.getUTCMinutes()) + ':' + pad2(now.getUTCSeconds());
-                }
-                if (headerLocal) {
-                    headerLocal.textContent = pad2(now.getHours()) + ':' + pad2(now.getMinutes()) + ':' + pad2(now.getSeconds());
-                }
-            };
-            updateHeaderClocks();
-            setInterval(updateHeaderClocks, 1000);
+        // Если SSE уже поднял StateManager до создания HUD — догоняем подписку.
+        if (window._mapHud && window._stateManager
+            && typeof window._mapHud.setStateManager === 'function') {
+            window._mapHud.setStateManager(window._stateManager);
         }
 
         // Инициализация расписания сеансов наблюдения, если мы на вкладке /passes
@@ -312,14 +302,9 @@
             }
         });
 
-        // InfoPanel — обновляет поля #ip-* в overlay-панели через StateManager.
-        if (window._infoPanelEl && typeof window.InfoPanel === 'function') {
-            window._infoPanel = new window.InfoPanel(window._infoPanelEl, window._stateManager);
-        }
-
-        // OverlayPanel — управляет видимостью overlay-панели (show/hide).
-        if (window._infoPanelEl && typeof window.OverlayPanel === 'function') {
-            window._overlayPanel = new window.OverlayPanel(window._infoPanelEl, window._stateManager);
+        // Map HUD: подписка на StateManager (если блок есть на странице).
+        if (window._mapHud && typeof window._mapHud.setStateManager === 'function') {
+            window._mapHud.setStateManager(window._stateManager);
         }
 
         console.log('[app.js] Подключение к SSE...');
@@ -876,16 +861,22 @@
         if (skyCanvas && window.SkyView) {
             window.skyView = new window.SkyView(skyCanvas);
 
-            // Панель информации под графиком: AOS, LOS, Длит., Осталось
-            window.skyView.setInfoElements({
-                aos: 'skyview-info-aos',
-                los: 'skyview-info-los',
-                dur: 'skyview-info-dur',
-                remaining: 'skyview-info-remaining'
-            });
+            // Панель AOS/LOS под SkyView: см. SHOW_INFO_PANEL в skyview.js (сейчас выкл.).
+            if (typeof window.skyView.setInfoElements === 'function') {
+                window.skyView.setInfoElements({
+                    aos: 'skyview-info-aos',
+                    los: 'skyview-info-los',
+                    dur: 'skyview-info-dur',
+                    remaining: 'skyview-info-remaining'
+                });
+            }
 
-            // Canvas SkyView всегда 300×300 px — квадратный буфер, окружность без искажений
-            const skySize = 300;
+            // Canvas SkyView — квадратный буфер по --skyview-size (CSS), не путать с Az/El.
+            const skySizeCss = parseInt(
+                getComputedStyle(document.documentElement).getPropertyValue('--skyview-size'),
+                10
+            );
+            const skySize = (skySizeCss > 0) ? skySizeCss : 340;
             if (skyCanvas.width !== skySize || skyCanvas.height !== skySize) {
                 skyCanvas.width = skySize;
                 skyCanvas.height = skySize;

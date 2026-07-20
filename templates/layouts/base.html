@@ -4,15 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css?v=151">
+    <link rel="stylesheet" href="/static/css/main.css?v=159">
     <link id="theme-colorsheet" rel="stylesheet" href="/static/css/colors-{{.Theme}}.css?v=58">
     <link rel="stylesheet" href="/static/css/overlay-panel.css?v=1">
     <link rel="stylesheet" href="/static/css/info-panel.css?v=6">
-    <link rel="stylesheet" href="/static/css/right-panel.css?v=32">
+    <link rel="stylesheet" href="/static/css/right-panel.css?v=39">
     <link rel="stylesheet" href="/static/css/bottom-panel.css?v=10">
     <link rel="stylesheet" href="/static/css/auto-mode.css?v=44">
     <link rel="stylesheet" href="/static/css/manual-layout.css?v=42">
     <link rel="stylesheet" href="/static/css/map-zoom.css?v=2">
+    <link rel="stylesheet" href="/static/css/map-hud.css?v=19">
     <link rel="stylesheet" href="/static/css/settings.css?v=4">
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/htmx-sse.js"></script>
@@ -20,7 +21,7 @@
 <body data-show-all-tracks-on-start="{{if .ShowAllTracksOnStart}}true{{else}}false{{end}}">
     <!-- Основная область: левый сайдбар убран; план сеансов — вкладка нижней панели на /tracking -->
     <div class="main-wrapper{{if eq .ActiveTab "tracking"}} tracking-page{{end}}">
-        <!-- App Header — строка над картой: режим, тракт, настройки, место, время, связь -->
+        <!-- App Header — режим, тракт, настройки, связь; время и наблюдатель — Map HUD на карте -->
         <header class="app-header" id="app-header">
             <div class="app-header__controls">
                 <div class="app-header__section app-header__modes">
@@ -34,6 +35,10 @@
                     <label class="app-header__label" for="app-header-path">Тракт</label>
                     <select class="app-header__dropdown" id="app-header-path" aria-label="Активный радиотракт"></select>
                 </div>
+                <div class="app-header__section app-header__theme">
+                    <label class="app-header__label" for="theme-select">Тема</label>
+                    <select class="app-header__dropdown" id="theme-select" aria-label="Цветовая схема интерфейса"></select>
+                </div>
                 <button type="button" class="app-header__section app-header__settings" id="app-header-settings" title="Настройки приложения" aria-label="Открыть настройки">
                     <svg class="app-header__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="12" cy="12" r="3"/>
@@ -42,38 +47,13 @@
                     <span class="app-header__text">Настройки</span>
                 </button>
             </div>
-            <!-- Правая группа: место, время, связь -->
             <div class="app-header__info">
-            <div class="app-header__section app-header__observer" title="Точка наблюдения">
-                <svg class="app-header__icon app-header__icon--observer" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <!-- Мачта-вышка -->
-                    <path d="M12 3 L8 21 M12 3 L16 21 M7 21 L17 21 M9.5 12 L14.5 12"/>
-                    <!-- Дуги радиоволн слева -->
-                    <path d="M5 5 A7 7 0 0 0 5 12"/>
-                    <path d="M2 4 A11 11 0 0 0 2 13"/>
-                    <!-- Дуги радиоволн справа -->
-                    <path d="M19 5 A7 7 0 0 1 19 12"/>
-                    <path d="M22 4 A11 11 0 0 1 22 13"/>
-                </svg>
-                <span class="app-header__text" id="app-header-city">{{.ObserverName}}</span>
-                <span class="app-header__subtext" id="app-header-coords">{{.ObserverCoordsLabel}}</span>
-            </div>
-            <!-- Секция: Время -->
-            <div class="app-header__section app-header__time">
-                <span class="app-header__time-item"><span class="app-header__time-label">MSK</span><span class="app-header__time-value" id="app-header-local">--:--:--</span></span>
-                <span class="app-header__time-item"><span class="app-header__time-label">UTC</span><span class="app-header__time-value" id="app-header-utc">--:--:--</span></span>
-            </div>
-            <!-- Секция: Статус связи -->
             <div class="app-header__section app-header__connection sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Обмен данными с бэкендом">
                 <svg class="app-header__icon app-header__icon--connection" viewBox="0 0 32 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <!-- Левый узел (сервер) -->
                     <circle cx="4" cy="12" r="3" stroke="none"/>
-                    <!-- Правый узел (клиент) -->
                     <circle cx="28" cy="12" r="3" stroke="none"/>
-                    <!-- Стрелка вправо (отправка) -->
                     <path d="M9 8 L21 8" fill="none"/>
                     <path d="M18 5 L22 8 L18 11" fill="none"/>
-                    <!-- Стрелка влево (приём) -->
                     <path d="M23 16 L11 16" fill="none"/>
                     <path d="M14 13 L10 16 L14 19" fill="none"/>
                 </svg>
@@ -105,13 +85,14 @@
     <script src="/static/js/azimuth.js?v=72"></script>
     <script src="/static/js/elevation.js?v=69"></script>
     <script src="/static/js/callouts.js?v=23"></script>
-    <script src="/static/js/earthview.js?v=133"></script>
-    <script src="/static/js/skyview.js?v=71"></script>
+    <script src="/static/js/earthview.js?v=134"></script>
+    <script src="/static/js/skyview.js?v=73"></script>
     <script src="/static/js/satellite-state.js?v=20"></script>
     <script src="/static/js/sse-client.js?v=5"></script>
     <script src="/static/js/info-panel.js?v=4"></script>
     <script src="/static/js/overlay-panel.js?v=2"></script>
-    <script src="/static/js/right-panel.js?v=18"></script>
+    <script src="/static/js/map-hud.js?v=5"></script>
+    <script src="/static/js/right-panel.js?v=20"></script>
     <script src="/static/js/bottom-panel.js?v=15"></script>
     <script src="/static/js/manual-panorama.js?v=6"></script>
     <script src="/static/js/pass-profile.js?v=2"></script>
@@ -123,7 +104,7 @@
     <script src="/static/js/auto-link.js?v=35"></script>
     <script src="/static/js/mode-manager.js?v=2"></script>
     <script src="/static/js/mode-bar.js?v=8"></script>
-    <script src="/static/js/app.js?v=92"></script>
-    <script src="/static/js/settings.js?v=4"></script>
+    <script src="/static/js/app.js?v=101"></script>
+    <script src="/static/js/settings.js?v=6"></script>
 </body>
 </html>

@@ -124,9 +124,9 @@
             this._wf.start();
         }
 
-        // Ресайз спектра/водопада при изменении контейнера .ml-loupe
+        // Ресайз спектра/водопада при изменении контейнера .ml-spectrum
         const self = this;
-        const specWrap = this._fftCanvas ? this._fftCanvas.closest('.ml-loupe') : null;
+        const specWrap = this._fftCanvas ? this._fftCanvas.closest('.ml-spectrum') : null;
         if (specWrap) {
             this._observeRaw(specWrap, function() {
                 if (self._fft) { self._fft._resize(); }
@@ -230,7 +230,7 @@
     };
 
     /**
-     * Перенастройка активного канала: демодулятор + лупа (§ 4.6 вариант A).
+     * Перенастройка активного канала: демодулятор + Спектр (§ 4.6 вариант A).
      * @param {{ freqMHz?: number, tx?: Object }} detail
      */
     ManualLayout.prototype._tuneChannel = function(detail) {

@@ -23,7 +23,7 @@
     width: 100%;
     border-collapse: collapse;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 13px;
     table-layout: fixed;
     /* Не показывать текстовую каретку и не давать выделять текст как в поле ввода */
     user-select: none;
@@ -39,7 +39,7 @@
 
 .passes-compact__table th {
     padding: 7px 6px;
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--panel-header-title, var(--text-primary));
     text-transform: uppercase;
@@ -55,7 +55,7 @@
     box-shadow: inset 0 -1px 0 var(--border-color);
 }
 
-/* Колонки: глаз (28px) | NORAD/имя (auto) | Азим./Угол (68px) | ЗРВ (68px) | Пакеты (56px) */
+/* Колонки: глаз (28px) | NORAD/имя (auto) | AZ/EL (64px) | ЗРВ (68px) | max EL/ALT (70px) */
 .pc-th-track {
     width: 28px;
     text-align: center;
@@ -83,7 +83,7 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -98,7 +98,7 @@
 
 /* Колонка Азим. / Угол м. — фиксированная ширина */
 .pc-th-azel {
-    width: 68px;
+    width: 64px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
@@ -110,7 +110,7 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -134,14 +134,15 @@
 
 /* Колонка «max El / Выс.» — TCA и средняя высота орбиты по TLE */
 .passes-compact__table th.pc-th-orbit {
-    width: 52px;
+    width: 70px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
-    font-size: 13px;
+    font-size: 14px;
+    font-weight: 600;
 }
 
 .pc-th-orbit__stack {
@@ -149,7 +150,7 @@
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -167,7 +168,7 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 13px;
+    font-size: 14px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -301,7 +302,7 @@
 }
 
 .pc-sat-name {
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
     overflow: hidden;
@@ -313,7 +314,7 @@
 
 /* Третья строка только если есть sat_alias */
 .pc-sat-alias {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-muted);
     white-space: nowrap;
     overflow: hidden;
@@ -324,7 +325,7 @@
 
 /* Третья строка ячейки — NORAD (мелкий, приглушённый) */
 .pc-sat-norad {
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 400;
     color: var(--text-muted);
     white-space: nowrap;
@@ -348,14 +349,14 @@
 }
 
 .pc-azel-az {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-primary);
     line-height: 1.4;
     white-space: nowrap;
 }
 
 .pc-azel-el {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-primary);
     line-height: 1.4;
     white-space: nowrap;
@@ -372,7 +373,7 @@
 
 .pc-orbit-el,
 .pc-orbit-alt {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-primary);
     white-space: nowrap;
 }
@@ -391,7 +392,7 @@
 
 .pc-col3-dur,
 .pc-col3-until {
-    font-size: 12px;
+    font-size: 13px;
     white-space: nowrap;
 }
 
@@ -494,10 +495,12 @@
     border-color: var(--accent-danger);
 }
 
-/* ===== SkyView: расширенный блок по ширине; центровка по правой панели ===== */
+/* ===== SkyView: квадратное окно (см. --skyview-size) =====
+   Инфо-панель под графиком сейчас выкл. (SHOW_INFO_PANEL / tracking.html).
+   При возврате панели: width → --skyview-block-width, height → calc(var(--skyview-size) + var(--info-panel-height)). */
 .right-panel__skyview {
-    width: var(--skyview-block-width);
-    height: var(--indicator-block-height);
+    width: var(--skyview-size);
+    height: var(--skyview-size);
     flex-shrink: 0;
     align-self: center;
     display: flex;
@@ -510,10 +513,10 @@
     margin-top: 4px;
 }
 
-/* Окно отрисовки — квадрат 300×300, не растягивать по ширине блока, центрировать */
+/* Окно отрисовки — квадрат по --skyview-size, центрировать */
 .right-panel__skyview-canvas {
-    width: var(--indicator-graph-size);
-    height: var(--indicator-graph-size);
+    width: var(--skyview-size);
+    height: var(--skyview-size);
     flex-shrink: 0;
     flex-grow: 0;
     align-self: center;
@@ -521,8 +524,8 @@
 
 .right-panel__skyview-canvas canvas {
     display: block;
-    width: var(--indicator-graph-size);
-    height: var(--indicator-graph-size);
+    width: var(--skyview-size);
+    height: var(--skyview-size);
     background: var(--bg-primary);
 }
 

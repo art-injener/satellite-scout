@@ -9,7 +9,6 @@
         <div class="settings-modal__body">
             <nav class="settings-modal__tabs" role="tablist" aria-label="Разделы настроек">
                 <button type="button" class="settings-tab is-active" data-tab="station" role="tab" aria-selected="true">Станция</button>
-                <button type="button" class="settings-tab" data-tab="ui" role="tab">Внешний вид</button>
                 <button type="button" class="settings-tab" data-tab="observer" role="tab">Наблюдатель</button>
                 <button type="button" class="settings-tab" data-tab="tle" role="tab">TLE</button>
                 <button type="button" class="settings-tab" data-tab="satnogs" role="tab">SatNOGS</button>
@@ -54,21 +53,6 @@
                         <input type="text" class="settings-field__input" data-bind="server.port" pattern="[0-9]+">
                     </label>
                     <p class="settings-pane__hint">Изменение порта применится после перезапуска приложения.</p>
-                </article>
-                <article class="settings-pane" data-pane="ui">
-                    <h3 class="settings-pane__title">Тема интерфейса</h3>
-                    <label class="settings-field">
-                        <span class="settings-field__label">Тема</span>
-                        <select class="settings-field__input" data-bind="ui.theme">
-                            <option value="classic">Classic</option>
-                            <option value="default">Operations Center</option>
-                            <option value="stsplus">STSPLUS</option>
-                            <option value="light">Light</option>
-                            <option value="breeze">Breeze</option>
-                            <option value="breeze-steel">Breeze Steel</option>
-                            <option value="breeze-dark">Breeze Dark</option>
-                        </select>
-                    </label>
                     <h3 class="settings-pane__title">Поведение при старте</h3>
                     <label class="settings-field settings-field--checkbox">
                         <input type="checkbox" class="settings-field__checkbox" data-bind="ui.show_all_tracks_on_start">

@@ -101,20 +101,19 @@
                     <div class="tracking-overlay-name" id="tracking-overlay-name">---</div>
                 </div>
             </div>
-            <!-- Overlay-панель параметров КА — слева поверх карты -->
+            {{/* Overlay «КА» временно отключён — оперативные данные в Map HUD (VFD). */}}
+            {{if false}}
             <div class="overlay-panel" id="sat-overlay-panel">
                 <div class="overlay-panel__header">
                     <span class="overlay-panel__title">КА</span>
                     <button class="overlay-panel__close" id="overlay-panel-close" title="Скрыть">×</button>
                 </div>
                 <div class="overlay-panel__body">
-                    <!-- Группа: Спутник -->
                     <div class="overlay-group">
                         <div class="overlay-row"><span class="overlay-label">NORAD</span><span class="overlay-value" id="ip-norad">---</span></div>
                         <div class="overlay-row"><span class="overlay-label">Имя</span><span class="overlay-value" id="ip-name">---</span></div>
                         <div class="overlay-row"><span class="overlay-label">Группа</span><span class="overlay-value" id="ip-group">---</span></div>
                     </div>
-                    <!-- Группа: Геоданные -->
                     <div class="overlay-group">
                         <div class="overlay-row"><span class="overlay-label">Lon</span><span class="overlay-value" id="ip-lon">---.--°</span></div>
                         <div class="overlay-row"><span class="overlay-label">Lat</span><span class="overlay-value" id="ip-lat">---.--°</span></div>
@@ -122,32 +121,77 @@
                         <div class="overlay-row"><span class="overlay-label">El</span><span class="overlay-value" id="ip-el">---°</span></div>
                         <div class="overlay-row"><span class="overlay-label">Alt</span><span class="overlay-value" id="ip-alt">--- km</span></div>
                     </div>
-                    <!-- Группа: Орбита -->
                     <div class="overlay-group">
                         <div class="overlay-row"><span class="overlay-label">Виток</span><span class="overlay-value" id="ip-orbit">#---</span></div>
                         <div class="overlay-row"><span class="overlay-label">Период</span><span class="overlay-value" id="ip-period">---</span></div>
                         <div class="overlay-row"><span class="overlay-label">Наклон</span><span class="overlay-value" id="ip-incl">---°</span></div>
                     </div>
-                    <!-- Группа: Пролёт -->
                     <div class="overlay-group">
                         <div class="overlay-row"><span class="overlay-label">AOS</span><span class="overlay-value" id="ip-aos">--:--:--</span></div>
                         <div class="overlay-row"><span class="overlay-label">TCA</span><span class="overlay-value" id="ip-tca">--:--:--</span></div>
                         <div class="overlay-row"><span class="overlay-label">LOS</span><span class="overlay-value" id="ip-los">--:--:--</span></div>
                         <div class="overlay-row"><span class="overlay-label">Длит.</span><span class="overlay-value" id="ip-dur">--:--</span></div>
                     </div>
-                    <!-- Группа: Радиолиния -->
                     <div class="overlay-group">
                         <div class="overlay-row"><span class="overlay-label">ТМИ</span><span class="overlay-value" id="ip-tmi">--- MHz</span></div>
                         <div class="overlay-row"><span class="overlay-label">Downlink</span><span class="overlay-value" id="ip-downlink">--- MHz</span></div>
                     </div>
                 </div>
-                <!-- Скрытые элементы: совместимость с InfoPanel (ip-status, ip-uplink, ip-mod) -->
                 <span style="display:none" id="ip-status"></span>
                 <span style="display:none" id="ip-uplink"></span>
                 <span style="display:none" id="ip-mod"></span>
             </div>
-            <!-- Кнопка восстановления overlay (видна, когда панель закрыта вручную) -->
             <button type="button" class="overlay-panel__restore" id="overlay-panel-restore" title="Показать параметры КА">КА</button>
+            {{end}}
+
+            <!-- Map HUD: время, наблюдатель, параметры текущего КА (стиль VFD) -->
+            <div class="map-hud" id="map-hud" aria-label="Индикаторы карты">
+                <div class="map-hud__panel map-hud__time">
+                    <div class="map-hud__row">
+                        <span class="map-hud__lbl">UTC</span>
+                        <span class="map-hud__val" id="map-hud-utc">--:--:--</span>
+                    </div>
+                    <div class="map-hud__row">
+                        <span class="map-hud__lbl">MSK</span>
+                        <span class="map-hud__val" id="map-hud-local">--:--:--</span>
+                    </div>
+                </div>
+                <div class="map-hud__panel map-hud__observer" title="Точка наблюдения">
+                    <div class="map-hud__row map-hud__row--stack">
+                        <span class="map-hud__val map-hud__val--name" id="map-hud-city">{{.ObserverName}}</span>
+                    </div>
+                    <div class="map-hud__row map-hud__row--stack">
+                        <span class="map-hud__val map-hud__val--coords" id="map-hud-coords">{{.ObserverCoordsLabel}}</span>
+                    </div>
+                </div>
+                <div class="map-hud__panel map-hud__pass" id="map-hud-pass">
+                    <div class="map-hud__group">
+                        <span class="map-hud__val map-hud__val--sat" id="map-hud-name">—</span>
+                        <span class="map-hud__lbl">NORAD:</span>
+                        <span class="map-hud__val" id="map-hud-norad">-----</span>
+                    </div>
+                    <div class="map-hud__group">
+                        <span class="map-hud__field">
+                            <span class="map-hud__lbl">AZ:</span>
+                            <span class="map-hud__val" id="map-hud-az">—</span>
+                        </span>
+                        <span class="map-hud__field">
+                            <span class="map-hud__lbl">EL:</span>
+                            <span class="map-hud__val" id="map-hud-el">— / —</span>
+                        </span>
+                    </div>
+                    <div class="map-hud__group map-hud__group--cd">
+                        <span class="map-hud__lbl" id="map-hud-cd-label"></span>
+                        <span class="map-hud__val" id="map-hud-cd-time">—</span>
+                    </div>
+                    <div class="map-hud__group">
+                        <span class="map-hud__field">
+                            <span class="map-hud__lbl">ALT:</span>
+                            <span class="map-hud__val" id="map-hud-alt">—</span>
+                        </span>
+                    </div>
+                </div>
+            </div>
 
             <!-- Контролы масштабирования карты (MAP-ZOOM-001): + / ⌂ / − -->
             <div class="map-zoom-controls" id="map-zoom-controls" role="group" aria-label="Масштаб карты">
@@ -160,7 +204,7 @@
 </div>
 
 <!-- Layout Ручного режима: 5 горизонтальных блоков (ADR-004 § 4.3 v2026-06-04).
-     Порядок: Панорама → Лупа → Декодер → Телеметрия → Антенна (Az | Profile+Rotator | El).
+     Порядок: Панорама → Спектр → Декодер → Телеметрия → Антенна (Az | Profile+Rotator | El).
      SkyView остаётся в правой панели. -->
 <section class="layout-manual" id="layout-manual" aria-hidden="true">
     <!-- Уровень 1: Панорама (FFT + метки передатчиков, клик → инфо сбоку) -->
@@ -178,7 +222,7 @@
         </section>
     </div>
 
-    <!-- Уровень 2: Az | Лупа (спектр + водопад) | El; приёмник — строка на всю ширину -->
+    <!-- Уровень 2: Az | Спектр (FFT + водопад) | El; приёмник — строка на всю ширину -->
     <div class="ml-block ml-block--rf">
         <section class="ml-panel ml-az">
             <div class="ml-panel__body ml-indicator-body">
@@ -198,14 +242,14 @@
             </div>
         </section>
 
-        <section class="ml-panel ml-loupe">
-            <div class="ml-loupe__fft">
+        <section class="ml-panel ml-spectrum">
+            <div class="ml-spectrum__fft">
                 <canvas id="manual-fft" class="ml-canvas" role="img" aria-label="БПФ-спектр узкой полосы активного канала"></canvas>
             </div>
-            <div class="ml-loupe__scale-wrap">
+            <div class="ml-spectrum__scale-wrap">
                 <canvas id="manual-spec-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
             </div>
-            <div class="ml-loupe__wf">
+            <div class="ml-spectrum__wf">
                 <canvas id="manual-wf" class="ml-canvas" role="img" aria-label="Спектрограмма (водопад) активного канала"></canvas>
             </div>
         </section>
@@ -453,15 +497,15 @@
                             </th>
                             <th class="pc-th-azel">
                                 <div class="pc-th-azel__stack">
-                                    <span class="pc-th-azel__line">Азим.</span>
-                                    <span class="pc-th-azel__line">Уг.мест</span>
+                                    <span class="pc-th-azel__line">AZ</span>
+                                    <span class="pc-th-azel__line">EL</span>
                                 </div>
                             </th>
                             <th class="pc-th-countdown">ЗРВ</th>
                             <th class="pc-th-orbit">
-                                <div class="pc-th-orbit__stack" title="Максимальный угол места (TCA) и средняя высота орбиты">
-                                    <span class="pc-th-orbit__line">max El</span>
-                                    <span class="pc-th-orbit__line">Выс.</span>
+                                <div class="pc-th-orbit__stack" title="Максимальный угол места в TCA и средняя высота орбиты">
+                                    <span class="pc-th-orbit__line">max EL</span>
+                                    <span class="pc-th-orbit__line">ALT</span>
                                 </div>
                             </th>
                         </tr>
@@ -474,11 +518,13 @@
             <button class="rp-ctrl rp-ctrl--track" id="rp-track" disabled title="Сопровождать выбранный спутник: антенна, узкополосный водопад" aria-label="Сопровождать"><span class="rp-ctrl__label">Сопровождать</span></button>
             <button class="rp-ctrl rp-ctrl--reset" id="rp-reset" disabled title="Снять с наблюдения" aria-label="Снять с наблюдения"><span class="rp-ctrl__label">Сброс</span></button>
         </div>
-        <!-- SkyView: окружность 300×300 px + отдельная панель информации (не влияет на размер окна отрисовки) -->
+        <!-- SkyView: квадрат по --indicator-graph-size; инфо-панель опциональна -->
         <div class="right-panel__skyview" id="right-panel-skyview">
             <div class="right-panel__skyview-canvas">
-                <canvas id="sky-view" width="300" height="300" role="img" aria-label="Полусфера небесной сцены: треки спутников по азимуту и углу места"></canvas>
+                <canvas id="sky-view" width="340" height="340" role="img" aria-label="Полусфера небесной сцены: треки спутников по азимуту и углу места"></canvas>
             </div>
+            {{/* Панель AOS/LOS под SkyView отключена. Включить: убрать if false + SHOW_INFO_PANEL=true в skyview.js */}}
+            {{if false}}
             <div class="skyview-info" id="skyview-info">
                 <div class="skyview-info__row">
                     <div class="skyview-info__group">
@@ -499,6 +545,7 @@
                     </div>
                 </div>
             </div>
+            {{end}}
         </div>
     </div>
 </section>

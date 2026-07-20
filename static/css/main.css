@@ -5,16 +5,18 @@
     --bottom-panel-height: calc(var(--indicator-block-height) + 10px);
     --footer-height: 44px;
 
-    /* Правая панель: под SkyView 300×300 px, расписание сеансов наблюдения и отступы */
-    --right-panel-width: 340px;
+    /* Правая панель: таблица + SkyView (размер SkyView — отдельно, см. --skyview-size) */
+    --right-panel-width: 350px;
 
-    /* Панели информации (SkyView, Az/El) — фиксированная высота (подобрана под макет) */
+    /* Панели информации (Az/El в РТН) — фиксированная высота */
     --info-panel-height: 28px;
-    /* Размер области графика для SkyView и Az/El — единое значение для одинаковой высоты */
-    --indicator-graph-size: 300px;
-    /* Ширина блока SkyView в правой панели (график остаётся 300×300, блок шире для инфо) */
-    --skyview-block-width: 320px;
-    /* Общая высота блока «график + инфо-панель» для всех трёх индикаторов */
+    /* Размер графиков Az/El и высота нижней панели РТН (не связан со SkyView) */
+    --indicator-graph-size: 310px;
+    /* Квадрат SkyView в правой панели — независим от РТН */
+    --skyview-size: 340px;
+    /* Ширина блока SkyView, если снова включить инфо-панель под графиком */
+    --skyview-block-width: 350px;
+    /* Общая высота блока «график Az/El + инфо-панель» */
     --indicator-block-height: calc(var(--indicator-graph-size) + var(--info-panel-height));
     --info-panel-padding-x: 8px;
     --info-panel-padding-y: 4px;
@@ -487,6 +489,11 @@ body.mode-manual:not(.station-basic) .right-panel {
 
 .app-header__dropdown:hover {
     color: var(--accent-primary);
+}
+
+.app-header__theme .app-header__dropdown {
+    min-width: 11rem;
+    max-width: 16rem;
 }
 
 .app-header__dropdown option {

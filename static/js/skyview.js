@@ -4,6 +4,13 @@
 (function() {
     'use strict';
 
+    /**
+     * Вывод AOS/LOS/«Ост.» в DOM-панель под SkyView.
+     * false — обновление отключено; разметка панели в tracking.html тоже выключена ({{if false}}).
+     * Чтобы вернуть: true здесь и убрать {{if false}} вокруг #skyview-info.
+     */
+    const SHOW_INFO_PANEL = false;
+
     /** Обрезка имени спутника для canvas-подписей (макс. 16 символов). */
     function _shortName(name, maxLen) {
         if (!name) { return ''; }
@@ -100,14 +107,14 @@
     }
 
     /**
-     * Обновление геометрии: окружность ВСЕГДА занимает квадратную область с минимальными полями
-     * (только под метки сторон света N/S/E/W и цифры азимута)
+     * Обновление геометрии: окружность с полями под метки N/S/E/W и азимуты,
+     * чтобы подписи не выходили за край canvas.
      */
     SkyView.prototype._updateGeometry = function() {
         const w = this.canvas.width;
         const h = this.canvas.height;
-        // Минимальный отступ — только для вывода символов сторон света и меток азимута
-        const padding = 16;
+        // Азимутные подписи на r+14 (шрифт ~12px), кардиналы на r+10 (шрифт 15px).
+        const padding = 28;
 
         this.centerX = w / 2;
         this.centerY = h / 2;
@@ -984,6 +991,7 @@
      * @param {Object} els - { aos, los, dur, remaining } — id строки или HTMLElement
      */
     SkyView.prototype.setInfoElements = function(els) {
+        if (!SHOW_INFO_PANEL) { return; }
         const getEl = function(v) {
             if (!v) {return null;}
             return typeof v === 'string' ? document.getElementById(v) : v;
@@ -1001,6 +1009,7 @@
     /** Обновление текстового блока под графиком: AOS, LOS, Длит., время до конца сеанса (Осталось).
      * При отображении выбранного спутника (отличного от наблюдаемого) показываются данные выбранного. */
     SkyView.prototype._updateInfoPanelDOM = function() {
+        if (!SHOW_INFO_PANEL) { return; }
         const e = this._infoEls;
         if (!e.aos && !e.los && !e.dur && !e.remaining) {return;}
 

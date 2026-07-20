@@ -3,7 +3,7 @@
 
    Отвечает за:
      - чтение GET /api/settings и заполнение формы по data-bind путям;
-     - переключение табов (Станция / Внешний вид / Наблюдатель / TLE / SatNOGS
+     - переключение табов (Станция / Наблюдатель / TLE / SatNOGS
        / Радиотракты / Исключения);
      - dirty-state, валидация, отправка PUT /api/settings;
      - live-preview наблюдателя на карте (EarthView.setObserverPreview)
@@ -988,8 +988,7 @@
      * — снимает live-preview;
      * — переставляет реальный observer на канвасе (маркер не возвращается
      *   к старому положению до прихода group-update);
-     * — обновляет город/координаты в footer (он рендерится сервером один раз
-     *   при загрузке страницы).
+     * — обновляет город/координаты в Map HUD (серверный рендер только при загрузке).
      */
     SettingsModal.prototype._applyObserverFrontUpdates = function() {
         const obs = this._workingConfig
@@ -1011,17 +1010,24 @@
             }
         }
 
-        const cityEl = document.getElementById('app-header-city');
-        if (cityEl && obs.name) {
-            cityEl.textContent = obs.name;
-        }
-        const coordsEl = document.getElementById('app-header-coords');
-        if (coordsEl && typeof obs.lat === 'number' && typeof obs.lon === 'number') {
+        if (typeof obs.lat === 'number' && typeof obs.lon === 'number') {
             const ns = obs.lat >= 0 ? 'N' : 'S';
             const ew = obs.lon >= 0 ? 'E' : 'W';
-            coordsEl.textContent =
+            const coordsLabel =
                 Math.abs(obs.lat).toFixed(2) + '°' + ns + ' ' +
                 Math.abs(obs.lon).toFixed(2) + '°' + ew;
+            if (window._mapHud && typeof window._mapHud.setObserver === 'function') {
+                window._mapHud.setObserver(obs.name || '', coordsLabel);
+            } else {
+                const cityEl = document.getElementById('map-hud-city');
+                if (cityEl && obs.name) {
+                    cityEl.textContent = obs.name;
+                }
+                const coordsEl = document.getElementById('map-hud-coords');
+                if (coordsEl) {
+                    coordsEl.textContent = coordsLabel;
+                }
+            }
         }
     };
 
