@@ -98,7 +98,7 @@
     /* ══════════════════════════════════════════════════════════════
        Наблюдатель (EarthView)
        ══════════════════════════════════════════════════════════════ */
-    --observer-marker:        #ff9500;
+    --observer-marker:        #ffffff;
     --observer-marker-stroke: rgba(0, 0, 0, 0.9);
     --observer-label:         #ffffff;
 
@@ -135,8 +135,8 @@
     --sky-satellite-label: #d0d8e0;
     --sky-satellite-aura: rgba(197, 88, 88, 1);
     --sky-satellite-aura-border: #ff8888;
-    --sky-observer:      #ffaa00;
-    --sky-observer-secondary: #ff6600;
+    --sky-observer:      #ffffff;
+    --sky-observer-secondary: #e0e0e0;
     --sky-info-text:     #00d4aa;
     --sky-info-label:    #d0d8e0;
     --sky-time-text:     #00a8ff;

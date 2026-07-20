@@ -625,6 +625,7 @@ func TestBroadcastGroupUpdate_OrbitMetricsFields(t *testing.T) {
 					SatName:  "ISS",
 					AOS:      now.UnixMilli(),
 					LOS:      now.Add(10 * time.Minute).UnixMilli(),
+					TCA:      now.Add(5 * time.Minute).UnixMilli(),
 					Duration: 600,
 					TCAEl:    51.3,
 				},
@@ -652,6 +653,10 @@ func TestBroadcastGroupUpdate_OrbitMetricsFields(t *testing.T) {
 			if !strings.Contains(body, fmt.Sprintf(`"orbit_alt_km":%.0f`, wantAlt)) &&
 				!strings.Contains(body, fmt.Sprintf(`"orbit_alt_km":%g`, wantAlt)) {
 				t.Errorf("orbit_alt_km in payload, want ~%.0f; body fragment: %s", wantAlt, body)
+			}
+			wantTCA := now.Add(5 * time.Minute).UnixMilli()
+			if !strings.Contains(body, fmt.Sprintf(`"tca":%d`, wantTCA)) {
+				t.Errorf("tca missing or wrong, want %d; body fragment: %s", wantTCA, body)
 			}
 			return
 		}

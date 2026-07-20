@@ -104,7 +104,7 @@
     /* ══════════════════════════════════════════════════════════════
        Наблюдатель
        ══════════════════════════════════════════════════════════════ */
-    --observer-marker:        #f67400;
+    --observer-marker:        #ffffff;
     --observer-marker-stroke: rgba(0, 0, 0, 0.9);
     --observer-label:         #f0f2f4;
 
@@ -140,8 +140,8 @@
     --sky-satellite-label: #d0d4d8;
     --sky-satellite-aura: rgba(218, 68, 83, 0.70);
     --sky-satellite-aura-border: #da4453;
-    --sky-observer:      #f67400;
-    --sky-observer-secondary: #d06020;
+    --sky-observer:      #ffffff;
+    --sky-observer-secondary: #e0e0e0;
     --sky-info-text:     #3daee9;
     --sky-info-label:    #d0d4d8;
     --sky-time-text:     #8a9096;

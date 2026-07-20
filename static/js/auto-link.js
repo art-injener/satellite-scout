@@ -73,6 +73,32 @@
     }
 
     /** Преобразование SatNOGS-передатчика в строку UI; null для неактивных. */
+    /** В SSE уже есть намёк на TX (primary), а строк в auto-link ещё нет. */
+    function satHasTxHint(sat) {
+        if (!sat) { return false; }
+        if (sat.freq_mhz && String(sat.freq_mhz).trim()) { return true; }
+        if (typeof sat.tx_count === 'number' && sat.tx_count > 0) { return true; }
+        return false;
+    }
+
+    /**
+     * Нужен повторный fetch SatNOGS: в группе есть КА с freq/tx_count,
+     * но для них ещё нет строк передатчиков (типичный промах кеша при старте).
+     */
+    function groupNeedsTxReload(satellites, rows) {
+        const withRows = new Set();
+        for (let i = 0; i < (rows || []).length; i++) {
+            const r = rows[i];
+            if (r && r.satNoradId) { withRows.add(r.satNoradId); }
+        }
+        for (let i = 0; i < (satellites || []).length; i++) {
+            const sat = satellites[i];
+            if (!satHasTxHint(sat)) { continue; }
+            if (!withRows.has(sat.norad_id)) { return true; }
+        }
+        return false;
+    }
+
     function txFromSatnogs(sat, t) {
         if (!t || !t.alive) { return null; }
         if (t.status && String(t.status).toLowerCase() !== 'active') { return null; }
@@ -93,6 +119,32 @@
             freqMHz: f,
             mode: modulation,
             description: t.description || '',
+        };
+    }
+
+    /**
+     * Строка TX из primary (REST) или намёка SSE — когда полный список пуст,
+     * но частота уже известна (иначе auto-link и tx_cycle остаются пустыми).
+     */
+    function txFromPrimaryHint(sat, primary) {
+        const norad = Number(sat && sat.norad_id) || 0;
+        if (!norad) { return null; }
+        const p = primary || {};
+        const freqMHzStr = (p.freq_mhz || (sat && sat.freq_mhz) || '').trim();
+        const hz = Number(p.freq_hz) || 0;
+        if (!freqMHzStr && hz <= 0) { return null; }
+        const uuid = (p.uuid || (sat && sat.tx_uuid) || '').trim() || ('primary-' + norad);
+        const mode = (p.modulation || p.mode || (sat && sat.modulation) || '').trim();
+        const f = freqMHzStr || freqMHz(hz);
+        return {
+            id: 'tx-' + norad + '-' + uuid,
+            uuid: uuid,
+            satNoradId: norad,
+            satLabel: (sat && sat.sat_name) || ('NORAD ' + norad),
+            freqHz: hz || Math.round(parseFloat(f) * 1e6),
+            freqMHz: f,
+            mode: mode,
+            description: p.description || '',
         };
     }
 
@@ -595,6 +647,18 @@
          */
         _softGroupUpdate(data) {
             const sats = data.satellites || [];
+            // SSE уже отдал freq/mod, а первый REST к SatNOGS был пустым (кеш
+            // ещё не прогрелся) — сбрасываем пустой кеш и догружаем строки TX.
+            if (groupNeedsTxReload(sats, this._rows)) {
+                for (let i = 0; i < sats.length; i++) {
+                    const sat = sats[i];
+                    if (satHasTxHint(sat)) {
+                        this._txCache.delete(sat.norad_id);
+                    }
+                }
+                this._rebuildFromGroup(sats);
+                return;
+            }
             const byNorad = new Map();
             for (let i = 0; i < sats.length; i++) {
                 const s = sats[i];
@@ -1355,18 +1419,30 @@
                 }
                 return resp.json();
             }).then((data) => {
-                if (!data || !Array.isArray(data.transmitters)) { return []; }
                 const out = [];
-                for (const t of data.transmitters) {
-                    const row = txFromSatnogs(sat, t);
-                    if (row) { out.push(row); }
+                if (data && Array.isArray(data.transmitters)) {
+                    for (const t of data.transmitters) {
+                        const row = txFromSatnogs(sat, t);
+                        if (row) { out.push(row); }
+                    }
+                    out.sort((a, b) => a.freqHz - b.freqHz);
                 }
-                out.sort((a, b) => a.freqHz - b.freqHz);
+                // Полный список пуст — берём primary из REST или freq из SSE.
+                if (out.length === 0) {
+                    const fallback = txFromPrimaryHint(sat, data && data.primary);
+                    if (fallback) {
+                        out.push(fallback);
+                    } else {
+                        // Нет даже primary: не кешируем пустоту (ждём прогрев SatNOGS).
+                        this._txCache.delete(norad);
+                    }
+                }
                 return out;
             }).catch((err) => {
                 console.warn(`[OverviewLink] SatNOGS ${norad} fetch failed:`, err);
                 this._txCache.delete(norad);
-                return [];
+                const fallback = txFromPrimaryHint(sat, null);
+                return fallback ? [fallback] : [];
             });
             this._txCache.set(norad, p);
             return p;
@@ -1577,6 +1653,9 @@
         groupFingerprint,
         txListFingerprint,
         txFromSatnogs,
+        txFromPrimaryHint,
+        satHasTxHint,
+        groupNeedsTxReload,
         getLayoutMode,
         setLayoutMode,
         dopplerHz,

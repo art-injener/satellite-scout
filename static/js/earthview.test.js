@@ -1174,6 +1174,44 @@ test('drawSelectedLayer: past рисуется точками (setLineDash не�
         'последний stroke (future) — сплошной: ' + JSON.stringify(strokeDashes[strokeDashes.length - 1]));
 });
 
+test('drawSecondaryGroundTrack: past — пунктир, future — сплошная', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    ev._mapSecondaryTrackLineWidth = 1.5;
+    const sat = {
+        noradId: 11111,
+        name: 'SEC',
+        track: {
+            past: [[
+                { lon: 10, lat: 30, ts: 1000000 },
+                { lon: 15, lat: 32, ts: 1060000 },
+            ]],
+            future: [[
+                { lon: 20, lat: 34, ts: 1120000 },
+                { lon: 25, lat: 36, ts: 1180000 },
+            ]],
+        },
+    };
+    ev._drawSecondaryGroundTrack(sat, 0, '#aabbcc');
+
+    let curDash = [];
+    const strokeDashes = [];
+    for (const c of calls) {
+        if (c.op === 'setLineDash') {
+            curDash = Array.isArray(c.args[0]) ? c.args[0].slice() : [];
+        }
+        if (c.op === 'stroke') {
+            strokeDashes.push(curDash.slice());
+        }
+    }
+    assert.ok(strokeDashes.length >= 2, 'минимум 2 stroke (past + future)');
+    assert.ok(strokeDashes[0].length > 0,
+        'первый stroke (past) — пунктир: ' + JSON.stringify(strokeDashes[0]));
+    assert.ok(strokeDashes[strokeDashes.length - 1].length === 0,
+        'последний stroke (future) — сплошной: ' + JSON.stringify(strokeDashes[strokeDashes.length - 1]));
+});
+
 test('drawSelectedLayer: legacy-формат (массив точек) → используется selectedTrack (future-цвет)', () => {
     const { ev, calls } = makeRecordingTrackEv();
     ev.observer = { lon: 0, lat: 0, name: 'gw' };

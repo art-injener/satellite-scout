@@ -6,7 +6,7 @@
     --footer-height: 44px;
 
     /* Правая панель: таблица + SkyView (размер SkyView — отдельно, см. --skyview-size) */
-    --right-panel-width: 350px;
+    --right-panel-width: 368px;
 
     /* Панели информации (Az/El в РТН) — фиксированная высота */
     --info-panel-height: 28px;
@@ -338,7 +338,8 @@ body.mode-manual:not(.station-basic) .right-panel {
     flex-shrink: 0;
 }
 
-.app-header__controls .app-header__section {
+.app-header__controls .app-header__section,
+.app-header__info .app-header__section {
     padding: 0 8px 0 10px;
 }
 
@@ -378,7 +379,7 @@ body.mode-manual:not(.station-basic) .right-panel {
 .app-header__icon--observer {
     width: 24px;
     height: 24px;
-    color: var(--observer-marker, #d4a040);
+    color: var(--observer-marker, #ffffff);
 }
 
 .app-header__icon--connection {

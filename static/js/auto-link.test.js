@@ -74,6 +74,9 @@ const {
     groupFingerprint,
     txListFingerprint,
     txFromSatnogs,
+    txFromPrimaryHint,
+    satHasTxHint,
+    groupNeedsTxReload,
     renderStrip,
     powerLevelClass,
     cellLabel,
@@ -387,6 +390,48 @@ const {
     assert.strictEqual(row.totalPackets, 42);
     assert.strictEqual(row.history.length, 1);
     console.log('PASS: applyTxCycleUpdate');
+})();
+
+(function test_groupNeedsTxReload_when_sse_has_freq_but_no_rows() {
+    assert.strictEqual(satHasTxHint({ freq_mhz: '145.825' }), true);
+    assert.strictEqual(satHasTxHint({ tx_count: 2 }), true);
+    assert.strictEqual(satHasTxHint({}), false);
+    assert.strictEqual(
+        groupNeedsTxReload(
+            [{ norad_id: 25544, freq_mhz: '145.825' }],
+            []
+        ),
+        true,
+        'нет строк TX при наличии freq в SSE → нужен reload'
+    );
+    assert.strictEqual(
+        groupNeedsTxReload(
+            [{ norad_id: 25544, freq_mhz: '145.825' }],
+            [{ satNoradId: 25544 }]
+        ),
+        false,
+        'строки уже есть → reload не нужен'
+    );
+    console.log('PASS: groupNeedsTxReload');
+})();
+
+(function test_txFromPrimaryHint() {
+    const row = txFromPrimaryHint(
+        { norad_id: 25544, sat_name: 'ISS', freq_mhz: '145.825', modulation: 'AFSK 1200', tx_uuid: 'abc' },
+        null
+    );
+    assert.ok(row, 'fallback from SSE hint');
+    assert.strictEqual(row.uuid, 'abc');
+    assert.strictEqual(row.freqMHz, '145.825');
+    assert.strictEqual(row.mode, 'AFSK 1200');
+
+    const fromPrimary = txFromPrimaryHint(
+        { norad_id: 1, sat_name: 'X' },
+        { uuid: 'u1', freq_mhz: '437.800', modulation: 'BPSK', freq_hz: 437800000 }
+    );
+    assert.strictEqual(fromPrimary.uuid, 'u1');
+    assert.strictEqual(fromPrimary.freqMHz, '437.800');
+    console.log('PASS: txFromPrimaryHint');
 })();
 
 console.log('\nAll auto-link tests passed.');

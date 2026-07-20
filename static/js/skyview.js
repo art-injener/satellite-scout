@@ -346,7 +346,7 @@
         const waveSpread = Math.PI / 4; // ±45° раствор дуг от горизонтали
         const emitterR = 2 * dpr; // радиус излучателя
 
-        const iconColor = this.colors.observer || '#ffaa00';
+        const iconColor = this.colors.observer || '#ffffff';
         const haloColor = this.colors.canvasTextStroke || 'rgba(0,0,0,0.9)';
 
         // Контуры мачты и волн одним path — рисуем дважды: тёмный ореол,
@@ -846,8 +846,8 @@
             satelliteSignal: themeRgba('sky-satellite-signal', 'rgba(0, 255, 200, 0.5)'),
             satLabel:        cssVar('--sky-satellite-label', '#ffffff'),
             satelliteAuraBorder: cssVar('--sky-satellite-aura-border', '#ff8888'),
-            observer:          cssVar('--sky-observer', '#ffaa00'),
-            observerSecondary: cssVar('--sky-observer-secondary', '#ff6600'),
+            observer:          cssVar('--sky-observer', '#ffffff'),
+            observerSecondary: cssVar('--sky-observer-secondary', '#e0e0e0'),
             infoText:  cssVar('--sky-info-text', '#00d4aa'),
             infoLabel: cssVar('--sky-info-label', '#ffffff'),
             timeText:  cssVar('--sky-time-text', '#708898'),

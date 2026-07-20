@@ -70,6 +70,12 @@ type groupSatInfo struct {
 	// Modulation — короткая подпись для UI: "FM" или "AFSK 1200".
 	FreqMHz    string `json:"freq_mhz,omitempty"`
 	Modulation string `json:"modulation,omitempty"`
+	// TxUUID — UUID primary-передатчика.
+	TxUUID string `json:"tx_uuid,omitempty"`
+	// TxCount — число активных downlink-передатчиков.
+	TxCount int `json:"tx_count,omitempty"`
+	// TCA — момент максимальной элевации, Unix ms.
+	TCA int64 `json:"tca,omitempty"`
 	// TCAEl — максимальный угол места пролёта (градусы).
 	TCAEl float64 `json:"tca_el"`
 	// OrbitAltKm — средняя высота орбиты по TLE (апогей+перигей)/2, км.
@@ -122,8 +128,11 @@ type PassProvider interface {
 // TransmitterInfo — узкая выжимка для UI, не зависящая от пакета satnogs.
 // Поля совпадают с satnogs.TransmitterSummary — sat-tracking использует только их.
 type TransmitterInfo struct {
+	UUID       string
 	FreqMHz    string
 	Modulation string
+	// Count — число активных downlink-передатчиков у КА (0 если неизвестно).
+	Count int
 }
 
 // TransmitterProvider — источник данных о передатчиках (SatNOGS или мок в тестах).
@@ -794,6 +803,7 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 			UIColDuration: uiDur,
 			UIColUntil:    uiUntil,
 			SkyPath:       sat.Pass.SkyPath,
+			TCA:           sat.Pass.TCA,
 			TCAEl:         roundTo(sat.Pass.TCAEl, 1),
 		}
 		if tle, ok := s.store.Get(sat.NoradID); ok && tle != nil {
@@ -803,6 +813,8 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 			if tx := txProvider.GetPrimaryTransmitter(sat.NoradID); tx != nil {
 				info.FreqMHz = tx.FreqMHz
 				info.Modulation = tx.Modulation
+				info.TxUUID = tx.UUID
+				info.TxCount = tx.Count
 			}
 		}
 		sats[i] = info

@@ -43,7 +43,7 @@ func TestBroadcastGroupUpdate_IncludesFreqAndModulation(t *testing.T) {
 
 	provider := &fakeTransmitterProvider{
 		primaryByID: map[int]*TransmitterInfo{
-			issNoradID: {FreqMHz: "145.825", Modulation: "AFSK 1200"},
+			issNoradID: {UUID: "tx-iss-1", FreqMHz: "145.825", Modulation: "AFSK 1200", Count: 1},
 		},
 	}
 	svc.SetTransmitterProvider(provider)

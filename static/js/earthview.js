@@ -409,8 +409,8 @@
             satelliteGlow: cssVar('--sat-glow', '#00ffff'),
             footprint:              themeRgba('map-footprint', 'rgba(0,255,255,0.6)'),
             footprintFill:          themeRgba('map-footprint-fill', 'rgba(0,255,255,0.05)'),
-            observer:      cssVar('--observer-marker', '#ff0000'),
-            observerLabel:       cssVar('--observer-marker', '#ff9500'),
+            observer:      cssVar('--observer-marker', '#ffffff'),
+            observerLabel:       cssVar('--observer-marker', '#ffffff'),
             observerLabelStroke: themeRgba('map-observer-label-stroke', 'rgba(0,0,0,0.9)'),
             observerLabelBg:     themeRgba('map-observer-label-bg', 'rgba(0,0,0,0.6)'),
             textPrimary:    cssVar('--text-primary', '#ffffff'),
@@ -1675,7 +1675,7 @@
         const waveSpread = Math.PI / 4; // ±45° раствор дуг от горизонтали
         const emitterR = 2.4 * dpr; // радиус излучателя
 
-        const iconColor = this.colors.observer || '#d4a040';
+        const iconColor = this.colors.observer || '#ffffff';
         const haloColor = this.colors.observerLabelStroke || 'rgba(0,0,0,0.9)';
 
         // Контуры мачты и волн одним path — рисуем дважды: тёмный ореол под низ,
@@ -2752,7 +2752,8 @@
     };
 
     /**
-     * Отрисовка пунктирной трассы вторичного спутника.
+     * Отрисовка трассы вторичного спутника: past — пунктир, future — сплошная
+     * (тот же контраст направления, что у выбранного КА, но без точек).
      * Вызывается только из _drawSecondaryLayer при sat.track && isTrackVisible(noradId) —
      * пока трасса в таблице не включена (⊙), линия на карте не рисуется.
      * @private
@@ -2766,8 +2767,6 @@
         const dpr = window.devicePixelRatio || 1;
         const isLight = typeof getThemeId === 'function' && getThemeId() === 'light';
 
-        /* Светлая тема: плотнее пунктир — иначе трассы «пропадают» на светлой карте */
-        ctx.setLineDash(isLight ? [5, 4] : [5, 5]);
         ctx.strokeStyle = color;
         ctx.lineWidth = this._mapSecondaryTrackLineWidth * dpr;
 
@@ -2815,11 +2814,15 @@
         const pastSegs = Array.isArray(track.past) ? track.past : [];
         const futureSegs = Array.isArray(track.future) ? track.future : [];
         const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
+        // Past — пунктир (в светлой теме плотнее, иначе трассы «пропадают»).
         if (Array.isArray(bridgedPast)) {
+            ctx.setLineDash(isLight ? [5, 4] : [5, 5]);
             for (let s = 0; s < bridgedPast.length; s++) {
                 drawSeg(bridgedPast[s]);
             }
         }
+        // Future — сплошная линия «куда летит».
+        ctx.setLineDash([]);
         for (let s = 0; s < futureSegs.length; s++) {
             drawSeg(futureSegs[s]);
         }

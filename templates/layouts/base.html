@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css?v=159">
-    <link id="theme-colorsheet" rel="stylesheet" href="/static/css/colors-{{.Theme}}.css?v=58">
+    <link rel="stylesheet" href="/static/css/main.css?v=163">
+    <link id="theme-colorsheet" rel="stylesheet" href="/static/css/colors-{{.Theme}}.css?v=60">
     <link rel="stylesheet" href="/static/css/overlay-panel.css?v=1">
     <link rel="stylesheet" href="/static/css/info-panel.css?v=6">
-    <link rel="stylesheet" href="/static/css/right-panel.css?v=39">
+    <link rel="stylesheet" href="/static/css/right-panel.css?v=54">
     <link rel="stylesheet" href="/static/css/bottom-panel.css?v=10">
     <link rel="stylesheet" href="/static/css/auto-mode.css?v=44">
     <link rel="stylesheet" href="/static/css/manual-layout.css?v=42">
     <link rel="stylesheet" href="/static/css/map-zoom.css?v=2">
-    <link rel="stylesheet" href="/static/css/map-hud.css?v=19">
+    <link rel="stylesheet" href="/static/css/map-hud.css?v=22">
     <link rel="stylesheet" href="/static/css/settings.css?v=4">
     <script src="/static/vendor/htmx.min.js"></script>
     <script src="/static/vendor/htmx-sse.js"></script>
@@ -35,6 +35,8 @@
                     <label class="app-header__label" for="app-header-path">Тракт</label>
                     <select class="app-header__dropdown" id="app-header-path" aria-label="Активный радиотракт"></select>
                 </div>
+            </div>
+            <div class="app-header__info">
                 <div class="app-header__section app-header__theme">
                     <label class="app-header__label" for="theme-select">Тема</label>
                     <select class="app-header__dropdown" id="theme-select" aria-label="Цветовая схема интерфейса"></select>
@@ -46,19 +48,17 @@
                     </svg>
                     <span class="app-header__text">Настройки</span>
                 </button>
-            </div>
-            <div class="app-header__info">
-            <div class="app-header__section app-header__connection sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Обмен данными с бэкендом">
-                <svg class="app-header__icon app-header__icon--connection" viewBox="0 0 32 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-                    <circle cx="4" cy="12" r="3" stroke="none"/>
-                    <circle cx="28" cy="12" r="3" stroke="none"/>
-                    <path d="M9 8 L21 8" fill="none"/>
-                    <path d="M18 5 L22 8 L18 11" fill="none"/>
-                    <path d="M23 16 L11 16" fill="none"/>
-                    <path d="M14 13 L10 16 L14 19" fill="none"/>
-                </svg>
-                <span class="app-header__text" id="connection-status-label">Отключено</span>
-            </div>
+                <div class="app-header__section app-header__connection sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Обмен данными с бэкендом">
+                    <svg class="app-header__icon app-header__icon--connection" viewBox="0 0 32 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <circle cx="4" cy="12" r="3" stroke="none"/>
+                        <circle cx="28" cy="12" r="3" stroke="none"/>
+                        <path d="M9 8 L21 8" fill="none"/>
+                        <path d="M18 5 L22 8 L18 11" fill="none"/>
+                        <path d="M23 16 L11 16" fill="none"/>
+                        <path d="M14 13 L10 16 L14 19" fill="none"/>
+                    </svg>
+                    <span class="app-header__text" id="connection-status-label">Отключено</span>
+                </div>
             </div>
         </header>
         <main class="main" role="tabpanel">
@@ -85,14 +85,14 @@
     <script src="/static/js/azimuth.js?v=72"></script>
     <script src="/static/js/elevation.js?v=69"></script>
     <script src="/static/js/callouts.js?v=23"></script>
-    <script src="/static/js/earthview.js?v=134"></script>
-    <script src="/static/js/skyview.js?v=73"></script>
+    <script src="/static/js/earthview.js?v=137"></script>
+    <script src="/static/js/skyview.js?v=74"></script>
     <script src="/static/js/satellite-state.js?v=20"></script>
     <script src="/static/js/sse-client.js?v=5"></script>
     <script src="/static/js/info-panel.js?v=4"></script>
     <script src="/static/js/overlay-panel.js?v=2"></script>
-    <script src="/static/js/map-hud.js?v=5"></script>
-    <script src="/static/js/right-panel.js?v=20"></script>
+    <script src="/static/js/map-hud.js?v=8"></script>
+    <script src="/static/js/right-panel.js?v=30"></script>
     <script src="/static/js/bottom-panel.js?v=15"></script>
     <script src="/static/js/manual-panorama.js?v=6"></script>
     <script src="/static/js/pass-profile.js?v=2"></script>
@@ -101,7 +101,7 @@
     <script src="/static/js/eye-constellation.js?v=4"></script>
     <script src="/static/js/manual-rx-bar.js?v=2"></script>
     <script src="/static/js/manual-layout.js?v=15"></script>
-    <script src="/static/js/auto-link.js?v=35"></script>
+    <script src="/static/js/auto-link.js?v=37"></script>
     <script src="/static/js/mode-manager.js?v=2"></script>
     <script src="/static/js/mode-bar.js?v=8"></script>
     <script src="/static/js/app.js?v=101"></script>

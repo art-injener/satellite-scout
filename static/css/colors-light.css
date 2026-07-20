@@ -102,7 +102,8 @@
     --selected-footprint-fill: rgba(123, 31, 162, 0.22);
 
     /* Наблюдатель — оранжевый, как в остальных темах */
-    --observer-marker:        #f67400;
+    /* На светлой карте/небе белый не читается — тёмный «инверсный» observer. */
+    --observer-marker:        #1a1f28;
     --observer-marker-stroke: rgba(255, 255, 255, 0.95);
     --observer-label:         #0f172a;
 
@@ -140,8 +141,8 @@
     --sky-satellite-label: #1a2830;
     --sky-satellite-aura: rgba(176, 24, 24, 0.55);
     --sky-satellite-aura-border: #a01414;
-    --sky-observer:      #f67400;
-    --sky-observer-secondary: #e65c00;
+    --sky-observer:      #1a1f28;
+    --sky-observer-secondary: #2a3140;
     --sky-info-text:     #0a6e8c;
     --sky-info-label:    #1e2832;
     --sky-time-text:     #3d4754;

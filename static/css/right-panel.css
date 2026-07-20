@@ -55,7 +55,7 @@
     box-shadow: inset 0 -1px 0 var(--border-color);
 }
 
-/* Колонки: глаз (28px) | NORAD/имя (auto) | AZ/EL (64px) | ЗРВ (68px) | max EL/ALT (70px) */
+/* Колонки: глаз (28px) | имя | МГц/MOD | AZ/EL | ЗРВ */
 .pc-th-track {
     width: 28px;
     text-align: center;
@@ -75,6 +75,8 @@
     text-align: center;
     vertical-align: middle;
     line-height: 1.2;
+    font-size: 13px;
+    letter-spacing: 0;
 }
 
 /* Две строки: NORAD ID сверху, имя КА снизу (в ячейке: NORAD → имя → при alias строка в скобках) */
@@ -83,7 +85,7 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -98,11 +100,13 @@
 
 /* Колонка Азим. / Угол м. — фиксированная ширина */
 .pc-th-azel {
-    width: 64px;
+    width: 72px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
     line-height: 1.2;
+    font-size: 13px;
+    letter-spacing: 0;
 }
 
 .pc-th-azel__stack {
@@ -110,7 +114,7 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -125,39 +129,43 @@
 
 /* Колонка До AOS / До LOS — фиксированная ширина */
 .pc-th-countdown {
-    width: 68px;
+    width: 66px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
     line-height: 1.2;
+    font-size: 13px;
+    letter-spacing: 0;
 }
 
-/* Колонка «max El / Выс.» — TCA и средняя высота орбиты по TLE */
-.passes-compact__table th.pc-th-orbit {
+/* Колонка FREQ / MOD — primary-передатчик SatNOGS */
+.passes-compact__table th.pc-th-tx {
     width: 70px;
     white-space: normal;
     text-align: center;
     vertical-align: middle;
-    line-height: 1.2;
+    line-height: 1.15;
     text-transform: none;
     letter-spacing: 0;
-    font-size: 14px;
+    font-size: 13px;
     font-weight: 600;
+    padding-left: 3px;
+    padding-right: 3px;
 }
 
-.pc-th-orbit__stack {
+.pc-th-tx__stack {
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 2px;
-    font-size: 14px;
-    line-height: 1.2;
+    font-size: 13px;
+    line-height: 1.15;
     text-transform: none;
     letter-spacing: 0;
     font-weight: 600;
 }
 
-.pc-th-orbit__line {
+.pc-th-tx__line {
     display: block;
     white-space: nowrap;
 }
@@ -168,7 +176,7 @@
     flex-direction: column;
     align-items: center;
     gap: 3px;
-    font-size: 14px;
+    font-size: 13px;
     line-height: 1.2;
     text-transform: none;
     letter-spacing: 0;
@@ -362,24 +370,119 @@
     white-space: nowrap;
 }
 
-/* Колонка «max El / Выс.»: TCA и средняя высота орбиты по TLE. */
-.pc-orbit-cell {
+/* Колонка FREQ / MOD: частота/мод + при N>1 полоска ▾ внизу на всю ширину. */
+.pc-tx-cell {
     font-variant-numeric: tabular-nums;
     text-align: center;
     vertical-align: middle;
-    padding: 4px 4px !important;
+    padding: 4px 2px !important;
     line-height: 1.3;
+    position: relative;
 }
 
-.pc-orbit-el,
-.pc-orbit-alt {
-    font-size: 13px;
+.pc-tx-cell--multi {
+    padding-bottom: 2px !important;
+}
+
+.pc-tx-main {
+    display: block;
+    width: 100%;
+    min-width: 0;
+}
+
+.pc-tx-freq,
+.pc-tx-mod {
     color: var(--text-primary);
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
 }
 
-.pc-orbit-alt {
+.pc-tx-freq {
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+}
+
+.pc-tx-mod {
     color: var(--text-muted);
+    font-size: 12px;
+    /* Без многоточия: размер подгоняет _fitTxModFonts в right-panel.js */
+    text-overflow: clip;
+}
+
+/* Полоска выпадашки внизу ячейки — широкая зона клика, без ломания колонок. */
+.pc-tx-more {
+    display: block;
+    box-sizing: border-box;
+    width: 100%;
+    margin: 3px 0 0;
+    padding: 2px 0 1px;
+    border: none;
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.14));
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    letter-spacing: 0;
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.pc-tx-more:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.pc-tx-menu {
+    position: fixed;
+    z-index: 1200;
+    min-width: 160px;
+    max-width: 260px;
+    max-height: 240px;
+    overflow-y: auto;
+    padding: 4px 0;
+    background: var(--panel-bg, #1a1f24);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.15));
+    border-radius: 4px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    font-size: 12px;
+}
+
+.pc-tx-menu__loading,
+.pc-tx-menu__empty {
+    padding: 8px 12px;
+    color: var(--text-muted);
+}
+
+.pc-tx-menu__item {
+    padding: 6px 12px;
+    color: var(--text-primary);
+}
+
+.pc-tx-menu__item + .pc-tx-menu__item {
+    border-top: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+.pc-tx-menu__freq {
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.pc-tx-menu__mod {
+    font-weight: 400;
+    color: var(--text-muted);
+}
+
+.pc-tx-menu__desc {
+    margin-top: 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 /* Колонка 3: верх — до AOS / «ЗРВ»; низ — длит. пролёта до AOS или остаток до LOS (см. right-panel.js) */

@@ -174,6 +174,25 @@
     gap: 6px;
 }
 
+/* Стрелка тренда EL — крупнее и ярче значений, чтобы читалась с первого взгляда. */
+.map-hud__el-dir {
+    display: none;
+    margin-right: 3px;
+    min-width: 0.85em;
+    font-size: 1.55em;
+    font-weight: 900;
+    line-height: 1;
+    color: #ffe8a0;
+    text-shadow:
+        0 0 5px rgba(255, 210, 80, 1),
+        0 0 14px rgba(255, 150, 20, 0.85);
+    vertical-align: middle;
+}
+
+.map-hud__el-dir:not(:empty) {
+    display: inline-block;
+}
+
 .map-hud__group .map-hud__field + .map-hud__field {
     margin-left: 10px;
 }

@@ -176,7 +176,8 @@
                             <span class="map-hud__val" id="map-hud-az">—</span>
                         </span>
                         <span class="map-hud__field">
-                            <span class="map-hud__lbl">EL:</span>
+                            <span class="map-hud__lbl">EL NOW/MAX:</span>
+                            <span class="map-hud__el-dir" id="map-hud-el-dir" aria-hidden="true"></span>
                             <span class="map-hud__val" id="map-hud-el">— / —</span>
                         </span>
                     </div>
@@ -495,19 +496,19 @@
                                     <span class="pc-th-sat__line">NORAD ID</span>
                                 </div>
                             </th>
-                            <th class="pc-th-azel">
+                            <th class="pc-th-tx">
+                                <div class="pc-th-tx__stack" title="Частота (МГц) и модуляция передатчика (SatNOGS)">
+                                    <span class="pc-th-tx__line">FREQ,МГц</span>
+                                    <span class="pc-th-tx__line">MOD</span>
+                                </div>
+                            </th>
+                            <th class="pc-th-azel" title="Азимут и угол места, градусы">
                                 <div class="pc-th-azel__stack">
-                                    <span class="pc-th-azel__line">AZ</span>
-                                    <span class="pc-th-azel__line">EL</span>
+                                    <span class="pc-th-azel__line">AZ,°</span>
+                                    <span class="pc-th-azel__line">EL,°</span>
                                 </div>
                             </th>
                             <th class="pc-th-countdown">ЗРВ</th>
-                            <th class="pc-th-orbit">
-                                <div class="pc-th-orbit__stack" title="Максимальный угол места в TCA и средняя высота орбиты">
-                                    <span class="pc-th-orbit__line">max EL</span>
-                                    <span class="pc-th-orbit__line">ALT</span>
-                                </div>
-                            </th>
                         </tr>
                     </thead>
                     <tbody id="passes-compact-body"></tbody>

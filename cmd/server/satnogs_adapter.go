@@ -26,9 +26,22 @@ func (a *satnogsTransmitterAdapter) GetPrimaryTransmitter(noradID int) *services
 	if tx == nil {
 		return nil
 	}
+	count := 0
+	all := a.svc.GetAllTransmitters(noradID)
+	for i := range all {
+		t := &all[i]
+		if t.IsActive() && t.HasDownlink() {
+			count++
+		}
+	}
+	if count == 0 {
+		count = 1 // primary есть — минимум один TX
+	}
 	return &services.TransmitterInfo{
+		UUID:       tx.UUID,
 		FreqMHz:    tx.FreqMHz,
 		Modulation: tx.Modulation,
+		Count:      count,
 	}
 }
 
@@ -43,14 +56,13 @@ func (a *satnogsTransmitterAdapter) RequestFetch(noradIDs []int) {
 // ListActiveTransmitters — реализация интерфейса services.TxCatalog.
 // Отдаёт UUID только тех передатчиков, у которых есть downlink и которые
 // в активном статусе (alive + status=active).
+// Если полный список пуст/отфильтрован, но primary уже есть — отдаём его UUID,
+// чтобы mock tx_cycle и auto-link не оставались без данных имитации.
 func (a *satnogsTransmitterAdapter) ListActiveTransmitters(noradID int) []services.TransmitterRef {
 	if a == nil || a.svc == nil {
 		return nil
 	}
 	all := a.svc.GetAllTransmitters(noradID)
-	if len(all) == 0 {
-		return nil
-	}
 	out := make([]services.TransmitterRef, 0, len(all))
 	for i := range all {
 		t := &all[i]
@@ -62,5 +74,11 @@ func (a *satnogsTransmitterAdapter) ListActiveTransmitters(noradID int) []servic
 		}
 		out = append(out, services.TransmitterRef{UUID: t.UUID})
 	}
-	return out
+	if len(out) > 0 {
+		return out
+	}
+	if tx := a.svc.GetPrimaryTransmitter(noradID); tx != nil && tx.UUID != "" {
+		return []services.TransmitterRef{{UUID: tx.UUID}}
+	}
+	return nil
 }

@@ -2,13 +2,30 @@
  * MapHud — VFD-индикаторы поверх Earth View.
  * Левый верх: UTC / местное время.
  * Правый верх: точка наблюдения.
- * Низ: NORAD · AZ/EL · countdown · max EL · ALT (логика как в плане сеансов).
+ * Низ: NORAD · AZ · EL NOW/MAX (+↑/↓) · countdown · ALT.
  */
 (function() {
     'use strict';
 
     function pad2(n) {
         return n < 10 ? '0' + n : String(n);
+    }
+
+    /**
+     * Стрелка тренда EL по фазе пролёта: до TCA — ↑, после — ↓.
+     * Вне окна AOS…LOS или без TCA — пустая строка.
+     * @param {number} nowMs
+     * @param {number} tcaMs
+     * @param {number} aos
+     * @param {number} los
+     * @returns {string}
+     */
+    function elTrendArrow(nowMs, tcaMs, aos, los) {
+        if (!tcaMs || !aos || !los || los <= aos) { return ''; }
+        if (nowMs < aos || nowMs > los) { return ''; }
+        if (nowMs < tcaMs) { return '\u2191'; }
+        if (nowMs > tcaMs) { return '\u2193'; }
+        return '\u2014';
     }
 
     /**
@@ -31,6 +48,7 @@
             norad: document.getElementById('map-hud-norad'),
             az: document.getElementById('map-hud-az'),
             el: document.getElementById('map-hud-el'),
+            elDir: document.getElementById('map-hud-el-dir'),
             cdLabel: document.getElementById('map-hud-cd-label'),
             cdTime: document.getElementById('map-hud-cd-time'),
             alt: document.getElementById('map-hud-alt'),
@@ -164,6 +182,7 @@
         this._setText(this._els.norad, '-----');
         this._setText(this._els.az, '—');
         this._setText(this._els.el, '— / —');
+        this._setText(this._els.elDir, '');
         this._setText(this._els.cdLabel, '');
         this._setText(this._els.cdTime, '—');
         this._setText(this._els.alt, '—');
@@ -191,11 +210,18 @@
             this._setText(this._els.az, '—');
         }
 
-        // Текущая EL / max EL пролёта
+        // Текущая EL / max EL + стрелка тренда (до TCA ↑, после ↓).
         const elNow = (pos && typeof pos.el === 'number') ? pos.el.toFixed(1) + '°' : '—';
         const tcaEl = sat && typeof sat.tca_el === 'number' ? sat.tca_el : NaN;
         const elMax = (isFinite(tcaEl) && tcaEl > 0) ? tcaEl.toFixed(1) + '°' : '—';
+        const arrow = elTrendArrow(
+            this._serverNowMs(),
+            sat && sat.tca ? sat.tca : 0,
+            sat ? sat.aos : 0,
+            sat ? sat.los : 0
+        );
         this._setText(this._els.el, elNow + ' / ' + elMax);
+        this._setText(this._els.elDir, arrow);
 
         const cd = this._fmtSessionCols(
             sat ? sat.aos : 0,
@@ -223,4 +249,5 @@
     };
 
     window.MapHud = MapHud;
+    window.MapHudElTrendArrow = elTrendArrow;
 })();
