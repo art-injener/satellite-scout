@@ -17,10 +17,11 @@ type routeDeps struct {
 	Templates   fs.FS
 	Static      fs.FS
 
-	SSE      *handlers.SSEHub
-	Tracking handlers.TrackingServiceInterface
-	SatNOGS  *satnogs.Service
-	SDR      *sdr.Service
+	SSE         *handlers.SSEHub
+	Tracking    handlers.TrackingServiceInterface
+	SatNOGS     *satnogs.Service
+	SDR         *sdr.Service
+	ReceiverHub *sdr.ReceiverHub
 
 	Exclude   handlers.ExclusionAdder
 	PassCache handlers.PassCacheInvalidator
@@ -76,6 +77,12 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	}
 
 	mux.Handle("GET /api/sse", deps.SSE)
+
+	// Бинарные chunked-стримы (ADR-002)
+	if deps.ReceiverHub != nil {
+		streamHandler := handlers.NewStreamHandler(deps.ReceiverHub)
+		mux.HandleFunc("GET /api/stream/v1/spectrum", streamHandler.Spectrum)
+	}
 }
 
 func redirectFound(path string) http.HandlerFunc {

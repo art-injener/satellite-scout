@@ -322,6 +322,7 @@ func (a *app) routeDeps() *routeDeps {
 		Tracking:    a.tracking,
 		SatNOGS:     a.satnogs,
 		SDR:         a.sdrService,
+		ReceiverHub: a.receiverHub,
 		Exclude:     a.exclude,
 		PassCache:   a.pass,
 		Group:       a.tracking,
