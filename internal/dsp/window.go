@@ -42,6 +42,36 @@ func MakeWindowCoeffs(n int, wt WindowType) []float64 {
 	return c
 }
 
+// makeSymmetricWindow — симметричная форма окна (делитель N-1).
+// Для FIR-фильтров: коэффициенты зеркальны, w[0]=w[N-1]=0.
+func makeSymmetricWindow(n int, wt WindowType) []float64 {
+	c := make([]float64, n)
+	d := float64(n - 1) // делитель N-1
+
+	switch wt {
+	case WindowHann:
+		for k := 0; k < n; k++ {
+			c[k] = 0.5 * (1.0 - math.Cos(2.0*math.Pi*float64(k)/d))
+		}
+
+	case WindowBlackmanHarris:
+		const (
+			a0 = 0.35875
+			a1 = 0.48829
+			a2 = 0.14128
+			a3 = 0.01168
+		)
+		for k := 0; k < n; k++ {
+			x := 2.0 * math.Pi * float64(k) / d
+			c[k] = a0 - a1*math.Cos(x) + a2*math.Cos(2.0*x) - a3*math.Cos(3.0*x)
+		}
+
+	default:
+		panic("dsp: unknown WindowType")
+	}
+	return c
+}
+
 // ApplyWindow домножает каждый IQ-отсчёт на соответствующий вес окна.
 // Меняет samples на месте. Длины должны совпадать.
 func ApplyWindow(samples []complex64, coeffs []float64) {
