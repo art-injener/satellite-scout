@@ -21,6 +21,8 @@ type fakeReceiver struct {
 func (f *fakeReceiver) Name() string                   { return "fake" }
 func (f *fakeReceiver) Capabilities() sdr.Capabilities { return sdr.Capabilities{} }
 func (f *fakeReceiver) Tune(uint64) error              { return nil }
+func (f *fakeReceiver) SetGain(float32) error          { return nil }
+func (f *fakeReceiver) Status() sdr.ReceiverStatus     { return sdr.ReceiverStatus{} }
 func (f *fakeReceiver) Stop() error                    { return nil }
 
 func (f *fakeReceiver) StartStream(_ context.Context, cfg sdr.StreamConfig) (<-chan sdr.IQFrame, error) {

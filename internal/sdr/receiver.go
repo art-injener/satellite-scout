@@ -38,11 +38,21 @@ type Capabilities struct {
 	SupportsParallel bool
 }
 
+// ReceiverStatus — текущее состояние приёмника (для GET /api/sdr/status).
+type ReceiverStatus struct {
+	CenterHz   uint64  `json:"center_hz"`
+	SampleRate uint32  `json:"sample_rate"`
+	GainDB     float32 `json:"gain_db"`
+	Running    bool    `json:"running"`
+}
+
 // Receiver — интерфейс SDR-устройства (ADR-004 §2.3).
 type Receiver interface {
 	Name() string
 	Capabilities() Capabilities
 	Tune(frequencyHz uint64) error
+	SetGain(db float32) error
+	Status() ReceiverStatus
 	StartStream(ctx context.Context, cfg StreamConfig) (<-chan IQFrame, error)
 	Stop() error
 }
