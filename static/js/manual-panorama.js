@@ -1,11 +1,11 @@
 // manual-panorama.js — Блок «Панорама эфира» Ручного режима (ADR-004 § 4.4).
 //
-// FFT canvas: склейка нескольких частотных диапазонов через разделитель «≈».
+// FFT canvas: склейка нескольких span (полос обзора) через разделитель «≈».
 // Чипы-маркеры (рамка + пунктир/сплошная линия) над известными несущими.
 // Боковой список «Передатчики» (DOM, 2-этажные строки).
 // Hover-связка: строка ↔ чип на FFT.
 //
-// Данные: mock (имитатор PanoramaDataSource). Реальный SDR — после SDR-003.
+// Данные: mock (имитатор PanoramaDataSource). Реальный SDR — после DWELL-001.
 // Источник передатчиков: пока mock-массив. Реальный — TX-DB-001.
 
 'use strict';
@@ -79,10 +79,10 @@
             .replace(/>/g, '&gt;');
     }
 
-    function calcFreqScaleStep(spanMHz, widthPx, minSpacingPx) {
+    function calcFreqScaleStep(widthMHz, widthPx, minSpacingPx) {
         minSpacingPx = minSpacingPx || 52;
         const maxTicks = Math.max(2, Math.floor(widthPx / minSpacingPx));
-        const idealStep = spanMHz / maxTicks;
+        const idealStep = widthMHz / maxTicks;
         const niceSteps = [0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5];
         for (let i = 0; i < niceSteps.length; i++) {
             if (niceSteps[i] >= idealStep) { return niceSteps[i]; }
@@ -90,17 +90,17 @@
         return niceSteps[niceSteps.length - 1];
     }
 
-    // ── Имитатор данных панорамы (несколько диапазонов) ────────────────────
+    // ── Имитатор данных панорамы (несколько span) ────────────────────
 
-    /** Генерирует шум + пики на заданных частотах для каждого диапазона. */
+    /** Генерирует шум + пики на заданных частотах для каждого span. */
     function PanoramaDataSource(opts) {
         opts = opts || {};
-        this.bands = opts.bands || [
+        this.spans = opts.spans || [
             { minMHz: 144.0, maxMHz: 148.0 },
             { minMHz: 430.0, maxMHz: 440.0 },
         ];
-        this._binsPerBand = opts.binsPerBand || 256;
-        this._totalBins = this._binsPerBand * this.bands.length;
+        this._binsPerSpan = opts.binsPerSpan || 256;
+        this._totalBins = this._binsPerSpan * this.spans.length;
         this._buf = new Float32Array(this._totalBins);
         this._transmitters = opts.transmitters || [];
         this._avgAlpha = 0.3;
@@ -108,15 +108,15 @@
 
     PanoramaDataSource.prototype.generateLine = function() {
         const totalBins = this._totalBins;
-        const binsPerBand = this._binsPerBand;
-        const bands = this.bands;
+        const binsPerSpan = this._binsPerSpan;
+        const spans = this.spans;
 
         for (let i = 0; i < totalBins; i++) {
             const noiseFloor = -90 + (Math.random() - 0.5) * 6;
-            const bandIdx = Math.floor(i / binsPerBand);
-            const binInBand = i - bandIdx * binsPerBand;
-            const band = bands[bandIdx];
-            const freqMHz = band.minMHz + (binInBand / (binsPerBand - 1)) * (band.maxMHz - band.minMHz);
+            const spanIdx = Math.floor(i / binsPerSpan);
+            const binInSpan = i - spanIdx * binsPerSpan;
+            const span = spans[spanIdx];
+            const freqMHz = span.minMHz + (binInSpan / (binsPerSpan - 1)) * (span.maxMHz - span.minMHz);
             let signal = noiseFloor;
 
             for (let t = 0; t < this._transmitters.length; t++) {
@@ -139,17 +139,17 @@
         return this._buf;
     };
 
-    // ── Canvas: FFT панорамы (multi-band + чипы) ──────────────────────────
+    // ── Canvas: FFT панорамы (multi-span + чипы) ──────────────────────────
 
     function PanoramaFFTView(canvas, opts) {
         opts = opts || {};
         this._canvas = canvas;
         this._ctx = canvas.getContext('2d');
-        this.bands = opts.bands || [
+        this.spans = opts.spans || [
             { minMHz: 144.0, maxMHz: 148.0 },
             { minMHz: 430.0, maxMHz: 440.0 },
         ];
-        this._binsPerBand = opts.binsPerBand || 256;
+        this._binsPerSpan = opts.binsPerSpan || 256;
         this._marginLeft = 32;
         this._marginRight = 8;
         this._marginTop = 48;
@@ -201,15 +201,15 @@
         }
     };
 
-    /** X-координата частоты → пиксель (с учётом разрывов между диапазонами). */
-    PanoramaFFTView.prototype._freqToX = function(freqMHz, bandIdx, plotX, bandWidths) {
+    /** X-координата частоты → пиксель (с учётом разрывов между span). */
+    PanoramaFFTView.prototype._freqToX = function(freqMHz, spanIdx, plotX, spanWidths) {
         let offset = plotX;
-        for (let b = 0; b < bandIdx; b++) {
-            offset += bandWidths[b] + this._gapPx;
+        for (let b = 0; b < spanIdx; b++) {
+            offset += spanWidths[b] + this._gapPx;
         }
-        const band = this.bands[bandIdx];
-        const frac = (freqMHz - band.minMHz) / (band.maxMHz - band.minMHz);
-        return offset + frac * bandWidths[bandIdx];
+        const span = this.spans[spanIdx];
+        const frac = (freqMHz - span.minMHz) / (span.maxMHz - span.minMHz);
+        return offset + frac * spanWidths[spanIdx];
     };
 
     PanoramaFFTView.prototype.draw = function(buf) {
@@ -227,20 +227,20 @@
         const plotH = h - mt - mb;
         if (plotW < 10 || plotH < 10) { return; }
 
-        const bands = this.bands;
-        const numBands = bands.length;
+        const spans = this.spans;
+        const numSpans = spans.length;
         const gapPx = this._gapPx;
-        const totalGap = (numBands - 1) * gapPx;
-        let totalSpanMHz = 0;
-        for (let b = 0; b < numBands; b++) {
-            totalSpanMHz += bands[b].maxMHz - bands[b].minMHz;
+        const totalGap = (numSpans - 1) * gapPx;
+        let totalWidthMHz = 0;
+        for (let b = 0; b < numSpans; b++) {
+            totalWidthMHz += spans[b].maxMHz - spans[b].minMHz;
         }
 
-        const bandWidths = [];
+        const spanWidths = [];
         const usableW = plotW - totalGap;
-        for (let b2 = 0; b2 < numBands; b2++) {
-            const spanB = bands[b2].maxMHz - bands[b2].minMHz;
-            bandWidths.push((spanB / totalSpanMHz) * usableW);
+        for (let b2 = 0; b2 < numSpans; b2++) {
+            const widthMHz = spans[b2].maxMHz - spans[b2].minMHz;
+            spanWidths.push((widthMHz / totalWidthMHz) * usableW);
         }
 
         const plotBg = cssVar('--spectrum-plot-bg', cssVar('--spectrum-bg', '#0c1420'));
@@ -282,22 +282,22 @@
         // Сохраняем метрики для хит-теста меток
         this._plotTop = mt;
 
-        // ── Вертикальная сетка частот (по тикам внутри каждого диапазона) ──
+        // ── Вертикальная сетка частот (по тикам внутри каждого span) ──
         ctx.save();
         ctx.strokeStyle = gridCol;
         ctx.setLineDash([2, 5]);
         ctx.lineWidth = 1;
-        for (let vgi = 0; vgi < numBands; vgi++) {
-            const vgBand = bands[vgi];
-            let vgBandX = ml;
+        for (let vgi = 0; vgi < numSpans; vgi++) {
+            const vgSpan = spans[vgi];
+            let vgSpanX = ml;
             for (let vgk = 0; vgk < vgi; vgk++) {
-                vgBandX += bandWidths[vgk] + gapPx;
+                vgSpanX += spanWidths[vgk] + gapPx;
             }
-            const vgBandW = bandWidths[vgi];
-            const vgSpan = vgBand.maxMHz - vgBand.minMHz;
-            const vgStep = calcFreqScaleStep(vgSpan, vgBandW, 60);
-            for (let vf = Math.ceil(vgBand.minMHz / vgStep) * vgStep; vf <= vgBand.maxMHz; vf += vgStep) {
-                const vgx = vgBandX + ((vf - vgBand.minMHz) / vgSpan) * vgBandW;
+            const vgSpanW = spanWidths[vgi];
+            const vgWidthMHz = vgSpan.maxMHz - vgSpan.minMHz;
+            const vgStep = calcFreqScaleStep(vgWidthMHz, vgSpanW, 60);
+            for (let vf = Math.ceil(vgSpan.minMHz / vgStep) * vgStep; vf <= vgSpan.maxMHz; vf += vgStep) {
+                const vgx = vgSpanX + ((vf - vgSpan.minMHz) / vgWidthMHz) * vgSpanW;
                 ctx.beginPath();
                 ctx.moveTo(vgx, mt);
                 ctx.lineTo(vgx, mt + plotH);
@@ -306,24 +306,24 @@
         }
         ctx.restore();
 
-        // ── Рисуем FFT-линию по диапазонам ──
-        const binsPerBand = this._binsPerBand;
+        // ── Рисуем FFT-линию по span ──
+        const binsPerSpan = this._binsPerSpan;
         ctx.save();
         ctx.strokeStyle = lineColor;
         ctx.lineWidth = 1.5;
         ctx.lineJoin = 'round';
 
-        for (let bi = 0; bi < numBands; bi++) {
-            const bStart = bi * binsPerBand;
-            let bandX = ml;
+        for (let bi = 0; bi < numSpans; bi++) {
+            const bStart = bi * binsPerSpan;
+            let spanX = ml;
             for (let bk = 0; bk < bi; bk++) {
-                bandX += bandWidths[bk] + gapPx;
+                spanX += spanWidths[bk] + gapPx;
             }
-            const bandW = bandWidths[bi];
+            const spanW = spanWidths[bi];
 
             ctx.beginPath();
-            for (let p = 0; p < binsPerBand; p++) {
-                const xPt = bandX + (p / (binsPerBand - 1)) * bandW;
+            for (let p = 0; p < binsPerSpan; p++) {
+                const xPt = spanX + (p / (binsPerSpan - 1)) * spanW;
                 const vv = Math.max(0, Math.min(1, buf[bStart + p]));
                 const yPt = mt + plotH * (1 - vv);
                 if (p === 0) { ctx.moveTo(xPt, yPt); }
@@ -333,16 +333,16 @@
         }
         ctx.restore();
 
-        // ── Разделитель «≈» между диапазонами ──
-        if (numBands > 1) {
+        // ── Разделитель «≈» между span ──
+        if (numSpans > 1) {
             ctx.save();
             ctx.font = '14px monospace';
             ctx.fillStyle = axisText;
             ctx.textAlign = 'center';
             ctx.textBaseline = 'middle';
             let gapX = ml;
-            for (let g = 0; g < numBands - 1; g++) {
-                gapX += bandWidths[g];
+            for (let g = 0; g < numSpans - 1; g++) {
+                gapX += spanWidths[g];
                 const cx = gapX + gapPx / 2;
                 ctx.fillText('≈', cx, mt + plotH / 2);
                 gapX += gapPx;
@@ -357,18 +357,18 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
 
-        for (let fi = 0; fi < numBands; fi++) {
-            const band = bands[fi];
-            let fBandX = ml;
+        for (let fi = 0; fi < numSpans; fi++) {
+            const span = spans[fi];
+            let fSpanX = ml;
             for (let fk = 0; fk < fi; fk++) {
-                fBandX += bandWidths[fk] + gapPx;
+                fSpanX += spanWidths[fk] + gapPx;
             }
-            const fBandW = bandWidths[fi];
-            const spanB2 = band.maxMHz - band.minMHz;
-            const step = calcFreqScaleStep(spanB2, fBandW, 60);
+            const fSpanW = spanWidths[fi];
+            const widthMHz = span.maxMHz - span.minMHz;
+            const step = calcFreqScaleStep(widthMHz, fSpanW, 60);
 
-            for (let f = Math.ceil(band.minMHz / step) * step; f <= band.maxMHz; f += step) {
-                const xF = fBandX + ((f - band.minMHz) / spanB2) * fBandW;
+            for (let f = Math.ceil(span.minMHz / step) * step; f <= span.maxMHz; f += step) {
+                const xF = fSpanX + ((f - span.minMHz) / widthMHz) * fSpanW;
                 ctx.fillText(f.toFixed(1), xF, h - mb + 4);
             }
         }
@@ -384,14 +384,14 @@
         ctx.restore();
 
         // ── Чипы-маркеры передатчиков ──
-        this._drawChips(ctx, ml, mt, plotH, bandWidths);
+        this._drawChips(ctx, ml, mt, plotH, spanWidths);
     };
 
     /**
      * Метки передатчиков: пунктирная вертикаль + подпись в рамке с заливкой.
      * Выбранный — сплошная линия и ярче рамка; клик по всей области подписи.
      */
-    PanoramaFFTView.prototype._drawChips = function(ctx, plotX, plotTop, plotH, bandWidths) {
+    PanoramaFFTView.prototype._drawChips = function(ctx, plotX, plotTop, plotH, spanWidths) {
         this._chipHitboxes = [];
         const txList = this._transmitters;
         if (!txList || txList.length === 0) { return; }
@@ -399,9 +399,9 @@
         const items = [];
         for (let t = 0; t < txList.length; t++) {
             const tx = txList[t];
-            const bandIdx = this._findBand(tx.freqMHz);
-            if (bandIdx < 0) { continue; }
-            items.push({ tx: tx, x: this._freqToX(tx.freqMHz, bandIdx, plotX, bandWidths) });
+            const spanIdx = this._findSpan(tx.freqMHz);
+            if (spanIdx < 0) { continue; }
+            items.push({ tx: tx, x: this._freqToX(tx.freqMHz, spanIdx, plotX, spanWidths) });
         }
         items.sort(function(a, b) { return a.x - b.x; });
 
@@ -502,10 +502,10 @@
         ctx.restore();
     };
 
-    /** Определяет, в какой диапазон попадает частота. */
-    PanoramaFFTView.prototype._findBand = function(freqMHz) {
-        for (let i = 0; i < this.bands.length; i++) {
-            if (freqMHz >= this.bands[i].minMHz && freqMHz <= this.bands[i].maxMHz) {
+    /** Определяет, в какой span попадает частота. */
+    PanoramaFFTView.prototype._findSpan = function(freqMHz) {
+        for (let i = 0; i < this.spans.length; i++) {
+            if (freqMHz >= this.spans[i].minMHz && freqMHz <= this.spans[i].maxMHz) {
                 return i;
             }
         }
@@ -522,7 +522,7 @@
      * @param {Object} opts
      * @param {HTMLCanvasElement} opts.canvas — #manual-panorama-fft
      * @param {HTMLElement} opts.txListEl — #manual-tx-scroll (контейнер списка)
-     * @param {Array} opts.bands — [{minMHz, maxMHz}, ...]
+     * @param {Array} opts.spans — [{minMHz, maxMHz}, ...]
      * @param {Array} opts.transmitters — [{freqMHz, label, active, ...}, ...]
      */
     function ManualPanorama(opts) {
@@ -532,11 +532,11 @@
         this._highlightFreq = null;
         this._selectedFreq = 437.800;
 
-        const defaultBands = [
+        const defaultSpans = [
             { minMHz: 144.0, maxMHz: 148.0 },
             { minMHz: 430.0, maxMHz: 440.0 },
         ];
-        const bands = opts.bands || defaultBands;
+        const spans = opts.spans || defaultSpans;
 
         // Mock-список передатчиков для разработки
         const defaultTx = [
@@ -553,8 +553,8 @@
         this._fftView = null;
         if (this._canvas) {
             this._fftView = new PanoramaFFTView(this._canvas, {
-                bands: bands,
-                binsPerBand: 256,
+                spans: spans,
+                binsPerSpan: 256,
             });
             this._fftView.setTransmitters(this._transmitters);
             this._fftView.setSelected(this._selectedFreq);
@@ -562,8 +562,8 @@
 
         // Источник данных
         this._dataSource = new PanoramaDataSource({
-            bands: bands,
-            binsPerBand: 256,
+            spans: spans,
+            binsPerSpan: 256,
             transmitters: this._transmitters,
         });
 

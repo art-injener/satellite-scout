@@ -14,6 +14,8 @@ type stubReceiver struct {
 func (s *stubReceiver) Name() string               { return s.name }
 func (s *stubReceiver) Capabilities() Capabilities { return Capabilities{} }
 func (s *stubReceiver) Tune(uint64) error          { return nil }
+func (s *stubReceiver) SetGain(float32) error      { return nil }
+func (s *stubReceiver) Status() ReceiverStatus     { return ReceiverStatus{} }
 func (s *stubReceiver) StartStream(context.Context, StreamConfig) (<-chan IQFrame, error) {
 	// Закрытый канал: stub не стримит, но не возвращает (nil, nil).
 	ch := make(chan IQFrame)

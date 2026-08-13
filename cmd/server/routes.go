@@ -44,7 +44,7 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	apiHandler := handlers.NewAPIHandler(deps.Cfg)
 	trackingHandler := handlers.NewTrackingHandler(deps.Tracking)
 	settingsHandler := handlers.NewSettingsHandler(deps.ConfigStore)
-	sdrHandler := handlers.NewSDRHandler(deps.SDR)
+	sdrHandler := handlers.NewSDRHandler(deps.SDR, deps.ReceiverHub)
 	exclusionsHandler := handlers.NewExclusionsHandler(deps.Exclude, deps.PassCache, deps.Group)
 
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(deps.Static))))
@@ -65,6 +65,8 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	mux.HandleFunc("PUT /api/settings", settingsHandler.Update)
 	mux.HandleFunc("GET /api/sdr/devices", sdrHandler.ListDevices)
 	mux.HandleFunc("POST /api/sdr/test", sdrHandler.Test)
+	mux.HandleFunc("POST /api/sdr/tune", sdrHandler.Tune)
+	mux.HandleFunc("GET /api/sdr/status", sdrHandler.GetStatus)
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
 	mux.HandleFunc("POST /api/exclusions", exclusionsHandler.Add)

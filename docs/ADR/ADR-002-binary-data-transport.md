@@ -1,8 +1,7 @@
 # ADR-002: Транспорт бинарных данных (SDR-стримы) backend → frontend
 
-**Дата создания:** 2026-04-26  
-**Дата исходного решения:** 2026-04-14 (HTTP Chunked Stream, см. `memory-bank/techContext.md` и `memory-bank/activeContext.md`)  
-**Статус:** ✅ **Accepted** (2026-07-17)  
+**Дата:** 2026-04-26  
+**Статус:** Accepted  
 **Связанные ADR:** [ADR-004](ADR-004-operation-modes-and-station-schema.md) (режимы Авто/Ручной/Анализ, виджеты UI), [ADR-006](ADR-006-sdr-hardware-drivers.md) (источник IQ, REST tune/status), [ADR-007](ADR-007-signal-lab-analysis.md) (режим «Анализ»: replay записи, SSE декодированных кадров)
 
 ---
@@ -72,7 +71,7 @@ Satellite Scout получает с SDR-приёмника большой бин
 
 | Канал | Endpoint / событие | Виджет | Payload |
 |-------|-------------------|--------|---------|
-| Chunked | `GET /api/stream/v1/panorama` | Панорама (`manual-panorama.js`) | `FFT_DB` по плиткам обзора (ADR-004 § 2.4) |
+| Chunked | `GET /api/stream/v1/panorama` | Панорама (`manual-panorama.js`) | `FFT_DB` по span обзора (ADR-004 § 2.4) |
 | Chunked | `GET /api/stream/v1/spectrum` | Спектр: FFT + waterfall (`manual-layout.js`) | `FFT_DB`, полоса SDR активного канала |
 | Chunked | `GET /api/stream/v1/audio` | WebAudio + FM audio spectrum | `PCM_I16` |
 | Chunked | `GET /api/stream/v1/demod` *(draft)* | Eye / Constellation (`eye-constellation.js`) | TBD, baseband/IQ-срезы |
@@ -490,7 +489,7 @@ Offset Hex                                                   Decoded
 
 | Endpoint | Режим | Виджет | Payload |
 |----------|-------|--------|---------|
-| `GET /api/stream/v1/panorama` | Ручной | Панорама эфира | `FFT_DB` по плиткам обзора |
+| `GET /api/stream/v1/panorama` | Ручной | Панорама эфира | `FFT_DB` по span обзора |
 | `GET /api/stream/v1/spectrum` | Ручной | Спектр (FFT + waterfall) | `FFT_DB`, 15–30 FPS |
 | `GET /api/stream/v1/audio` | Ручной | Прослушивание, FM spectrum | `PCM_I16` |
 | `GET /api/stream/v1/demod` | Ручной | Eye / Constellation *(draft)* | TBD |
@@ -507,11 +506,11 @@ Offset Hex                                                   Decoded
 
 | Параметр | Тип | Default | Описание |
 |----------|-----|---------|----------|
-| `bins` | int | 1024 | Бинов на плитку после downsampling |
+| `bins` | int | 1024 | Бинов на span после downsampling |
 | `mode` | string | `avg` | `avg`, `maxhold` — накопление **по времени** |
-| `window_ms` | int | 2000 | Окно аккумуляции на плитку |
+| `window_ms` | int | 2000 | Окно аккумуляции на span |
 
-> ⚠️ **Не синхронизировано с ADR-004 § 2.4 (решение 2026-08-03).** Параметры выше описывают прежнюю модель «непрерывный sweep по диапазонам антенны». В актуальной модели ось панорамы собирается из **плиток вокруг частот КА** в окне `[now, now + 1h]`, диапазон антенны — опциональный фильтр; накопление по частоте внутри пикселя — всегда `max` (параметром не управляется), политики `SWEEP`/`MIXED`/`HOLD` и возраст данных по бинам транспортом пока не описаны. Как это ляжет на wire protocol — открытый вопрос **Q-F1** (часть VI), решается вместе с `DWELL-001`.
+> ⚠️ **Не синхронизировано с ADR-004 § 2.4.** Параметры выше описывают прежнюю модель «непрерывный sweep по диапазонам антенны». В актуальной модели ось панорамы собирается из **span вокруг частот КА** в окне `[now, now + 1h]`, диапазон антенны — опциональный фильтр; накопление по частоте внутри пикселя — всегда `max` (параметром не управляется), политики `SWEEP`/`HOLD` (без `MIXED`) и возраст данных транспортом пока не описаны. Как это ляжет на wire protocol — открытый вопрос **Q-F1** (часть VI), решается вместе с `DWELL-001`.
 
 ### Query-параметры `/spectrum`
 
@@ -549,7 +548,7 @@ Offset Hex                                                   Decoded
 
 ### Управление SDR — отдельный REST API (вне ADR)
 
-Единый набор, синхронизирован с ADR-006 §3.3 (2026-07-17):
+Единый набор, синхронизирован с ADR-006 §3.3:
 
 ```text
 POST /api/sdr/tune      {radio_path, center_hz, span_hz, gain_db?}  ← перестройка приёмника тракта

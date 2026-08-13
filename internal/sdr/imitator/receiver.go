@@ -37,11 +37,13 @@ func DefaultOptions() Options {
 type Receiver struct {
 	opts Options
 
-	mu      sync.Mutex
-	tuned   uint64
-	cancel  context.CancelFunc
-	stopped chan struct{}
-	running bool
+	mu         sync.Mutex
+	tuned      uint64
+	gainDB     float32
+	sampleRate uint32
+	cancel     context.CancelFunc
+	stopped    chan struct{}
+	running    bool
 }
 
 // New создаёт имитатор SDR.
@@ -71,6 +73,24 @@ func (r *Receiver) Tune(frequencyHz uint64) error {
 	return nil
 }
 
+func (r *Receiver) SetGain(db float32) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.gainDB = db
+	return nil
+}
+
+func (r *Receiver) Status() sdr.ReceiverStatus {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return sdr.ReceiverStatus{
+		CenterHz:   r.tuned,
+		SampleRate: r.sampleRate,
+		GainDB:     r.gainDB,
+		Running:    r.running,
+	}
+}
+
 func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-chan sdr.IQFrame, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -80,6 +100,13 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 	}
 	r.running = true
 	r.stopped = make(chan struct{})
+	r.sampleRate = cfg.SampleRate
+	if cfg.CenterHz != 0 && r.tuned == 0 {
+		r.tuned = cfg.CenterHz
+	}
+	if cfg.GainDB != 0 && r.gainDB == 0 {
+		r.gainDB = cfg.GainDB
+	}
 
 	streamCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
@@ -150,9 +177,13 @@ func (r *Receiver) streamSyntheticTone(
 			sampleIdx++
 		}
 
+		r.mu.Lock()
+		centerHz := r.tuned
+		r.mu.Unlock()
+
 		frame := sdr.IQFrame{
 			Samples:     samples,
-			CenterHz:    cfg.CenterHz,
+			CenterHz:    centerHz,
 			SampleRate:  cfg.SampleRate,
 			TimestampMs: nowMs(),
 		}
@@ -205,9 +236,13 @@ func (r *Receiver) sendFrame(
 	samples []complex64,
 	cfg sdr.StreamConfig,
 ) bool {
+	r.mu.Lock()
+	centerHz := r.tuned
+	r.mu.Unlock()
+
 	frame := sdr.IQFrame{
 		Samples:     samples,
-		CenterHz:    cfg.CenterHz,
+		CenterHz:    centerHz,
 		SampleRate:  cfg.SampleRate,
 		TimestampMs: nowMs(),
 	}
