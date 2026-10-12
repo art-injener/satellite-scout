@@ -27,6 +27,8 @@ type RadioPathInfo struct {
 	ID         int    `json:"id"`
 	Name       string `json:"name"`
 	HasRotator bool   `json:"has_rotator"`
+	// AntennaKind — конструкция антенны (config.AntennaKinds), пусто у поворотной без указания.
+	AntennaKind string `json:"antenna_kind,omitempty"`
 }
 
 // ConfigResponse — ответ с конфигурацией для фронтенда. Содержит только то,

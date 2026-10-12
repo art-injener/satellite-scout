@@ -1,0 +1,54 @@
+{
+  "_version": 1,
+  "server": {
+    "port": "8081"
+  },
+  "ui": {
+    "theme": "default",
+    "show_all_tracks_on_start": false
+  },
+  "tle": {
+    "cache_dir": "data/tle_cache",
+    "groups": [
+      "stations",
+      "amateur",
+      "cubesat"
+    ],
+    "update_interval": "6h",
+    "max_tle_age_days": 7
+  },
+  "satnogs": {
+    "enabled": true,
+    "cache_ttl": "24h",
+    "timeout": "12s",
+    "max_retries": 2,
+    "workers": 4
+  },
+  "exclude_norad_file": "data/tle_cache/exclude_norad.txt",
+  "station": {
+    "name": "Отладка: квадрифиляр",
+    "observer": {
+      "name": "Ростов-на-Дону",
+      "lat": 47.2357,
+      "lon": 39.7015,
+      "alt_m": 70
+    },
+    "radio_paths": [
+      {
+        "id": 1,
+        "name": "QFH Имитатор",
+        "antenna": {
+          "name": "QFH 437",
+          "type": "stationary",
+          "kind": "qfh",
+          "freq_min_mhz": 430,
+          "freq_max_mhz": 440
+        },
+        "receiver": {
+          "driver": "simulated",
+          "label": "Имитатор (simulated)"
+        }
+      }
+    ]
+  }
+}

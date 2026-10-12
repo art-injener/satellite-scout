@@ -196,6 +196,18 @@ const (
 	AntennaTypeRotatable = "rotatable"
 )
 
+// Конструкция антенны: по ней UI рисует диаграмму направленности антенны без
+// поворотки. Неподвижные яги и диполь считаются смотрящими в зенит.
+const (
+	AntennaKindQFH    = "qfh"
+	AntennaKindYagi   = "yagi"
+	AntennaKindDipole = "dipole"
+	AntennaKindWhip   = "whip"
+)
+
+// AntennaKinds — все допустимые значения AntennaConfig.Kind.
+var AntennaKinds = []string{AntennaKindQFH, AntennaKindYagi, AntennaKindDipole, AntennaKindWhip}
+
 // AntennaConfig — параметры антенны радиотракта.
 // Диапазон частот и название носят справочный характер — в расчётах не участвуют.
 type AntennaConfig struct {
@@ -204,6 +216,9 @@ type AntennaConfig struct {
 
 	// Type — AntennaTypeStationary или AntennaTypeRotatable.
 	Type string `json:"type"`
+
+	// Kind — конструкция (AntennaKinds). Обязательна для тракта без поворотки.
+	Kind string `json:"kind,omitempty"`
 
 	// FreqMinMHz — нижняя граница рабочего диапазона, МГц (необязательно).
 	FreqMinMHz *float64 `json:"freq_min_mhz,omitempty"`

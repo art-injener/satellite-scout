@@ -37,6 +37,10 @@ func Bootstrap(path string) (*Store, error) {
 	err := store.Load()
 	switch {
 	case err == nil:
+		// Те же правила, что при сохранении из настроек: с невалидным файлом не стартуем
+		if verr := store.Get().Validate(); verr != nil {
+			return nil, fmt.Errorf("invalid config %s: %w", path, verr)
+		}
 		applyRuntimeEnv(store)
 		slog.Info("configuration loaded from file", slog.String("path", path))
 		return store, nil

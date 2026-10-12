@@ -146,6 +146,7 @@ func TestAPIHandler_GetConfig_HybridStation(t *testing.T) {
 					Name: "VHF Обзорный",
 					Antenna: config.AntennaConfig{
 						Type: config.AntennaTypeStationary,
+						Kind: config.AntennaKindQFH,
 					},
 				},
 				{
@@ -182,6 +183,12 @@ func TestAPIHandler_GetConfig_HybridStation(t *testing.T) {
 	}
 	if !body.RadioPaths[1].HasRotator {
 		t.Error("RadioPaths[1].HasRotator = false, want true")
+	}
+	if body.RadioPaths[0].AntennaKind != config.AntennaKindQFH {
+		t.Errorf("RadioPaths[0].AntennaKind = %q, want %q", body.RadioPaths[0].AntennaKind, config.AntennaKindQFH)
+	}
+	if body.RadioPaths[1].AntennaKind != "" {
+		t.Errorf("RadioPaths[1].AntennaKind = %q, want empty", body.RadioPaths[1].AntennaKind)
 	}
 }
 
