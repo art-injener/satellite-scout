@@ -39,13 +39,28 @@
         "name": "VHF Имитатор",
         "antenna": {
           "name": "QFH 145",
-          "type": "stationary",
+          "type": "rotatable",
+          "kind": "qfh",
           "freq_min_mhz": 144,
           "freq_max_mhz": 148
         },
         "receiver": {
           "driver": "simulated",
           "label": "Имитатор (simulated)"
+        },
+        "rotator": {
+          "driver": "rotctld",
+          "host": "127.0.0.1",
+          "port": 4533,
+          "az_range": [
+            0,
+            360
+          ],
+          "el_range": [
+            0,
+            90
+          ],
+          "step_deg": 1
         }
       }
     ]

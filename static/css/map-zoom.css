@@ -10,7 +10,7 @@
 .map-zoom-controls {
     position: absolute;
     right: 12px;
-    bottom: 12px;
+    bottom: 40px;
     z-index: 22;
     display: flex;
     flex-direction: column;

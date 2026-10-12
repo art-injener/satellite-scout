@@ -2730,6 +2730,14 @@ class CalloutRenderer {
 
             // Клик по строке → select этого спутника
             entry.el.classList.toggle('map-sat-callout--expanded', isExpanded);
+
+            // Подсказка при наведении: полные имена всех КА стека.
+            const names = [];
+            for (let ni = 0; ni < stacked.length; ni++) {
+                const inf = info[stacked[ni]];
+                if (inf && inf.name) { names.push(inf.name); }
+            }
+            entry.el.title = names.join('\n');
         } else {
             // Одиночная карточка
             entry.el.classList.remove('map-sat-callout--stacked');
@@ -2741,6 +2749,10 @@ class CalloutRenderer {
                 entry.subEl.textContent = aliasText;
                 entry.subEl.style.display = aliasText ? '' : 'none';
                 entry.el.classList.toggle('map-sat-callout--single-line', !aliasText);
+                // Подсказка при наведении: полное имя, если текст обрезан многоточием.
+                entry.el.title = aliasText
+                    ? (singleInfo.name || '') + '\n' + aliasText
+                    : (singleInfo.name || '');
             }
             // Скрываем экстра-строки, если были
             if (entry.extraRows) {
