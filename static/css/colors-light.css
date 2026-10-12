@@ -184,6 +184,16 @@
     --spectrum-instrument-bg: #f4f7fb;
     /* Полоска шкалы частот между FFT и водопадом — как остров UI */
     --bp-overview-freq-scale-bg: var(--bg-tertiary);
+
+    /* Индикатор частоты в тракте приёма (freq-dial.js). В светлой теме —
+       не неон, а ЖК-вид: тёмные сегменты на светлом окне, ореол выключен. */
+    --fdial-bg:       #dfe5ec;
+    --fdial-lamp:     #0e4520;
+    --fdial-lamp-off: #c3ccd5;
+    --fdial-glow:     transparent;
+    /* Рамка курсора — тёмный янтарь: окно ЖК светлое, яркий оранжевый на нём
+       не читался бы. */
+    --fdial-cursor:   #a34700;
     --spectrum-plot-grid:  rgba(20, 36, 58, 0.10);
     --spectrum-axis-text:  #45505f;
     --spectrum-trace:      #0d7a3a;

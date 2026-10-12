@@ -18,6 +18,14 @@
     const TAB_RADIO_PATHS = 'radio-paths';
     const ANTENNA_STATIONARY = 'stationary';
     const ANTENNA_ROTATABLE = 'rotatable';
+    // Конструкции антенны — те же значения, что config.AntennaKinds на сервере
+    const ANTENNA_KINDS = [
+        ['qfh', 'Квадрифиляр'],
+        ['yagi', 'Яги'],
+        ['dipole', 'Диполь'],
+        ['whip', 'Штырь'],
+    ];
+    const ANTENNA_KIND_DEFAULT = 'qfh';
     const RECEIVER_NONE = '';
     const RECEIVER_SIMULATED = 'simulated';
     const STATUS_RESET_DELAY_MS = 6000;
@@ -60,6 +68,17 @@
             cur = cur[p];
         }
         cur[parts[parts.length - 1]] = value;
+    }
+
+    /**
+     * Варианты конструкции антенны [значение, подпись]. Без поворотки
+     * конструкция обязательна, с повороткой можно оставить «не указана».
+     */
+    function antennaKindOptions(antennaType) {
+        if (antennaType === ANTENNA_ROTATABLE) {
+            return [['', 'Не указана']].concat(ANTENNA_KINDS);
+        }
+        return ANTENNA_KINDS.slice();
     }
 
     function deepClone(v) {
@@ -471,7 +490,7 @@
             list.push({
                 id: nextID,
                 name: 'Новый тракт',
-                antenna: { name: '', type: ANTENNA_STATIONARY },
+                antenna: { name: '', type: ANTENNA_STATIONARY, kind: ANTENNA_KIND_DEFAULT },
                 receiver: { driver: RECEIVER_SIMULATED, label: 'Имитатор (simulated)' },
                 rotator: null
             });
@@ -515,6 +534,7 @@
         antGrid.className = 'settings-radio-path__grid';
         antGrid.appendChild(this._radioField(idx, 'antenna.name', 'Название антенны', 'text', rp.antenna && rp.antenna.name, false));
         antGrid.appendChild(this._radioAntennaTypeSelect(idx, rp));
+        antGrid.appendChild(this._radioAntennaKindSelect(idx, rp));
         antGrid.appendChild(this._radioOptionalNumber(idx, 'antenna.freq_min_mhz', 'Диапазон min, МГц', rp.antenna && rp.antenna.freq_min_mhz));
         antGrid.appendChild(this._radioOptionalNumber(idx, 'antenna.freq_max_mhz', 'Диапазон max, МГц', rp.antenna && rp.antenna.freq_max_mhz));
         wrap.appendChild(antGrid);
@@ -589,6 +609,7 @@
             target.antenna.type = sel.value;
             if (sel.value === ANTENNA_STATIONARY) {
                 target.rotator = null;
+                if (!target.antenna.kind) {target.antenna.kind = ANTENNA_KIND_DEFAULT;}
             } else if (!target.rotator) {
                 target.rotator = {
                     driver: 'rotctld',
@@ -600,6 +621,40 @@
                 };
             }
             self._renderRadioPaths();
+            self._setDirty(true);
+        });
+        lbl.appendChild(span);
+        lbl.appendChild(sel);
+        return lbl;
+    };
+
+    /** Селект конструкции: без поворотки пустого варианта нет — поле обязательно. */
+    SettingsModal.prototype._radioAntennaKindSelect = function(idx, rp) {
+        const self = this;
+        const lbl = document.createElement('label');
+        lbl.className = 'settings-field';
+        const span = document.createElement('span');
+        span.className = 'settings-field__label';
+        span.textContent = 'Конструкция';
+        const sel = document.createElement('select');
+        sel.className = 'settings-field__input';
+        const type = (rp.antenna && rp.antenna.type) || ANTENNA_STATIONARY;
+        antennaKindOptions(type).forEach(([value, label]) => {
+            const opt = document.createElement('option');
+            opt.value = value;
+            opt.textContent = label;
+            sel.appendChild(opt);
+        });
+        sel.value = (rp.antenna && rp.antenna.kind) || '';
+        sel.addEventListener('change', () => {
+            const target = self._workingConfig.station.radio_paths[idx];
+            if (!target) {return;}
+            if (!target.antenna) {target.antenna = {};}
+            if (sel.value) {
+                target.antenna.kind = sel.value;
+            } else {
+                delete target.antenna.kind;
+            }
             self._setDirty(true);
         });
         lbl.appendChild(span);
@@ -1084,7 +1139,8 @@
         module.exports = { // eslint-disable-line no-undef
             SettingsModal: SettingsModal,
             getByPath: getByPath,
-            setByPath: setByPath
+            setByPath: setByPath,
+            antennaKindOptions: antennaKindOptions
         };
     } else {
         window.SettingsModalClass = SettingsModal;
