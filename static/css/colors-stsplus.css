@@ -174,6 +174,17 @@
     --spectrum-plot-bg:    #2a3440;
     --spectrum-instrument-bg: #2a3440;
     --bp-overview-freq-scale-bg: var(--spectrum-instrument-bg);
+
+    /* Индикатор частоты в тракте приёма (freq-dial.js) — светящаяся
+       семисегментная лампа. Светодиодная зелень одна на все
+       тёмные темы: это физический прибор, а не элемент оформления. */
+    --fdial-bg:       #060b0c;
+    --fdial-lamp:     #3bff4f;
+    --fdial-lamp-off: #2b3537;
+    --fdial-glow:     var(--fdial-lamp);
+    /* Рамка курсора — янтарь: на зелёной лампе зелёная рамка сливалась
+       с цифрой, а оператору нужно видеть, какой разряд он крутит. */
+    --fdial-cursor:   #ff9421;
     --spectrum-plot-grid:  rgba(255, 255, 255, 0.14);
     --spectrum-axis-text:  #e4e8ec;
     --spectrum-trace:      #5ee878;

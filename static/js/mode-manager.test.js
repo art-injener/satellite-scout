@@ -159,6 +159,16 @@ test('setRadioPath switches to existing path', () => {
     assert.strictEqual(mm.hasRotator(), true);
 });
 
+test('antennaKind returns the kind of the current path or null', () => {
+    const qfh = Object.assign(vhfPath(1), { antenna_kind: 'qfh' });
+    const mm = new ModeManager(StationType.HYBRID, [qfh, uhfRotatorPath(2)], {
+        storage: new MemoryStorage(),
+    });
+    assert.strictEqual(mm.antennaKind(), 'qfh');
+    mm.setRadioPath(2);
+    assert.strictEqual(mm.antennaKind(), null, 'rotator path without a kind');
+});
+
 test('setRadioPath ignores non-existent id', () => {
     const mm = new ModeManager(StationType.OBSERVATION, [vhfPath(1)], {
         storage: new MemoryStorage(),

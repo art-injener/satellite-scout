@@ -44,4 +44,19 @@ console.log('TEST: setByPath creates intermediate objects');
 }
 console.log('  OK');
 
+console.log('TEST: antenna kind is mandatory without a rotator');
+{
+    const values = settings.antennaKindOptions('stationary').map((o) => o[0]);
+    assert.deepStrictEqual(values, ['qfh', 'yagi', 'dipole', 'whip']);
+}
+console.log('  OK');
+
+console.log('TEST: antenna kind may stay empty on a rotator');
+{
+    const values = settings.antennaKindOptions('rotatable').map((o) => o[0]);
+    assert.deepStrictEqual(values, ['', 'qfh', 'yagi', 'dipole', 'whip']);
+    settings.antennaKindOptions('rotatable').forEach((o) => assert.ok(o[1], 'every option has a label'));
+}
+console.log('  OK');
+
 console.log('\nAll tests passed.');

@@ -60,6 +60,33 @@
                 window._overviewLink.resume();
             }
         }
+        // В Ручном работают с эфиром: план сеансов и SkyView уступают место
+        // спектру, в Авто разворачиваются обратно. Ручной тумблер продолжает
+        // работать — оператор может раскрыть панель и в Ручном.
+        if (mode === 'manual' || mode === 'overview') {
+            setRightPanelCollapsed(isManual);
+        }
+    }
+
+    /**
+     * Сворачивает или разворачивает правую панель (план сеансов + SkyView).
+     * Ширину колонки задаёт класс right-collapsed на .main-wrapper.tracking-page.
+     * @param {boolean} collapsed
+     */
+    function setRightPanelCollapsed(collapsed) {
+        const wrapper = document.querySelector('.main-wrapper.tracking-page');
+        const toggle = document.getElementById('right-panel-toggle');
+        if (!wrapper) { return; }
+        wrapper.classList.toggle('right-collapsed', collapsed);
+        if (toggle) {
+            toggle.textContent = collapsed ? '◀' : '▶';
+            toggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
+        }
+        try {
+            localStorage.setItem('ux.rightCollapsed', collapsed ? '1' : '0');
+        } catch (_e) {
+            // localStorage может быть недоступен — состояние живёт до перезагрузки.
+        }
     }
 
     function initStationModes() {
@@ -232,20 +259,13 @@
         const rightPanelWrapper = document.querySelector('.main-wrapper.tracking-page');
         const rightToggle = document.getElementById('right-panel-toggle');
         if (rightPanelWrapper && rightToggle) {
-            const LS_RIGHT = 'ux.rightCollapsed';
-            if (localStorage.getItem(LS_RIGHT) === '1') {
-                rightPanelWrapper.classList.add('right-collapsed');
-                rightToggle.textContent = '◀';
-                rightToggle.setAttribute('title', 'Развернуть');
-            } else {
-                rightToggle.textContent = '▶';
-                rightToggle.setAttribute('title', 'Свернуть');
-            }
+            // Восстанавливаем прошлое состояние до ответа /api/config — иначе на
+            // reload в Ручном панель успевает мигнуть раскрытой.
+            let stored = null;
+            try { stored = localStorage.getItem('ux.rightCollapsed'); } catch (_e) { /* noop */ }
+            setRightPanelCollapsed(stored === '1');
             rightToggle.addEventListener('click', function() {
-                const collapsed = rightPanelWrapper.classList.toggle('right-collapsed');
-                rightToggle.textContent = collapsed ? '◀' : '▶';
-                rightToggle.setAttribute('title', collapsed ? 'Развернуть' : 'Свернуть');
-                localStorage.setItem(LS_RIGHT, collapsed ? '1' : '0');
+                setRightPanelCollapsed(!rightPanelWrapper.classList.contains('right-collapsed'));
             });
         }
     });

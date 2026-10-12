@@ -165,6 +165,12 @@ class ModeManager {
         return Boolean(rp && rp.has_rotator);
     }
 
+    /** @returns {?string} конструкция антенны текущего тракта (qfh, yagi, dipole, whip). */
+    antennaKind() {
+        const rp = this.getRadioPath();
+        return (rp && rp.antenna_kind) || null;
+    }
+
     /**
      * Подписка на смену режима. callback(mode).
      * @param {(mode: string) => void} callback
