@@ -49,6 +49,40 @@
      */
     const TRACK_LAT_JUMP_DEG = 15;
 
+    /** Предел ширины обычной карточки выноски (logical px) — совпадает с max-width .map-sat-callout. */
+    const CALLOUT_MAX_W = 130;
+    /** Предел для выбранного/сопровождаемого КА: имя показывается целиком (.map-sat-callout--tracked). */
+    const CALLOUT_MAX_W_HIGHLIGHT = 240;
+
+    /**
+     * Ширина карточки выноски под имя и alias в physical px.
+     * measureText отдаёт ширину в CSS px (шрифт задан в px, трансформация canvas
+     * не влияет), поэтому весь расчёт ведётся в logical px и умножается на dpr в конце.
+     * Шрифты как у .map-sat-callout: имя 11px bold, alias 9px medium.
+     * @param {CanvasRenderingContext2D} ctx
+     * @param {string} name
+     * @param {string} alias
+     * @param {number} dpr
+     * @param {number} maxLogicalW — верхний предел ширины, logical px
+     * @returns {number}
+     */
+    function calloutCardWidth(ctx, name, alias, dpr, maxLogicalW) {
+        ctx.save();
+        ctx.font = 'bold 11px monospace';
+        const wName = ctx.measureText(name || '').width;
+        ctx.font = '500 9px monospace';
+        const wAlias = ctx.measureText(alias || '').width;
+        ctx.restore();
+        // Паддинги карточки 4+7 и бордер 1+1 дают 13 px, плюс запас на разницу шрифтов.
+        const innerPad = 16;
+        const bucket = 8;
+        const minW = 56;
+        const target = Math.max(wName, wAlias) + innerPad;
+        // Округление вверх, чтобы шаг бакета не съедал место под текст.
+        const bucketed = Math.ceil(target / bucket) * bucket;
+        return Math.max(minW, Math.min(maxLogicalW, bucketed)) * dpr;
+    }
+
     // Палитра вторичных спутников: цветные, но не кислотные.
     const SECONDARY_SAT_COLORS = [
         '#66ccaa', '#dd8899', '#7799dd', '#ddbb55',
@@ -1410,27 +1444,12 @@
             const a = aliasMap[nid];
             return a ? String(a) : '';
         };
-        // Подбор ширины карточки под содержимое (имя + alias).
-        // Возвращает значение в physical px (как и остальные размеры аллокатора).
-        // Шрифты подобраны под .map-sat-callout: имя 11px bold, sub 9px medium.
-        // monospace fallback близок по метрикам к --font-mono без чтения computed style.
-        const measure = (name, alias) => {
-            ctx.save();
-            ctx.font = 'bold 11px monospace';
-            const wName = ctx.measureText(name || '').width;
-            ctx.font = '500 9px monospace';
-            const wAlias = ctx.measureText(alias || '').width;
-            ctx.restore();
-            // Горизонтальные паддинги карточки (4+7) + 2px бордер ≈ 13 logical px.
-            // Прибавляем небольшой буфер на разницу шрифтов и округление.
-            const innerPad = 16 * dpr;
-            const target = Math.max(wName, wAlias) + innerPad;
-            const minW = 56 * dpr;
-            const maxW = 130 * dpr;
-            const bucket = 8 * dpr;
-            const raw = Math.round(Math.max(minW, Math.min(maxW, target)));
-            return Math.round(raw / bucket) * bucket;
-        };
+        // Ширина карточки под содержимое (имя + alias), physical px.
+        // Выделенный КА получает расширенный предел: длинное имя видно целиком.
+        const measure = (name, alias, nid) => calloutCardWidth(
+            ctx, name, alias, dpr,
+            isHighlight(nid) ? CALLOUT_MAX_W_HIGHLIGHT : CALLOUT_MAX_W
+        );
         const cardHeightFor = (alias) => {
             const h = alias ? 34 : 28;
             return h * dpr;
@@ -1449,7 +1468,7 @@
                 color: this.colors.satLabel || '#ffeb3b',
                 name: name,
                 alias: alias,
-                cardWidth: measure(name, alias),
+                cardWidth: measure(name, alias, trkId),
                 cardHeight: cardHeightFor(alias),
                 iconRadius: iconRadiusFor(trkId, false),
                 isTracked: isHighlight(trkId),
@@ -1467,7 +1486,7 @@
                 color: this.colors.mapIconSelectedFill || '#ffb347',
                 name: name,
                 alias: alias,
-                cardWidth: measure(name, alias),
+                cardWidth: measure(name, alias, selId),
                 cardHeight: cardHeightFor(alias),
                 iconRadius: iconRadiusFor(selId, false),
                 isTracked: isHighlight(selId),
@@ -1491,7 +1510,7 @@
                 color: c,
                 name: name,
                 alias: alias,
-                cardWidth: measure(name, alias),
+                cardWidth: measure(name, alias, nid),
                 cardHeight: cardHeightFor(alias),
                 iconRadius: iconRadiusFor(nid, true),
                 isTracked: isHighlight(nid),
@@ -2975,7 +2994,7 @@
 
     // CommonJS-экспорт для node-тестов.
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-        module.exports = { EarthView: EarthView, MAP_ZOOM_LEVELS: MAP_ZOOM_LEVELS }; // eslint-disable-line no-undef
+        module.exports = { EarthView: EarthView, MAP_ZOOM_LEVELS: MAP_ZOOM_LEVELS, calloutCardWidth: calloutCardWidth }; // eslint-disable-line no-undef
     }
 
 })();

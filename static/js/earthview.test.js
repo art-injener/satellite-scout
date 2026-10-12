@@ -15,7 +15,7 @@ global.getThemeId = function() { return 'classic'; };
 global.requestAnimationFrame = function(cb) { return setTimeout(cb, 0); };
 global.cancelAnimationFrame = function(id) { clearTimeout(id); };
 
-const { EarthView, MAP_ZOOM_LEVELS } = require('./earthview.js');
+const { EarthView, MAP_ZOOM_LEVELS, calloutCardWidth } = require('./earthview.js');
 
 // ── Утилиты тестов ───────────────────────────────────────────────────────────
 
@@ -1231,6 +1231,60 @@ test('drawSelectedLayer: legacy-формат (массив точек) → ис�
     const colors = calls.filter(c => c.op === 'strokeStyle').map(c => c.args[0]);
     assert.ok(colors.includes('#FFFF00'), 'legacy-формат = future-цвет');
     assert.ok(!colors.includes('#FF0000'), 'для legacy past-цвет НЕ применяется (нет past/future)');
+});
+
+// ── Callout card width ───────────────────────────────────────────────────────
+
+// Monospace stub: name 11px → 6.6 px/char, alias 9px → 5.4 px/char (CSS px,
+// independent of canvas transform, like the real measureText).
+function makeMeasureCtx() {
+    const ctx = {
+        font: '',
+        save: function() {},
+        restore: function() {},
+        measureText: function(s) {
+            const perChar = ctx.font.indexOf('11px') >= 0 ? 6.6 : 5.4;
+            return { width: String(s).length * perChar };
+        },
+    };
+    return ctx;
+}
+
+// Horizontal padding 4+7 and border 1+1 from .map-sat-callout in main.css.
+const CARD_CHROME_CSS = 13;
+
+test('calloutCardWidth: dpr=1 card fits full name', () => {
+    const ctx = makeMeasureCtx();
+    const w = calloutCardWidth(ctx, 'FOX-1CLIFF', '', 1, 130);
+    assert.ok(w >= 10 * 6.6 + CARD_CHROME_CSS, 'width ' + w + ' too small for text');
+});
+
+test('calloutCardWidth: dpr=2 returns physical px, card fits full name', () => {
+    const ctx = makeMeasureCtx();
+    const w = calloutCardWidth(ctx, 'OSCAR 7', '', 2, 130);
+    const cssW = w / 2;
+    assert.ok(cssW >= 7 * 6.6 + CARD_CHROME_CSS, 'CSS width ' + cssW + ' too small for "OSCAR 7"');
+});
+
+test('calloutCardWidth: physical width scales linearly with dpr', () => {
+    const ctx = makeMeasureCtx();
+    const w1 = calloutCardWidth(ctx, 'AEROCUBE 10A', 'AC-10A', 1, 130);
+    const w2 = calloutCardWidth(ctx, 'AEROCUBE 10A', 'AC-10A', 2, 130);
+    assert.strictEqual(w2, w1 * 2);
+});
+
+test('calloutCardWidth: alias wider than name defines width', () => {
+    const ctx = makeMeasureCtx();
+    const alias = 'A-VERY-LONG-ALIAS-NAME';
+    const w = calloutCardWidth(ctx, 'AO-7', alias, 1, 200);
+    assert.ok(w >= alias.length * 5.4 + CARD_CHROME_CSS);
+});
+
+test('calloutCardWidth: clamped by max logical width', () => {
+    const ctx = makeMeasureCtx();
+    const longName = 'X'.repeat(60);
+    assert.strictEqual(calloutCardWidth(ctx, longName, '', 2, 130), 260);
+    assert.ok(calloutCardWidth(ctx, longName, '', 2, 240) > 260);
 });
 
 // ── Итоги ────────────────────────────────────────────────────────────────────

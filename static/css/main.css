@@ -970,6 +970,7 @@ body.station-basic .app-header__dropdown {
        min/max — защитная сетка на случай некорректных значений из layout.
        Базовые размеры: DEFAULTS callouts.js (110×28 одностр., 110×34 двухстр.). */
     min-width: 50px;
+    /* Совпадает с CALLOUT_MAX_W в earthview.js. */
     max-width: 130px;
     min-height: 28px;
     box-sizing: border-box;
@@ -1041,6 +1042,8 @@ body.station-basic .app-header__dropdown {
    мягкое свечение цветом КА + увеличение 1.18× для выхода на первый план. */
 .map-sat-callout--tracked {
     z-index: 2;
+    /* Длинное имя выделенного КА — целиком; совпадает с CALLOUT_MAX_W_HIGHLIGHT в earthview.js. */
+    max-width: 240px;
     background: var(--map-callout-bg-tracked, var(--map-callout-bg));
     transform: scale(1.18);
     box-shadow:
