@@ -1,0 +1,62 @@
+{
+  "_version": 1,
+  "server": {
+    "port": "8082"
+  },
+  "ui": {
+    "theme": "default",
+    "show_all_tracks_on_start": false
+  },
+  "tle": {
+    "cache_dir": "data/tle_cache",
+    "groups": [
+      "stations",
+      "amateur",
+      "cubesat"
+    ],
+    "update_interval": "6h",
+    "max_tle_age_days": 7
+  },
+  "satnogs": {
+    "enabled": true,
+    "cache_ttl": "24h",
+    "timeout": "12s",
+    "max_retries": 2,
+    "workers": 4
+  },
+  "exclude_norad_file": "data/tle_cache/exclude_norad.txt",
+  "station": {
+    "name": "Отладка: поворотная яги",
+    "observer": {
+      "name": "Ростов-на-Дону",
+      "lat": 47.2357,
+      "lon": 39.7015,
+      "alt_m": 70
+    },
+    "radio_paths": [
+      {
+        "id": 1,
+        "name": "Yagi Имитатор",
+        "antenna": {
+          "name": "Yagi 437",
+          "type": "rotatable",
+          "kind": "yagi",
+          "freq_min_mhz": 430,
+          "freq_max_mhz": 440
+        },
+        "receiver": {
+          "driver": "simulated",
+          "label": "Имитатор (simulated)"
+        },
+        "rotator": {
+          "driver": "rotctld",
+          "host": "localhost",
+          "port": 4533,
+          "az_range": [0, 360],
+          "el_range": [0, 90],
+          "step_deg": 1
+        }
+      }
+    ]
+  }
+}

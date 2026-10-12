@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"slices"
 	"strings"
 )
 
@@ -134,6 +135,7 @@ func (c *Config) Validate() error {
 				})
 			}
 			errs = append(errs, validateAntenna(prefix+".antenna", rp.Antenna)...)
+			errs = append(errs, validateAntennaKind(prefix+".antenna.kind", rp)...)
 			errs = append(errs, validateRadioPathRotator(prefix, rp)...)
 		}
 	}
@@ -249,6 +251,28 @@ func validateAntenna(fieldPrefix string, ant AntennaConfig) ValidationErrors {
 		}
 	}
 	return errs
+}
+
+// validateAntennaKind: без поворотки UI рисует диаграмму по конструкции,
+// поэтому там она обязательна; с повороткой — справочная.
+func validateAntennaKind(field string, rp RadioPath) ValidationErrors {
+	kind := rp.Antenna.Kind
+	if kind == "" {
+		if rp.Rotator != nil {
+			return nil
+		}
+		return ValidationErrors{{
+			Field:   field,
+			Message: "для антенны без поворотки укажите конструкцию: " + strings.Join(AntennaKinds, ", "),
+		}}
+	}
+	if !slices.Contains(AntennaKinds, kind) {
+		return ValidationErrors{{
+			Field:   field,
+			Message: fmt.Sprintf("неизвестная конструкция %q, допустимо: %s", kind, strings.Join(AntennaKinds, ", ")),
+		}}
+	}
+	return nil
 }
 
 func validateRadioPathRotator(prefix string, rp RadioPath) ValidationErrors {

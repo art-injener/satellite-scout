@@ -82,11 +82,82 @@ func sampleRadioPath(id int) RadioPath {
 		Name: "Test Radio Path",
 		Antenna: AntennaConfig{
 			Type: AntennaTypeStationary,
+			Kind: AntennaKindQFH,
 			Name: "QFH 145",
 		},
 		Receiver: ReceiverConfig{
 			Driver: "simulated",
 		},
+	}
+}
+
+func TestValidate_AntennaWithoutRotatorRequiresKind(t *testing.T) {
+	cfg := DefaultConfig()
+	rp := sampleRadioPath(1)
+	rp.Antenna.Kind = ""
+	cfg.Station.RadioPaths = []RadioPath{rp}
+
+	verrs := mustValidationErrors(t, cfg.Validate())
+	if !hasField(verrs, "station.radio_paths[0].antenna.kind") {
+		t.Errorf("expected error on antenna.kind, got %v", verrs)
+	}
+}
+
+func TestValidate_UnknownAntennaKindRejected(t *testing.T) {
+	cfg := DefaultConfig()
+	rp := sampleRadioPath(1)
+	rp.Antenna.Kind = "helix"
+	cfg.Station.RadioPaths = []RadioPath{rp}
+
+	verrs := mustValidationErrors(t, cfg.Validate())
+	if !hasField(verrs, "station.radio_paths[0].antenna.kind") {
+		t.Errorf("expected error on antenna.kind, got %v", verrs)
+	}
+}
+
+func TestValidate_UnknownAntennaKindRejectedWithRotator(t *testing.T) {
+	cfg := DefaultConfig()
+	rp := sampleRadioPath(1)
+	rp.Antenna.Type = AntennaTypeRotatable
+	rp.Antenna.Kind = "helix"
+	rp.Rotator = &RotatorConfig{Driver: "rotctld", Port: 4533}
+	cfg.Station.RadioPaths = []RadioPath{rp}
+
+	verrs := mustValidationErrors(t, cfg.Validate())
+	if !hasField(verrs, "station.radio_paths[0].antenna.kind") {
+		t.Errorf("expected error on antenna.kind, got %v", verrs)
+	}
+}
+
+func TestValidate_AntennaKindOptionalWithRotator(t *testing.T) {
+	cfg := DefaultConfig()
+	rp := sampleRadioPath(1)
+	rp.Antenna.Type = AntennaTypeRotatable
+	rp.Antenna.Kind = ""
+	rp.Rotator = &RotatorConfig{Driver: "rotctld", Port: 4533}
+	cfg.Station.RadioPaths = []RadioPath{rp}
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("kind must be optional on a rotator, got %v", err)
+	}
+}
+
+func TestValidate_AllAntennaKindsAccepted(t *testing.T) {
+	for _, kind := range AntennaKinds {
+		cfg := DefaultConfig()
+		rp := sampleRadioPath(1)
+		rp.Antenna.Kind = kind
+		cfg.Station.RadioPaths = []RadioPath{rp}
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("kind %q must be valid, got %v", kind, err)
+		}
+	}
+}
+
+func TestAntennaKinds_ListsAllKinds(t *testing.T) {
+	want := []string{AntennaKindQFH, AntennaKindYagi, AntennaKindDipole, AntennaKindWhip}
+	if !slices.Equal(AntennaKinds, want) {
+		t.Errorf("AntennaKinds = %v, want %v", AntennaKinds, want)
 	}
 }
 

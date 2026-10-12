@@ -78,6 +78,33 @@ func TestBootstrap_UsesExistingFile(t *testing.T) {
 	}
 }
 
+// TestBootstrap_RejectsInvalidFile — невалидный файл не загружается: сервер
+// не должен стартовать с конфигом, который отклонили бы настройки.
+func TestBootstrap_RejectsInvalidFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "config.json")
+
+	cfg := DefaultConfig()
+	cfg.Station.RadioPaths = []RadioPath{{
+		ID:       1,
+		Name:     "VHF",
+		Antenna:  AntennaConfig{Type: AntennaTypeStationary},
+		Receiver: ReceiverConfig{Driver: "simulated"},
+	}}
+	data, _ := json.MarshalIndent(cfg, "", "  ")
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	_, err := Bootstrap(path)
+	if err == nil {
+		t.Fatal("Bootstrap() must fail on a radio path without antenna.kind")
+	}
+	if !contains([]byte(err.Error()), "antenna.kind") {
+		t.Errorf("error must name the field, got %v", err)
+	}
+}
+
 // TestBootstrap_RuntimeDevModeFromEnv — DevMode не сериализуется в файл и
 // читается из env SCOUT_DEV_MODE на каждом запуске.
 func TestBootstrap_RuntimeDevModeFromEnv(t *testing.T) {
