@@ -203,6 +203,102 @@ func TestReceiver_StartStream_Signals(t *testing.T) {
 	}
 }
 
+// Retuning by Δ mid-stream moves the signal by −Δ in the baseband, and the
+// frames carry the new center from the first block generated after Tune.
+func TestReceiver_TuneMidStreamShiftsSignal(t *testing.T) {
+	const deltaHz = 4_000
+	r := New(Options{Signals: []Signal{testCarrier(10_000)}})
+	if err := r.Tune(testCenter); err != nil {
+		t.Fatalf("Tune: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ch, err := r.StartStream(ctx, sdr.StreamConfig{SampleRate: testRate, BlockSize: 480})
+	if err != nil {
+		t.Fatalf("StartStream: %v", err)
+	}
+	defer func() { _ = r.Stop() }()
+
+	if f := meanFreq((<-ch).Samples); math.Abs(f-10_000) > 1 {
+		t.Fatalf("before tune: freq=%.1f Hz, want 10000", f)
+	}
+	if err := r.Tune(testCenter + deltaHz); err != nil {
+		t.Fatalf("Tune: %v", err)
+	}
+	for frame := range ch {
+		if frame.CenterHz != testCenter+deltaHz {
+			continue
+		}
+		if f := meanFreq(frame.Samples); math.Abs(f-(10_000-deltaHz)) > 1 {
+			t.Errorf("after tune by %d Hz: freq=%.1f Hz, want %d", deltaHz, f, 10_000-deltaHz)
+		}
+		return
+	}
+	t.Fatal("no frame with the new center before the stream ended")
+}
+
+// streamRate collects blocks from streamGenerated for the given time and returns
+// samples per second of wall-clock time from block number skip to the last block.
+func streamRate(t *testing.T, window time.Duration, skip int, generate func(dst []complex64, centerHz uint64)) float64 {
+	t.Helper()
+	const blockSize = 480 // 10 ms at testRate
+	r := New(Options{})
+	ctx, cancel := context.WithTimeout(context.Background(), window)
+	defer cancel()
+	ch := make(chan sdr.IQFrame, 4)
+	go func() {
+		defer close(ch)
+		r.streamGenerated(ctx, sdr.StreamConfig{SampleRate: testRate}, blockSize, ch, generate)
+	}()
+
+	var first, last time.Time
+	samples, n := 0, 0
+	for frame := range ch {
+		now := time.Now()
+		if n++; n <= skip {
+			continue
+		}
+		if first.IsZero() {
+			first = now
+			continue
+		}
+		last = now
+		samples += len(frame.Samples)
+	}
+	if samples == 0 {
+		t.Fatal("stream produced less than two blocks")
+	}
+	return float64(samples) / last.Sub(first).Seconds()
+}
+
+// Generation time must not stretch the stream: blocks follow a schedule from
+// the stream start, so the sample rate in real time stays fs.
+func TestStreamGenerated_SlowGeneratorKeepsSampleRate(t *testing.T) {
+	slow := func(dst []complex64, _ uint64) { time.Sleep(3 * time.Millisecond) }
+	rate := streamRate(t, 600*time.Millisecond, 0, slow)
+	if ratio := rate / testRate; ratio < 0.95 || ratio > 1.05 {
+		t.Errorf("stream rate %.0f samples/s = %.2f of fs, want 1.00 ± 0.05", rate, ratio)
+	}
+}
+
+// After a long stall the stream resumes at fs instead of bursting the missed
+// blocks: a consumer would otherwise see time run fast right after the stall.
+// The rate is measured from the stalled block on.
+func TestStreamGenerated_NoBurstAfterStall(t *testing.T) {
+	const stalled = 3
+	calls := 0
+	stallOnce := func(dst []complex64, _ uint64) {
+		calls++
+		if calls == stalled {
+			time.Sleep(200 * time.Millisecond)
+		}
+	}
+	rate := streamRate(t, 600*time.Millisecond, stalled-1, stallOnce)
+	if ratio := rate / testRate; ratio > 1.05 {
+		t.Errorf("stream rate %.0f samples/s = %.2f of fs: missed blocks came in a burst", rate, ratio)
+	}
+}
+
 func TestReceiver_StartStream_NoiseOnly(t *testing.T) {
 	r := New(Options{NoiseDBFS: -60, Seed: 2})
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)

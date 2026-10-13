@@ -224,7 +224,13 @@ func (r *Receiver) syntheticTone(sampleRate uint32) func(dst []complex64, center
 	}
 }
 
-// streamGenerated выдаёт блоки от генератора в темпе реального времени.
+// maxScheduleLagBlocks — на сколько блоков поток может отстать от расписания и догнать его.
+// Больше: пропущенное не догоняется, расписание идёт от текущего момента. Иначе после
+// задержки потребитель получил бы залп блоков и время эфира побежало бы быстрее.
+const maxScheduleLagBlocks = 4
+
+// streamGenerated выдаёт блоки от генератора в темпе реального времени: блок n уходит
+// в момент «старт + n·длительность блока», время генерации из паузы вычитается.
 // Генератор получает текущую частоту настройки приёмника.
 func (r *Receiver) streamGenerated(
 	ctx context.Context,
@@ -234,6 +240,7 @@ func (r *Receiver) streamGenerated(
 	generate func(dst []complex64, centerHz uint64),
 ) {
 	frameDuration := time.Duration(float64(blockSize) / float64(cfg.SampleRate) * float64(time.Second))
+	next := time.Now()
 
 	for {
 		r.mu.Lock()
@@ -256,10 +263,18 @@ func (r *Receiver) streamGenerated(
 		case ch <- frame:
 		}
 
+		next = next.Add(frameDuration)
+		wait := time.Until(next)
+		if wait < -maxScheduleLagBlocks*frameDuration {
+			next, wait = time.Now(), 0
+		}
+		if wait <= 0 {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(frameDuration):
+		case <-time.After(wait):
 		}
 	}
 }
