@@ -141,6 +141,9 @@
         /** Частота, на которой стоит приёмник; _hz — то, что набрано на индикаторе. */
         this._appliedHz = this._hz;
         this._editing = false;
+        /** Только показ: перестраивать приёмник этому клиенту нельзя. */
+        this._readOnly = false;
+        this._buttons = [];
         this._pos = clamp(
             typeof opts.pos === 'number' ? opts.pos : DEFAULT_POS,
             0, DIGIT_COUNT - 1
@@ -277,7 +280,9 @@
 
         // Разряды сверху, клавиши под ними — порядок DOM совпадает с визуальным
         for (let i = 0; i < ACTIONS.length; i++) {
-            root.appendChild(makeBtn(ACTIONS[i]));
+            const b = makeBtn(ACTIONS[i]);
+            this._buttons.push(b);
+            root.appendChild(b);
         }
 
         if (this._unitLabel) {
@@ -377,6 +382,7 @@
     };
 
     FreqDial.prototype._onAction = function(act, fromRepeat) {
+        if (this._readOnly) { return; }
         if (!fromRepeat && this._repeated) { return; } // click после автоповтора
         if (act === 'inc') { this._step(1); }
         else if (act === 'dec') { this._step(-1); }
@@ -388,6 +394,7 @@
     // ── Автоповтор при удержании ─────────────────────────────────────────
 
     FreqDial.prototype._startRepeat = function(act) {
+        if (this._readOnly) { return; }
         const self = this;
         this._stopRepeat();
         this._repeated = false;
@@ -410,7 +417,7 @@
     // ── Ввод ─────────────────────────────────────────────────────────────
 
     FreqDial.prototype._onKeyDown = function(e) {
-        if (!e) { return; }
+        if (!e || this._readOnly) { return; }
         const key = e.key;
         let handled = true;
 
@@ -445,6 +452,7 @@
     };
 
     FreqDial.prototype._onDigitClick = function(e) {
+        if (this._readOnly) { return; }
         const pos = this._posFromEvent(e);
         if (pos === null) { return; }
         this._placeCursor(pos);
@@ -452,7 +460,7 @@
     };
 
     FreqDial.prototype._onWheel = function(e) {
-        if (!e || typeof e.deltaY !== 'number' || e.deltaY === 0) { return; }
+        if (this._readOnly || !e || typeof e.deltaY !== 'number' || e.deltaY === 0) { return; }
         if (typeof e.preventDefault === 'function') { e.preventDefault(); }
         const pos = this._posFromEvent(e);
         if (pos !== null && pos !== this._pos) { this._pos = pos; }
@@ -482,6 +490,38 @@
 
     FreqDial.prototype.getHz = function() {
         return this._hz;
+    };
+
+    /**
+     * Только показ: ввод игнорируется, незавершённый набор отменяется.
+     * Программная установка (setHz) продолжает работать.
+     * @param {boolean} on
+     */
+    FreqDial.prototype.setReadOnly = function(on) {
+        this._readOnly = !!on;
+        if (this._readOnly) {
+            this._stopRepeat();
+            if (this._editing) { this._cancel(); }
+        }
+        if (this._root && this._root.classList) {
+            this._root.classList.toggle('is-readonly', this._readOnly);
+        }
+        if (this._strip) {
+            this._strip.setAttribute('aria-readonly', this._readOnly ? 'true' : 'false');
+            this._strip.tabIndex = this._readOnly ? -1 : 0;
+        }
+        for (let i = 0; i < this._buttons.length; i++) {
+            this._buttons[i].disabled = this._readOnly;
+        }
+    };
+
+    FreqDial.prototype.isReadOnly = function() {
+        return this._readOnly;
+    };
+
+    /** Оператор набирает частоту, но ещё не нажал SET. */
+    FreqDial.prototype.isEditing = function() {
+        return this._editing;
     };
 
     FreqDial.prototype.getMHz = function() {
@@ -514,6 +554,7 @@
         }
         this._handlers = [];
         this._digitEls = [];
+        this._buttons = [];
         this._strip = null;
         this._onChange = null;
         this._root = null;

@@ -59,4 +59,56 @@ console.log('TEST: antenna kind may stay empty on a rotator');
 }
 console.log('  OK');
 
-console.log('\nAll tests passed.');
+function receiverModal(receiver) {
+    const modal = Object.create(settings.SettingsModal.prototype);
+    modal._workingConfig = { station: { radio_paths: [{ id: 1, receiver: receiver }] } };
+    modal._sdrDevices = [{ driver: 'rtlsdr', serial: '0002', device_path: '', label: 'RTL-SDR v4' }];
+    modal._setDirty = () => {};
+    return modal;
+}
+
+console.log('TEST: receiver selection keeps sample rate for the same driver');
+{
+    const modal = receiverModal({ driver: 'rtlsdr', serial: '0001', sample_rate_hz: 1024000 });
+    modal._applyReceiverSelection(0, 'rtlsdr|0002|');
+    const rx = modal._workingConfig.station.radio_paths[0].receiver;
+    assert.strictEqual(rx.serial, '0002');
+    assert.strictEqual(rx.sample_rate_hz, 1024000);
+}
+console.log('  OK');
+
+console.log('TEST: receiver selection drops sample rate when driver changes');
+{
+    const modal = receiverModal({ driver: 'simulated', sample_rate_hz: 48000 });
+    modal._applyReceiverSelection(0, 'rtlsdr|0002|');
+    const rx = modal._workingConfig.station.radio_paths[0].receiver;
+    assert.strictEqual(rx.driver, 'rtlsdr');
+    assert.strictEqual(rx.sample_rate_hz, undefined);
+}
+console.log('  OK');
+
+console.log('TEST: save refused with 403 explains that only the master may change settings');
+global.fetch = () => Promise.resolve({
+    ok: false,
+    status: 403,
+    text: () => Promise.resolve('forbidden: master only'),
+    json: () => Promise.resolve({ error: 'forbidden' }),
+});
+const modal403 = Object.create(settings.SettingsModal.prototype);
+modal403._workingConfig = { station: {} };
+modal403._clearFieldErrors = () => {};
+modal403._setDirty = () => { throw new Error('must stay dirty: nothing was saved'); };
+const statuses403 = [];
+modal403._setStatus = (text, kind) => statuses403.push([text, kind]);
+modal403._save().then(() => {
+    assert.strictEqual(statuses403.length, 1);
+    assert.strictEqual(statuses403[0][1], 'error');
+    assert.ok(/паролю станции/.test(statuses403[0][0]), statuses403[0][0]);
+    assert.ok(!/мастер/i.test(statuses403[0][0]), 'role names stay out of the UI');
+    assert.ok(!/HTTP 403/.test(statuses403[0][0]), 'no raw HTTP code for a known case');
+    console.log('  OK');
+    console.log('\nAll tests passed.');
+}).catch((err) => {
+    console.error(err);
+    process.exit(1);
+});

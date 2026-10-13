@@ -9,10 +9,11 @@ import (
 type stubReceiver struct {
 	name    string
 	stopped bool
+	caps    Capabilities
 }
 
 func (s *stubReceiver) Name() string               { return s.name }
-func (s *stubReceiver) Capabilities() Capabilities { return Capabilities{} }
+func (s *stubReceiver) Capabilities() Capabilities { return s.caps }
 func (s *stubReceiver) Tune(uint64) error          { return nil }
 func (s *stubReceiver) SetGain(float32) error      { return nil }
 func (s *stubReceiver) Status() ReceiverStatus     { return ReceiverStatus{} }
@@ -26,7 +27,7 @@ func (s *stubReceiver) Stop() error { s.stopped = true; return nil }
 
 func TestReceiverHub_RegisterGet(t *testing.T) {
 	hub := NewReceiverHub()
-	hub.Register("path-1", func() (Receiver, error) {
+	hub.Register("path-1", PathConfig{}, func() (Receiver, error) {
 		return &stubReceiver{name: "test-1"}, nil
 	})
 
@@ -42,7 +43,7 @@ func TestReceiverHub_RegisterGet(t *testing.T) {
 func TestReceiverHub_LazyOpen(t *testing.T) {
 	calls := 0
 	hub := NewReceiverHub()
-	hub.Register("lazy", func() (Receiver, error) {
+	hub.Register("lazy", PathConfig{}, func() (Receiver, error) {
 		calls++
 		return &stubReceiver{name: "lazy"}, nil
 	})
@@ -58,7 +59,7 @@ func TestReceiverHub_LazyOpen(t *testing.T) {
 
 func TestReceiverHub_GetCached(t *testing.T) {
 	hub := NewReceiverHub()
-	hub.Register("cached", func() (Receiver, error) {
+	hub.Register("cached", PathConfig{}, func() (Receiver, error) {
 		return &stubReceiver{name: "cached"}, nil
 	})
 
@@ -72,7 +73,7 @@ func TestReceiverHub_GetCached(t *testing.T) {
 func TestReceiverHub_FactoryError_NotCached(t *testing.T) {
 	attempt := 0
 	hub := NewReceiverHub()
-	hub.Register("flaky", func() (Receiver, error) {
+	hub.Register("flaky", PathConfig{}, func() (Receiver, error) {
 		attempt++
 		if attempt == 1 {
 			return nil, errors.New("device busy")
@@ -98,8 +99,8 @@ func TestReceiverHub_CloseAll(t *testing.T) {
 	s1 := &stubReceiver{name: "s1"}
 	s2 := &stubReceiver{name: "s2"}
 	hub := NewReceiverHub()
-	hub.Register("p1", func() (Receiver, error) { return s1, nil })
-	hub.Register("p2", func() (Receiver, error) { return s2, nil })
+	hub.Register("p1", PathConfig{}, func() (Receiver, error) { return s1, nil })
+	hub.Register("p2", PathConfig{}, func() (Receiver, error) { return s2, nil })
 
 	hub.Get("p1")
 	hub.Get("p2")
@@ -120,10 +121,44 @@ func TestReceiverHub_UnknownPath(t *testing.T) {
 	}
 }
 
+func TestReceiverHub_SampleRate(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured uint32
+		want       uint32
+		wantErr    error
+	}{
+		{"configured overrides driver", 1_024_000, 1_024_000, nil},
+		{"driver recommended when not configured", 0, 2_048_000, nil},
+		{"configured outside driver ranges", 500_000, 0, ErrSampleRateUnsupported},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := NewReceiverHub()
+			hub.Register("p", PathConfig{SampleRateHz: tc.configured}, func() (Receiver, error) {
+				return &stubReceiver{caps: rtlLikeCaps()}, nil
+			})
+			got, err := hub.SampleRate("p")
+			if !errors.Is(err, tc.wantErr) {
+				t.Fatalf("err=%v, want %v", err, tc.wantErr)
+			}
+			if got != tc.want {
+				t.Errorf("rate=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestReceiverHub_SampleRate_UnknownPath(t *testing.T) {
+	if _, err := NewReceiverHub().SampleRate("nope"); !errors.Is(err, ErrUnknownRadioPath) {
+		t.Errorf("err=%v, want ErrUnknownRadioPath", err)
+	}
+}
+
 func TestReceiverHub_List(t *testing.T) {
 	hub := NewReceiverHub()
-	hub.Register("a", func() (Receiver, error) { return &stubReceiver{}, nil })
-	hub.Register("b", func() (Receiver, error) { return &stubReceiver{}, nil })
+	hub.Register("a", PathConfig{}, func() (Receiver, error) { return &stubReceiver{}, nil })
+	hub.Register("b", PathConfig{}, func() (Receiver, error) { return &stubReceiver{}, nil })
 
 	ids := hub.List()
 	if len(ids) != 2 {

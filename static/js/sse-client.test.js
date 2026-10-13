@@ -857,6 +857,43 @@ test('satellite_group_update routes group data to stateManager', () => {
     client.disconnect();
 });
 
+// ── Receiver control events ───────────────────────────────
+
+console.log('\nSSEClient — receiver control events');
+
+test('control events are re-dispatched on document as satellite-scout-access', () => {
+    const dispatched = [];
+    const prevDocument = global.document;
+    const prevCustomEvent = global.CustomEvent;
+    global.document = { dispatchEvent: (e) => { dispatched.push(e); return true; } };
+    global.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init.detail; } };
+    try {
+        const client = new SSEClient(new SatelliteStateManager());
+        client.connect();
+        const es = MockEventSource._lastInstance;
+        es._simulateOpen();
+        es._emit('control_request', { request_id: 'r1', remote_addr: '192.168.1.232' });
+        es._emit('control_request_closed', { request_id: 'r1' });
+        es._emit('control_granted', {});
+        es._emit('control_denied', { reason: 'timeout' });
+        es._emit('control_revoked', {});
+        es._emit('control_released', {});
+        es._emit('control_granted', 'not json');
+
+        assert.deepStrictEqual(dispatched.map((e) => e.type), new Array(6).fill('satellite-scout-access'));
+        assert.deepStrictEqual(dispatched.map((e) => e.detail.event), [
+            'control_request', 'control_request_closed', 'control_granted', 'control_denied', 'control_revoked',
+            'control_released',
+        ]);
+        assert.deepStrictEqual(dispatched[0].detail.data, { request_id: 'r1', remote_addr: '192.168.1.232' });
+        assert.strictEqual(dispatched[3].detail.data.reason, 'timeout');
+        client.disconnect();
+    } finally {
+        global.document = prevDocument;
+        global.CustomEvent = prevCustomEvent;
+    }
+});
+
 // ── Итоги ─────────────────────────────────────────────────
 
 console.log(`\n${'═'.repeat(50)}`);

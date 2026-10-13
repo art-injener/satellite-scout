@@ -15,6 +15,7 @@ import (
 	"time"
 
 	assets "github.com/art-injener/satellite-scout"
+	"github.com/art-injener/satellite-scout/internal/access"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/exclude"
 	"github.com/art-injener/satellite-scout/internal/handlers"
@@ -37,6 +38,7 @@ type app struct {
 	static    fs.FS
 
 	sseHub   *handlers.SSEHub                   // рассылка real-time данных
+	access   *access.Manager                    // роли: мастер и зрители
 	tleStore *tracker.TLEStore                  // хранилище TLE
 	tracking *services.SatelliteTrackingService // отслеживание спутников
 	pass     *services.PassService              // расчёт пролётов
@@ -66,7 +68,18 @@ func loadConfig() (*config.Store, error) {
 	if err != nil {
 		return nil, err
 	}
+	generated, err := config.EnsureMasterPassword(configStore)
+	if err != nil {
+		return nil, err
+	}
 	cfg := configStore.Get()
+	if generated {
+		slog.Warn("master password generated: use it to control the station remotely",
+			"password", cfg.Server.MasterPassword,
+			"saved_to", configStore.Path(),
+		)
+	}
+	slog.Info("access: requests from this machine are master; do not put a reverse proxy in front on the same host")
 	slog.Info("configuration loaded",
 		"path", configStore.Path(),
 		"port", cfg.Server.Port,
@@ -88,6 +101,11 @@ func NewApp(configStore *config.Store) *app {
 	tleStore := tracker.NewTLEStore(cfg.TLEStoreConfig())
 	// SSEHub - eдиная точка рассылки данных для UI
 	sseHub := handlers.NewSSEHub()
+
+	// Роли и передача управления: хаб сообщает о подключениях, менеджер шлёт через него события.
+	accessManager := access.NewManager(cfg.Server.MasterPassword)
+	accessManager.SetNotifier(sseHub)
+	sseHub.SetPresence(accessManager)
 
 	// Наблюдатель
 	observer := tracker.NewObserver(
@@ -121,10 +139,15 @@ func NewApp(configStore *config.Store) *app {
 	for _, rp := range cfg.Station.RadioPaths {
 		rc := rp.Receiver
 		pathID := fmt.Sprintf("radio_path_%d", rp.ID)
-		receiverHub.Register(pathID, func() (sdr.Receiver, error) {
+		receiverHub.Register(pathID, sdr.PathConfig{SampleRateHz: rc.SampleRateHz}, func() (sdr.Receiver, error) {
 			switch rc.Driver {
 			case "imitator", "simulated", "":
-				return imitator.New(imitator.DefaultOptions()), nil
+				r := imitator.New(imitator.DefaultBeaconOptions())
+				// Сразу на частоте маяка: сигнал виден в спектре без вызова tune.
+				if err := r.Tune(imitator.DefaultBeaconHz); err != nil {
+					return nil, err
+				}
+				return r, nil
 			default:
 				return nil, fmt.Errorf("%w: %q", sdr.ErrDriverNotImplemented, rc.Driver)
 			}
@@ -137,6 +160,7 @@ func NewApp(configStore *config.Store) *app {
 		templates:   templates,
 		static:      static,
 		sseHub:      sseHub,
+		access:      accessManager,
 		tleStore:    tleStore,
 		tracking:    trackingService,
 		pass:        passService,
@@ -154,7 +178,7 @@ func (a *app) Run() error {
 
 	mux := http.NewServeMux()
 	setupRoutes(mux, a.routeDeps())
-	server := newServer(a.cfg, loggingMiddleware(mux))
+	server := newServer(a.cfg, loggingMiddleware(a.access.EnsureSession(mux)))
 
 	var lc net.ListenConfig
 	ln, listenErr := lc.Listen(ctx, "tcp", server.Addr)
@@ -319,6 +343,7 @@ func (a *app) routeDeps() *routeDeps {
 		Templates:   a.templates,
 		Static:      a.static,
 		SSE:         a.sseHub,
+		Access:      a.access,
 		Tracking:    a.tracking,
 		SatNOGS:     a.satnogs,
 		SDR:         a.sdrService,

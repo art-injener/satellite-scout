@@ -13,8 +13,8 @@ import (
 // модального окна «Настройки» в UI: чтение и обновление всего конфига.
 //
 // Эндпоинты:
-//   - GET  /api/settings — возвращает полный config.Config (без runtime-полей).
-//   - PUT  /api/settings — принимает Config, валидирует, сохраняет атомарно
+//   - GET  /api/settings — возвращает полный config.Config (без runtime-полей и пароля мастера).
+//   - PUT  /api/settings — только мастеру (проверка в маршрутах); принимает Config, валидирует, сохраняет атомарно
 //     через ConfigStore.Update и возвращает список полей, требующих рестарта.
 type SettingsHandler struct {
 	store *config.Store
@@ -40,7 +40,7 @@ type SettingsValidationResponse struct {
 }
 
 // Get возвращает текущую конфигурацию в виде, пригодном для модалки настроек.
-// Runtime-поля (DevMode) не сериализуются — их клиент не редактирует.
+// Runtime-поля (DevMode) не сериализуются — их клиент не редактирует. Пароль мастера не отдаётся.
 func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 	cfg := h.store.Get()
 	if cfg == nil {
@@ -49,6 +49,7 @@ func (h *SettingsHandler) Get(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	cfg.Server.MasterPassword = ""
 	writeJSON(w, http.StatusOK, cfg)
 }
 
@@ -82,10 +83,13 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := h.store.Update(func(c *config.Config) error {
-		// Полная замена всего конфига (кроме runtime DevMode, которого в JSON нет).
+		// Полная замена всего конфига, кроме runtime DevMode (его нет в JSON) и пароля мастера:
+		// модалка его не получает, а меняется он только правкой файла.
 		dev := c.DevMode
+		password := c.Server.MasterPassword
 		*c = incoming
 		c.DevMode = dev
+		c.Server.MasterPassword = password
 		return nil
 	})
 	if err != nil {

@@ -162,13 +162,13 @@ function makeMockWidget() {
     Widget.prototype.setPosition = function(a, b) { this.calls.push(['setPosition', a, b]); };
     Widget.prototype.setNoradId = function(id) { this.calls.push(['setNoradId', id]); };
     Widget.prototype.resize = function(w, h) { this.calls.push(['resize', w, h]); };
-    Widget.prototype.draw = function() { this.calls.push(['draw']); };
+    Widget.prototype.draw = function(buf) { this.calls.push(['draw', buf]); };
     Widget.prototype.refreshThemeColors = function() { this.calls.push(['refreshThemeColors']); };
     Widget.prototype._resize = function() { this.calls.push(['_resize']); };
     Widget.prototype.refresh = function() { this.calls.push(['refresh']); };
     Widget.prototype.start = function() { this.calls.push(['start']); };
     Widget.prototype.clear = function() { this.calls.push(['clear']); };
-    Widget.prototype.pushLine = function() { this.calls.push(['pushLine']); };
+    Widget.prototype.pushLine = function(buf) { this.calls.push(['pushLine', buf]); };
     return Widget;
 }
 
@@ -176,16 +176,84 @@ global.window.AzimuthIndicator = makeMockWidget();
 global.window.ElevationIndicator = makeMockWidget();
 global.window.FFTSpectrumView = makeMockWidget();
 global.window.WaterfallView = makeMockWidget();
-function MockDataSource(opts) {
-    this.freqCenterMHz = opts.freqCenterMHz;
-    this.freqSpanMHz = opts.freqSpanMHz;
-    this.calls = [];
-    this._buf = new Float32Array(opts.bins || 512);
+// SpectrumStream mock: tests play the server through opts.onFrame / opts.onStatus
+const realStream = require('./spectrum-stream.js');
+function MockStream(opts) {
+    this.opts = opts;
+    this.started = 0;
+    this.stopped = 0;
+    this.running = false;
+    MockStream.instances.push(this);
 }
-MockDataSource.prototype.generateLine = function() { this.calls.push(['generateLine']); };
-MockDataSource.prototype.getLine = function() { return this._buf; };
-MockDataSource.prototype.reset = function() { this.calls.push(['reset']); };
-global.window.SpectrumDataSource = MockDataSource;
+MockStream.instances = [];
+MockStream.last = function() { return MockStream.instances[MockStream.instances.length - 1] || null; };
+MockStream.prototype.start = function() { this.started++; this.running = true; };
+MockStream.prototype.stop = function() { this.stopped++; this.running = false; };
+MockStream.prototype.isRunning = function() { return this.running; };
+MockStream.dbfsToUnit = realStream.dbfsToUnit;
+MockStream.AutoRange = realStream.AutoRange;
+global.window.SpectrumStream = MockStream;
+
+/** FFT frame as SpectrumStream hands it over. */
+function fftFrame(centerHz, values, spanHz) {
+    return {
+        header: { dataType: 0x01, centerHz: centerHz, spanHz: spanHz || 2048000 },
+        values: new Float32Array(values || [-100, -50, 0]),
+    };
+}
+
+// fetch mock: records POST /api/sdr/tune, answers with fetchMock.status
+const fetchMock = { calls: [], status: 200, body: { ok: true } };
+global.fetch = function(url, init) {
+    fetchMock.calls.push({ url: url, body: init && init.body ? JSON.parse(init.body) : null });
+    const status = fetchMock.status;
+    return Promise.resolve({
+        ok: status >= 200 && status < 300,
+        status: status,
+        json: () => Promise.resolve(fetchMock.body),
+    });
+};
+function tuneCalls() {
+    return fetchMock.calls.filter((c) => c.url === '/api/sdr/tune');
+}
+
+// AccessControl mock: role is a flag the test flips
+function makeAccess(canControl) {
+    const ac = {
+        can: canControl,
+        listeners: [],
+        notices: [],
+        refreshed: 0,
+        canControl() { return ac.can; },
+        onChange(cb) {
+            ac.listeners.push(cb);
+            return () => { ac.listeners = ac.listeners.filter((x) => x !== cb); };
+        },
+        setNotice(t) { ac.notices.push(t); },
+        refresh() { ac.refreshed++; return Promise.resolve(); },
+        setRole(can) { ac.can = can; ac.listeners.forEach((cb) => cb()); },
+    };
+    return ac;
+}
+
+/** Single-tract station: tract id 1, Az/El view. */
+const TRACT_1 = { hasRotator: () => true, antennaKind: () => 'yagi', getRadioPathId: () => 1 };
+
+/** Runs fn with a mode manager and an access control on window. */
+function withStation(opts, fn) {
+    const prevMM = global.window._modeManager;
+    const prevAC = global.window._accessControl;
+    global.window._modeManager = opts.mm === undefined ? TRACT_1 : opts.mm;
+    global.window._accessControl = opts.access || makeAccess(true);
+    fetchMock.calls = [];
+    fetchMock.status = 200;
+    try {
+        return fn(global.window._accessControl);
+    } finally {
+        global.window._modeManager = prevMM;
+        global.window._accessControl = prevAC;
+    }
+}
 
 // ManualPanorama mock
 function MockPanorama() {
@@ -272,6 +340,8 @@ MockFreqDial.prototype.setMHz = function(mhz) { this.hz = Math.round(mhz * 1e6);
 MockFreqDial.prototype.getHz = function() { return this.hz; };
 MockFreqDial.prototype.getMHz = function() { return this.hz / 1e6; };
 MockFreqDial.prototype.destroy = function() { this.calls.push(['destroy']); };
+MockFreqDial.prototype.setReadOnly = function(on) { this.readOnly = !!on; this.calls.push(['setReadOnly', !!on]); };
+MockFreqDial.prototype.isEditing = function() { return !!this.editing; };
 /** Имитирует перестройку оператором: индикатор сообщает новую частоту наружу. */
 MockFreqDial.prototype.emit = function(hz) {
     this.hz = Math.round(hz);
@@ -282,6 +352,7 @@ _domNodes.set('manual-rx-rf-bar', makeDomElement('manual-rx-rf-bar'));
 _domNodes.set('manual-rx-rf-val', makeDomElement('manual-rx-rf-val'));
 _domNodes.set('manual-rx-audio-bar', makeDomElement('manual-rx-audio-bar'));
 _domNodes.set('manual-rx-audio-val', makeDomElement('manual-rx-audio-val'));
+_domNodes.set('manual-rx-stream', makeDomElement('manual-rx-stream'));
 
 // Вкладка «Демодулятор»: переключатель Таблица/Hex + кнопки записи и прослушивания
 const resultTabTable = makeDomElement('result-tab-table', { _attrs: { 'data-view': 'table', 'aria-selected': 'true' } });
@@ -454,7 +525,6 @@ test('constructor instantiates Az/El/FFT/WF widgets from window classes', () => 
     assert.ok(m._el, 'ElevationIndicator must be created');
     assert.ok(m._fft, 'FFTSpectrumView must be created');
     assert.ok(m._wf, 'WaterfallView must be created');
-    assert.ok(m._dataSource, 'SpectrumDataSource must be created');
     m.destroy();
 });
 
@@ -656,23 +726,21 @@ test('constructor creates DemodPanel and subscribes to panorama:tune', () => {
     m.destroy();
 });
 
-test('panorama:tune updates demod, spectrum center and the freq dial', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    const layoutEl = _domNodes.get('layout-manual');
-    const tx = { freqMHz: 435.25, label: 'AO-91 BPSK', modulation: 'BPSK31', active: true };
+test('panorama:tune updates demod and the dial, and tunes the receiver', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        const layoutEl = _domNodes.get('layout-manual');
+        const tx = { freqMHz: 435.25, label: 'AO-91 BPSK', modulation: 'BPSK31', active: true };
 
-    layoutEl.dispatchEvent({ type: 'panorama:tune', detail: { freqMHz: 435.25, tx: tx } });
+        layoutEl.dispatchEvent({ type: 'panorama:tune', detail: { freqMHz: 435.25, tx: tx } });
 
-    const setCalls = m._demodPanel.calls.filter((c) => c[0] === 'setChannel');
-    assert.strictEqual(setCalls.length, 1);
-    assert.strictEqual(setCalls[0][1].label, 'AO-91 BPSK');
-    assert.strictEqual(m._dataSource.freqCenterMHz, 435.25);
-    assert.strictEqual(m._fft.freqCenterMHz, 435.25);
-    assert.strictEqual(m._freqDial.getHz(), 435250000);
-    const resetCalls = m._dataSource.calls.filter((c) => c[0] === 'reset');
-    assert.strictEqual(resetCalls.length, 1);
-    m.destroy();
+        const setCalls = m._demodPanel.calls.filter((c) => c[0] === 'setChannel');
+        assert.strictEqual(setCalls.length, 1);
+        assert.strictEqual(setCalls[0][1].label, 'AO-91 BPSK');
+        assert.strictEqual(m._freqDial.getHz(), 435250000);
+        assert.deepStrictEqual(tuneCalls().map((c) => c.body), [{ radio_path: 'radio_path_1', center_hz: 435250000 }]);
+        m.destroy();
+    });
 });
 
 console.log('\n— ManualLayout: telemetry table —');
@@ -820,15 +888,16 @@ test('_setRxFreqMHz ignores a non-finite frequency', () => {
     m.destroy();
 });
 
-test('dial retune updates the stored frequency and the spectrum center', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    m._freqDial.emit(437801000);
-    assert.ok(Math.abs(m._rxFreqMHz - 437.801) < 1e-9, `got ${m._rxFreqMHz}`);
-    assert.ok(Math.abs(m._dataSource.freqCenterMHz - 437.801) < 1e-9);
-    assert.ok(Math.abs(m._fft.freqCenterMHz - 437.801) < 1e-9);
-    assert.ok(Math.abs(m._wf._freqCenterMHz - 437.801) < 1e-9);
-    m.destroy();
+test('dial SET tunes the receiver; the views wait for the stream to move', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        const centerBefore = m._fft.freqCenterMHz;
+        m._freqDial.emit(437801000);
+        assert.ok(Math.abs(m._rxFreqMHz - 437.801) < 1e-9, `got ${m._rxFreqMHz}`);
+        assert.deepStrictEqual(tuneCalls().map((c) => c.body), [{ radio_path: 'radio_path_1', center_hz: 437801000 }]);
+        assert.strictEqual(m._fft.freqCenterMHz, centerBefore, 'data on screen is still the old tuning');
+        m.destroy();
+    });
 });
 
 test('destroy tears the dial down', () => {
@@ -1121,7 +1190,6 @@ test('Antenna from Spectrum keeps the channel and the dial retune', () => {
     assert.strictEqual(m._view, 'spectrum', 'reception must go on');
     assert.ok(m._spectrumTimer);
     assert.strictEqual(m._freqDial.getHz(), 435260000, 'Spectrum frequency wins over the panorama selection');
-    assert.ok(Math.abs(m._dataSource.freqCenterMHz - 435.26) < 1e-9);
     m.destroy();
 });
 
@@ -1134,7 +1202,6 @@ test('Antenna from Panorama tunes to the transmitter selected there and stays on
     assert.strictEqual(m._view, 'spectrum', 'one SDR: Antenna shows the channel, so it holds');
     assert.ok(m._spectrumTimer);
     assert.strictEqual(m._freqDial.getHz(), 435250000);
-    assert.strictEqual(m._dataSource.freqCenterMHz, 435.25);
     assert.strictEqual(m._chanFreqMHz, 435.25);
     m.destroy();
 });
@@ -1164,27 +1231,17 @@ test('selection equal to the last channel does not undo the dial retune', () => 
     m.destroy();
 });
 
-test('with nothing chosen Antenna opens the 435-437 MHz telemetry band', () => {
-    const m = new ManualLayout(makeStateManager());
-    m.activate();
-    fire(tabAntenna, 'click');
-    assert.strictEqual(activeTabOf(m), 'antenna');
-    assert.strictEqual(m._view, 'spectrum');
-    assert.strictEqual(m._dataSource.freqCenterMHz, 436);
-    assert.strictEqual(m._dataSource.freqSpanMHz, 2);
-    assert.strictEqual(m._freqDial.getHz(), 436000000);
-    assert.strictEqual(m._expectedFreqMHz(), null, 'no transmitter, no expected frequency');
-    m.destroy();
-});
-
-test('tuning to a channel narrows the band to the channel width', () => {
-    const m = new ManualLayout(makeStateManager());
-    tuneTo(AO91.freqMHz, AO91);
-    assert.strictEqual(m._dataSource.freqSpanMHz, 0.192);
-    assert.strictEqual(m._fft.freqSpanMHz, 0.192);
-    assert.strictEqual(m._antFft.freqSpanMHz, 0.192);
-    assert.strictEqual(m._wf._freqSpanMHz, 0.192);
-    m.destroy();
+test('with nothing chosen Antenna holds without retuning the shared receiver', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabAntenna, 'click');
+        assert.strictEqual(activeTabOf(m), 'antenna');
+        assert.strictEqual(m._view, 'spectrum');
+        assert.strictEqual(tuneCalls().length, 0, 'other viewers keep their picture');
+        assert.strictEqual(m._expectedFreqMHz(), null, 'no transmitter, no expected frequency');
+        m.destroy();
+    });
 });
 
 test('Panorama from Antenna returns the SDR to SWEEP', () => {
@@ -1352,26 +1409,32 @@ function tuneTo(freqMHz, tx) {
     });
 }
 
-test('compact spectrum shows the channel in HOLD only while Antenna is open', () => {
-    const m = new ManualLayout(makeStateManager());
-    assert.ok(m._antFft, 'compact spectrum view must be created');
-    m.activate();
-    fire(tabSpectrum, 'click');
-    m._spectrumTick();
-    assert.strictEqual(antDraws(m), 0, 'hidden on the Spectrum tab');
-    fire(tabAntenna, 'click');
-    m._spectrumTick();
-    assert.strictEqual(antDraws(m), 1);
-    m.destroy();
+test('compact spectrum draws stream frames only while Antenna is open', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        assert.ok(m._antFft, 'compact spectrum view must be created');
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(435250000));
+        assert.strictEqual(antDraws(m), 0, 'hidden on the Spectrum tab');
+        fire(tabAntenna, 'click');
+        MockStream.last().opts.onFrame(fftFrame(435250000));
+        assert.strictEqual(antDraws(m), 1);
+        m.destroy();
+    });
 });
 
-test('compact spectrum follows the receiver frequency', () => {
-    const m = new ManualLayout(makeStateManager());
-    tuneTo(435.25, { label: 'AO-91', modulation: 'BPSK', noradId: 43017 });
-    assert.strictEqual(m._antFft.freqCenterMHz, 435.25);
-    m._freqDial.emit(435260000);
-    assert.strictEqual(m._antFft.freqCenterMHz, 435.26);
-    m.destroy();
+test('compact spectrum follows the receiver frequency from the stream', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(435250000));
+        assert.strictEqual(m._antFft.freqCenterMHz, 435.25);
+        MockStream.last().opts.onFrame(fftFrame(435260000));
+        assert.strictEqual(m._antFft.freqCenterMHz, 435.26);
+        m.destroy();
+    });
 });
 
 test('expected frequency is the tuned transmitter shifted by Doppler', () => {
@@ -1532,9 +1595,271 @@ test('tract subscription is made once and dropped on destroy', () => {
     });
 });
 
+console.log('\n— ManualLayout: live spectrum stream —');
+
+test('Spectrum opens one stream for the selected tract, Panorama and deactivate stop it', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        assert.strictEqual(m._stream, null, 'no stream while sweeping');
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        assert.ok(/^\/api\/stream\/v1\/spectrum\?/.test(s.opts.url), s.opts.url);
+        assert.ok(s.opts.url.indexOf('radio_path=radio_path_1') >= 0, s.opts.url);
+        assert.strictEqual(s.started, 1);
+        fire(tabAntenna, 'click');
+        assert.strictEqual(MockStream.last(), s, 'Antenna keeps the same stream');
+        fire(tabPanorama, 'click');
+        assert.strictEqual(s.stopped, 1);
+        fire(tabSpectrum, 'click');
+        const s2 = MockStream.last();
+        m.deactivate();
+        assert.strictEqual(s2.stopped, 1, 'leaving Manual closes the stream');
+        m.destroy();
+    });
+});
+
+test('without a tract there is no stream and the panel says so', () => {
+    withStation({ mm: null }, () => {
+        const before = MockStream.instances.length;
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        assert.strictEqual(MockStream.instances.length, before);
+        assert.ok(/тракт/i.test(_domNodes.get('manual-rx-stream').textContent));
+        m.destroy();
+    });
+});
+
+test('stream status is shown under the dial', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        const el = _domNodes.get('manual-rx-stream');
+        s.opts.onStatus({ state: 'connecting' });
+        assert.ok(/подключ/i.test(el.textContent), el.textContent);
+        s.opts.onStatus({ state: 'error', message: 'HTTP 500: stream start failed' });
+        assert.ok(/HTTP 500/.test(el.textContent), el.textContent);
+        m.destroy();
+    });
+});
+
+test('frame is drawn on the FFT and the waterfall in the auto dB scale, band from the header', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        m._fft.calls = [];
+        m._wf.calls = [];
+        MockStream.last().opts.onFrame(fftFrame(436500000, [-100, -50, 0], 2048000));
+        // median -50 gives the bottom -60, peak 0 gives the top +5
+        assert.strictEqual(m._fft._dbMin, -60);
+        assert.strictEqual(m._fft._dbMax, 5);
+        assert.strictEqual(m._antFft._dbMin, -60, 'Antenna spectrum shares the scale');
+        const want = Array.from(realStream.dbfsToUnit(new Float32Array([-100, -50, 0]), -60, 5));
+        const draw = m._fft.calls.find((c) => c[0] === 'draw');
+        assert.deepStrictEqual(Array.from(draw[1]), want);
+        const line = m._wf.calls.find((c) => c[0] === 'pushLine');
+        assert.deepStrictEqual(Array.from(line[1]), want, 'waterfall uses the same scale');
+        assert.strictEqual(m._fft.freqCenterMHz, 436.5);
+        assert.strictEqual(m._fft.freqSpanMHz, 2.048);
+        assert.strictEqual(m._wf._freqCenterMHz, 436.5);
+        assert.strictEqual(m._wf._freqSpanMHz, 2.048);
+        assert.strictEqual(m._freqDial.getHz(), 436500000, 'dial shows where the receiver really is');
+        m.destroy();
+    });
+});
+
+test('Antenna draws the stream on its compact spectrum', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fire(tabAntenna, 'click');
+        m._antFft.calls = [];
+        MockStream.last().opts.onFrame(fftFrame(436500000));
+        assert.ok(m._antFft.calls.some((c) => c[0] === 'draw'));
+        assert.strictEqual(m._antFft.freqCenterMHz, 436.5);
+        m.destroy();
+    });
+});
+
+test('retune seen in the stream clears the waterfall, steady frames do not', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        s.opts.onFrame(fftFrame(436500000));
+        m._wf.calls = [];
+        s.opts.onFrame(fftFrame(436500000));
+        assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'));
+        s.opts.onFrame(fftFrame(437800000));
+        assert.ok(m._wf.calls.some((c) => c[0] === 'clear'), 'old lines belong to another frequency');
+        assert.strictEqual(m._freqDial.getHz(), 437800000, 'another operator retuned: dial follows');
+        m.destroy();
+    });
+});
+
+test('heartbeat updates the band without drawing', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        m._fft.calls = [];
+        MockStream.last().opts.onFrame({ header: { dataType: 0xFE, centerHz: 145800000, spanHz: 1024000 }, values: null });
+        assert.ok(!m._fft.calls.some((c) => c[0] === 'draw'));
+        assert.strictEqual(m._fft.freqCenterMHz, 145.8);
+        m.destroy();
+    });
+});
+
+test('dial is not overwritten while the operator is typing', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        m._freqDial.setHz(437000000);
+        m._freqDial.editing = true;
+        MockStream.last().opts.onFrame(fftFrame(436500000));
+        assert.strictEqual(m._freqDial.getHz(), 437000000);
+        m.destroy();
+    });
+});
+
+test('switching the tract restarts the stream on the new tract', () => {
+    const mm = Object.assign(hybridModeManager(), {});
+    mm.getRadioPathId = () => mm.id;
+    withStation({ mm: mm }, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s1 = MockStream.last();
+        mm.setRadioPath(2);
+        const s2 = MockStream.last();
+        assert.notStrictEqual(s1, s2);
+        assert.strictEqual(s1.stopped, 1);
+        assert.ok(s2.opts.url.indexOf('radio_path=radio_path_2') >= 0, s2.opts.url);
+        assert.strictEqual(s2.started, 1);
+        m.destroy();
+    });
+});
+
+test('destroy stops the stream', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        m.destroy();
+        assert.strictEqual(s.stopped, 1);
+    });
+});
+
+console.log('\n— ManualLayout: receiver control rights —');
+
+test('viewer: dial is read-only and a transmitter click does not tune', () => {
+    withStation({ access: makeAccess(false) }, (ac) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        assert.strictEqual(m._freqDial.readOnly, true);
+        tuneTo(AO91.freqMHz, AO91);
+        assert.strictEqual(tuneCalls().length, 0);
+        assert.ok(ac.notices.some((t) => /только в режиме «Контроль»\.$/.test(t)), ac.notices.join(' | '));
+        assert.strictEqual(m._view, 'spectrum', 'viewer still watches the spectrum');
+        m.destroy();
+    });
+});
+
+test('role change switches the dial between read-only and editable', () => {
+    withStation({ access: makeAccess(false) }, (ac) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        assert.strictEqual(m._freqDial.readOnly, true);
+        ac.setRole(true);
+        assert.strictEqual(m._freqDial.readOnly, false);
+        ac.setRole(false);
+        assert.strictEqual(m._freqDial.readOnly, true);
+        m.destroy();
+        assert.strictEqual(ac.listeners.length, 0, 'destroy drops the access subscription');
+    });
+});
+
+test('access subscription is made once across activate cycles', () => {
+    withStation({}, (ac) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        m.deactivate();
+        m.activate();
+        assert.strictEqual(ac.listeners.length, 1);
+        m.destroy();
+    });
+});
+
+// ── Async: server answers to a tune request ───────────────────
+
+const asyncTests = [];
+function testAsync(name, fn) { asyncTests.push([name, fn]); }
+const flush = () => new Promise((r) => setImmediate(r));
+
+testAsync('tune refused with 403 reverts the dial to the receiver and re-reads the role', async () => {
+    const ac = makeAccess(true);
+    const m = withStation({ access: ac }, () => {
+        const layout = new ManualLayout(makeStateManager());
+        layout.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000));
+        fetchMock.status = 403;
+        layout._freqDial.emit(437000000);
+        return layout;
+    });
+    global.window._accessControl = ac;
+    await flush();
+    await flush();
+    assert.strictEqual(m._freqDial.getHz(), 436500000);
+    assert.strictEqual(ac.refreshed, 1);
+    assert.ok(ac.notices.some((t) => /Режим «Контроль» отключён/.test(t)), ac.notices.join(' | '));
+    delete global.window._accessControl;
+    m.destroy();
+});
+
+testAsync('stream frames do not move the dial back while a tune is in flight', async () => {
+    const ac = makeAccess(true);
+    let m;
+    withStation({ access: ac }, () => {
+        m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000));
+        m._freqDial.emit(437000000);
+        MockStream.last().opts.onFrame(fftFrame(436500000));
+        assert.strictEqual(m._freqDial.getHz(), 437000000, 'old-center frame must not undo the SET');
+    });
+    await flush();
+    await flush();
+    MockStream.last().opts.onFrame(fftFrame(437000000));
+    assert.strictEqual(m._freqDial.getHz(), 437000000);
+    m.destroy();
+});
+
 // ── Summary ───────────────────────────────────────────────────
 
-console.log(`\n${passed} passed, ${failed} failed`);
-if (failed > 0) {
-    process.exit(1);
-}
+(async () => {
+    for (const [name, fn] of asyncTests) {
+        try {
+            await fn();
+            passed++;
+            console.log(`  ✓ ${name}`);
+        } catch (err) {
+            failed++;
+            console.error(`  ✗ ${name}`);
+            console.error(`    ${err.stack || err.message}`);
+        }
+    }
+    console.log(`\n${passed} passed, ${failed} failed`);
+    if (failed > 0) {
+        process.exit(1);
+    }
+})();

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -61,26 +62,23 @@ func (h *StreamHandler) Spectrum(w http.ResponseWriter, r *http.Request) {
 	fps := parseIntClamped(q.Get(queryFPS), defaultSpectrumFPS, minFPS, maxFPS)
 	mode := parseDisplayMode(q.Get(queryMode))
 
-	receiver, err := h.hub.Get(radioPath)
+	// Поток устройства общий для всех зрителей тракта; FFT и накопление у каждого клиента свои.
+	// Сеанс устройства живёт дольше запроса, поэтому контекст запроса в него не передаётся.
+	iqCh, unsubscribe, err := h.hub.Subscribe(radioPath) //nolint:contextcheck // см. комментарий выше
 	if err != nil {
-		slog.Error("spectrum: receiver not found",
+		slog.ErrorContext(r.Context(), "spectrum: failed to subscribe",
 			"radio_path", radioPath, "error", err)
-		http.Error(w, "receiver not available: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	fftSize := nextPow2(bins) // FFT — степень двойки >= bins
-	streamCfg := sdr.StreamConfig{
-		BlockSize: fftSize,
-	}
-	bins = fftSize // клиент получает ровно столько бинов, сколько FFT
-	iqCh, err := receiver.StartStream(r.Context(), streamCfg)
-	if err != nil {
-		slog.Error("spectrum: failed to start stream",
-			"radio_path", radioPath, "error", err)
+		if errors.Is(err, sdr.ErrUnknownRadioPath) {
+			http.Error(w, "receiver not available: "+err.Error(), http.StatusBadRequest)
+			return
+		}
 		http.Error(w, "stream start failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	defer unsubscribe()
+
+	fftSize := nextPow2(bins) // FFT — степень двойки >= bins
+	bins = fftSize            // клиент получает ровно столько бинов, сколько FFT
 
 	w.Header().Set("Content-Type", headerContentType)
 	w.Header().Set("Cache-Control", headerCacheControl)
@@ -118,6 +116,7 @@ func serveSpectrumLoop(
 	p spectrumParams,
 ) {
 	pipeline := dsp.NewSpectrumPipeline(p.fftSize, p.bins, p.mode, dsp.WindowBlackmanHarris)
+	chunker := newIQChunker(p.fftSize)
 
 	frameDur := time.Second / time.Duration(p.fps)
 	ticker := time.NewTicker(frameDur)
@@ -129,6 +128,7 @@ func serveSpectrumLoop(
 		hdr:     make([]byte, dsp.HeaderSize),
 		mode:    p.mode,
 	}
+	var center uint64 // частота приёмника в последнем блоке IQ
 
 	for {
 		select {
@@ -137,9 +137,15 @@ func serveSpectrumLoop(
 				sw.flushPipeline(pipeline)
 				return
 			}
+			// Приёмник перестроили: накопленное относится к прежней частоте
+			if center != 0 && frame.CenterHz != center {
+				chunker.reset()
+				pipeline.Reset()
+			}
+			center = frame.CenterHz
 			sw.lastCenter = int64(frame.CenterHz)
 			sw.lastSpan = int64(frame.SampleRate)
-			pipeline.Push(frame.Samples)
+			chunker.feed(frame.Samples, pipeline.Push)
 
 		case <-ticker.C:
 			if !sw.flushPipeline(pipeline) {
@@ -155,6 +161,35 @@ func serveSpectrumLoop(
 		}
 	}
 }
+
+// iqChunker собирает отсчёты кадров устройства в блоки размера FFT клиента.
+// Блок лежит в собственном буфере: кадр общий для всех зрителей,
+// а оконная функция в SpectrumPipeline.Push меняет отсчёты на месте.
+type iqChunker struct {
+	buf []complex64
+	n   int
+}
+
+func newIQChunker(size int) *iqChunker {
+	return &iqChunker{buf: make([]complex64, size)}
+}
+
+// feed дописывает отсчёты и вызывает emit на каждый заполненный блок.
+// Блок валиден только внутри emit; остаток ждёт следующего кадра.
+func (c *iqChunker) feed(samples []complex64, emit func(block []complex64)) {
+	for len(samples) > 0 {
+		copied := copy(c.buf[c.n:], samples)
+		c.n += copied
+		samples = samples[copied:]
+		if c.n == len(c.buf) {
+			emit(c.buf)
+			c.n = 0
+		}
+	}
+}
+
+// reset выбрасывает недособранный блок.
+func (c *iqChunker) reset() { c.n = 0 }
 
 // spectrumWriter инкапсулирует запись SSTM-фреймов в HTTP-поток.
 type spectrumWriter struct {

@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+
+	"github.com/art-injener/satellite-scout/internal/access"
 )
 
 // Размер буфера канала событий клиента.
@@ -24,14 +26,28 @@ type SSEEvent struct {
 
 // sseClient — подключённый SSE-клиент.
 type sseClient struct {
-	events   chan SSEEvent // Канал событий для этого клиента.
-	clientID string        // Идентификатор клиента (из query ?client_id=).
+	events   chan SSEEvent     // Канал событий для этого клиента.
+	clientID string            // Идентификатор клиента (из query ?client_id=).
+	info     access.ClientInfo // Сессия и адрес — для событий управления приёмником.
 }
 
 // clientMessage — направленное сообщение конкретному клиенту.
 type clientMessage struct {
 	clientID string
 	event    SSEEvent
+}
+
+// filteredMessage — событие для клиентов, отобранных функцией match.
+type filteredMessage struct {
+	event SSEEvent
+	match func(access.ClientInfo) bool
+}
+
+// PresenceListener узнаёт о подключении и отключении SSE-клиентов.
+// Методы вызываются из горутины Run и не должны блокироваться на хабе.
+type PresenceListener interface {
+	ClientConnected(c access.ClientInfo)
+	ClientDisconnected(c access.ClientInfo)
 }
 
 // SSEHub управляет подключениями SSE-клиентов и рассылкой событий.
@@ -43,6 +59,9 @@ type SSEHub struct {
 	unregister chan *sseClient    // Канал отписки клиентов.
 	broadcast  chan SSEEvent      // Канал для рассылки событий всем клиентам.
 	directed   chan clientMessage // Канал для отправки события конкретному клиенту.
+	filtered   chan filteredMessage
+
+	presence PresenceListener
 
 	// notifyOnConnect — при регистрации клиента сюда отправляется сигнал, об отправки состояния спутников
 	notifyOnConnect chan struct{}
@@ -64,6 +83,7 @@ func NewSSEHub() *SSEHub {
 		unregister: make(chan *sseClient, 16),
 		broadcast:  make(chan SSEEvent, hubBroadcastBufferSize),
 		directed:   make(chan clientMessage, 64),
+		filtered:   make(chan filteredMessage, 64),
 		done:       make(chan struct{}),
 	}
 }
@@ -94,6 +114,8 @@ func (h *SSEHub) Run(ctx context.Context) {
 			st.broadcastEvent(ctx, event)
 		case msg := <-h.directed:
 			st.sendDirected(ctx, msg)
+		case msg := <-h.filtered:
+			st.sendFiltered(ctx, msg)
 		case <-ctx.Done():
 			return
 		}
@@ -121,6 +143,10 @@ func (st *hubState) registerClient(ctx context.Context, client *sseClient) {
 
 	sendCachedEvents(client, st.lastEvents)
 
+	if st.hub.presence != nil {
+		st.hub.presence.ClientConnected(client.info)
+	}
+
 	if st.hub.onClientConnect != nil && client.clientID != "" {
 		for _, evt := range st.hub.onClientConnect(client.clientID) {
 			select {
@@ -147,6 +173,9 @@ func (st *hubState) unregisterClient(ctx context.Context, client *sseClient) {
 	if client.clientID != "" {
 		delete(st.clientIDMap, client.clientID)
 	}
+	if st.hub.presence != nil {
+		st.hub.presence.ClientDisconnected(client.info)
+	}
 	st.hub.clientCount.Add(-1)
 	slog.DebugContext(ctx, "SSE client unregistered",
 		"client_id", client.clientID,
@@ -169,6 +198,19 @@ func (st *hubState) sendDirected(ctx context.Context, msg clientMessage) {
 	default:
 		slog.WarnContext(ctx, "SSE directed: client buffer full",
 			"client_id", msg.clientID, "event_type", msg.event.Type)
+	}
+}
+
+func (st *hubState) sendFiltered(ctx context.Context, msg filteredMessage) {
+	for client := range st.clients {
+		if !msg.match(client.info) {
+			continue
+		}
+		select {
+		case client.events <- msg.event:
+		default:
+			slog.WarnContext(ctx, "SSE filtered: client buffer full", "event_type", msg.event.Type)
+		}
 	}
 }
 
@@ -239,6 +281,21 @@ func (h *SSEHub) SendToClient(clientID string, eventType string, data []byte) {
 	}
 }
 
+// SendWhere отправляет событие клиентам, для которых match вернул true.
+// match вызывается в горутине Run.
+func (h *SSEHub) SendWhere(eventType string, data []byte, match func(access.ClientInfo) bool) {
+	msg := filteredMessage{event: SSEEvent{Type: eventType, Data: data}, match: match}
+	select {
+	case h.filtered <- msg:
+	case <-h.done:
+	}
+}
+
+// SetPresence задаёт получателя событий подключения и отключения. Вызывать до Run().
+func (h *SSEHub) SetPresence(p PresenceListener) {
+	h.presence = p
+}
+
 // SetOnClientConnect задаёт колбэк для per-client событий при подключении.
 // Колбэк вызывается в горутине Run. Вызывать до Run().
 func (h *SSEHub) SetOnClientConnect(fn func(clientID string) []SSEEvent) {
@@ -283,6 +340,7 @@ func (h *SSEHub) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	client := &sseClient{
 		events:   make(chan SSEEvent, clientEventBufferSize),
 		clientID: clientID,
+		info:     access.ClientInfo{Session: access.SessionID(r), RemoteAddr: r.RemoteAddr},
 	}
 
 	// Регистрация (неблокирующая — Hub может быть уже остановлен).

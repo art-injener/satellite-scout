@@ -20,7 +20,14 @@
 // сверху показывают заданное положение и обновляются стрелками; SET наводит на
 // введённое. Кто цель и идёт ли за ней антенна решает План сеансов, панель читает.
 //
-// Жизненный цикл: activate()/deactivate() управляют таймером отрисовки.
+// Спектр и водопад рисуются из потока сервера (spectrum-stream.js). Приёмник
+// один на всех клиентов тракта: центр и полосу берём из заголовка кадра, а
+// регулятор частоты показывает, где приёмник стоит на самом деле. Перестроить
+// его могут мастер и слейв с разрешением (access-control.js); у остальных
+// регулятор только показывает частоту.
+//
+// Жизненный цикл: activate()/deactivate() открывают и закрывают поток и
+// управляют таймером перерисовки профиля и ленты пролётов.
 
 'use strict';
 
@@ -28,10 +35,11 @@
     const SPECTRUM_TICK_MS = 80;
     /** Скорость света для доплеровского сдвига, м/с. */
     const C_LIGHT = 299792458;
-    /** Настройка приёмника, пока канал не выбран: диапазон телеметрии 435–437 МГц. */
+    /** Подписи осей до первого кадра потока: диапазон телеметрии 435–437 МГц. */
     const DEFAULT_BAND = { centerMHz: 436, spanMHz: 2 };
-    /** Полоса спектра, настроенного на канал передатчика, МГц. */
-    const CHANNEL_SPAN_MHZ = 0.192;
+    /** Размер строки спектра и частота кадров, которые просим у сервера. */
+    const STREAM_BINS = 1024;
+    const STREAM_FPS = 20;
     /** Допуск наведения: сверх него рассогласование подсвечивается, градусы. */
     const POINTING_TOLERANCE_DEG = 2;
     const STORAGE_AGC = 'ux.manualRxAgc';
@@ -110,7 +118,18 @@
         this._wf = null;
         /** Компактный спектр канала на вкладке «Антенна». */
         this._antFft = null;
-        this._dataSource = null;
+        /** Поток спектра: открыт только в приёме (HOLD) при активном Ручном. */
+        this._stream = null;
+        this._streamPath = null;
+        /** Центр приёмника из последнего кадра, Гц; null — кадров ещё не было. */
+        this._streamCenterHz = null;
+        /** Шкала dB по данным потока, общая для спектров и водопада. */
+        this._streamRange = null;
+        /** Запросы перестройки в пути: пока они есть, кадры не двигают регулятор. */
+        this._tunePending = 0;
+        this._offAccess = null;
+        this._accessPanel = null;
+        this._rxStreamEl = null;
         this._panorama = null;
         this._passProfile = null;
         this._passTimeline = null;
@@ -907,10 +926,12 @@
             if (this._active) {
                 this._startSpectrumTimer();
                 if (this._wf) { this._wf.start(); }
+                this._startStream();
             }
         } else {
             // SWEEP: спектр/водопад выключены и очищены, панорама сканирует
             this._stopSpectrumTimer();
+            this._stopStream();
             if (this._wf) { this._wf.clear(); }
             if (this._fftCanvas && typeof this._fftCanvas.getContext === 'function') {
                 const ctx = this._fftCanvas.getContext('2d');
@@ -926,6 +947,7 @@
         const root = document.getElementById('manual-rx-panel');
         if (!root) { return; }
         this._rxPanelRoot = root;
+        this._rxStreamEl = document.getElementById('manual-rx-stream');
         this._rxPipelineSelect = document.getElementById('manual-rx-pipeline');
         this._rxMeters = {
             rfBar: document.getElementById('manual-rx-rf-bar'),
@@ -970,15 +992,215 @@
     };
 
     /**
-     * Ручная перестройка оператором: сдвигаем центр спектра/водопада за
-     * индикатором, чтобы канал не «уезжал» из окна.
+     * Ручная перестройка оператором (SET на регуляторе). Спектр и водопад
+     * сдвинутся, когда придут кадры с новым центром.
      * @param {number} freqMHz
      */
     ManualLayout.prototype._onOperatorRetune = function(freqMHz) {
-        if (this._dataSource) { this._dataSource.freqCenterMHz = freqMHz; }
-        if (this._fft) { this._fft.freqCenterMHz = freqMHz; }
-        if (this._antFft) { this._antFft.freqCenterMHz = freqMHz; }
-        if (this._wf) { this._wf._freqCenterMHz = freqMHz; }
+        this._requestTune(freqMHz);
+    };
+
+    /** Имя тракта на сервере для выбранного в шапке; null — тракта нет. */
+    ManualLayout.prototype._radioPathName = function() {
+        const mm = (typeof window !== 'undefined') ? window._modeManager : null;
+        const id = mm && typeof mm.getRadioPathId === 'function' ? mm.getRadioPathId() : null;
+        return id === null || id === undefined ? null : 'radio_path_' + id;
+    };
+
+    /**
+     * Перестройка общего приёмника. Без прав запрос не уходит; отказ сервера
+     * возвращает регулятор на частоту, где приёмник стоит.
+     * @param {number} freqMHz
+     */
+    ManualLayout.prototype._requestTune = function(freqMHz) {
+        const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+        if (ac && !ac.canControl()) {
+            ac.setNotice('Перестраивать приёмник можно только в режиме «Контроль».');
+            this._revertDial();
+            return;
+        }
+        const path = this._radioPathName();
+        if (!path || typeof fetch !== 'function') { return; }
+        const self = this;
+        const notice = function(text) { if (ac) { ac.setNotice(text); } };
+        this._tunePending++;
+        fetch('/api/sdr/tune', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ radio_path: path, center_hz: Math.round(freqMHz * 1e6) }),
+        })
+            .then(function(r) {
+                if (r.ok) { return null; }
+                self._revertDial();
+                if (r.status === 403) {
+                    notice('Режим «Контроль» отключён, приёмник не перестроен.');
+                    if (ac) { ac.refresh(); }
+                    return null;
+                }
+                return r.json().then(function(b) {
+                    notice('Приёмник не перестроен: ' + ((b && b.error) || ('HTTP ' + r.status)));
+                }, function() {
+                    notice('Приёмник не перестроен: HTTP ' + r.status);
+                });
+            })
+            .catch(function(err) {
+                self._revertDial();
+                notice('Приёмник не перестроен: ' + err.message);
+            })
+            .then(function() { self._tunePending--; });
+    };
+
+    /** Регулятор на частоту приёмника из потока, если она уже известна. */
+    ManualLayout.prototype._revertDial = function() {
+        if (this._streamCenterHz === null) { return; }
+        this._rxFreqMHz = this._streamCenterHz / 1e6;
+        if (this._freqDial) { this._freqDial.setHz(this._streamCenterHz); }
+    };
+
+    // ── Права на управление приёмником ────────────────────────────────────
+
+    /**
+     * AccessControl создаёт app.js после конструктора, поэтому подписываемся
+     * при первом activate(), как и на смену тракта.
+     */
+    ManualLayout.prototype._subscribeAccess = function() {
+        if (this._offAccess) { return; }
+        const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+        if (!ac || typeof ac.onChange !== 'function') { return; }
+        const self = this;
+        this._offAccess = ac.onChange(function() { self._applyAccess(); });
+        this._unsubscribers.push(this._offAccess);
+        const Panel = window.AccessControl && window.AccessControl.AccessPanel;
+        if (typeof Panel === 'function' && !this._accessPanel) {
+            this._accessPanel = new Panel(ac, {
+                role: document.getElementById('manual-access-role'),
+                detail: document.getElementById('manual-access-detail'),
+                manage: document.getElementById('manual-access-manage'),
+                revoke: document.getElementById('manual-access-revoke'),
+                release: document.getElementById('manual-access-release'),
+                notice: document.getElementById('manual-access-notice'),
+                modal: {
+                    root: document.getElementById('access-modal'),
+                    backdrop: document.getElementById('access-modal-backdrop'),
+                    close: document.getElementById('access-modal-close'),
+                    request: document.getElementById('access-modal-request'),
+                    loginForm: document.getElementById('access-modal-login'),
+                    password: document.getElementById('access-modal-password'),
+                    submit: document.getElementById('access-modal-submit'),
+                    error: document.getElementById('access-modal-error'),
+                },
+            });
+        }
+    };
+
+    /** Без прав регулятор только показывает частоту приёмника. */
+    ManualLayout.prototype._applyAccess = function() {
+        const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+        if (this._freqDial && typeof this._freqDial.setReadOnly === 'function') {
+            this._freqDial.setReadOnly(!!ac && !ac.canControl());
+        }
+    };
+
+    // ── Поток спектра ─────────────────────────────────────────────────────
+
+    /** Открывает поток выбранного тракта; при смене тракта переоткрывает. */
+    ManualLayout.prototype._startStream = function() {
+        const path = this._radioPathName();
+        if (this._stream && this._streamPath === path) { return; }
+        this._stopStream();
+        if (!path) {
+            this._setStreamStatus({ state: 'no_path' });
+            return;
+        }
+        if (typeof window.SpectrumStream !== 'function') { return; }
+        const self = this;
+        this._streamPath = path;
+        this._streamCenterHz = null;
+        this._streamRange = new window.SpectrumStream.AutoRange();
+        this._stream = new window.SpectrumStream({
+            url: '/api/stream/v1/spectrum?radio_path=' + encodeURIComponent(path) +
+                '&bins=' + STREAM_BINS + '&fps=' + STREAM_FPS,
+            onFrame: function(frame) { self._onStreamFrame(frame); },
+            onStatus: function(st) { self._setStreamStatus(st); },
+        });
+        this._stream.start();
+    };
+
+    ManualLayout.prototype._stopStream = function() {
+        if (this._stream) {
+            this._stream.stop();
+            this._stream = null;
+        }
+        this._streamPath = null;
+    };
+
+    ManualLayout.prototype._setStreamStatus = function(st) {
+        const el = this._rxStreamEl;
+        if (!el) { return; }
+        let text = '';
+        if (st.state === 'no_path') { text = 'Нет радиотракта: поток спектра недоступен'; }
+        else if (st.state === 'connecting') { text = 'Поток спектра: подключение…'; }
+        else if (st.state === 'live') { text = 'Поток спектра: приём'; }
+        else if (st.state === 'error') { text = 'Поток спектра: ' + (st.message || 'ошибка') + ', повтор…'; }
+        el.textContent = text;
+        if (typeof el.setAttribute === 'function') { el.setAttribute('data-state', st.state); }
+    };
+
+    /** @param {{header: Object, values: ?Float32Array}} frame */
+    ManualLayout.prototype._onStreamFrame = function(frame) {
+        const h = frame.header;
+        this._applyStreamBand(h.centerHz, h.spanHz);
+        if (!frame.values || !this._active || !this._streamRange) { return; }
+        const range = this._streamRange.update(frame.values);
+        const views = [this._fft, this._antFft];
+        for (let i = 0; i < views.length; i++) {
+            if (!views[i]) { continue; }
+            views[i]._dbMin = range.min;
+            views[i]._dbMax = range.max;
+        }
+        const line = window.SpectrumStream.dbfsToUnit(frame.values, range.min, range.max);
+        if (this._fft) { this._fft.draw(line); }
+        if (this._wf) { this._wf.pushLine(line); }
+        if (this._antFft && this._activeTab === 'antenna') {
+            this._antFft.draw(line);
+            this._drawExpectedFreq(this._antFft, this._expectedFreqMHz());
+        }
+    };
+
+    /**
+     * Центр и полоса видов — из кадра: данные на экране соответствуют им.
+     * Смена центра значит, что приёмник перестроили (может быть, другой
+     * оператор): водопад с прежней частотой очищается, регулятор следует за
+     * приёмником, если оператор сейчас ничего не набирает и не ждёт перестройки.
+     */
+    ManualLayout.prototype._applyStreamBand = function(centerHz, spanHz) {
+        if (!centerHz) { return; }
+        const first = this._streamCenterHz === null;
+        const changed = centerHz !== this._streamCenterHz;
+        const centerMHz = centerHz / 1e6;
+        const spanMHz = spanHz > 0 ? spanHz / 1e6 : null;
+        const views = [this._fft, this._antFft];
+        for (let i = 0; i < views.length; i++) {
+            if (!views[i]) { continue; }
+            views[i].freqCenterMHz = centerMHz;
+            if (spanMHz) { views[i].freqSpanMHz = spanMHz; }
+        }
+        if (this._wf) {
+            this._wf._freqCenterMHz = centerMHz;
+            if (spanMHz) { this._wf._freqSpanMHz = spanMHz; }
+            if (changed && !first) {
+                this._wf.clear();
+                if (this._active) { this._wf.start(); }
+            }
+        }
+        this._streamCenterHz = centerHz;
+        const editing = this._freqDial && typeof this._freqDial.isEditing === 'function' &&
+            this._freqDial.isEditing();
+        if (changed && this._tunePending === 0 && !editing) {
+            this._rxFreqMHz = centerMHz;
+            if (this._freqDial) { this._freqDial.setHz(centerHz); }
+        }
     };
 
     /**
@@ -1156,37 +1378,28 @@
     };
 
     ManualLayout.prototype._initSpectrum = function() {
-        if (typeof window.SpectrumDataSource !== 'function' ||
-            typeof window.FFTSpectrumView !== 'function' ||
+        if (typeof window.FFTSpectrumView !== 'function' ||
             typeof window.WaterfallView !== 'function') {
             return;
         }
-        this._dataSource = new window.SpectrumDataSource({
-            bins: 512,
-            freqCenterMHz: DEFAULT_BAND.centerMHz,
-            freqSpanMHz: DEFAULT_BAND.spanMHz,
-        });
+        const band = { freqCenterMHz: DEFAULT_BAND.centerMHz, freqSpanMHz: DEFAULT_BAND.spanMHz };
         if (this._fftCanvas) {
-            this._fft = new window.FFTSpectrumView(this._fftCanvas, {
-                freqCenterMHz: this._dataSource.freqCenterMHz,
-                freqSpanMHz: this._dataSource.freqSpanMHz,
-            });
+            this._fft = new window.FFTSpectrumView(this._fftCanvas, band);
         }
         if (this._antCanvas) {
-            this._antFft = new window.FFTSpectrumView(this._antCanvas, {
-                freqCenterMHz: this._dataSource.freqCenterMHz,
-                freqSpanMHz: this._dataSource.freqSpanMHz,
-            });
+            this._antFft = new window.FFTSpectrumView(this._antCanvas, band);
         }
         if (this._wfCanvas) {
             const ml = this._fft ? this._fft._marginLeft : 32;
             const mr = this._fft ? this._fft._marginRight : 4;
             this._wf = new window.WaterfallView(this._wfCanvas, this._scaleCanvas, {
-                freqCenterMHz: this._dataSource.freqCenterMHz,
-                freqSpanMHz: this._dataSource.freqSpanMHz,
+                freqCenterMHz: band.freqCenterMHz,
+                freqSpanMHz: band.freqSpanMHz,
                 marginLeft: ml,
                 marginRight: mr,
             });
+            // Строка водопада — кадр потока: шкала времени по его частоте
+            this._wf._tickMs = 1000 / STREAM_FPS;
             this._wf.clear();
             this._wf.start();
         }
@@ -1292,29 +1505,8 @@
             });
         }
 
-        if (this._dataSource) {
-            this._dataSource.freqCenterMHz = freqMHz;
-            this._dataSource.freqSpanMHz = CHANNEL_SPAN_MHZ;
-            if (typeof this._dataSource.reset === 'function') {
-                this._dataSource.reset();
-            }
-        }
-        if (this._fft) {
-            this._fft.freqCenterMHz = freqMHz;
-            this._fft.freqSpanMHz = CHANNEL_SPAN_MHZ;
-        }
-        if (this._antFft) {
-            this._antFft.freqCenterMHz = freqMHz;
-            this._antFft.freqSpanMHz = CHANNEL_SPAN_MHZ;
-        }
-        if (this._wf) {
-            this._wf._freqCenterMHz = freqMHz;
-            this._wf._freqSpanMHz = CHANNEL_SPAN_MHZ;
-            this._wf.clear();
-            if (this._active) { this._wf.start(); }
-        }
-
         this._setRxFreqMHz(freqMHz);
+        this._requestTune(freqMHz);
 
         if (tx && tx.modulation) {
             this._setRxPipeline(tx.modulation);
@@ -1523,6 +1715,8 @@
         this._active = true;
         this._subscribeRadioPath();
         this._applyRadioPath();
+        this._subscribeAccess();
+        this._applyAccess();
         const self = this;
         requestAnimationFrame(function() {
             requestAnimationFrame(function() {
@@ -1551,6 +1745,7 @@
         this._offRadioPath = mm.onRadioPathChange(function() {
             self._applyRadioPath();
             self._refreshActiveTab();
+            if (self._stream) { self._startStream(); }
         });
         this._unsubscribers.push(this._offRadioPath);
     };
@@ -1567,6 +1762,7 @@
         if (!this._active) { return; }
         this._active = false;
         this._stopSpectrumTimer();
+        this._stopStream();
         if (this._panorama) { this._panorama.deactivate(); }
         if (this._tmiTable) { this._tmiTable.deactivate(); }
         if (this._eyeView) { this._eyeView.deactivate(); }
@@ -1607,10 +1803,10 @@
         this.refresh();
     };
 
-    // ── Таймер спектра/водопада ───────────────────────────────────────────
+    // ── Таймер приёма: профиль и лента пролётов (спектр рисует поток) ─────
 
     ManualLayout.prototype._startSpectrumTimer = function() {
-        if (this._spectrumTimer || !this._dataSource) { return; }
+        if (this._spectrumTimer) { return; }
         const self = this;
         this._spectrumTimer = setInterval(function() { self._spectrumTick(); }, SPECTRUM_TICK_MS);
     };
@@ -1623,16 +1819,7 @@
     };
 
     ManualLayout.prototype._spectrumTick = function() {
-        if (!this._active || !this._dataSource) { return; }
-        this._dataSource.generateLine();
-        const line = this._dataSource.getLine();
-        if (this._fft) { this._fft.draw(line); }
-        if (this._wf) { this._wf.pushLine(line); }
-        if (this._antFft && this._activeTab === 'antenna') {
-            this._antFft.draw(line);
-            this._drawExpectedFreq(this._antFft, this._expectedFreqMHz());
-        }
-
+        if (!this._active) { return; }
         this._ppTickCount = (this._ppTickCount || 0) + 1;
         if (this._passProfile && this._ppTickCount >= 12) {
             this._ppTickCount = 0;
@@ -1705,6 +1892,11 @@
 
     ManualLayout.prototype.destroy = function() {
         this._stopSpectrumTimer();
+        this._stopStream();
+        if (this._accessPanel) {
+            this._accessPanel.destroy();
+            this._accessPanel = null;
+        }
         let i;
         for (i = 0; i < this._unsubscribers.length; i++) {
             const off = this._unsubscribers[i];
@@ -1727,7 +1919,6 @@
         this._antFft = null;
         this._omniLobe = null;
         this._omniGain = null;
-        this._dataSource = null;
         if (this._panorama) {
             this._panorama.destroy();
             this._panorama = null;

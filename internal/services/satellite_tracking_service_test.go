@@ -643,12 +643,12 @@ func TestBroadcastGroupUpdate_OrbitMetricsFields(t *testing.T) {
 
 	// Проверяем кеш Hub: последний satellite_group_update должен содержать orbit metrics.
 	req := httptest.NewRequest(http.MethodGet, "/api/sse", nil)
-	rec := httptest.NewRecorder()
+	rec := &lockedRecorder{rec: httptest.NewRecorder()}
 	go hub.ServeHTTP(rec, req)
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		body := rec.Body.String()
+		body := rec.body()
 		if strings.Contains(body, `"tca_el":51.3`) && strings.Contains(body, `"orbit_alt_km":`) {
 			if !strings.Contains(body, fmt.Sprintf(`"orbit_alt_km":%.0f`, wantAlt)) &&
 				!strings.Contains(body, fmt.Sprintf(`"orbit_alt_km":%g`, wantAlt)) {
@@ -662,5 +662,41 @@ func TestBroadcastGroupUpdate_OrbitMetricsFields(t *testing.T) {
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	t.Fatalf("satellite_group_update with tca_el/orbit_alt_km not received; body=%q", rec.Body.String())
+	t.Fatalf("satellite_group_update with tca_el/orbit_alt_km not received; body=%q", rec.body())
+}
+
+// lockedRecorder lets the test read the body while ServeHTTP writes it from another goroutine.
+type lockedRecorder struct {
+	mu  sync.Mutex
+	rec *httptest.ResponseRecorder
+}
+
+func (l *lockedRecorder) Header() http.Header {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rec.Header()
+}
+
+func (l *lockedRecorder) Write(p []byte) (int, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rec.Write(p)
+}
+
+func (l *lockedRecorder) WriteHeader(code int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rec.WriteHeader(code)
+}
+
+func (l *lockedRecorder) Flush() {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.rec.Flush()
+}
+
+func (l *lockedRecorder) body() string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.rec.Body.String()
 }

@@ -43,12 +43,30 @@ func (r *DataRing) Write(frame IQFrame) {
 }
 
 // Subscribe создаёт нового подписчика и возвращает канал для чтения фреймов.
+// После Close возвращает уже закрытый канал.
 func (r *DataRing) Subscribe() <-chan IQFrame {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	ch := make(chan IQFrame, r.capacity)
+	if r.closed {
+		close(ch)
+		return ch
+	}
 	r.subscribers = append(r.subscribers, ch)
 	return ch
+}
+
+// Unsubscribe убирает подписчика и закрывает его канал. Повторный вызов и вызов после Close безопасны.
+func (r *DataRing) Unsubscribe(sub <-chan IQFrame) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for i, ch := range r.subscribers {
+		if ch == sub {
+			close(ch)
+			r.subscribers = append(r.subscribers[:i], r.subscribers[i+1:]...)
+			return
+		}
+	}
 }
 
 // Close закрывает все каналы подписчиков.

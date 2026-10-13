@@ -1924,3 +1924,149 @@ section h2 {
         justify-content: center;
     }
 }
+
+/* Запрос управления приёмником от слейва: плашка у мастера поверх любого режима */
+.access-request {
+    position: fixed;
+    top: 56px;
+    right: 16px;
+    z-index: 1300;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: min(480px, calc(100vw - 32px));
+    padding: 10px 12px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--accent-warning);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.access-request[hidden] {
+    display: none;
+}
+
+.access-request__text {
+    flex: 1 1 auto;
+}
+
+.access-request__btn {
+    flex-shrink: 0;
+    height: 28px;
+    padding: 0 12px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.access-request__btn--allow {
+    border-color: var(--accent-success);
+    color: var(--accent-success);
+}
+
+/* Окно управления приёмником у зрителя: запрос у мастера или вход по паролю.
+   Каркас — общий .modal (info-panel.css). */
+.access-modal .modal__box {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 400px;
+    font-family: var(--font-mono);
+}
+
+.access-modal__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+}
+
+.access-modal__title {
+    margin: 0;
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-heading);
+}
+
+.access-modal__close {
+    padding: 0 4px;
+    background: transparent;
+    border: none;
+    font-size: 1.4rem;
+    line-height: 1;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.access-modal__close:hover {
+    color: var(--text-primary);
+}
+
+.access-modal__request {
+    width: 100%;
+}
+
+.access-modal__request:disabled {
+    opacity: 0.5;
+    cursor: default;
+    filter: none;
+}
+
+.access-modal__divider {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.access-modal__divider::before,
+.access-modal__divider::after {
+    content: '';
+    flex: 1 1 auto;
+    border-top: 1px solid var(--border-color);
+}
+
+.access-modal__login {
+    display: flex;
+    gap: 10px;
+}
+
+.access-modal__input {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 7px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 0.9rem;
+    color: var(--text-primary);
+}
+
+.access-modal__input:focus {
+    outline: none;
+    border-color: var(--border-focus);
+}
+
+.access-modal__login .modal__btn:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.access-modal__error {
+    margin: -4px 0 0;
+    font-size: 0.85rem;
+    color: var(--accent-danger);
+}
+
+.access-modal__error:empty {
+    display: none;
+}
