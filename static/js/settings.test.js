@@ -87,6 +87,22 @@ console.log('TEST: receiver selection drops sample rate when driver changes');
 }
 console.log('  OK');
 
+console.log('TEST: receiver selection keeps calibration for the same driver');
+{
+    const modal = receiverModal({ driver: 'rtlsdr', serial: '0001', calibration_db: -23.5 });
+    modal._applyReceiverSelection(0, 'rtlsdr|0002|');
+    assert.strictEqual(modal._workingConfig.station.radio_paths[0].receiver.calibration_db, -23.5);
+}
+console.log('  OK');
+
+console.log('TEST: receiver selection drops calibration when driver changes');
+{
+    const modal = receiverModal({ driver: 'simulated', calibration_db: -40 });
+    modal._applyReceiverSelection(0, 'rtlsdr|0002|');
+    assert.strictEqual(modal._workingConfig.station.radio_paths[0].receiver.calibration_db, undefined);
+}
+console.log('  OK');
+
 console.log('TEST: reselecting the imitator keeps its signals section');
 {
     const imitator = { noise_dbfs: -60, signals: [{ kind: 'carrier', freq_hz: 436500000, level_dbfs: -40 }] };

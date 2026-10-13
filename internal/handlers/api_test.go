@@ -192,6 +192,40 @@ func TestAPIHandler_GetConfig_HybridStation(t *testing.T) {
 	}
 }
 
+// The receiver calibration reaches the UI so it can show dBm; a path without
+// calibration sends no field and the UI stays in dBFS.
+func TestAPIHandler_GetConfig_Calibration(t *testing.T) {
+	cal := -40.0
+	stationary := config.AntennaConfig{Type: config.AntennaTypeStationary, Kind: config.AntennaKindQFH}
+	cfg := &config.Config{
+		Station: config.StationConfig{
+			RadioPaths: []config.RadioPath{
+				{ID: 1, Name: "Calibrated", Antenna: stationary,
+					Receiver: config.ReceiverConfig{Driver: config.DriverSimulated, CalibrationDB: &cal}},
+				{ID: 2, Name: "Uncalibrated", Antenna: stationary},
+			},
+		},
+	}
+	w := httptest.NewRecorder()
+	NewAPIHandler(cfg).GetConfig(w, httptest.NewRequest(http.MethodGet, "/api/config", nil))
+
+	var body struct {
+		RadioPaths []map[string]any `json:"radio_paths"`
+	}
+	if err := json.NewDecoder(w.Result().Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body.RadioPaths) != 2 {
+		t.Fatalf("RadioPaths len = %d, want 2", len(body.RadioPaths))
+	}
+	if got := body.RadioPaths[0]["calibration_db"]; got != -40.0 {
+		t.Errorf("calibrated path: calibration_db = %v, want -40", got)
+	}
+	if got, ok := body.RadioPaths[1]["calibration_db"]; ok {
+		t.Errorf("uncalibrated path must not send calibration_db, got %v", got)
+	}
+}
+
 func TestWriteJSON(t *testing.T) {
 	tests := []struct {
 		name       string

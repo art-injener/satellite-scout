@@ -29,6 +29,8 @@ type RadioPathInfo struct {
 	HasRotator bool   `json:"has_rotator"`
 	// AntennaKind — конструкция антенны (config.AntennaKinds), пусто у поворотной без указания.
 	AntennaKind string `json:"antenna_kind,omitempty"`
+	// CalibrationDB — поправка приёмника для dBm (config.ReceiverConfig.CalibrationDB); нет — UI в dBFS.
+	CalibrationDB *float64 `json:"calibration_db,omitempty"`
 }
 
 // ConfigResponse — ответ с конфигурацией для фронтенда. Содержит только то,

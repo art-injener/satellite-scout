@@ -315,6 +315,62 @@ func TestReceiver_StartStream_NoiseOnly(t *testing.T) {
 	}
 }
 
+// Gain scales the whole air, signals and noise alike: levels in the config are
+// at 0 dB gain, so the level at the antenna stays put while dBFS follows the gain.
+// Negative gain means AGC and leaves the air as configured.
+func TestReceiver_GainScalesAir(t *testing.T) {
+	cases := []struct {
+		gainDB float32
+		wantDB float64
+	}{
+		{gainDB: 0, wantDB: -60},
+		{gainDB: 10, wantDB: -50},
+		{gainDB: 25.5, wantDB: -34.5},
+		{gainDB: -1, wantDB: -60},
+	}
+	for _, tc := range cases {
+		r := New(Options{NoiseDBFS: -60, Seed: 2})
+		if err := r.SetGain(tc.gainDB); err != nil {
+			t.Fatalf("SetGain: %v", err)
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		ch, err := r.StartStream(ctx, sdr.StreamConfig{CenterHz: testCenter, SampleRate: testRate, BlockSize: 48000})
+		if err != nil {
+			cancel()
+			t.Fatalf("StartStream: %v", err)
+		}
+		frame := <-ch
+		_ = r.Stop()
+		cancel()
+		if p := 10 * math.Log10(meanPower(frame.Samples)); math.Abs(p-tc.wantDB) > 0.1 {
+			t.Errorf("gain %.1f dB: power %.2f dBFS, want %.1f", tc.gainDB, p, tc.wantDB)
+		}
+	}
+}
+
+// Changing gain mid-stream takes effect on the next generated block.
+func TestReceiver_GainChangeMidStream(t *testing.T) {
+	r := New(Options{NoiseDBFS: -60, Seed: 2})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ch, err := r.StartStream(ctx, sdr.StreamConfig{CenterHz: testCenter, SampleRate: testRate, BlockSize: 4800})
+	if err != nil {
+		t.Fatalf("StartStream: %v", err)
+	}
+	defer func() { _ = r.Stop() }()
+
+	<-ch
+	if err := r.SetGain(20); err != nil {
+		t.Fatalf("SetGain: %v", err)
+	}
+	for frame := range ch {
+		if p := 10 * math.Log10(meanPower(frame.Samples)); math.Abs(p+40) < 0.5 {
+			return
+		}
+	}
+	t.Fatal("no block at -40 dBFS after raising gain by 20 dB")
+}
+
 func TestReceiver_StartStream_InvalidSignal(t *testing.T) {
 	r := New(Options{Signals: []Signal{{Kind: "noise", FrequencyHz: testCenter}}})
 	_, err := r.StartStream(context.Background(), sdr.StreamConfig{SampleRate: testRate})
