@@ -192,6 +192,7 @@ MockStream.prototype.stop = function() { this.stopped++; this.running = false; }
 MockStream.prototype.isRunning = function() { return this.running; };
 MockStream.dbfsToUnit = realStream.dbfsToUnit;
 MockStream.AutoRange = realStream.AutoRange;
+MockStream.markerReadout = realStream.markerReadout;
 global.window.SpectrumStream = MockStream;
 
 /** FFT frame as SpectrumStream hands it over. */
@@ -348,12 +349,9 @@ MockFreqDial.prototype.emit = function(hz) {
     if (this._onChange) { this._onChange(this.hz); }
 };
 global.window.FreqDial = MockFreqDial;
-_domNodes.set('manual-rx-rf-bar', makeDomElement('manual-rx-rf-bar'));
-_domNodes.set('manual-rx-rf-val', makeDomElement('manual-rx-rf-val'));
-_domNodes.set('manual-rx-audio-bar', makeDomElement('manual-rx-audio-bar'));
-_domNodes.set('manual-rx-audio-val', makeDomElement('manual-rx-audio-val'));
-_domNodes.set('manual-rx-stream', makeDomElement('manual-rx-stream'));
-
+_domNodes.set('manual-rx-marker-freq', makeDomElement('manual-rx-marker-freq'));
+_domNodes.set('manual-rx-marker-level', makeDomElement('manual-rx-marker-level'));
+_domNodes.set('manual-rx-marker-bar', makeDomElement('manual-rx-marker-bar'));
 // Вкладка «Демодулятор»: переключатель Таблица/Hex + кнопки записи и прослушивания
 const resultTabTable = makeDomElement('result-tab-table', { _attrs: { 'data-view': 'table', 'aria-selected': 'true' } });
 const resultTabHex = makeDomElement('result-tab-hex', { _attrs: { 'data-view': 'hex', 'aria-selected': 'false' } });
@@ -909,23 +907,23 @@ test('destroy tears the dial down', () => {
     assert.strictEqual(m._freqDial, null);
 });
 
-test('level meters render bar width and formatted value', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    m._updateRxMeters(-60, -30);
-    assert.strictEqual(_domNodes.get('manual-rx-rf-bar').style.width, '50.0%');
-    assert.strictEqual(_domNodes.get('manual-rx-rf-val').textContent, '-60.0 dBFS');
-    assert.strictEqual(_domNodes.get('manual-rx-audio-bar').style.width, '75.0%');
-    assert.strictEqual(_domNodes.get('manual-rx-audio-val').textContent, '-30.0 dB');
+function markerText() {
+    return ['freq', 'level'].map((k) => _domNodes.get('manual-rx-marker-' + k).textContent);
+}
+
+test('marker readout shows dashes until the first frame', () => {
+    const m = new ManualLayout(makeStateManager());
+    assert.deepStrictEqual(markerText(), ['—', '—']);
+    assert.strictEqual(_domNodes.get('manual-rx-marker-bar').style.width, '0.0%');
     m.destroy();
 });
 
-test('level meters clamp out-of-range values to 0..100%', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    m._updateRxMeters(-200, 20);
-    assert.strictEqual(_domNodes.get('manual-rx-rf-bar').style.width, '0.0%');
-    assert.strictEqual(_domNodes.get('manual-rx-audio-bar').style.width, '100.0%');
+test('level bar clamps out-of-range values to 0..100%', () => {
+    const m = new ManualLayout(makeStateManager());
+    m._showMarker({ freqHz: 436500000, dbfs: -200, floorDbfs: -210, snrDb: 10 });
+    assert.strictEqual(_domNodes.get('manual-rx-marker-bar').style.width, '0.0%');
+    m._showMarker({ freqHz: 436500000, dbfs: 20, floorDbfs: -90, snrDb: 110 });
+    assert.strictEqual(_domNodes.get('manual-rx-marker-bar').style.width, '100.0%');
     m.destroy();
 });
 
@@ -1619,29 +1617,62 @@ test('Spectrum opens one stream for the selected tract, Panorama and deactivate 
     });
 });
 
-test('without a tract there is no stream and the panel says so', () => {
+test('without a tract there is no stream', () => {
     withStation({ mm: null }, () => {
         const before = MockStream.instances.length;
         const m = new ManualLayout(makeStateManager());
         m.activate();
         fire(tabSpectrum, 'click');
         assert.strictEqual(MockStream.instances.length, before);
-        assert.ok(/тракт/i.test(_domNodes.get('manual-rx-stream').textContent));
         m.destroy();
     });
 });
 
-test('stream status is shown under the dial', () => {
+/** 1024 bins of noise at -90 dBFS with one peak. */
+function peakFrame(bin, dbfs, timestampMs) {
+    const values = new Array(1024).fill(-90);
+    values[bin] = dbfs;
+    const f = fftFrame(436500000, values, 2048000);
+    f.header.timestampMs = timestampMs;
+    return f;
+}
+
+test('stream frame shows the peak marker: frequency and amplitude with bar', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
+        assert.deepStrictEqual(markerText(), ['437.012', '−49.3'],
+            'units live in the markup, values use the typographic minus');
+        assert.strictEqual(_domNodes.get('manual-rx-marker-bar').style.width, '58.9%');
+        m.destroy();
+    });
+});
+
+test('marker text refreshes at most four times a second', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
         fire(tabSpectrum, 'click');
         const s = MockStream.last();
-        const el = _domNodes.get('manual-rx-stream');
-        s.opts.onStatus({ state: 'connecting' });
-        assert.ok(/подключ/i.test(el.textContent), el.textContent);
-        s.opts.onStatus({ state: 'error', message: 'HTTP 500: stream start failed' });
-        assert.ok(/HTTP 500/.test(el.textContent), el.textContent);
+        s.opts.onFrame(peakFrame(768, -49.3, 1000));
+        s.opts.onFrame(peakFrame(768, -60, 1100));
+        assert.strictEqual(markerText()[1], '−49.3', 'a frame 100 ms later must not redraw the text');
+        s.opts.onFrame(peakFrame(768, -60, 1250));
+        assert.strictEqual(markerText()[1], '−60.0');
+        m.destroy();
+    });
+});
+
+test('closing the stream resets the marker to dashes', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
+        m.deactivate();
+        assert.deepStrictEqual(markerText(), ['—', '—']);
         m.destroy();
     });
 });

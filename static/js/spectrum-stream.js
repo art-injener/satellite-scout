@@ -159,6 +159,30 @@
     };
 
     /**
+     * Маркер на пике кадра. Частота бина — как у перекрестья на спектре (от левого края полосы),
+     * шумовая полка — медиана кадра, как у AutoRange. С/Ш — пик над полкой в одном бине БПФ.
+     * @param {?Float32Array} dbfs
+     * @param {number} centerHz
+     * @param {number} spanHz
+     * @returns {?{freqHz: number, dbfs: number, floorDbfs: number, snrDb: number}}
+     */
+    function markerReadout(dbfs, centerHz, spanHz) {
+        if (!dbfs || dbfs.length === 0) { return null; }
+        let idx = 0;
+        for (let i = 1; i < dbfs.length; i++) {
+            if (dbfs[i] > dbfs[idx]) { idx = i; }
+        }
+        const sorted = Float32Array.from(dbfs).sort();
+        const floor = sorted[sorted.length >> 1];
+        return {
+            freqHz: centerHz - spanHz / 2 + idx * spanHz / dbfs.length,
+            dbfs: dbfs[idx],
+            floorDbfs: floor,
+            snrDb: dbfs[idx] - floor,
+        };
+    }
+
+    /**
      * Чтение потока с переподключением.
      * @param {{url: string,
      *          onFrame: function({header: Object, values: ?Float32Array}): void,
@@ -263,6 +287,7 @@
     SpectrumStream.parseHeader = parseHeader;
     SpectrumStream.dbfsToUnit = dbfsToUnit;
     SpectrumStream.AutoRange = AutoRange;
+    SpectrumStream.markerReadout = markerReadout;
 
     if (typeof window !== 'undefined') {
         window.SpectrumStream = SpectrumStream;
@@ -275,6 +300,7 @@
             parseHeader: parseHeader,
             dbfsToUnit: dbfsToUnit,
             AutoRange: AutoRange,
+            markerReadout: markerReadout,
         };
     }
 })();

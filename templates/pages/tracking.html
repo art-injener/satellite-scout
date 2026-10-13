@@ -457,21 +457,29 @@
             <div class="ml-rx-panel__display">
                 <!-- Индикатор-регулятор частоты: разметку строит freq-dial.js -->
                 <div class="ml-rx-panel__dial" id="manual-rx-dial"></div>
-                <div class="ml-rx-panel__meter">
-                    <span class="ml-rx-panel__meter-lbl">RF Power</span>
-                    <span class="ml-rx-panel__meter-val" id="manual-rx-rf-val">-67.1 dBFS</span>
-                    <span class="ml-rx-panel__meter-track">
-                        <span class="ml-rx-panel__meter-fill" id="manual-rx-rf-bar"></span>
-                    </span>
+                <!-- Пик спектра: те же частота и амплитуда, что у перекрестья на графике -->
+                <div class="ml-rx-ind">
+                    <div class="ml-rx-ind__cell">
+                        <span class="ml-rx-ind__lbl">Freq. сигнала</span>
+                        <span class="ml-rx-ind__val">
+                            <span class="ml-rx-ind__num" id="manual-rx-marker-freq">—</span>
+                            <span class="ml-rx-ind__unit">МГц</span>
+                        </span>
+                    </div>
+                    <div class="ml-rx-ind__cell">
+                        <span class="ml-rx-ind__lbl" title="Амплитуда самого сильного бина БПФ в полосе">Амп. max</span>
+                        <span class="ml-rx-ind__val">
+                            <span class="ml-rx-ind__num" id="manual-rx-marker-level">—</span>
+                            <span class="ml-rx-ind__unit">dBFS</span>
+                        </span>
+                        <span class="ml-rx-ind__track">
+                            <span class="ml-rx-ind__fill" id="manual-rx-marker-bar"></span>
+                        </span>
+                        <span class="ml-rx-ind__scale" aria-hidden="true">
+                            <span>−120</span><span>−90</span><span>−60</span><span>−30</span><span>0</span>
+                        </span>
+                    </div>
                 </div>
-                <div class="ml-rx-panel__meter">
-                    <span class="ml-rx-panel__meter-lbl">Audio Level</span>
-                    <span class="ml-rx-panel__meter-val" id="manual-rx-audio-val">-21.1 dB</span>
-                    <span class="ml-rx-panel__meter-track">
-                        <span class="ml-rx-panel__meter-fill" id="manual-rx-audio-bar"></span>
-                    </span>
-                </div>
-                <span class="ml-rx-panel__stream" id="manual-rx-stream" role="status" aria-live="polite"></span>
             </div>
 
             <!-- Приёмник общий для всех клиентов. Перестраивает мастер или слейв,

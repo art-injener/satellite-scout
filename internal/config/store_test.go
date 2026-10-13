@@ -111,6 +111,33 @@ func TestStore_GetReturnsDeepCopy(t *testing.T) {
 	}
 }
 
+func TestStore_GetCopiesImitator(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "config.json"))
+	seed := DefaultConfig()
+	seed.Station.RadioPaths = []RadioPath{{
+		ID:      1,
+		Name:    "Test",
+		Antenna: AntennaConfig{Type: AntennaTypeStationary, Kind: AntennaKindQFH},
+		Receiver: ReceiverConfig{Driver: "simulated", Imitator: &ImitatorConfig{
+			NoiseDBFS: -60,
+			Signals:   []ImitatorSignal{{Kind: ImitatorCarrier, FreqHz: 436_500_000, LevelDBFS: -40}},
+		}},
+	}}
+	store.Set(seed)
+
+	first := store.Get()
+	first.Station.RadioPaths[0].Receiver.Imitator.NoiseDBFS = -10
+	first.Station.RadioPaths[0].Receiver.Imitator.Signals[0].LevelDBFS = -1
+
+	im := store.Get().Station.RadioPaths[0].Receiver.Imitator
+	if im.NoiseDBFS != -60 {
+		t.Error("Get() returned shared imitator section")
+	}
+	if im.Signals[0].LevelDBFS != -40 {
+		t.Error("Get() returned shared imitator signals")
+	}
+}
+
 func TestStore_UpdateAppliesAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

@@ -19,21 +19,48 @@ var (
 )
 
 // Options — параметры создания имитатора. Источник выбирается по первому заданному:
-// Source, затем Beacon, иначе синтетический тон.
+// Source, затем эфир из Signals и NoiseDBFS, иначе синтетический тон.
 type Options struct {
 	// Source — внешний источник IQ (формат .cfile: float32 I, float32 Q, little-endian).
 	Source io.Reader
 
-	// Beacon — маяк КА на заданной частоте; сигнал сдвигается при перестройке приёмника.
-	Beacon *BeaconConfig
+	// Signals — сигналы в эфире; сдвигаются при перестройке приёмника.
+	// Приёмник при создании настроен на частоту первого сигнала.
+	Signals []Signal
+
+	// NoiseDBFS — мощность общего шума приёмника во всей полосе дискретизации, dBFS.
+	// SNR сигнала в полосе B: LevelDBFS − (NoiseDBFS + 10·lg(B/fs)). 0 — без шума.
+	NoiseDBFS float64
+	Seed      uint64 // зерно шума: одинаковое зерно даёт одинаковый шум
 
 	// ToneOffsetHz — смещение синтетического тона от центральной частоты (Гц).
 	ToneOffsetHz float64
 }
 
-// DefaultOptions возвращает настройки с синтетическим тоном 1 кГц.
+const (
+	// DefaultFrequencyHz — частота эфира по умолчанию: любительский спутниковый участок 435–438 МГц.
+	DefaultFrequencyHz = 436_500_000
+	// DefaultNoiseDBFS — общий шум приёмника по умолчанию: заметно ниже полной шкалы, как у реального SDR.
+	DefaultNoiseDBFS = -60.0
+)
+
+// DefaultOptions — эфир по умолчанию: несущая ходит ±1 МГц вокруг DefaultFrequencyHz за минуту
+// поверх шума DefaultNoiseDBFS, уровень по профилю пролёта за 45 с от −40 до −90 dBFS.
+// SNR в полосе 12,5 кГц от 42 до −8 дБ: сигнал уходит под шум у горизонта.
 func DefaultOptions() Options {
-	return Options{ToneOffsetHz: 1000}
+	return Options{
+		Signals: []Signal{{
+			Kind:        SignalCarrier,
+			FrequencyHz: DefaultFrequencyHz,
+			LevelDBFS:   -40,
+			SweepHz:     1_000_000,
+			SweepPeriod: time.Minute,
+			PassSwingDB: 50,
+			PassPeriod:  45 * time.Second,
+		}},
+		NoiseDBFS: DefaultNoiseDBFS,
+		Seed:      1,
+	}
 }
 
 // Receiver — имитатор SDR-приёмника для TDD без железа.
@@ -49,9 +76,14 @@ type Receiver struct {
 	running    bool
 }
 
-// New создаёт имитатор SDR.
+// New создаёт имитатор SDR. Если частота первого сигнала в диапазоне приёмника, он сразу
+// на ней: сигнал виден в спектре без перестройки.
 func New(opts Options) *Receiver {
-	return &Receiver{opts: opts}
+	r := &Receiver{opts: opts}
+	if len(opts.Signals) > 0 {
+		_ = r.Tune(opts.Signals[0].FrequencyHz)
+	}
+	return r
 }
 
 func (r *Receiver) Name() string { return "imitator" }
@@ -108,10 +140,10 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 		return nil, sdr.ErrSampleRateRequired
 	}
 
-	var beacon *beaconSource
-	if r.opts.Source == nil && r.opts.Beacon != nil {
+	var air *scene
+	if r.opts.Source == nil && (len(r.opts.Signals) > 0 || r.opts.NoiseDBFS != 0) {
 		var err error
-		if beacon, err = newBeaconSource(*r.opts.Beacon, float64(cfg.SampleRate)); err != nil {
+		if air, err = newScene(r.opts, float64(cfg.SampleRate)); err != nil {
 			return nil, err
 		}
 	}
@@ -139,8 +171,8 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 		switch {
 		case r.opts.Source != nil:
 			r.streamFromReader(streamCtx, cfg, blockSize, ch)
-		case beacon != nil:
-			r.streamGenerated(streamCtx, cfg, blockSize, ch, beacon.fill)
+		case air != nil:
+			r.streamGenerated(streamCtx, cfg, blockSize, ch, air.fill)
 		default:
 			r.streamGenerated(streamCtx, cfg, blockSize, ch, r.syntheticTone(cfg.SampleRate))
 		}

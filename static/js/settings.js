@@ -781,6 +781,10 @@
         if (target.receiver && target.receiver.sample_rate_hz && target.receiver.driver === parsed.driver) {
             parsed.sample_rate_hz = target.receiver.sample_rate_hz;
         }
+        // Эфир имитатора задаётся только в config.json: повторный выбор имитатора его не стирает.
+        if (target.receiver && target.receiver.imitator && parsed.driver === RECEIVER_SIMULATED) {
+            parsed.imitator = target.receiver.imitator;
+        }
         target.receiver = parsed;
         this._setDirty(true);
     };
