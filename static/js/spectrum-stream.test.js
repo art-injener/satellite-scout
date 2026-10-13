@@ -19,7 +19,7 @@ const assert = require('assert');
 
 global.window = {};
 const {
-    SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, markerReadout,
+    SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, markerReadout, dbmOffset, shiftLevels,
 } = require('./spectrum-stream.js');
 
 const HEADER = 40;
@@ -63,6 +63,29 @@ let passed = 0;
 let failed = 0;
 const queue = [];
 function test(name, fn) { queue.push([name, fn]); }
+
+// ── dBm at the antenna input ──────────────────────────────────────────
+
+test('dbmOffset is calibration minus gain', () => {
+    assert.strictEqual(dbmOffset(-40, 0), -40);
+    assert.strictEqual(dbmOffset(-40, 20), -60);
+    assert.strictEqual(dbmOffset(0, 10.5), -10.5);
+});
+
+test('dbmOffset gives null when dBm cannot be shown: no calibration, unknown gain, AGC', () => {
+    assert.strictEqual(dbmOffset(undefined, 0), null);
+    assert.strictEqual(dbmOffset(null, 0), null);
+    assert.strictEqual(dbmOffset(-40, undefined), null);
+    assert.strictEqual(dbmOffset(-40, -1), null, 'negative gain is AGC');
+    assert.strictEqual(dbmOffset(NaN, 0), null);
+});
+
+test('shiftLevels adds the offset to every bin and keeps the source intact', () => {
+    const src = new Float32Array([-100, -50.5, 0]);
+    const out = shiftLevels(src, -40);
+    assert.deepStrictEqual(Array.from(out), [-140, -90.5, -40]);
+    assert.deepStrictEqual(Array.from(src), [-100, -50.5, 0]);
+});
 
 // ── Header and frame reader ───────────────────────────────────────────
 
@@ -164,6 +187,12 @@ test('AutoRange: the scale follows a lasting change of the noise floor', () => {
     let r;
     for (let i = 0; i < 60; i++) { r = ar.update(noiseFrame(-49)); }
     assert.deepStrictEqual(r, { min: -60, max: -5 });
+});
+
+test('AutoRange: the top also fits the held trace, the floor stays on the live frame', () => {
+    const held = noiseFrame(-40, { 512: -11 });
+    assert.deepStrictEqual(new AutoRange().update(noiseFrame(-69), held), { min: -80, max: -5 },
+        'a held peak above the live one lifts the top, the held noise does not lift the bottom');
 });
 
 test('AutoRange: floor is the median, so a band full of carriers below half does not lift it', () => {

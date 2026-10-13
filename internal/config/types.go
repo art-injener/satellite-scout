@@ -252,10 +252,21 @@ type ReceiverConfig struct {
 	// железо при разборе конфига может быть не подключено.
 	SampleRateHz uint32 `json:"sample_rate_hz,omitempty"`
 
+	// CalibrationDB — уровень на входе антенны в dBm, который даёт 0 dBFS при усилении 0 дБ.
+	// UI показывает dBm = dBFS + CalibrationDB − усиление. Берётся из калибровки генератором
+	// известного уровня или ориентировочно для модели приёмника. nil — калибровки нет, UI в dBFS.
+	CalibrationDB *float64 `json:"calibration_db,omitempty"`
+
 	// Imitator — эфир имитатора, только для DriverSimulated. nil — эфир по умолчанию:
 	// несущая с ходом ±1 МГц поверх шума.
 	Imitator *ImitatorConfig `json:"imitator,omitempty"`
 }
+
+// Допустимый диапазон ReceiverConfig.CalibrationDB, dBm: с запасом шире любого SDR.
+const (
+	CalibrationMinDB = -100.0
+	CalibrationMaxDB = 30.0
+)
 
 // DriverSimulated — драйвер приёмника-имитатора.
 const DriverSimulated = "simulated"

@@ -420,6 +420,7 @@ func TestSpectrum_RetuneResetsAccumulation(t *testing.T) {
 
 // sstmFrame — разобранный кадр спектра из HTTP-потока.
 type sstmFrame struct {
+	mode             dsp.DisplayMode
 	centerHz, spanHz uint64
 	dbfs             []float32
 }
@@ -440,6 +441,7 @@ func readSpectrumFrame(t *testing.T, r io.Reader) sstmFrame {
 			continue
 		}
 		f := sstmFrame{
+			mode:     dsp.DisplayMode(hdr[6]),
 			centerHz: binary.LittleEndian.Uint64(hdr[16:24]),
 			spanHz:   binary.LittleEndian.Uint64(hdr[24:32]),
 			dbfs:     make([]float32, len(payload)/4),
@@ -448,6 +450,16 @@ func readSpectrumFrame(t *testing.T, r io.Reader) sstmFrame {
 			f.dbfs[i] = math.Float32frombits(binary.LittleEndian.Uint32(payload[i*4:]))
 		}
 		return f
+	}
+}
+
+// readModeFrame reads FFT frames until one of the given display mode arrives.
+func readModeFrame(t *testing.T, r io.Reader, mode dsp.DisplayMode) sstmFrame {
+	t.Helper()
+	for {
+		if f := readSpectrumFrame(t, r); f.mode == mode {
+			return f
+		}
 	}
 }
 
@@ -518,6 +530,134 @@ func TestSpectrum_ImitatorRetuneMovesPeak(t *testing.T) {
 	}
 	if got := peakHz(after); math.Abs(got-carrierHz) > binHz {
 		t.Errorf("peak at %.0f Hz after tune, want the carrier to stay at %d ± one bin", got, carrierHz)
+	}
+}
+
+// openImitatorSpectrum streams the spectrum of an imitator with one sweeping
+// carrier; the caller reads frames from the returned body.
+func openImitatorSpectrum(t *testing.T, query string) io.ReadCloser {
+	t.Helper()
+	receiver := imitator.New(imitator.Options{Signals: []imitator.Signal{{
+		Kind: imitator.SignalCarrier, FrequencyHz: 436_500_000, LevelDBFS: -20,
+		SweepHz: 200_000, SweepPeriod: time.Second, // 800 kHz/s
+	}}})
+	hub := sdr.NewReceiverHub()
+	hub.Register("p", sdr.PathConfig{SampleRateHz: 1_024_000}, func() (sdr.Receiver, error) { return receiver, nil })
+	srv := httptest.NewServer(http.HandlerFunc(NewStreamHandler(hub).Spectrum))
+	t.Cleanup(srv.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		srv.URL+"/api/stream/v1/spectrum?radio_path=p&fps=20&bins=1024&"+query, nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET spectrum: %v", err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+	return resp.Body
+}
+
+// binsAbove counts bins of the frame above the level: the trace width of the carrier.
+func binsAbove(dbfs []float32, level float32) int {
+	n := 0
+	for _, v := range dbfs {
+		if v > level {
+			n++
+		}
+	}
+	return n
+}
+
+// Peak hold keeps the trace of a sweeping carrier across UI frames. In half a
+// second the triangle sweep goes from the center to +200 kHz and back, so the
+// held trace covers ~200 bins, while one averaging window covers a few dozen.
+func TestSpectrum_MaxHoldKeepsTraceAcrossFrames(t *testing.T) {
+	const frames = 10 // 0.5 s at 20 fps
+	traceWidth := func(query string, mode dsp.DisplayMode) int {
+		body := openImitatorSpectrum(t, query)
+		var f sstmFrame
+		for range frames {
+			f = readModeFrame(t, body, mode)
+		}
+		return binsAbove(f.dbfs, -80)
+	}
+
+	held, window := traceWidth("mode=maxhold", dsp.ModeMaxHold), traceWidth("mode=avg", dsp.ModeAvg)
+	if held < 150 {
+		t.Errorf("maxhold trace %d bins after %d frames, want ≥ 150: the hold was reset between frames", held, frames)
+	}
+	if window > 100 {
+		t.Errorf("avg trace %d bins, want ≤ 100: one window must not accumulate earlier frames", window)
+	}
+}
+
+// In peak hold every tick carries two frames: the hold and the live spectrum.
+// The live trace follows the carrier, the hold never drops below it.
+func TestSpectrum_MaxHoldAlsoSendsLiveFrames(t *testing.T) {
+	const frames = 10
+	body := openImitatorSpectrum(t, "mode=maxhold")
+	var hold, live sstmFrame
+	for range frames {
+		hold = readModeFrame(t, body, dsp.ModeMaxHold)
+		live = readSpectrumFrame(t, body)
+		if live.mode != dsp.ModeCurrent {
+			t.Fatalf("frame after the hold has mode %d, want the live frame (%d)", live.mode, dsp.ModeCurrent)
+		}
+		if live.centerHz != hold.centerHz || len(live.dbfs) != len(hold.dbfs) {
+			t.Fatalf("live frame center %d bins %d, want the hold's %d and %d",
+				live.centerHz, len(live.dbfs), hold.centerHz, len(hold.dbfs))
+		}
+	}
+	for i := range hold.dbfs {
+		if hold.dbfs[i] < live.dbfs[i]-0.01 {
+			t.Fatalf("bin %d: hold %.1f below live %.1f", i, hold.dbfs[i], live.dbfs[i])
+		}
+	}
+	if w := binsAbove(live.dbfs, -80); w > 100 {
+		t.Errorf("live trace %d bins, want ≤ 100: it must not accumulate", w)
+	}
+	if w := binsAbove(hold.dbfs, -80); w < 150 {
+		t.Errorf("hold trace %d bins, want ≥ 150", w)
+	}
+}
+
+// Averaging over N frames (window_ms = N frame periods) spreads the sweeping
+// carrier over the bins it passed during the window; one frame does not.
+func TestSpectrum_AvgWindowAveragesAcrossFrames(t *testing.T) {
+	const frames = 10
+	body := openImitatorSpectrum(t, "mode=avg&window_ms=500")
+	var f sstmFrame
+	for range frames {
+		f = readModeFrame(t, body, dsp.ModeAvg)
+	}
+	if w := binsAbove(f.dbfs, -80); w < 150 {
+		t.Errorf("avg over 500 ms trace %d bins, want ≥ 150: frames are not averaged together", w)
+	}
+}
+
+func TestAvgFrames(t *testing.T) {
+	tests := []struct {
+		windowMs string
+		fps      int
+		want     int
+	}{
+		{"", 20, 1},
+		{"abc", 20, 1},
+		{"50", 20, 1},
+		{"10", 20, 1},
+		{"500", 20, 10},
+		{"2500", 20, 50},
+		{"1000", 10, 10},
+		{"100000", 20, maxAvgFrames},
+	}
+	for _, tt := range tests {
+		if got := avgFrames(tt.windowMs, tt.fps); got != tt.want {
+			t.Errorf("avgFrames(%q, %d) = %d, want %d", tt.windowMs, tt.fps, got, tt.want)
+		}
 	}
 }
 

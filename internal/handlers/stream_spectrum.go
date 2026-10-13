@@ -20,11 +20,13 @@ const (
 	maxFPS              = 30
 	minBins             = 64
 	maxBins             = 8192
+	maxAvgFrames        = 100 // окно среднего, кадров UI: 5 с при 20 fps
 
 	queryRadioPath = "radio_path"
 	queryBins      = "bins"
 	queryFPS       = "fps"
 	queryMode      = "mode"
+	queryWindowMs  = "window_ms"
 
 	headerContentType    = "application/octet-stream"
 	headerCacheControl   = "no-cache"
@@ -61,6 +63,7 @@ func (h *StreamHandler) Spectrum(w http.ResponseWriter, r *http.Request) {
 	bins := parseIntClamped(q.Get(queryBins), defaultSpectrumBins, minBins, maxBins)
 	fps := parseIntClamped(q.Get(queryFPS), defaultSpectrumFPS, minFPS, maxFPS)
 	mode := parseDisplayMode(q.Get(queryMode))
+	frames := avgFrames(q.Get(queryWindowMs), fps)
 
 	// Поток устройства общий для всех зрителей тракта; FFT и накопление у каждого клиента свои.
 	// Сеанс устройства живёт дольше запроса, поэтому контекст запроса в него не передаётся.
@@ -90,21 +93,24 @@ func (h *StreamHandler) Spectrum(w http.ResponseWriter, r *http.Request) {
 		"bins", bins,
 		"fps", fps,
 		"mode", mode,
+		"avg_frames", frames,
 	)
 
 	serveSpectrumLoop(r.Context(), w, flusher, iqCh, spectrumParams{
-		fftSize: fftSize,
-		bins:    bins,
-		fps:     fps,
-		mode:    mode,
+		fftSize:   fftSize,
+		bins:      bins,
+		fps:       fps,
+		mode:      mode,
+		avgFrames: frames,
 	})
 }
 
 type spectrumParams struct {
-	fftSize int
-	bins    int
-	fps     int
-	mode    dsp.DisplayMode
+	fftSize   int
+	bins      int
+	fps       int
+	mode      dsp.DisplayMode
+	avgFrames int // окно ModeAvg в кадрах UI
 }
 
 // serveSpectrumLoop — основной цикл: IQ → DSP → SSTM → HTTP.
@@ -116,6 +122,7 @@ func serveSpectrumLoop(
 	p spectrumParams,
 ) {
 	pipeline := dsp.NewSpectrumPipeline(p.fftSize, p.bins, p.mode, dsp.WindowBlackmanHarris)
+	pipeline.SetAvgFrames(p.avgFrames)
 	chunker := newIQChunker(p.fftSize)
 
 	frameDur := time.Second / time.Duration(p.fps)
@@ -204,16 +211,27 @@ type spectrumWriter struct {
 }
 
 // flushPipeline сбрасывает pipeline в HTTP. Возвращает true, если записан фрейм.
+// В режимах удержания за кадром удержания идёт мгновенный кадр с display_mode
+// current: клиент рисует оба.
 func (sw *spectrumWriter) flushPipeline(p *dsp.SpectrumPipeline) bool {
 	dbfs := p.Flush()
 	if dbfs == nil {
 		return false
 	}
+	if !sw.writeFrame(dbfs, sw.mode) {
+		return false
+	}
+	if live := p.FlushLive(); live != nil {
+		return sw.writeFrame(live, dsp.ModeCurrent)
+	}
+	return true
+}
 
+func (sw *spectrumWriter) writeFrame(dbfs []float32, mode dsp.DisplayMode) bool {
 	payload := dsp.Float32ToBytes(dbfs)
 	dsp.EncodeHeader(sw.hdr, dsp.FrameHeader{
 		DataType:    dsp.DataTypeFFTDB,
-		DisplayMode: sw.mode,
+		DisplayMode: mode,
 		TimestampMs: time.Now().UnixMilli(),
 		CenterHz:    sw.lastCenter,
 		SpanHz:      sw.lastSpan,
@@ -261,6 +279,17 @@ func parseIntClamped(s string, def, lo, hi int) int {
 		return hi
 	}
 	return v
+}
+
+// avgFrames переводит окно усреднения window_ms в кадры UI при данном fps,
+// с округлением; пусто или меньше кадра — один кадр.
+func avgFrames(windowMs string, fps int) int {
+	ms, err := strconv.Atoi(windowMs)
+	if err != nil || ms <= 0 || fps <= 0 {
+		return 1
+	}
+	n := (ms*fps + 500) / 1000
+	return max(1, min(n, maxAvgFrames))
 }
 
 func parseDisplayMode(s string) dsp.DisplayMode {

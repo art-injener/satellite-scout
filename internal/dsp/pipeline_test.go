@@ -114,6 +114,50 @@ func TestSpectrumPipeline_ResetClearsState(t *testing.T) {
 	}
 }
 
+// toneBlock returns n samples of a complex tone sitting exactly on FFT bin k (DC at n/2).
+func toneBlock(n, k int) []complex64 {
+	s := make([]complex64, n)
+	for i := range s {
+		phase := 2.0 * math.Pi * float64(k-n/2) * float64(i) / float64(n)
+		s[i] = complex(float32(math.Cos(phase)), float32(math.Sin(phase)))
+	}
+	return s
+}
+
+// In hold modes the pipeline also yields the live (instantaneous) spectrum
+// from the same FFTs: the hold keeps an old tone, the live trace does not.
+func TestSpectrumPipeline_HoldModeAlsoGivesLive(t *testing.T) {
+	const n, binA, binB = 256, 64, 192
+	p := NewSpectrumPipeline(n, 0, ModeMaxHold, WindowBlackmanHarris)
+
+	p.Push(toneBlock(n, binA))
+	_ = p.Flush()
+	_ = p.FlushLive()
+	p.Push(toneBlock(n, binB))
+	hold := p.Flush()
+	live := p.FlushLive()
+
+	if hold == nil || live == nil {
+		t.Fatalf("hold=%v live=%v, want both frames", hold == nil, live == nil)
+	}
+	if hold[binA]-hold[n/4+n/8] < 30 || hold[binB]-hold[n/4+n/8] < 30 {
+		t.Errorf("hold must keep both tones: A=%.1f B=%.1f noise=%.1f", hold[binA], hold[binB], hold[n/4+n/8])
+	}
+	if live[binB]-live[binA] < 30 {
+		t.Errorf("live must show only the current tone: A=%.1f B=%.1f", live[binA], live[binB])
+	}
+}
+
+func TestSpectrumPipeline_NoLiveOutsideHoldModes(t *testing.T) {
+	for _, mode := range []DisplayMode{ModeCurrent, ModeAvg} {
+		p := NewSpectrumPipeline(64, 0, mode, WindowHann)
+		p.Push(toneBlock(64, 10))
+		if got := p.FlushLive(); got != nil {
+			t.Errorf("mode %d: FlushLive = %v, want nil", mode, got)
+		}
+	}
+}
+
 func TestSpectrumPipeline_FFTSize(t *testing.T) {
 	p := NewSpectrumPipeline(2048, 512, ModeAvg, WindowHann)
 	if p.FFTSize() != 2048 {

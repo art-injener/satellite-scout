@@ -37,9 +37,21 @@
     const C_LIGHT = 299792458;
     /** Подписи осей до первого кадра потока: диапазон телеметрии 435–437 МГц. */
     const DEFAULT_BAND = { centerMHz: 436, spanMHz: 2 };
-    /** Размер строки спектра и частота кадров, которые просим у сервера. */
-    const STREAM_BINS = 1024;
+    /** Частота кадров потока спектра. */
     const STREAM_FPS = 20;
+    /** Отсчётов в полосе: одинаково во всех режимах и при любой ширине графика. */
+    const STREAM_BINS = 4096;
+    /** Накопление спектра — значение mode в запросе потока; считает сервер (ADR-002 §III). */
+    const SPEC_MODES = ['current', 'avg', 'maxhold'];
+    const SPEC_MODE_DEFAULT = 'current';
+    const STORAGE_SPEC_MODE = 'ux.manual.specMode';
+    /** «Накопление»: среднее по N циклам, цикл — кадр потока. */
+    const SPEC_AVG_N = [4, 10, 20, 50];
+    const SPEC_AVG_N_DEFAULT = 10;
+    const STORAGE_SPEC_AVG_N = 'ux.manual.specAvgN';
+    /** display_mode кадра SSTM (ADR-002): в «Пике» за удержанием идёт мгновенный кадр. */
+    const FRAME_MODE_CURRENT = 0x00;
+    const FRAME_MODE_MAXHOLD = 0x02;
     /** Цифры маркера обновляются не чаще раза в этот интервал: 20 раз в секунду их не прочитать. */
     const MARKER_REFRESH_MS = 250;
     const MARKER_EMPTY = '—';
@@ -128,6 +140,17 @@
         this._streamCenterHz = null;
         /** Шкала dB по данным потока, общая для спектров и водопада. */
         this._streamRange = null;
+        /** Накопление спектра (SPEC_MODES), его кнопки и N для «Накопления». */
+        this._specMode = SPEC_MODE_DEFAULT;
+        this._specModeButtons = [];
+        this._specAvgN = SPEC_AVG_N_DEFAULT;
+        this._specAvgNSelects = [];
+        /** Последний кадр удержания: рисуется вместе со следующим мгновенным. */
+        this._heldValues = null;
+        /** Сдвиг уровней из dBFS в dBm на входе антенны; null — экран в dBFS. */
+        this._levelOffset = null;
+        /** Тракт, для которого получен _levelOffset. */
+        this._levelPath = null;
         /** Запросы перестройки в пути: пока они есть, кадры не двигают регулятор. */
         this._tunePending = 0;
         this._offAccess = null;
@@ -181,6 +204,9 @@
         /** Маркер пика под индикатором частоты и время кадра последнего обновления цифр, мс. */
         this._marker = null;
         this._markerShownMs = null;
+        /** Подписи единиц уровня (dBFS или dBm) и поле порога шумоподавления. */
+        this._levelUnits = [];
+        this._squelchInput = null;
         this._rxPipelineSelect = null;
         this._rxPanelRoot = null;
 
@@ -204,6 +230,7 @@
         this._initIndicators();
         this._initRotPanel();
         this._initSpectrum();
+        this._initSpecMode();
         this._initPanorama();
         this._initPassProfile();
         this._initPassTimeline();
@@ -957,6 +984,11 @@
             level: document.getElementById('manual-rx-marker-level'),
             bar: document.getElementById('manual-rx-marker-bar'),
         };
+        this._levelUnits = [
+            document.getElementById('manual-rx-marker-unit'),
+            document.getElementById('manual-rx-squelch-unit'),
+        ];
+        this._squelchInput = document.getElementById('manual-rx-squelch');
         const self = this;
 
         this._initFreqDial();
@@ -1116,12 +1148,149 @@
         this._streamPath = path;
         this._streamCenterHz = null;
         this._streamRange = new window.SpectrumStream.AutoRange();
+        this._heldValues = null;
+        this._requestLevelOffset(path);
+        const windowMs = this._specMode === 'avg'
+            ? '&window_ms=' + Math.round(this._specAvgN * 1000 / STREAM_FPS)
+            : '';
         this._stream = new window.SpectrumStream({
             url: '/api/stream/v1/spectrum?radio_path=' + encodeURIComponent(path) +
-                '&bins=' + STREAM_BINS + '&fps=' + STREAM_FPS,
+                '&bins=' + STREAM_BINS + '&fps=' + STREAM_FPS +
+                '&mode=' + this._specMode + windowMs,
             onFrame: function(frame) { self._onStreamFrame(frame); },
         });
         this._stream.start();
+    };
+
+    /**
+     * dBm на экране, если у приёмника тракта есть поправка; усиление берётся из статуса
+     * приёмника. Пока ответа нет, у того же тракта остаются прежние единицы.
+     * @param {string} path
+     */
+    ManualLayout.prototype._requestLevelOffset = function(path) {
+        const mm = (typeof window !== 'undefined') ? window._modeManager : null;
+        const rp = mm && typeof mm.getRadioPath === 'function' ? mm.getRadioPath() : null;
+        const cal = rp ? rp.calibration_db : undefined;
+        if (typeof cal !== 'number' || path !== this._levelPath) {
+            this._levelPath = null;
+            this._setLevelOffset(null);
+        }
+        if (typeof cal !== 'number' || typeof fetch !== 'function') { return; }
+        const self = this;
+        fetch('/api/sdr/status?radio_path=' + encodeURIComponent(path), { credentials: 'same-origin' })
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(st) {
+                if (self._streamPath !== path) { return; }
+                self._levelPath = path;
+                self._setLevelOffset(window.SpectrumStream.dbmOffset(cal, st && st.gain_db));
+            })
+            .catch(function() { /* без статуса остаются dBFS */ });
+    };
+
+    /**
+     * Меняет единицы уровня. Порог шумоподавления пересчитывается, чтобы значить
+     * тот же уровень; шкала и удержание были в прежних единицах и начинаются заново.
+     * @param {?number} offset — сдвиг dBFS в dBm, null — dBFS
+     */
+    ManualLayout.prototype._setLevelOffset = function(offset) {
+        if (offset === this._levelOffset) { return; }
+        const delta = (offset || 0) - (this._levelOffset || 0);
+        this._levelOffset = offset;
+        const unit = offset === null ? 'dBFS' : 'dBm';
+        for (let i = 0; i < this._levelUnits.length; i++) {
+            if (this._levelUnits[i]) { this._levelUnits[i].textContent = unit; }
+        }
+        const sq = this._squelchInput;
+        if (sq && sq.value !== '' && isFinite(Number(sq.value))) {
+            sq.value = String(Number((Number(sq.value) + delta).toFixed(1)));
+        }
+        if (this._streamRange) { this._streamRange = new window.SpectrumStream.AutoRange(); }
+        this._heldValues = null;
+    };
+
+    /**
+     * Переоткрывает открытый поток с текущими параметрами: так меняется режим
+     * накопления и сбрасывается удержание (ADR-002 §III, отдельного REST нет).
+     */
+    ManualLayout.prototype._reopenStream = function() {
+        if (!this._stream) { return; }
+        this._stopStream();
+        this._startStream();
+    };
+
+    // ── Накопление спектра: Мгн. | Накопление (N) | Пик, «Сброс» ──────────
+
+    /** Переключатели над спектром «Спектра» и над компактным спектром «Антенны»: состояние одно. */
+    const SPEC_MODE_GROUPS = [
+        { modes: 'manual-spec-mode', avgN: 'manual-spec-avg-n', reset: 'manual-spec-reset' },
+        { modes: 'manual-ant-spec-mode', avgN: 'manual-ant-spec-avg-n', reset: 'manual-ant-spec-reset' },
+    ];
+
+    ManualLayout.prototype._initSpecMode = function() {
+        const self = this;
+        this._specModeButtons = [];
+        this._specAvgNSelects = [];
+        for (let g = 0; g < SPEC_MODE_GROUPS.length; g++) {
+            const ids = SPEC_MODE_GROUPS[g];
+            const group = document.getElementById(ids.modes);
+            if (group && typeof group.querySelectorAll === 'function') {
+                this._specModeButtons = this._specModeButtons.concat(
+                    Array.prototype.slice.call(group.querySelectorAll('[data-spec-mode]')));
+            }
+            const select = document.getElementById(ids.avgN);
+            if (select) {
+                this._specAvgNSelects.push(select);
+                this._on(select, 'change', function() { self._setSpecAvgN(Number(select.value)); });
+            }
+            this._on(document.getElementById(ids.reset), 'click', function() { self._reopenStream(); });
+        }
+        let saved = null;
+        let savedN = null;
+        try {
+            saved = localStorage.getItem(STORAGE_SPEC_MODE);
+            savedN = Number(localStorage.getItem(STORAGE_SPEC_AVG_N));
+        } catch (_e) { /* noop */ }
+        this._specMode = SPEC_MODES.indexOf(saved) >= 0 ? saved : SPEC_MODE_DEFAULT;
+        this._specAvgN = SPEC_AVG_N.indexOf(savedN) >= 0 ? savedN : SPEC_AVG_N_DEFAULT;
+        for (let i = 0; i < this._specModeButtons.length; i++) {
+            (function(btn) {
+                self._on(btn, 'click', function() {
+                    self._setSpecMode(btn.getAttribute('data-spec-mode'));
+                });
+            })(this._specModeButtons[i]);
+        }
+        this._renderSpecMode();
+    };
+
+    /** @param {string} mode — один из SPEC_MODES */
+    ManualLayout.prototype._setSpecMode = function(mode) {
+        if (SPEC_MODES.indexOf(mode) < 0 || mode === this._specMode) { return; }
+        this._specMode = mode;
+        try { localStorage.setItem(STORAGE_SPEC_MODE, mode); } catch (_e) { /* noop */ }
+        this._renderSpecMode();
+        this._reopenStream();
+    };
+
+    /** @param {number} n — один из SPEC_AVG_N; поток переоткрывается только в «Накоплении» */
+    ManualLayout.prototype._setSpecAvgN = function(n) {
+        if (SPEC_AVG_N.indexOf(n) < 0 || n === this._specAvgN) { return; }
+        this._specAvgN = n;
+        try { localStorage.setItem(STORAGE_SPEC_AVG_N, String(n)); } catch (_e) { /* noop */ }
+        this._renderSpecMode();
+        if (this._specMode === 'avg') { this._reopenStream(); }
+    };
+
+    ManualLayout.prototype._renderSpecMode = function() {
+        for (let i = 0; i < this._specModeButtons.length; i++) {
+            const btn = this._specModeButtons[i];
+            const on = btn.getAttribute('data-spec-mode') === this._specMode;
+            btn.classList.toggle('is-on', on);
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        }
+        for (let s = 0; s < this._specAvgNSelects.length; s++) {
+            this._specAvgNSelects[s].value = String(this._specAvgN);
+            this._specAvgNSelects[s].hidden = this._specMode !== 'avg';
+        }
     };
 
     ManualLayout.prototype._stopStream = function() {
@@ -1139,24 +1308,40 @@
         const h = frame.header;
         this._applyStreamBand(h.centerHz, h.spanHz);
         if (!frame.values || !this._active || !this._streamRange) { return; }
-        const range = this._streamRange.update(frame.values);
+        const values = this._levelOffset === null
+            ? frame.values
+            : window.SpectrumStream.shiftLevels(frame.values, this._levelOffset);
+        // В «Пике» сервер шлёт удержание и следом мгновенный кадр: рисуем их вместе,
+        // водопад и маркер берут мгновенный
+        const peak = this._specMode === 'maxhold';
+        if (peak && h.displayMode === FRAME_MODE_MAXHOLD) {
+            this._heldValues = values;
+            return;
+        }
+        const held = peak && h.displayMode === FRAME_MODE_CURRENT ? this._heldValues : null;
+        const range = this._streamRange.update(values, held);
         const views = [this._fft, this._antFft];
         for (let i = 0; i < views.length; i++) {
             if (!views[i]) { continue; }
             views[i]._dbMin = range.min;
             views[i]._dbMax = range.max;
         }
-        const line = window.SpectrumStream.dbfsToUnit(frame.values, range.min, range.max);
-        if (this._fft) { this._fft.draw(line); }
+        const toUnit = window.SpectrumStream.dbfsToUnit;
+        const line = toUnit(values, range.min, range.max);
+        const heldLine = held ? toUnit(held, range.min, range.max) : null;
+        const drawOn = function(view) {
+            if (heldLine) { view.draw(line, heldLine); } else { view.draw(line); }
+        };
+        if (this._fft) { drawOn(this._fft); }
         if (this._wf) { this._wf.pushLine(line); }
         if (this._antFft && this._activeTab === 'antenna') {
-            this._antFft.draw(line);
+            drawOn(this._antFft);
             this._drawExpectedFreq(this._antFft, this._expectedFreqMHz());
         }
         const ts = h.timestampMs;
         if (this._markerShownMs === null || !(ts - this._markerShownMs < MARKER_REFRESH_MS)) {
             this._markerShownMs = typeof ts === 'number' ? ts : null;
-            this._showMarker(window.SpectrumStream.markerReadout(frame.values, h.centerHz, h.spanHz));
+            this._showMarker(window.SpectrumStream.markerReadout(values, h.centerHz, h.spanHz));
         }
     };
 
@@ -1196,15 +1381,17 @@
     };
 
     /**
-     * Цифры пика под индикатором частоты; полоса амплитуды — шкала −120…0 dBFS.
+     * Цифры пика под индикатором частоты; полоса амплитуды — шкала −120…0 dBFS
+     * и в dBm: она показывает запас до перегрузки АЦП.
      * Единицы стоят в разметке, здесь только числа: крупные цифры не прыгают.
-     * @param {?{freqHz: number, dbfs: number}} mk — null: данных нет, прочерки
+     * @param {?{freqHz: number, dbfs: number}} mk — уровень в единицах экрана; null: данных нет, прочерки
      */
     ManualLayout.prototype._showMarker = function(mk) {
         const m = this._marker;
         if (!m) { return; }
         const num = function(v, digits) { return v.toFixed(digits).replace('-', '−'); };
-        const pct = mk ? Math.max(0, Math.min(100, (mk.dbfs + 120) / 120 * 100)) : 0;
+        const fs = mk ? mk.dbfs - (this._levelOffset || 0) : 0;
+        const pct = mk ? Math.max(0, Math.min(100, (fs + 120) / 120 * 100)) : 0;
         if (m.freq) { m.freq.textContent = mk ? num(mk.freqHz / 1e6, 3) : MARKER_EMPTY; }
         if (m.level) { m.level.textContent = mk ? num(mk.dbfs, 1) : MARKER_EMPTY; }
         if (m.bar) { m.bar.style.width = pct.toFixed(1) + '%'; }

@@ -162,7 +162,7 @@ function makeMockWidget() {
     Widget.prototype.setPosition = function(a, b) { this.calls.push(['setPosition', a, b]); };
     Widget.prototype.setNoradId = function(id) { this.calls.push(['setNoradId', id]); };
     Widget.prototype.resize = function(w, h) { this.calls.push(['resize', w, h]); };
-    Widget.prototype.draw = function(buf) { this.calls.push(['draw', buf]); };
+    Widget.prototype.draw = function(buf, hold) { this.calls.push(['draw', buf, hold]); };
     Widget.prototype.refreshThemeColors = function() { this.calls.push(['refreshThemeColors']); };
     Widget.prototype._resize = function() { this.calls.push(['_resize']); };
     Widget.prototype.refresh = function() { this.calls.push(['refresh']); };
@@ -193,6 +193,8 @@ MockStream.prototype.isRunning = function() { return this.running; };
 MockStream.dbfsToUnit = realStream.dbfsToUnit;
 MockStream.AutoRange = realStream.AutoRange;
 MockStream.markerReadout = realStream.markerReadout;
+MockStream.dbmOffset = realStream.dbmOffset;
+MockStream.shiftLevels = realStream.shiftLevels;
 global.window.SpectrumStream = MockStream;
 
 /** FFT frame as SpectrumStream hands it over. */
@@ -352,6 +354,31 @@ global.window.FreqDial = MockFreqDial;
 _domNodes.set('manual-rx-marker-freq', makeDomElement('manual-rx-marker-freq'));
 _domNodes.set('manual-rx-marker-level', makeDomElement('manual-rx-marker-level'));
 _domNodes.set('manual-rx-marker-bar', makeDomElement('manual-rx-marker-bar'));
+_domNodes.set('manual-rx-marker-unit', makeDomElement('manual-rx-marker-unit', { textContent: 'dBFS' }));
+_domNodes.set('manual-rx-squelch', makeDomElement('manual-rx-squelch', { value: '-90' }));
+_domNodes.set('manual-rx-squelch-unit', makeDomElement('manual-rx-squelch-unit', { textContent: 'dBFS' }));
+// Накопление спектра: Мгн. | Накопление | Пик, число циклов N и «Сброс» над графиком
+const specModeBtns = ['current', 'avg', 'maxhold'].reduce(function(acc, mode) {
+    acc[mode] = makeDomElement('spec-mode-' + mode, { _attrs: { 'data-spec-mode': mode } });
+    return acc;
+}, {});
+_domNodes.set('manual-spec-mode', makeDomElement('manual-spec-mode', {
+    querySelectorAll: () => Object.values(specModeBtns),
+}));
+_domNodes.set('manual-spec-reset', makeDomElement('manual-spec-reset'));
+const specAvgN = makeDomElement('manual-spec-avg-n', { value: '10', hidden: false });
+_domNodes.set('manual-spec-avg-n', specAvgN);
+// Тот же переключатель над компактным спектром «Антенны»
+const antSpecModeBtns = ['current', 'avg', 'maxhold'].reduce(function(acc, mode) {
+    acc[mode] = makeDomElement('ant-spec-mode-' + mode, { _attrs: { 'data-spec-mode': mode } });
+    return acc;
+}, {});
+_domNodes.set('manual-ant-spec-mode', makeDomElement('manual-ant-spec-mode', {
+    querySelectorAll: () => Object.values(antSpecModeBtns),
+}));
+_domNodes.set('manual-ant-spec-reset', makeDomElement('manual-ant-spec-reset'));
+const antSpecAvgN = makeDomElement('manual-ant-spec-avg-n', { value: '10', hidden: false });
+_domNodes.set('manual-ant-spec-avg-n', antSpecAvgN);
 // Вкладка «Демодулятор»: переключатель Таблица/Hex + кнопки записи и прослушивания
 const resultTabTable = makeDomElement('result-tab-table', { _attrs: { 'data-view': 'table', 'aria-selected': 'true' } });
 const resultTabHex = makeDomElement('result-tab-hex', { _attrs: { 'data-view': 'hex', 'aria-selected': 'false' } });
@@ -1628,6 +1655,298 @@ test('without a tract there is no stream', () => {
     });
 });
 
+console.log('\n— ManualLayout: spectrum accumulation mode —');
+
+/** Query parameter of the stream URL. */
+function urlParam(url, name) {
+    const m = new RegExp('[?&]' + name + '=([^&]*)').exec(url);
+    return m ? decodeURIComponent(m[1]) : null;
+}
+
+/** Runs fn with an in-memory localStorage, then removes it. */
+function withStorage(initial, fn) {
+    const data = Object.assign({}, initial);
+    global.localStorage = {
+        getItem: (k) => (Object.prototype.hasOwnProperty.call(data, k) ? data[k] : null),
+        setItem: (k, v) => { data[k] = String(v); },
+    };
+    try { fn(data); } finally { delete global.localStorage; }
+}
+
+test('stream asks for the instantaneous spectrum by default', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const url = MockStream.last().opts.url;
+        assert.strictEqual(urlParam(url, 'mode'), 'current', url);
+        assert.strictEqual(urlParam(url, 'window_ms'), null, 'no averaging window: ' + url);
+        assert.ok(specModeBtns.current.classList.contains('is-on'));
+        assert.strictEqual(specModeBtns.current.getAttribute('aria-pressed'), 'true');
+        assert.strictEqual(specAvgN.hidden, true, 'N is shown only for accumulation');
+        m.destroy();
+    });
+});
+
+test('every mode asks for the same 4096 bins whatever the canvas width', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        assert.strictEqual(urlParam(MockStream.last().opts.url, 'bins'), '4096');
+        m._fftCanvas.clientWidth = 1900;
+        fire(specModeBtns.avg, 'click');
+        assert.strictEqual(urlParam(MockStream.last().opts.url, 'bins'), '4096');
+        fire(specModeBtns.maxhold, 'click');
+        assert.strictEqual(urlParam(MockStream.last().opts.url, 'bins'), '4096');
+        m.destroy();
+    });
+});
+
+test('accumulation averages over N cycles: window_ms is N stream frames', () => {
+    withStorage({}, (data) => {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            fire(specModeBtns.avg, 'click');
+            const s1 = MockStream.last();
+            assert.strictEqual(urlParam(s1.opts.url, 'mode'), 'avg');
+            assert.strictEqual(urlParam(s1.opts.url, 'window_ms'), '500', 'default N = 10 frames of 50 ms');
+            assert.strictEqual(specAvgN.hidden, false);
+            specAvgN.value = '20';
+            fire(specAvgN, 'change');
+            const s2 = MockStream.last();
+            assert.notStrictEqual(s2, s1, 'new N reopens the stream');
+            assert.strictEqual(s1.stopped, 1);
+            assert.strictEqual(urlParam(s2.opts.url, 'window_ms'), '1000');
+            assert.strictEqual(data['ux.manual.specAvgN'], '20');
+            fire(specModeBtns.current, 'click');
+            assert.strictEqual(urlParam(MockStream.last().opts.url, 'window_ms'), null);
+            assert.strictEqual(specAvgN.hidden, true);
+            m.destroy();
+        });
+    });
+});
+
+test('saved N is used, an unknown one falls back to 10; N outside accumulation is only remembered', () => {
+    withStorage({ 'ux.manual.specMode': 'avg', 'ux.manual.specAvgN': '50' }, (data) => {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            assert.strictEqual(urlParam(MockStream.last().opts.url, 'window_ms'), '2500');
+            assert.strictEqual(specAvgN.value, '50');
+            fire(specModeBtns.maxhold, 'click');
+            const s = MockStream.last();
+            specAvgN.value = '4';
+            fire(specAvgN, 'change');
+            assert.strictEqual(MockStream.last(), s, 'peak hold does not depend on N');
+            assert.strictEqual(data['ux.manual.specAvgN'], '4');
+            m.destroy();
+        });
+    });
+    withStorage({ 'ux.manual.specMode': 'avg', 'ux.manual.specAvgN': '7' }, () => {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            assert.strictEqual(urlParam(MockStream.last().opts.url, 'window_ms'), '500');
+            m.destroy();
+        });
+    });
+});
+
+test('mode button reopens the stream with the new mode and remembers it', () => {
+    withStorage({}, (data) => {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            const s1 = MockStream.last();
+            fire(specModeBtns.maxhold, 'click');
+            const s2 = MockStream.last();
+            assert.notStrictEqual(s2, s1, 'a new stream');
+            assert.strictEqual(s1.stopped, 1, 'the old stream is closed');
+            assert.strictEqual(urlParam(s2.opts.url, 'mode'), 'maxhold');
+            assert.strictEqual(s2.started, 1);
+            assert.ok(specModeBtns.maxhold.classList.contains('is-on'));
+            assert.ok(!specModeBtns.current.classList.contains('is-on'));
+            assert.strictEqual(data['ux.manual.specMode'], 'maxhold');
+            fire(specModeBtns.maxhold, 'click');
+            assert.strictEqual(MockStream.last(), s2, 'the same mode does not reopen the stream');
+            m.destroy();
+        });
+    });
+});
+
+test('saved mode is used for the first stream, a removed or unknown one gives the instantaneous', () => {
+    withStorage({ 'ux.manual.specMode': 'maxhold' }, () => {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            assert.strictEqual(urlParam(MockStream.last().opts.url, 'mode'), 'maxhold');
+            m.destroy();
+        });
+    });
+    ['minhold', 'bogus'].forEach((saved) => {
+        withStorage({ 'ux.manual.specMode': saved }, () => {
+            withStation({}, () => {
+                const m = new ManualLayout(makeStateManager());
+                m.activate();
+                fire(tabSpectrum, 'click');
+                assert.strictEqual(urlParam(MockStream.last().opts.url, 'mode'), 'current', saved);
+                m.destroy();
+            });
+        });
+    });
+});
+
+test('reset reopens the stream with the same mode: the server starts the hold anew', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fire(specModeBtns.maxhold, 'click');
+        const s1 = MockStream.last();
+        fire(_domNodes.get('manual-spec-reset'), 'click');
+        const s2 = MockStream.last();
+        assert.notStrictEqual(s2, s1);
+        assert.strictEqual(s1.stopped, 1);
+        assert.strictEqual(urlParam(s2.opts.url, 'mode'), 'maxhold');
+        m.destroy();
+    });
+});
+
+test('without an open stream the mode is only remembered, reset does nothing', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        const before = MockStream.instances.length;
+        fire(specModeBtns.maxhold, 'click');
+        fire(_domNodes.get('manual-spec-reset'), 'click');
+        assert.strictEqual(MockStream.instances.length, before, 'Panorama has no stream to reopen');
+        fire(tabSpectrum, 'click');
+        assert.strictEqual(urlParam(MockStream.last().opts.url, 'mode'), 'maxhold');
+        fire(specModeBtns.current, 'click');
+        m.destroy();
+    });
+});
+
+/** Stream frame of the given display mode (0 current, 1 avg, 2 maxhold). */
+function modeFrame(displayMode, values) {
+    const f = fftFrame(436500000, values, 2048000);
+    f.header.displayMode = displayMode;
+    return f;
+}
+
+test('peak hold draws the held trace under the live one; waterfall and marker take the live', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fire(specModeBtns.maxhold, 'click');
+        const s = MockStream.last();
+        m._fft.calls = [];
+        m._wf.calls = [];
+        const held = [-100, -20, -50];
+        const live = [-100, -50, -10];
+        s.opts.onFrame(modeFrame(0x02, held));
+        assert.strictEqual(m._fft.calls.filter((c) => c[0] === 'draw').length, 0, 'the hold waits for its live frame');
+        s.opts.onFrame(modeFrame(0x00, live));
+        const draw = m._fft.calls.find((c) => c[0] === 'draw');
+        const range = { min: m._fft._dbMin, max: m._fft._dbMax };
+        const unit = (v) => Array.from(realStream.dbfsToUnit(new Float32Array(v), range.min, range.max));
+        assert.deepStrictEqual(Array.from(draw[1]), unit(live), 'main trace is live');
+        assert.deepStrictEqual(Array.from(draw[2]), unit(held), 'second trace is the hold');
+        const line = m._wf.calls.find((c) => c[0] === 'pushLine');
+        assert.deepStrictEqual(Array.from(line[1]), unit(live), 'waterfall shows the live spectrum');
+        assert.strictEqual(m._wf.calls.filter((c) => c[0] === 'pushLine').length, 1);
+        assert.strictEqual(markerText()[1], '−10.0', 'marker reads the live peak');
+        m.destroy();
+    });
+});
+
+test('Antenna switcher drives the same mode: both groups light up, one stream reopen', () => {
+    withStorage({}, (data) => {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            fire(tabAntenna, 'click');
+            const s1 = MockStream.last();
+            const before = MockStream.instances.length;
+            fire(antSpecModeBtns.maxhold, 'click');
+            const s2 = MockStream.last();
+            assert.notStrictEqual(s2, s1);
+            assert.strictEqual(s1.stopped, 1);
+            assert.strictEqual(MockStream.instances.length, before + 1, 'exactly one new stream');
+            assert.strictEqual(urlParam(s2.opts.url, 'mode'), 'maxhold');
+            assert.ok(antSpecModeBtns.maxhold.classList.contains('is-on'));
+            assert.ok(specModeBtns.maxhold.classList.contains('is-on'), 'Spectrum tab shows the same mode');
+            assert.strictEqual(specModeBtns.maxhold.getAttribute('aria-pressed'), 'true');
+            assert.strictEqual(data['ux.manual.specMode'], 'maxhold');
+            fire(_domNodes.get('manual-ant-spec-reset'), 'click');
+            assert.notStrictEqual(MockStream.last(), s2, 'reset from Antenna reopens the stream');
+            m.destroy();
+        });
+    });
+});
+
+test('N chosen on Antenna is shown on Spectrum too', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fire(antSpecModeBtns.avg, 'click');
+        assert.strictEqual(antSpecAvgN.hidden, false);
+        assert.strictEqual(specAvgN.hidden, false);
+        antSpecAvgN.value = '50';
+        fire(antSpecAvgN, 'change');
+        assert.strictEqual(urlParam(MockStream.last().opts.url, 'window_ms'), '2500');
+        assert.strictEqual(specAvgN.value, '50');
+        fire(specModeBtns.current, 'click');
+        assert.strictEqual(antSpecAvgN.hidden, true);
+        m.destroy();
+    });
+});
+
+test('peak hold also draws the held trace on the Antenna spectrum', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fire(tabAntenna, 'click');
+        fire(antSpecModeBtns.maxhold, 'click');
+        const s = MockStream.last();
+        m._antFft.calls = [];
+        s.opts.onFrame(modeFrame(0x02, [-100, -20, -50]));
+        s.opts.onFrame(modeFrame(0x00, [-100, -50, -10]));
+        const draw = m._antFft.calls.find((c) => c[0] === 'draw');
+        assert.ok(draw && draw[2], 'Antenna gets the hold as the second trace');
+        const unit = Array.from(realStream.dbfsToUnit(new Float32Array([-100, -20, -50]), m._antFft._dbMin, m._antFft._dbMax));
+        assert.deepStrictEqual(Array.from(draw[2]), unit);
+        fire(specModeBtns.current, 'click');
+        m.destroy();
+    });
+});
+
+test('outside peak hold the frame is drawn alone', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fire(specModeBtns.avg, 'click');
+        m._fft.calls = [];
+        MockStream.last().opts.onFrame(modeFrame(0x01, [-100, -50, -10]));
+        const draw = m._fft.calls.find((c) => c[0] === 'draw');
+        assert.ok(draw, 'drawn at once');
+        assert.strictEqual(draw[2], undefined, 'no held trace');
+        m.destroy();
+    });
+});
+
 /** 1024 bins of noise at -90 dBFS with one peak. */
 function peakFrame(bin, dbfs, timestampMs) {
     const values = new Array(1024).fill(-90);
@@ -1872,6 +2191,72 @@ testAsync('stream frames do not move the dial back while a tune is in flight', a
     await flush();
     MockStream.last().opts.onFrame(fftFrame(437000000));
     assert.strictEqual(m._freqDial.getHz(), 437000000);
+    m.destroy();
+});
+
+// ── Amplitude units: dBm with calibration, dBFS otherwise ──────
+
+/** Tract 1 whose receiver has a dBm calibration. */
+const CALIBRATED = Object.assign({}, TRACT_1, { getRadioPath: () => ({ id: 1, calibration_db: -40 }) });
+
+function levelUnits() {
+    return [_domNodes.get('manual-rx-marker-unit').textContent, _domNodes.get('manual-rx-squelch-unit').textContent];
+}
+function statusCalls() {
+    return fetchMock.calls.filter((c) => c.url.indexOf('/api/sdr/status') === 0);
+}
+
+/** Opens the Spectrum tab on the given tract and waits for the receiver status. */
+async function openWithStatus(mm, status) {
+    const prevBody = fetchMock.body;
+    fetchMock.body = status;
+    let m;
+    withStation({ mm: mm }, () => {
+        m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+    });
+    await flush();
+    await flush();
+    fetchMock.body = prevBody;
+    return m;
+}
+
+testAsync('calibrated tract shows dBm at the antenna: calibration minus receiver gain', async () => {
+    _domNodes.get('manual-rx-squelch').value = '-90';
+    const m = await openWithStatus(CALIBRATED, { center_hz: 436500000, gain_db: 10, running: true });
+    assert.deepStrictEqual(statusCalls().map((c) => c.url), ['/api/sdr/status?radio_path=radio_path_1']);
+    const frame = peakFrame(768, -49.3, 1000);
+    const want = new realStream.AutoRange().update(realStream.shiftLevels(frame.values, -50));
+    MockStream.last().opts.onFrame(frame);
+    assert.deepStrictEqual(markerText(), ['437.012', '−99.3'], 'peak in dBm: -49.3 - 40 - 10');
+    assert.deepStrictEqual(levelUnits(), ['dBm', 'dBm']);
+    assert.strictEqual(_domNodes.get('manual-rx-marker-bar').style.width, '58.9%', 'bar keeps the ADC headroom');
+    assert.deepStrictEqual([m._fft._dbMin, m._fft._dbMax], [want.min, want.max], 'spectrum scale in dBm');
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-140', 'squelch keeps its meaning in new units');
+    m._stopStream();
+    global.window._modeManager = TRACT_1;
+    m._startStream();
+    delete global.window._modeManager;
+    assert.deepStrictEqual(levelUnits(), ['dBFS', 'dBFS'], 'uncalibrated tract goes back to dBFS');
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-90');
+    m.destroy();
+});
+
+testAsync('AGC on the receiver keeps dBFS: gain is unknown', async () => {
+    const m = await openWithStatus(CALIBRATED, { center_hz: 436500000, gain_db: -1, running: true });
+    MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
+    assert.deepStrictEqual(markerText(), ['437.012', '−49.3']);
+    assert.deepStrictEqual(levelUnits(), ['dBFS', 'dBFS']);
+    m.destroy();
+});
+
+testAsync('tract without calibration stays in dBFS and does not ask for the status', async () => {
+    const m = await openWithStatus(TRACT_1, { gain_db: 10 });
+    assert.strictEqual(statusCalls().length, 0);
+    MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
+    assert.deepStrictEqual(markerText(), ['437.012', '−49.3']);
+    assert.deepStrictEqual(levelUnits(), ['dBFS', 'dBFS']);
     m.destroy();
 });
 

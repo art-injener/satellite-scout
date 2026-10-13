@@ -5,6 +5,7 @@ import (
 	"errors"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 )
@@ -299,6 +300,68 @@ func TestValidate_ImitatorOnlyForSimulatedDriver(t *testing.T) {
 	verrs := mustValidationErrors(t, cfg.Validate())
 	if !hasField(verrs, "station.radio_paths[0].receiver.imitator") {
 		t.Errorf("expected error on receiver.imitator for rtlsdr, got %v", verrs)
+	}
+}
+
+func TestValidate_CalibrationRange(t *testing.T) {
+	const field = "station.radio_paths[0].receiver.calibration_db"
+	cases := []struct {
+		db      float64
+		wantErr bool
+	}{
+		{db: -40, wantErr: false},
+		{db: CalibrationMinDB, wantErr: false},
+		{db: CalibrationMaxDB, wantErr: false},
+		{db: CalibrationMinDB - 0.1, wantErr: true},
+		{db: CalibrationMaxDB + 0.1, wantErr: true},
+	}
+	for _, c := range cases {
+		rp := sampleRadioPath(1)
+		db := c.db
+		rp.Receiver.CalibrationDB = &db
+		cfg := DefaultConfig()
+		cfg.Station.RadioPaths = []RadioPath{rp}
+		err := cfg.Validate()
+		if !c.wantErr {
+			if err != nil {
+				t.Errorf("calibration %.1f rejected: %v", c.db, err)
+			}
+			continue
+		}
+		if verrs := mustValidationErrors(t, err); !hasField(verrs, field) {
+			t.Errorf("calibration %.1f: expected error on %s, got %v", c.db, field, verrs)
+		}
+	}
+}
+
+func TestReceiverConfig_CalibrationJSON(t *testing.T) {
+	var rc ReceiverConfig
+	if err := json.Unmarshal([]byte(`{"driver":"rtlsdr","calibration_db":-23.5}`), &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.CalibrationDB == nil || *rc.CalibrationDB != -23.5 {
+		t.Errorf("calibration_db=%v, want -23.5", rc.CalibrationDB)
+	}
+	out, err := json.Marshal(ReceiverConfig{Driver: "rtlsdr"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(out), "calibration_db") {
+		t.Errorf("absent calibration must not be written: %s", out)
+	}
+}
+
+func TestClone_CalibrationIsDeepCopied(t *testing.T) {
+	cfg := DefaultConfig()
+	rp := sampleRadioPath(1)
+	db := -40.0
+	rp.Receiver.CalibrationDB = &db
+	cfg.Station.RadioPaths = []RadioPath{rp}
+
+	dup := cloneConfig(cfg)
+	*dup.Station.RadioPaths[0].Receiver.CalibrationDB = -10
+	if db != -40 {
+		t.Errorf("clone shares calibration with the original: original became %.1f", db)
 	}
 }
 

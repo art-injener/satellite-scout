@@ -781,6 +781,11 @@
         if (target.receiver && target.receiver.sample_rate_hz && target.receiver.driver === parsed.driver) {
             parsed.sample_rate_hz = target.receiver.sample_rate_hz;
         }
+        // Поправка для dBm снята с приёмника того же драйвера; у другого драйвера она неверна.
+        if (target.receiver && typeof target.receiver.calibration_db === 'number' &&
+            target.receiver.driver === parsed.driver) {
+            parsed.calibration_db = target.receiver.calibration_db;
+        }
         // Эфир имитатора задаётся только в config.json: повторный выбор имитатора его не стирает.
         if (target.receiver && target.receiver.imitator && parsed.driver === RECEIVER_SIMULATED) {
             parsed.imitator = target.receiver.imitator;

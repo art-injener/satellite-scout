@@ -49,10 +49,11 @@ func (h *APIHandler) GetConfig(w http.ResponseWriter, r *http.Request) {
 	paths := make([]RadioPathInfo, 0, len(station.RadioPaths))
 	for _, rp := range station.RadioPaths {
 		paths = append(paths, RadioPathInfo{
-			ID:          rp.ID,
-			Name:        rp.Name,
-			HasRotator:  rp.Rotator != nil,
-			AntennaKind: rp.Antenna.Kind,
+			ID:            rp.ID,
+			Name:          rp.Name,
+			HasRotator:    rp.Rotator != nil,
+			AntennaKind:   rp.Antenna.Kind,
+			CalibrationDB: rp.Receiver.CalibrationDB,
 		})
 	}
 

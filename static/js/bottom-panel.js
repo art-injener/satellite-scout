@@ -466,8 +466,9 @@
         }
     };
 
-    // Полная перерисовка: сетка dB, ось Y, линия спектра, перекрестье на пике
-    FFTSpectrumView.prototype.draw = function(buf) {
+    // Полная перерисовка: сетка dB, ось Y, линия спектра, перекрестье на пике.
+    // held — удержание пика той же длины, рисуется под линией; перекрестье остаётся на живой
+    FFTSpectrumView.prototype.draw = function(buf, held) {
         this._resize();
         const w = this._canvas.width;
         const h = this._canvas.height;
@@ -540,18 +541,23 @@
             if (buf[bi] > peakVal) { peakVal = buf[bi]; peakIdx = bi; }
         }
 
-        ctx.save();
-        ctx.beginPath();
-        for (let bp = 0; bp < bins; bp++) {
-            const xPt = ml + (bp / (bins - 1)) * plotW;
-            const vv = Math.max(0, Math.min(1, buf[bp]));
-            const yPt = mt + plotH * (1 - vv);
-            if (bp === 0) { ctx.moveTo(xPt, yPt); } else { ctx.lineTo(xPt, yPt); }
-        }
-        ctx.strokeStyle = cssVar('--spectrum-trace', '#00ff80');
-        ctx.lineWidth = 1.5;
-        ctx.stroke();
-        ctx.restore();
+        const trace = function(values, color, width) {
+            const n = values.length;
+            ctx.save();
+            ctx.beginPath();
+            for (let bp = 0; bp < n; bp++) {
+                const xPt = ml + (bp / (n - 1)) * plotW;
+                const vv = Math.max(0, Math.min(1, values[bp]));
+                const yPt = mt + plotH * (1 - vv);
+                if (bp === 0) { ctx.moveTo(xPt, yPt); } else { ctx.lineTo(xPt, yPt); }
+            }
+            ctx.strokeStyle = color;
+            ctx.lineWidth = width;
+            ctx.stroke();
+            ctx.restore();
+        };
+        if (held && held.length > 1) { trace(held, cssVar('--spectrum-hold-trace', '#5ec8ff'), 1); }
+        trace(buf, cssVar('--spectrum-trace', '#00ff80'), 1.5);
 
         // ── Перекрестье на пике ──
         const peakX = ml + (peakIdx / (bins - 1)) * plotW;

@@ -85,16 +85,100 @@ func TestReducer_Reset(t *testing.T) {
 	}
 }
 
-func TestReducer_Flush_Resets(t *testing.T) {
+// Window modes describe one UI frame: Flush starts the next window from scratch.
+func TestReducer_WindowModesResetOnFlush(t *testing.T) {
+	for _, mode := range []DisplayMode{ModeCurrent, ModeAvg} {
+		r := NewReducer(2, mode)
+		r.Push([]float64{1.0, 1.0})
+		_ = r.Flush()
+
+		r.Push([]float64{3.0, 3.0})
+		got := r.Flush()
+		want := PowerToDBFS([]float64{3.0, 3.0})
+		assertFloat32Slice(t, "window mode after Flush", got, want, 0.01)
+	}
+}
+
+// Hold modes keep the extreme since the stream start: a peak seen in one UI
+// frame stays on screen until Reset (new stream or retune).
+func TestReducer_HoldModesKeepStateAcrossFlush(t *testing.T) {
+	maxR := NewReducer(2, ModeMaxHold)
+	maxR.Push([]float64{1.0, 0.1})
+	_ = maxR.Flush()
+	maxR.Push([]float64{0.1, 2.0})
+	assertFloat32Slice(t, "MaxHold across Flush", maxR.Flush(), PowerToDBFS([]float64{1.0, 2.0}), 0.01)
+
+	minR := NewReducer(2, ModeMinHold)
+	minR.Push([]float64{1.0, 0.1})
+	_ = minR.Flush()
+	minR.Push([]float64{0.1, 2.0})
+	assertFloat32Slice(t, "MinHold across Flush", minR.Flush(), PowerToDBFS([]float64{0.1, 0.1}), 0.01)
+}
+
+// Without new data there is nothing new to send, even if a hold is kept.
+func TestReducer_HoldFlushWithoutNewPushReturnsNil(t *testing.T) {
 	r := NewReducer(2, ModeMaxHold)
 	r.Push([]float64{1.0, 1.0})
 	_ = r.Flush()
+	if got := r.Flush(); got != nil {
+		t.Errorf("second Flush without Push: got %v, want nil", got)
+	}
+}
+
+func TestReducer_ResetClearsHold(t *testing.T) {
+	r := NewReducer(2, ModeMaxHold)
+	r.Push([]float64{1.0, 1.0})
+	_ = r.Flush()
+	r.Reset()
 
 	r.Push([]float64{0.1, 0.1})
-	got := r.Flush()
-	// После Flush аккумулятор сбросился; max от одного кадра = он сам
-	want := PowerToDBFS([]float64{0.1, 0.1})
-	assertFloat32Slice(t, "Flush resets", got, want, 0.01)
+	assertFloat32Slice(t, "MaxHold after Reset", r.Flush(), PowerToDBFS([]float64{0.1, 0.1}), 0.01)
+}
+
+// Avg over N display frames: each Flush returns the mean of every FFT pushed
+// during the last N frames; until N frames are collected it averages what it has.
+func TestReducer_AvgOverFrames(t *testing.T) {
+	r := NewReducer(1, ModeAvg)
+	r.SetAvgFrames(3)
+
+	steps := []struct {
+		push []float64
+		want float64
+	}{
+		{[]float64{1}, 1},             // frame 1: mean(1)
+		{[]float64{4, 4}, 3},          // frames 1–2: (1+4+4)/3
+		{[]float64{7}, 4},             // frames 1–3: (1+8+7)/4
+		{[]float64{10}, 25.0 / 4},     // frames 2–4: (8+7+10)/4, frame 1 dropped
+		{[]float64{13, 13}, 43.0 / 4}, // frames 3–5: (7+10+26)/4
+	}
+	for i, s := range steps {
+		for _, p := range s.push {
+			r.Push([]float64{p})
+		}
+		got := r.Flush()
+		assertFloat32Slice(t, "AvgOverFrames step "+string(rune('1'+i)), got, PowerToDBFS([]float64{s.want}), 0.01)
+	}
+}
+
+func TestReducer_AvgOverFramesResetClearsHistory(t *testing.T) {
+	r := NewReducer(1, ModeAvg)
+	r.SetAvgFrames(4)
+	r.Push([]float64{100})
+	_ = r.Flush()
+	r.Reset()
+
+	r.Push([]float64{1})
+	assertFloat32Slice(t, "AvgOverFrames after Reset", r.Flush(), PowerToDBFS([]float64{1}), 0.01)
+}
+
+func TestReducer_AvgOverFramesFlushWithoutPushReturnsNil(t *testing.T) {
+	r := NewReducer(1, ModeAvg)
+	r.SetAvgFrames(4)
+	r.Push([]float64{1})
+	_ = r.Flush()
+	if got := r.Flush(); got != nil {
+		t.Fatalf("Flush without new Push = %v, want nil", got)
+	}
 }
 
 // --- DownsampleMax ---

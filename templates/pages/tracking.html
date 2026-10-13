@@ -290,6 +290,26 @@
                  видно, ловит ли антенна сигнал. -->
             <div class="ml-ant__spec">
                 <canvas id="manual-ant-spectrum" role="img" aria-label="Спектр принимаемого канала"></canvas>
+                <!-- Тот же режим, что на «Спектре»: состояние и поток общие -->
+                <div class="ml-spec-mode" role="group" aria-label="Накопление спектра">
+                    <div class="ml-spec-mode__seg" id="manual-ant-spec-mode">
+                        <button type="button" class="ml-spec-mode__btn" data-spec-mode="current" aria-pressed="false"
+                                title="Мгновенный спектр: последний БПФ цикла">Мгн.</button>
+                        <button type="button" class="ml-spec-mode__btn" data-spec-mode="avg" aria-pressed="false"
+                                title="Накопление: среднее по N последним циклам">Накопление</button>
+                        <button type="button" class="ml-spec-mode__btn" data-spec-mode="maxhold" aria-pressed="false"
+                                title="Пиковый детектор: максимумы до сброса или перестройки, поверх — мгновенный спектр">Пик</button>
+                    </div>
+                    <select class="ml-spec-mode__n" id="manual-ant-spec-avg-n" aria-label="Число циклов накопления" hidden
+                            title="Число циклов накопления (цикл — 50 мс)">
+                        <option value="4">N 4</option>
+                        <option value="10">N 10</option>
+                        <option value="20">N 20</option>
+                        <option value="50">N 50</option>
+                    </select>
+                    <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-ant-spec-reset"
+                            title="Начать накопление заново">Сброс</button>
+                </div>
             </div>
             <div class="ml-ant__ind">
                 <div class="ml-ant__canvas-wrap ml-ant__dir">
@@ -396,6 +416,26 @@
             <section class="ml-panel ml-spectrum" id="manual-spectrum">
                 <div class="ml-spectrum__fft">
                     <canvas id="manual-fft" class="ml-canvas" role="img" aria-label="БПФ-спектр узкой полосы активного канала"></canvas>
+                    <!-- Накопление спектра считает сервер; смена режима и «Сброс» переоткрывают поток -->
+                    <div class="ml-spec-mode" role="group" aria-label="Накопление спектра">
+                        <div class="ml-spec-mode__seg" id="manual-spec-mode">
+                            <button type="button" class="ml-spec-mode__btn" data-spec-mode="current" aria-pressed="false"
+                                    title="Мгновенный спектр: последний БПФ цикла">Мгн.</button>
+                            <button type="button" class="ml-spec-mode__btn" data-spec-mode="avg" aria-pressed="false"
+                                    title="Накопление: среднее по N последним циклам">Накопление</button>
+                            <button type="button" class="ml-spec-mode__btn" data-spec-mode="maxhold" aria-pressed="false"
+                                    title="Пиковый детектор: максимумы до сброса или перестройки, поверх — мгновенный спектр">Пик</button>
+                        </div>
+                        <select class="ml-spec-mode__n" id="manual-spec-avg-n" aria-label="Число циклов накопления" hidden
+                                title="Число циклов накопления (цикл — 50 мс)">
+                            <option value="4">N 4</option>
+                            <option value="10">N 10</option>
+                            <option value="20">N 20</option>
+                            <option value="50">N 50</option>
+                        </select>
+                        <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-reset"
+                                title="Начать накопление заново">Сброс</button>
+                    </div>
                 </div>
                 <div class="ml-spectrum__scale-wrap">
                     <canvas id="manual-spec-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
@@ -470,7 +510,7 @@
                         <span class="ml-rx-ind__lbl" title="Амплитуда самого сильного бина БПФ в полосе">Амп. max</span>
                         <span class="ml-rx-ind__val">
                             <span class="ml-rx-ind__num" id="manual-rx-marker-level">—</span>
-                            <span class="ml-rx-ind__unit">dBFS</span>
+                            <span class="ml-rx-ind__unit" id="manual-rx-marker-unit">dBFS</span>
                         </span>
                         <span class="ml-rx-ind__track">
                             <span class="ml-rx-ind__fill" id="manual-rx-marker-bar"></span>
@@ -542,7 +582,7 @@
                     <span class="ml-rx-panel__label">Squelch</span>
                     <span class="ml-rx-panel__controls">
                         <input class="ml-rx-panel__input" id="manual-rx-squelch" type="number" step="1" value="-90">
-                        <span class="ml-rx-panel__unit">dBFS</span>
+                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit">dBFS</span>
                     </span>
                 </label>
                 <label class="ml-rx-panel__field">

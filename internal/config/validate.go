@@ -139,6 +139,13 @@ func (c *Config) Validate() error {
 			errs = append(errs, validateAntennaKind(prefix+".antenna.kind", rp)...)
 			errs = append(errs, validateRadioPathRotator(prefix, rp)...)
 			errs = append(errs, validateImitator(prefix+".receiver", rp.Receiver)...)
+			if cal := rp.Receiver.CalibrationDB; cal != nil && (*cal < CalibrationMinDB || *cal > CalibrationMaxDB) {
+				errs = append(errs, ValidationError{
+					Field: prefix + ".receiver.calibration_db",
+					Message: fmt.Sprintf("поправка %.1f dBm вне диапазона [%.0f; %.0f]",
+						*cal, CalibrationMinDB, CalibrationMaxDB),
+				})
+			}
 		}
 	}
 

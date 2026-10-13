@@ -28,7 +28,8 @@ type Options struct {
 	// Приёмник при создании настроен на частоту первого сигнала.
 	Signals []Signal
 
-	// NoiseDBFS — мощность общего шума приёмника во всей полосе дискретизации, dBFS.
+	// NoiseDBFS — мощность общего шума приёмника во всей полосе дискретизации, dBFS
+	// при усилении 0 дБ; уровни сигналов — тоже при 0 дБ.
 	// SNR сигнала в полосе B: LevelDBFS − (NoiseDBFS + 10·lg(B/fs)). 0 — без шума.
 	NoiseDBFS float64
 	Seed      uint64 // зерно шума: одинаковое зерно даёт одинаковый шум
@@ -172,7 +173,7 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 		case r.opts.Source != nil:
 			r.streamFromReader(streamCtx, cfg, blockSize, ch)
 		case air != nil:
-			r.streamGenerated(streamCtx, cfg, blockSize, ch, air.fill)
+			r.streamGenerated(streamCtx, cfg, blockSize, ch, r.withGain(air.fill))
 		default:
 			r.streamGenerated(streamCtx, cfg, blockSize, ch, r.syntheticTone(cfg.SampleRate))
 		}
@@ -209,6 +210,25 @@ func (r *Receiver) markStopped() {
 	defer r.mu.Unlock()
 	r.running = false
 	close(r.stopped)
+}
+
+// withGain умножает эфир на текущее усиление приёмника: уровни в конфиге заданы при
+// усилении 0 дБ, как мощность на антенне, а dBFS растут вместе с усилением.
+// Отрицательное усиление означает АРУ, эфир остаётся как в конфиге.
+func (r *Receiver) withGain(generate func(dst []complex64, centerHz uint64)) func(dst []complex64, centerHz uint64) {
+	return func(dst []complex64, centerHz uint64) {
+		generate(dst, centerHz)
+		r.mu.Lock()
+		gainDB := r.gainDB
+		r.mu.Unlock()
+		if gainDB <= 0 {
+			return
+		}
+		k := complex(float32(math.Pow(10, float64(gainDB)/20)), 0)
+		for i := range dst {
+			dst[i] *= k
+		}
+	}
 }
 
 // syntheticTone возвращает генератор комплексной экспоненты exp(j*2π*f_offset*n/sampleRate).

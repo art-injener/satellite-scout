@@ -115,6 +115,31 @@
         return out;
     }
 
+    /**
+     * Сдвиг из dBFS в dBm на входе антенны: поправка приёмника минус его усиление.
+     * null — показываем dBFS: нет поправки, усиление неизвестно или включена АРУ
+     * (отрицательное усиление в статусе приёмника).
+     * @param {*} calibrationDb — receiver.calibration_db тракта
+     * @param {*} gainDb — gain_db из статуса приёмника
+     * @returns {?number}
+     */
+    function dbmOffset(calibrationDb, gainDb) {
+        if (typeof calibrationDb !== 'number' || !isFinite(calibrationDb)) { return null; }
+        if (typeof gainDb !== 'number' || !isFinite(gainDb) || gainDb < 0) { return null; }
+        return calibrationDb - gainDb;
+    }
+
+    /**
+     * Копия кадра, сдвинутая на offset дБ.
+     * @param {Float32Array} values
+     * @param {number} offset
+     */
+    function shiftLevels(values, offset) {
+        const out = new Float32Array(values.length);
+        for (let i = 0; i < values.length; i++) { out[i] = values[i] + offset; }
+        return out;
+    }
+
     // Автодиапазон шкалы dB
     const RANGE_FLOOR_MARGIN_DB = 10;  // запас под уровнем шума
     const RANGE_MIN_SPAN_DB = 40;      // окно над шумом, даже когда сигналов нет
@@ -138,12 +163,19 @@
 
     /**
      * @param {Float32Array} dbfs — кадр спектра
+     * @param {?Float32Array} [heldDbfs] — удержание рядом с кадром: поднимает только верх,
+     *        шум удержания выше живого и низ по нему не считается
      * @returns {{min: number, max: number}}
      */
-    AutoRange.prototype.update = function(dbfs) {
+    AutoRange.prototype.update = function(dbfs, heldDbfs) {
         const sorted = Float32Array.from(dbfs).sort();
         const median = sorted[sorted.length >> 1];
-        const top = sorted[sorted.length - 1];
+        let top = sorted[sorted.length - 1];
+        if (heldDbfs) {
+            for (let i = 0; i < heldDbfs.length; i++) {
+                if (heldDbfs[i] > top) { top = heldDbfs[i]; }
+            }
+        }
         this._floor = this._floor === null ? median : this._floor + RANGE_FLOOR_ALPHA * (median - this._floor);
         this._peak = this._peak === null ? top : Math.max(top, this._peak - RANGE_PEAK_DECAY_DB);
 
@@ -288,6 +320,8 @@
     SpectrumStream.dbfsToUnit = dbfsToUnit;
     SpectrumStream.AutoRange = AutoRange;
     SpectrumStream.markerReadout = markerReadout;
+    SpectrumStream.dbmOffset = dbmOffset;
+    SpectrumStream.shiftLevels = shiftLevels;
 
     if (typeof window !== 'undefined') {
         window.SpectrumStream = SpectrumStream;
@@ -301,6 +335,8 @@
             dbfsToUnit: dbfsToUnit,
             AutoRange: AutoRange,
             markerReadout: markerReadout,
+            dbmOffset: dbmOffset,
+            shiftLevels: shiftLevels,
         };
     }
 })();

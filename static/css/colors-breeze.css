@@ -203,6 +203,7 @@
     --spectrum-axis-text:  #e4e8ec;
     --spectrum-trace:      #5ee878;
     --spectrum-crosshair:  #ffcc66;
+    --spectrum-hold-trace: #5ec8ff; /* удержание пика под линией спектра */
     --spectrum-peak-label: #ffffff;
     --spectrum-text:       #8a9096;
     --spectrum-signal:     #f0c040;
