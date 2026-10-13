@@ -40,6 +40,9 @@
     /** Размер строки спектра и частота кадров, которые просим у сервера. */
     const STREAM_BINS = 1024;
     const STREAM_FPS = 20;
+    /** Цифры маркера обновляются не чаще раза в этот интервал: 20 раз в секунду их не прочитать. */
+    const MARKER_REFRESH_MS = 250;
+    const MARKER_EMPTY = '—';
     /** Допуск наведения: сверх него рассогласование подсвечивается, градусы. */
     const POINTING_TOLERANCE_DEG = 2;
     const STORAGE_AGC = 'ux.manualRxAgc';
@@ -129,7 +132,6 @@
         this._tunePending = 0;
         this._offAccess = null;
         this._accessPanel = null;
-        this._rxStreamEl = null;
         this._panorama = null;
         this._passProfile = null;
         this._passTimeline = null;
@@ -176,7 +178,9 @@
 
         this._rxFreqMHz = DEFAULT_BAND.centerMHz;
         this._freqDial = null;
-        this._rxMeters = null;
+        /** Маркер пика под индикатором частоты и время кадра последнего обновления цифр, мс. */
+        this._marker = null;
+        this._markerShownMs = null;
         this._rxPipelineSelect = null;
         this._rxPanelRoot = null;
 
@@ -947,18 +951,16 @@
         const root = document.getElementById('manual-rx-panel');
         if (!root) { return; }
         this._rxPanelRoot = root;
-        this._rxStreamEl = document.getElementById('manual-rx-stream');
         this._rxPipelineSelect = document.getElementById('manual-rx-pipeline');
-        this._rxMeters = {
-            rfBar: document.getElementById('manual-rx-rf-bar'),
-            rfVal: document.getElementById('manual-rx-rf-val'),
-            audioBar: document.getElementById('manual-rx-audio-bar'),
-            audioVal: document.getElementById('manual-rx-audio-val'),
+        this._marker = {
+            freq: document.getElementById('manual-rx-marker-freq'),
+            level: document.getElementById('manual-rx-marker-level'),
+            bar: document.getElementById('manual-rx-marker-bar'),
         };
         const self = this;
 
         this._initFreqDial();
-        this._updateRxMeters(-67.1, -21.1);
+        this._showMarker(null);
 
         this._initPill(document.getElementById('manual-rx-agc'), STORAGE_AGC, false);
 
@@ -1109,11 +1111,7 @@
         const path = this._radioPathName();
         if (this._stream && this._streamPath === path) { return; }
         this._stopStream();
-        if (!path) {
-            this._setStreamStatus({ state: 'no_path' });
-            return;
-        }
-        if (typeof window.SpectrumStream !== 'function') { return; }
+        if (!path || typeof window.SpectrumStream !== 'function') { return; }
         const self = this;
         this._streamPath = path;
         this._streamCenterHz = null;
@@ -1122,7 +1120,6 @@
             url: '/api/stream/v1/spectrum?radio_path=' + encodeURIComponent(path) +
                 '&bins=' + STREAM_BINS + '&fps=' + STREAM_FPS,
             onFrame: function(frame) { self._onStreamFrame(frame); },
-            onStatus: function(st) { self._setStreamStatus(st); },
         });
         this._stream.start();
     };
@@ -1133,18 +1130,8 @@
             this._stream = null;
         }
         this._streamPath = null;
-    };
-
-    ManualLayout.prototype._setStreamStatus = function(st) {
-        const el = this._rxStreamEl;
-        if (!el) { return; }
-        let text = '';
-        if (st.state === 'no_path') { text = 'Нет радиотракта: поток спектра недоступен'; }
-        else if (st.state === 'connecting') { text = 'Поток спектра: подключение…'; }
-        else if (st.state === 'live') { text = 'Поток спектра: приём'; }
-        else if (st.state === 'error') { text = 'Поток спектра: ' + (st.message || 'ошибка') + ', повтор…'; }
-        el.textContent = text;
-        if (typeof el.setAttribute === 'function') { el.setAttribute('data-state', st.state); }
+        this._markerShownMs = null;
+        this._showMarker(null);
     };
 
     /** @param {{header: Object, values: ?Float32Array}} frame */
@@ -1165,6 +1152,11 @@
         if (this._antFft && this._activeTab === 'antenna') {
             this._antFft.draw(line);
             this._drawExpectedFreq(this._antFft, this._expectedFreqMHz());
+        }
+        const ts = h.timestampMs;
+        if (this._markerShownMs === null || !(ts - this._markerShownMs < MARKER_REFRESH_MS)) {
+            this._markerShownMs = typeof ts === 'number' ? ts : null;
+            this._showMarker(window.SpectrumStream.markerReadout(frame.values, h.centerHz, h.spanHz));
         }
     };
 
@@ -1204,26 +1196,18 @@
     };
 
     /**
-     * Обновляет индикаторы уровней. Диапазон шкалы: −120…0 dBFS.
-     * @param {number} rfDbfs
-     * @param {number} audioDb
+     * Цифры пика под индикатором частоты; полоса амплитуды — шкала −120…0 dBFS.
+     * Единицы стоят в разметке, здесь только числа: крупные цифры не прыгают.
+     * @param {?{freqHz: number, dbfs: number}} mk — null: данных нет, прочерки
      */
-    ManualLayout.prototype._updateRxMeters = function(rfDbfs, audioDb) {
-        const m = this._rxMeters;
+    ManualLayout.prototype._showMarker = function(mk) {
+        const m = this._marker;
         if (!m) { return; }
-        function pct(db) {
-            if (typeof db !== 'number' || !isFinite(db)) { return 0; }
-            const p = (db + 120) / 120 * 100;
-            return Math.max(0, Math.min(100, p));
-        }
-        if (m.rfBar) { m.rfBar.style.width = pct(rfDbfs).toFixed(1) + '%'; }
-        if (m.rfVal && typeof rfDbfs === 'number' && isFinite(rfDbfs)) {
-            m.rfVal.textContent = rfDbfs.toFixed(1) + ' dBFS';
-        }
-        if (m.audioBar) { m.audioBar.style.width = pct(audioDb).toFixed(1) + '%'; }
-        if (m.audioVal && typeof audioDb === 'number' && isFinite(audioDb)) {
-            m.audioVal.textContent = audioDb.toFixed(1) + ' dB';
-        }
+        const num = function(v, digits) { return v.toFixed(digits).replace('-', '−'); };
+        const pct = mk ? Math.max(0, Math.min(100, (mk.dbfs + 120) / 120 * 100)) : 0;
+        if (m.freq) { m.freq.textContent = mk ? num(mk.freqHz / 1e6, 3) : MARKER_EMPTY; }
+        if (m.level) { m.level.textContent = mk ? num(mk.dbfs, 1) : MARKER_EMPTY; }
+        if (m.bar) { m.bar.style.width = pct.toFixed(1) + '%'; }
     };
 
     ManualLayout.prototype._initPill = function(btn, key, defaultOn) {

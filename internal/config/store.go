@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 )
 
@@ -245,12 +246,17 @@ func cloneConfig(c *Config) *Config {
 	return &dup
 }
 
-// cloneRadioPath копирует радиотракт с нюансом по nullable Rotator.
+// cloneRadioPath копирует радиотракт с нюансом по nullable Rotator и секции имитатора.
 func cloneRadioPath(rp RadioPath) RadioPath {
 	out := rp
 	if rp.Rotator != nil {
 		rot := *rp.Rotator
 		out.Rotator = &rot
+	}
+	if rp.Receiver.Imitator != nil {
+		im := *rp.Receiver.Imitator
+		im.Signals = slices.Clone(im.Signals)
+		out.Receiver.Imitator = &im
 	}
 	return out
 }

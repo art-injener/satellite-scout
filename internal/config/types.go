@@ -251,6 +251,53 @@ type ReceiverConfig struct {
 	// Проверяется по возможностям драйвера при открытии устройства, а не здесь:
 	// железо при разборе конфига может быть не подключено.
 	SampleRateHz uint32 `json:"sample_rate_hz,omitempty"`
+
+	// Imitator — эфир имитатора, только для DriverSimulated. nil — эфир по умолчанию:
+	// несущая с ходом ±1 МГц поверх шума.
+	Imitator *ImitatorConfig `json:"imitator,omitempty"`
+}
+
+// DriverSimulated — драйвер приёмника-имитатора.
+const DriverSimulated = "simulated"
+
+// Виды сигналов имитатора.
+const (
+	ImitatorCarrier  = "carrier"   // немодулированная несущая
+	ImitatorAFSKPRBS = "afsk_prbs" // непрерывный AFSK 1200 на PRBS-9, эталон для BER
+	ImitatorBeacon   = "beacon"    // кадр AX.25 в AFSK 1200 раз в period_s
+)
+
+// ImitatorSignalKinds — все допустимые значения ImitatorSignal.Kind.
+var ImitatorSignalKinds = []string{ImitatorCarrier, ImitatorAFSKPRBS, ImitatorBeacon}
+
+// ImitatorConfig — эфир имитатора: общий шум приёмника и сигналы.
+type ImitatorConfig struct {
+	// NoiseDBFS — мощность шума во всей полосе дискретизации, dBFS. 0 — шум по умолчанию.
+	NoiseDBFS float64          `json:"noise_dbfs,omitempty"`
+	Signals   []ImitatorSignal `json:"signals,omitempty"`
+}
+
+// ImitatorSignal — сигнал имитатора. Сдвиг от центра приёмника в момент t:
+// freq_hz − центр + doppler_hz + doppler_rate_hz_s·t + ход(t).
+type ImitatorSignal struct {
+	Kind      string  `json:"kind"`
+	FreqHz    uint64  `json:"freq_hz"`
+	LevelDBFS float64 `json:"level_dbfs"` // 0 — полная шкала
+
+	DopplerHz      float64 `json:"doppler_hz,omitempty"`
+	DopplerRateHzS float64 `json:"doppler_rate_hz_s,omitempty"`
+
+	// SweepHz — размах хода туда-обратно от freq_hz за SweepPeriodS; 0 — без хода.
+	SweepHz      float64 `json:"sweep_hz,omitempty"`
+	SweepPeriodS float64 `json:"sweep_period_s,omitempty"`
+
+	// PassSwingDB — профиль пролёта: level_dbfs в середине, на PassSwingDB ниже у горизонта,
+	// пролёт длится PassPeriodS и повторяется; 0 — уровень постоянный.
+	PassSwingDB float64 `json:"pass_swing_db,omitempty"`
+	PassPeriodS float64 `json:"pass_period_s,omitempty"`
+
+	// PeriodS — интервал между кадрами маяка, с.
+	PeriodS float64 `json:"period_s,omitempty"`
 }
 
 // RotatorConfig — параметры поворотной платформы радиотракта.

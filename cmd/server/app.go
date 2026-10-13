@@ -142,12 +142,7 @@ func NewApp(configStore *config.Store) *app {
 		receiverHub.Register(pathID, sdr.PathConfig{SampleRateHz: rc.SampleRateHz}, func() (sdr.Receiver, error) {
 			switch rc.Driver {
 			case "imitator", "simulated", "":
-				r := imitator.New(imitator.DefaultBeaconOptions())
-				// Сразу на частоте маяка: сигнал виден в спектре без вызова tune.
-				if err := r.Tune(imitator.DefaultBeaconHz); err != nil {
-					return nil, err
-				}
-				return r, nil
+				return imitator.New(imitatorOptions(rc.Imitator)), nil
 			default:
 				return nil, fmt.Errorf("%w: %q", sdr.ErrDriverNotImplemented, rc.Driver)
 			}

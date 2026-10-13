@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
+	"math/cmplx"
 	"testing"
 	"time"
 
@@ -165,6 +167,134 @@ func TestReceiver_Stop(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("channel not closed after Stop()")
+	}
+}
+
+func TestReceiver_New_TunedToFirstSignal(t *testing.T) {
+	r := New(Options{Signals: []Signal{testCarrier(10_000), testCarrier(-5_000)}})
+	if got := r.Status().CenterHz; got != testCenter+10_000 {
+		t.Errorf("CenterHz=%d, want first signal %d", got, testCenter+10_000)
+	}
+}
+
+func TestReceiver_New_SignalOutsideRangeLeavesUntuned(t *testing.T) {
+	r := New(Options{Signals: []Signal{{Kind: SignalCarrier, FrequencyHz: 10_000_000}}})
+	if got := r.Status().CenterHz; got != 0 {
+		t.Errorf("CenterHz=%d, want 0 for frequency outside receiver range", got)
+	}
+}
+
+func TestReceiver_StartStream_Signals(t *testing.T) {
+	r := New(Options{Signals: []Signal{testCarrier(10_000)}})
+	if err := r.Tune(testCenter); err != nil {
+		t.Fatalf("Tune: %v", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ch, err := r.StartStream(ctx, sdr.StreamConfig{SampleRate: testRate, BlockSize: 4800})
+	if err != nil {
+		t.Fatalf("StartStream: %v", err)
+	}
+	defer func() { _ = r.Stop() }()
+
+	frame := <-ch
+	if f := meanFreq(frame.Samples); math.Abs(f-10_000) > 1 {
+		t.Errorf("mean freq=%.1f Hz, want 10000", f)
+	}
+}
+
+func TestReceiver_StartStream_NoiseOnly(t *testing.T) {
+	r := New(Options{NoiseDBFS: -60, Seed: 2})
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ch, err := r.StartStream(ctx, sdr.StreamConfig{CenterHz: testCenter, SampleRate: testRate, BlockSize: 48000})
+	if err != nil {
+		t.Fatalf("StartStream: %v", err)
+	}
+	defer func() { _ = r.Stop() }()
+
+	frame := <-ch
+	if p := 10 * math.Log10(meanPower(frame.Samples)); math.Abs(p+60) > 0.1 {
+		t.Errorf("power %.2f dBFS, want noise only at -60", p)
+	}
+}
+
+func TestReceiver_StartStream_InvalidSignal(t *testing.T) {
+	r := New(Options{Signals: []Signal{{Kind: "noise", FrequencyHz: testCenter}}})
+	_, err := r.StartStream(context.Background(), sdr.StreamConfig{SampleRate: testRate})
+	if !errors.Is(err, ErrInvalidSignal) {
+		t.Fatalf("err=%v, want ErrInvalidSignal", err)
+	}
+	if r.Status().Running {
+		t.Error("receiver must not be running after failed start")
+	}
+}
+
+func TestDefaultOptions_SweepingCarrierOverNoise(t *testing.T) {
+	opts := DefaultOptions()
+	if len(opts.Signals) != 1 {
+		t.Fatalf("signals=%d, want one carrier", len(opts.Signals))
+	}
+	sig := opts.Signals[0]
+	if sig.Kind != SignalCarrier || sig.FrequencyHz != DefaultFrequencyHz {
+		t.Errorf("signal %s at %d Hz, want carrier at %d", sig.Kind, sig.FrequencyHz, uint64(DefaultFrequencyHz))
+	}
+	if sig.SweepHz != 1_000_000 || sig.SweepPeriod != time.Minute {
+		t.Errorf("sweep ±%.0f Hz over %v, want ±1 MHz over 1 min", sig.SweepHz, sig.SweepPeriod)
+	}
+	if sig.LevelDBFS != -40 || sig.PassSwingDB != 50 || sig.PassPeriod != 45*time.Second {
+		t.Errorf("pass %.0f dBFS -%.0f dB over %v, want -40 dBFS down to -90 over 45 s",
+			sig.LevelDBFS, sig.PassSwingDB, sig.PassPeriod)
+	}
+	if opts.NoiseDBFS >= sig.LevelDBFS || opts.NoiseDBFS > -20 {
+		t.Errorf("noise %.0f dBFS, carrier %.0f dBFS: want noise well below full scale and the carrier",
+			opts.NoiseDBFS, sig.LevelDBFS)
+	}
+	if got := New(opts).Status().CenterHz; got != DefaultFrequencyHz {
+		t.Errorf("CenterHz=%d, want sweep center %d", got, uint64(DefaultFrequencyHz))
+	}
+}
+
+func TestReceiver_StartStream_ZeroSampleRateRejected(t *testing.T) {
+	r := New(DefaultOptions())
+	_, err := r.StartStream(context.Background(), sdr.StreamConfig{BlockSize: 1024})
+	if !errors.Is(err, sdr.ErrSampleRateRequired) {
+		t.Fatalf("err=%v, want ErrSampleRateRequired", err)
+	}
+	if r.Status().Running {
+		t.Error("receiver must not be running after failed start")
+	}
+}
+
+func TestReceiver_Capabilities_RecommendedRateSupported(t *testing.T) {
+	caps := New(DefaultOptions()).Capabilities()
+	if caps.RecommendedSampleRate == 0 {
+		t.Fatal("RecommendedSampleRate is zero")
+	}
+	if _, err := sdr.ResolveSampleRate(caps, caps.RecommendedSampleRate); err != nil {
+		t.Errorf("recommended rate outside own ranges: %v", err)
+	}
+}
+
+func TestReceiver_StartStream_RecommendedRate(t *testing.T) {
+	r := New(DefaultOptions())
+	rate := r.Capabilities().RecommendedSampleRate
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	ch, err := r.StartStream(ctx, sdr.StreamConfig{SampleRate: rate, BlockSize: 1024})
+	if err != nil {
+		t.Fatalf("StartStream: %v", err)
+	}
+	defer func() { _ = r.Stop() }()
+
+	frame := <-ch
+	if frame.SampleRate != rate {
+		t.Errorf("SampleRate=%d, want %d", frame.SampleRate, rate)
+	}
+	for i, v := range frame.Samples {
+		if cmplx.IsNaN(complex128(v)) || cmplx.IsInf(complex128(v)) {
+			t.Fatalf("sample %d is not finite: %v", i, v)
+		}
 	}
 }
 

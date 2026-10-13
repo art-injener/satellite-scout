@@ -87,6 +87,23 @@ console.log('TEST: receiver selection drops sample rate when driver changes');
 }
 console.log('  OK');
 
+console.log('TEST: reselecting the imitator keeps its signals section');
+{
+    const imitator = { noise_dbfs: -60, signals: [{ kind: 'carrier', freq_hz: 436500000, level_dbfs: -40 }] };
+    const modal = receiverModal({ driver: 'simulated', imitator: imitator });
+    modal._applyReceiverSelection(0, 'simulated');
+    assert.deepStrictEqual(modal._workingConfig.station.radio_paths[0].receiver.imitator, imitator);
+}
+console.log('  OK');
+
+console.log('TEST: switching from the imitator to hardware drops its signals section');
+{
+    const modal = receiverModal({ driver: 'simulated', imitator: { noise_dbfs: -60 } });
+    modal._applyReceiverSelection(0, 'rtlsdr|0002|');
+    assert.strictEqual(modal._workingConfig.station.radio_paths[0].receiver.imitator, undefined);
+}
+console.log('  OK');
+
 console.log('TEST: save refused with 403 explains that only the master may change settings');
 global.fetch = () => Promise.resolve({
     ok: false,

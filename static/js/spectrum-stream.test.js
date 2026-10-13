@@ -8,6 +8,7 @@
  *   - frame reader: frames split across chunks, several frames in one chunk,
  *     heartbeat without payload, bad magic
  *   - dBFS to 0..1 scale for the canvas views
+ *   - peak marker readout: frequency, level, noise floor, SNR
  *   - one long-lived request: frames delivered as chunks arrive, stop() aborts,
  *     end of stream and HTTP errors reconnect with growing delay
  */
@@ -17,7 +18,9 @@
 const assert = require('assert');
 
 global.window = {};
-const { SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange } = require('./spectrum-stream.js');
+const {
+    SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, markerReadout,
+} = require('./spectrum-stream.js');
 
 const HEADER = 40;
 const MAGIC = 0x4D545353;
@@ -167,6 +170,26 @@ test('AutoRange: floor is the median, so a band full of carriers below half does
     const peaks = {};
     for (let i = 0; i < 400; i++) { peaks[i] = -20; }
     assert.strictEqual(new AutoRange().update(noiseFrame(-69, peaks)).min, -80);
+});
+
+// ── Peak marker ───────────────────────────────────────────────────────
+
+test('markerReadout: peak frequency, level, noise floor and SNR', () => {
+    // 1024 bins over 2.048 MHz around 436.5 MHz: bin 768 is 2 kHz * 256 above center
+    const m = markerReadout(noiseFrame(-90, { 768: -49.3 }), 436500000, 2048000);
+    assert.strictEqual(m.freqHz, 437012000);
+    assert.ok(Math.abs(m.dbfs + 49.3) < 1e-4, String(m.dbfs));
+    assert.strictEqual(m.floorDbfs, -90);
+    assert.ok(Math.abs(m.snrDb - 40.7) < 1e-4, String(m.snrDb));
+});
+
+test('markerReadout: frequency matches the bin the canvas marks, from the left edge', () => {
+    assert.strictEqual(markerReadout(noiseFrame(-90, { 0: -10 }), 436500000, 2048000).freqHz, 435476000);
+});
+
+test('markerReadout: no data gives null', () => {
+    assert.strictEqual(markerReadout(new Float32Array(0), 436500000, 2048000), null);
+    assert.strictEqual(markerReadout(null, 436500000, 2048000), null);
 });
 
 // ── Long-lived request ────────────────────────────────────────────────

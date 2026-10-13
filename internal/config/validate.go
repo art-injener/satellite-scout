@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"reflect"
 	"slices"
 	"strings"
 )
@@ -137,6 +138,7 @@ func (c *Config) Validate() error {
 			errs = append(errs, validateAntenna(prefix+".antenna", rp.Antenna)...)
 			errs = append(errs, validateAntennaKind(prefix+".antenna.kind", rp)...)
 			errs = append(errs, validateRadioPathRotator(prefix, rp)...)
+			errs = append(errs, validateImitator(prefix+".receiver", rp.Receiver)...)
 		}
 	}
 
@@ -208,7 +210,7 @@ func radioPathsEqual(a, b []RadioPath) bool {
 		if a[i].Antenna != b[i].Antenna {
 			return false
 		}
-		if a[i].Receiver != b[i].Receiver {
+		if !reflect.DeepEqual(a[i].Receiver, b[i].Receiver) {
 			return false
 		}
 		if !rotatorEqual(a[i].Rotator, b[i].Rotator) {
@@ -298,6 +300,57 @@ func validateRadioPathRotator(prefix string, rp RadioPath) ValidationErrors {
 				Field:   prefix + ".rotator.port",
 				Message: fmt.Sprintf("порт %d вне диапазона [1; 65535]", rp.Rotator.Port),
 			})
+		}
+	}
+	return errs
+}
+
+func validateImitator(prefix string, rc ReceiverConfig) ValidationErrors {
+	im := rc.Imitator
+	if im == nil {
+		return nil
+	}
+	prefix += ".imitator"
+	if rc.Driver != DriverSimulated {
+		return ValidationErrors{{
+			Field:   prefix,
+			Message: fmt.Sprintf("секция имитатора допустима только для приёмника %q", DriverSimulated),
+		}}
+	}
+
+	var errs ValidationErrors
+	add := func(field, msg string) {
+		errs = append(errs, ValidationError{Field: prefix + field, Message: msg})
+	}
+	if im.NoiseDBFS > 0 {
+		add(".noise_dbfs", "мощность шума не может быть выше полной шкалы (0 dBFS)")
+	}
+	for i, s := range im.Signals {
+		sp := fmt.Sprintf(".signals[%d]", i)
+		if !slices.Contains(ImitatorSignalKinds, s.Kind) {
+			add(sp+".kind", fmt.Sprintf("неизвестный вид сигнала %q, допустимо: %s",
+				s.Kind, strings.Join(ImitatorSignalKinds, ", ")))
+		}
+		if s.FreqHz == 0 {
+			add(sp+".freq_hz", "частота должна быть положительной")
+		}
+		if s.LevelDBFS > 0 {
+			add(sp+".level_dbfs", "уровень не может быть выше полной шкалы (0 dBFS)")
+		}
+		if s.SweepHz < 0 {
+			add(sp+".sweep_hz", "размах хода не может быть отрицательным")
+		}
+		if s.SweepHz > 0 && s.SweepPeriodS <= 0 {
+			add(sp+".sweep_period_s", "для хода по частоте укажите положительный период")
+		}
+		if s.PassSwingDB < 0 {
+			add(sp+".pass_swing_db", "размах уровня за пролёт не может быть отрицательным")
+		}
+		if s.PassSwingDB > 0 && s.PassPeriodS <= 0 {
+			add(sp+".pass_period_s", "для профиля пролёта укажите положительную длительность")
+		}
+		if s.Kind == ImitatorBeacon && s.PeriodS <= 0 {
+			add(sp+".period_s", "для маяка укажите положительный интервал между кадрами")
 		}
 	}
 	return errs

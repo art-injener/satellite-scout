@@ -642,64 +642,106 @@
     color: var(--text-muted);
 }
 
-.ml-rx-panel__meter {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 1px 6px;
+/* ── Показания пика под индикатором частоты ──────────────────────────────
+   Те же окно и лампа, что у индикатора: читаются как одна приборная вставка.
+   Две плитки во всю ширину: частота пика и амплитуда со шкалой. */
+.ml-rx-ind {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
 }
 
-.ml-rx-panel__meter-lbl {
+/* Подпись и число в одну строку, шкала амплитуды под ними во всю ширину */
+.ml-rx-ind__cell {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: baseline;
+    gap: 2px 8px;
+    min-width: 0;
+    padding: 4px 8px 5px;
+    background: var(--fdial-bg, #0a0f0d);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+}
+
+.ml-rx-ind__lbl {
     font-family: var(--font-mono);
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.06em;
+    font-size: 14px;
+    letter-spacing: 0.04em;
     color: var(--text-label, var(--text-muted));
 }
 
-.ml-rx-panel__meter-val {
-    font-family: var(--font-mono);
-    font-size: 12px;
-    font-variant-numeric: tabular-nums;
-    color: var(--accent-primary);
-    text-align: right;
+/* Число прижато вправо, единица после него мелко: разряды стоят на месте */
+.ml-rx-ind__val {
+    display: flex;
+    align-items: baseline;
+    justify-content: flex-end;
+    gap: 5px;
+    white-space: nowrap;
 }
 
-.ml-rx-panel__meter-track {
+.ml-rx-ind__num {
+    font-family: var(--font-mono);
+    font-size: 24px;
+    font-weight: 700;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+    color: var(--fdial-lamp, var(--accent-primary));
+    text-shadow: 0 0 6px color-mix(in srgb, var(--fdial-glow, var(--accent-primary)) 45%, transparent);
+}
+
+.ml-rx-ind__unit {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    color: var(--text-muted);
+}
+
+/* Шкала амплитуды −120…0 dBFS: риски через 30 дБ совпадают с подписями */
+.ml-rx-ind__track {
     grid-column: 1 / -1;
-    height: 5px;
+    position: relative;
+    height: 8px;
+    margin-top: 3px;
     border-radius: 2px;
-    background: var(--bg-primary);
+    background:
+        repeating-linear-gradient(to right,
+            transparent 0, transparent calc(25% - 1px),
+            var(--border-color) calc(25% - 1px), var(--border-color) 25%),
+        color-mix(in srgb, var(--fdial-lamp, var(--accent-primary)) 10%, transparent);
     overflow: hidden;
 }
 
-.ml-rx-panel__meter-fill {
+.ml-rx-ind__fill {
     display: block;
     height: 100%;
     width: 0;
-    border-radius: 2px;
-    background: var(--accent-success, #00d4aa);
+    background: var(--fdial-lamp, var(--accent-primary));
+    box-shadow: 0 0 6px var(--fdial-glow, var(--accent-primary));
     transition: width 0.15s linear;
 }
 
-/* Состояние потока спектра под уровнями: подключение, приём, ошибка */
-.ml-rx-panel__stream {
-    min-height: 1.2em;
+/* Подписи по краям шкалы прижаты внутрь, средние по центру своих рисок */
+.ml-rx-ind__scale {
+    grid-column: 1 / -1;
+    position: relative;
+    height: 1.2em;
     font-family: var(--font-mono);
-    font-size: 11px;
-    color: var(--text-label, var(--text-muted));
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
+    font-size: 10px;
+    line-height: 1.2;
+    color: var(--text-muted);
 }
 
-.ml-rx-panel__stream[data-state="live"] {
-    color: var(--accent-success);
+.ml-rx-ind__scale > span {
+    position: absolute;
+    top: 0;
+    transform: translateX(-50%);
 }
 
-.ml-rx-panel__stream[data-state="error"],
-.ml-rx-panel__stream[data-state="no_path"] {
-    color: var(--accent-warning);
-}
+.ml-rx-ind__scale > span:nth-child(1) { left: 0; transform: none; }
+.ml-rx-ind__scale > span:nth-child(2) { left: 25%; }
+.ml-rx-ind__scale > span:nth-child(3) { left: 50%; }
+.ml-rx-ind__scale > span:nth-child(4) { left: 75%; }
+.ml-rx-ind__scale > span:nth-child(5) { right: 0; transform: none; }
 
 /* Регулятор у клиента без прав: только показывает частоту приёмника */
 .fdial.is-readonly .fdial__btn {

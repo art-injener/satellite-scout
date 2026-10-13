@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"slices"
 	"testing"
 	"time"
@@ -230,6 +231,117 @@ func TestRestartRequiredFields_ReceiverSampleRateChanged(t *testing.T) {
 	got := RestartRequiredFields(old, updated)
 	if !hasString(got, "station.radio_paths") {
 		t.Errorf("sample rate is applied when the device opens, expected restart, got %v", got)
+	}
+}
+
+func sampleImitator() *ImitatorConfig {
+	return &ImitatorConfig{
+		NoiseDBFS: -60,
+		Signals: []ImitatorSignal{
+			{Kind: ImitatorCarrier, FreqHz: 436_500_000, LevelDBFS: -40, SweepHz: 1_000_000, SweepPeriodS: 60},
+			{Kind: ImitatorAFSKPRBS, FreqHz: 436_510_000, LevelDBFS: -50, DopplerHz: -2_000, DopplerRateHzS: 15,
+				PassSwingDB: 30, PassPeriodS: 600},
+			{Kind: ImitatorBeacon, FreqHz: 436_490_000, LevelDBFS: -45, PeriodS: 10},
+		},
+	}
+}
+
+func imitatorPath(imitator *ImitatorConfig) RadioPath {
+	rp := sampleRadioPath(1)
+	rp.Receiver.Imitator = imitator
+	return rp
+}
+
+func TestValidate_ImitatorSectionPasses(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Station.RadioPaths = []RadioPath{imitatorPath(sampleImitator())}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("valid imitator section rejected: %v", err)
+	}
+}
+
+func TestValidate_ImitatorSignalErrors(t *testing.T) {
+	const prefix = "station.radio_paths[0].receiver.imitator"
+	cases := []struct {
+		name  string
+		edit  func(im *ImitatorConfig)
+		field string
+	}{
+		{"unknown kind", func(im *ImitatorConfig) { im.Signals[0].Kind = "noise" }, ".signals[0].kind"},
+		{"zero frequency", func(im *ImitatorConfig) { im.Signals[1].FreqHz = 0 }, ".signals[1].freq_hz"},
+		{"level above full scale", func(im *ImitatorConfig) { im.Signals[2].LevelDBFS = 3 }, ".signals[2].level_dbfs"},
+		{"beacon without period", func(im *ImitatorConfig) { im.Signals[2].PeriodS = 0 }, ".signals[2].period_s"},
+		{"sweep without period", func(im *ImitatorConfig) { im.Signals[0].SweepPeriodS = 0 }, ".signals[0].sweep_period_s"},
+		{"negative sweep", func(im *ImitatorConfig) { im.Signals[0].SweepHz = -1 }, ".signals[0].sweep_hz"},
+		{"pass without period", func(im *ImitatorConfig) { im.Signals[1].PassPeriodS = 0 }, ".signals[1].pass_period_s"},
+		{"negative pass swing", func(im *ImitatorConfig) { im.Signals[1].PassSwingDB = -5 }, ".signals[1].pass_swing_db"},
+		{"noise above full scale", func(im *ImitatorConfig) { im.NoiseDBFS = 1 }, ".noise_dbfs"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			im := sampleImitator()
+			c.edit(im)
+			cfg := DefaultConfig()
+			cfg.Station.RadioPaths = []RadioPath{imitatorPath(im)}
+			verrs := mustValidationErrors(t, cfg.Validate())
+			if !hasField(verrs, prefix+c.field) {
+				t.Errorf("expected error on %s, got %v", prefix+c.field, verrs)
+			}
+		})
+	}
+}
+
+func TestValidate_ImitatorOnlyForSimulatedDriver(t *testing.T) {
+	rp := imitatorPath(sampleImitator())
+	rp.Receiver.Driver = "rtlsdr"
+	cfg := DefaultConfig()
+	cfg.Station.RadioPaths = []RadioPath{rp}
+	verrs := mustValidationErrors(t, cfg.Validate())
+	if !hasField(verrs, "station.radio_paths[0].receiver.imitator") {
+		t.Errorf("expected error on receiver.imitator for rtlsdr, got %v", verrs)
+	}
+}
+
+func TestReceiverConfig_ImitatorJSON(t *testing.T) {
+	raw := `{"driver":"simulated","imitator":{"noise_dbfs":-55,"signals":[
+		{"kind":"afsk_prbs","freq_hz":437000000,"level_dbfs":-45,"doppler_hz":-1500,"doppler_rate_hz_s":20},
+		{"kind":"carrier","freq_hz":436500000,"level_dbfs":-40,"sweep_hz":500000,"sweep_period_s":30,
+		 "pass_swing_db":50,"pass_period_s":45},
+		{"kind":"beacon","freq_hz":436400000,"level_dbfs":-50,"period_s":5}]}}`
+	var rc ReceiverConfig
+	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	want := &ImitatorConfig{NoiseDBFS: -55, Signals: []ImitatorSignal{
+		{Kind: ImitatorAFSKPRBS, FreqHz: 437_000_000, LevelDBFS: -45, DopplerHz: -1500, DopplerRateHzS: 20},
+		{Kind: ImitatorCarrier, FreqHz: 436_500_000, LevelDBFS: -40, SweepHz: 500_000, SweepPeriodS: 30,
+			PassSwingDB: 50, PassPeriodS: 45},
+		{Kind: ImitatorBeacon, FreqHz: 436_400_000, LevelDBFS: -50, PeriodS: 5},
+	}}
+	if !reflect.DeepEqual(rc.Imitator, want) {
+		t.Errorf("imitator=%+v, want %+v", rc.Imitator, want)
+	}
+}
+
+func TestRestartRequiredFields_ImitatorSameContentNoRestart(t *testing.T) {
+	old := DefaultConfig()
+	old.Station.RadioPaths = []RadioPath{imitatorPath(sampleImitator())}
+	updated := DefaultConfig()
+	updated.Station.RadioPaths = []RadioPath{imitatorPath(sampleImitator())}
+	if got := RestartRequiredFields(old, updated); hasString(got, "station.radio_paths") {
+		t.Errorf("equal imitator sections must not require restart, got %v", got)
+	}
+}
+
+func TestRestartRequiredFields_ImitatorChanged(t *testing.T) {
+	old := DefaultConfig()
+	old.Station.RadioPaths = []RadioPath{imitatorPath(sampleImitator())}
+	im := sampleImitator()
+	im.Signals[1].LevelDBFS = -30
+	updated := DefaultConfig()
+	updated.Station.RadioPaths = []RadioPath{imitatorPath(im)}
+	if got := RestartRequiredFields(old, updated); !hasString(got, "station.radio_paths") {
+		t.Errorf("imitator is built when the device opens, expected restart, got %v", got)
 	}
 }
 
