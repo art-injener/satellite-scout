@@ -4,15 +4,18 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/dsp"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sdr/imitator"
 )
 
 // fakeReceiver — минимальный Receiver для тестов стрима.
@@ -412,6 +415,109 @@ func TestSpectrum_RetuneResetsAccumulation(t *testing.T) {
 	newTone, oldTone := bin(fftSize/2-16), bin(fftSize/2+16)
 	if newTone-oldTone < 40 {
 		t.Errorf("new tone %.1f dB, old tone bin %.1f dB: old tuning leaked into the frame", newTone, oldTone)
+	}
+}
+
+// sstmFrame — разобранный кадр спектра из HTTP-потока.
+type sstmFrame struct {
+	centerHz, spanHz uint64
+	dbfs             []float32
+}
+
+// readSpectrumFrame reads SSTM frames from the stream until one carries FFT data.
+func readSpectrumFrame(t *testing.T, r io.Reader) sstmFrame {
+	t.Helper()
+	hdr := make([]byte, dsp.HeaderSize)
+	for {
+		if _, err := io.ReadFull(r, hdr); err != nil {
+			t.Fatalf("read header: %v", err)
+		}
+		payload := make([]byte, binary.LittleEndian.Uint32(hdr[32:36]))
+		if _, err := io.ReadFull(r, payload); err != nil {
+			t.Fatalf("read payload: %v", err)
+		}
+		if dsp.DataType(hdr[5]) != dsp.DataTypeFFTDB {
+			continue
+		}
+		f := sstmFrame{
+			centerHz: binary.LittleEndian.Uint64(hdr[16:24]),
+			spanHz:   binary.LittleEndian.Uint64(hdr[24:32]),
+			dbfs:     make([]float32, len(payload)/4),
+		}
+		for i := range f.dbfs {
+			f.dbfs[i] = math.Float32frombits(binary.LittleEndian.Uint32(payload[i*4:]))
+		}
+		return f
+	}
+}
+
+func peakBin(dbfs []float32) int {
+	idx := 0
+	for i, v := range dbfs {
+		if v > dbfs[idx] {
+			idx = i
+		}
+	}
+	return idx
+}
+
+// End to end through the imitator, the device hub and the spectrum stream:
+// retuning by Δ moves the carrier peak by −Δ on the frequency axis of the frame.
+func TestSpectrum_ImitatorRetuneMovesPeak(t *testing.T) {
+	const (
+		carrierHz = 436_500_000
+		deltaHz   = 100_000
+		rate      = 1_024_000
+		bins      = 1024 // 1 kHz per bin
+	)
+	receiver := imitator.New(imitator.Options{Signals: []imitator.Signal{
+		{Kind: imitator.SignalCarrier, FrequencyHz: carrierHz, LevelDBFS: -20},
+	}})
+	hub := sdr.NewReceiverHub()
+	hub.Register("p", sdr.PathConfig{SampleRateHz: rate}, func() (sdr.Receiver, error) { return receiver, nil })
+	srv := httptest.NewServer(http.HandlerFunc(NewStreamHandler(hub).Spectrum))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		srv.URL+"/api/stream/v1/spectrum?radio_path=p&fps=20&mode=current&bins="+strconv.Itoa(bins), nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET spectrum: %v", err)
+	}
+	defer resp.Body.Close()
+
+	// Частота пика по оси кадра: левый край center − span/2, шаг span/bins.
+	peakHz := func(f sstmFrame) float64 {
+		return float64(f.centerHz) - float64(f.spanHz)/2 + float64(peakBin(f.dbfs))*float64(f.spanHz)/float64(len(f.dbfs))
+	}
+	binHz := float64(rate) / bins
+
+	before := readSpectrumFrame(t, resp.Body)
+	if before.centerHz != carrierHz {
+		t.Fatalf("center=%d, want the receiver on the carrier %d", before.centerHz, carrierHz)
+	}
+	if got := peakHz(before); math.Abs(got-carrierHz) > binHz {
+		t.Fatalf("peak at %.0f Hz before tune, want %d ± one bin", got, carrierHz)
+	}
+
+	if err := receiver.Tune(carrierHz + deltaHz); err != nil {
+		t.Fatalf("Tune: %v", err)
+	}
+	after := readSpectrumFrame(t, resp.Body)
+	for after.centerHz != carrierHz+deltaHz {
+		after = readSpectrumFrame(t, resp.Body)
+	}
+	wantBin := float64(len(after.dbfs))/2 - deltaHz/binHz
+	if got := peakBin(after.dbfs); math.Abs(float64(got)-wantBin) > 1 {
+		t.Errorf("peak bin %d after tune by %d Hz, want %.0f ± 1 (moved by −Δ)", got, deltaHz, wantBin)
+	}
+	if got := peakHz(after); math.Abs(got-carrierHz) > binHz {
+		t.Errorf("peak at %.0f Hz after tune, want the carrier to stay at %d ± one bin", got, carrierHz)
 	}
 }
 
