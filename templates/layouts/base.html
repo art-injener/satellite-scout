@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css?v=163">
+    <link rel="stylesheet" href="/static/css/main.css?v=166">
     <link id="theme-colorsheet" rel="stylesheet" href="/static/css/colors-{{.Theme}}.css?v=65">
     <link rel="stylesheet" href="/static/css/overlay-panel.css?v=1">
     <link rel="stylesheet" href="/static/css/info-panel.css?v=6">
     <link rel="stylesheet" href="/static/css/right-panel.css?v=54">
     <link rel="stylesheet" href="/static/css/bottom-panel.css?v=10">
     <link rel="stylesheet" href="/static/css/auto-mode.css?v=44">
-    <link rel="stylesheet" href="/static/css/manual-layout.css?v=123">
+    <link rel="stylesheet" href="/static/css/manual-layout.css?v=125">
     <link rel="stylesheet" href="/static/css/map-zoom.css?v=3">
     <link rel="stylesheet" href="/static/css/map-hud.css?v=24">
     <link rel="stylesheet" href="/static/css/settings.css?v=4">
@@ -76,6 +76,12 @@
             {{template "tracking-bottom-panel" .}}
         {{end}}
         {{template "settings-modal" .}}
+        <!-- Запрос управления приёмником от слейва: видит только мастер, в любом режиме -->
+        <div class="access-request" id="access-request-dialog" role="alertdialog" aria-labelledby="access-request-text" hidden>
+            <span class="access-request__text" id="access-request-text"></span>
+            <button type="button" class="access-request__btn access-request__btn--allow" id="access-request-allow">Разрешить</button>
+            <button type="button" class="access-request__btn" id="access-request-deny">Отклонить</button>
+        </div>
     </div>
 
     <script src="/static/js/css-vars.js?v=16"></script>
@@ -88,7 +94,9 @@
     <script src="/static/js/earthview.js?v=137"></script>
     <script src="/static/js/skyview.js?v=74"></script>
     <script src="/static/js/satellite-state.js?v=20"></script>
-    <script src="/static/js/sse-client.js?v=5"></script>
+    <script src="/static/js/sse-client.js?v=7"></script>
+    <script src="/static/js/access-control.js?v=4"></script>
+    <script src="/static/js/spectrum-stream.js?v=2"></script>
     <script src="/static/js/info-panel.js?v=4"></script>
     <script src="/static/js/overlay-panel.js?v=2"></script>
     <script src="/static/js/map-hud.js?v=8"></script>
@@ -101,12 +109,12 @@
     <script src="/static/js/demod-panel.js?v=2"></script>
     <script src="/static/js/telemetry-table.js?v=4"></script>
     <script src="/static/js/eye-constellation.js?v=4"></script>
-    <script src="/static/js/freq-dial.js?v=4"></script>
-    <script src="/static/js/manual-layout.js?v=52"></script>
+    <script src="/static/js/freq-dial.js?v=5"></script>
+    <script src="/static/js/manual-layout.js?v=57"></script>
     <script src="/static/js/auto-link.js?v=37"></script>
     <script src="/static/js/mode-manager.js?v=3"></script>
     <script src="/static/js/mode-bar.js?v=8"></script>
-    <script src="/static/js/app.js?v=102"></script>
-    <script src="/static/js/settings.js?v=7"></script>
+    <script src="/static/js/app.js?v=103"></script>
+    <script src="/static/js/settings.js?v=9"></script>
 </body>
 </html>

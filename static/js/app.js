@@ -166,6 +166,9 @@
         // Mode-bar: переключатель режимов работы и активного радиотракта.
         initStationModes();
 
+        // Роль клиента и передача управления приёмником — до ManualLayout
+        initAccessControl();
+
         // Set default datetime for simulation
         const passTimeInput = document.getElementById('pass-time');
         if (passTimeInput && !passTimeInput.value) {
@@ -300,6 +303,8 @@
             const s = evt.status;
             if (s === window.SSEConnectionStatus.CONNECTED) {
                 setConnectionStatus('connected');
+                // Права слейва живут, пока открыт SSE: после переподключения роль могла смениться
+                if (window._accessControl) { window._accessControl.refresh(); }
                 // При (ре)подключении к бэкенду — повторно загрузить конфиг
                 // наблюдателя: если страница была открыта до старта бэкенда,
                 // карта центрирована на (0,0) и без retry так и останется.
@@ -726,6 +731,23 @@
         if (document.getElementById('bottom-panel-body') && typeof window.BottomPanel === 'function') {
             window._bottomPanel = new window.BottomPanel();
         }
+    }
+
+    // Управление приёмником: роль клиента и запрос управления у мастера
+    // (виден мастеру в любом режиме). Панель в колонке приёмника строит ManualLayout.
+    function initAccessControl() {
+        if (window._accessControl || typeof window.AccessControl !== 'function') {
+            return;
+        }
+        const ac = new window.AccessControl();
+        window._accessControl = ac;
+        new window.AccessControl.AccessRequestDialog(ac, {
+            root: document.getElementById('access-request-dialog'),
+            text: document.getElementById('access-request-text'),
+            allow: document.getElementById('access-request-allow'),
+            deny: document.getElementById('access-request-deny'),
+        });
+        ac.start();
     }
 
     // Инициализация Ручного layout: отдельные canvas Az/El/FFT/WF в #layout-manual

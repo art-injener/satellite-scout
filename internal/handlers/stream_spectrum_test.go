@@ -3,9 +3,11 @@ package handlers
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"math"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,17 +17,24 @@ import (
 
 // fakeReceiver — минимальный Receiver для тестов стрима.
 type fakeReceiver struct {
-	frames []sdr.IQFrame
+	frames    []sdr.IQFrame
+	streamCfg sdr.StreamConfig // последний запрошенный поток
 }
 
-func (f *fakeReceiver) Name() string                   { return "fake" }
-func (f *fakeReceiver) Capabilities() sdr.Capabilities { return sdr.Capabilities{} }
-func (f *fakeReceiver) Tune(uint64) error              { return nil }
-func (f *fakeReceiver) SetGain(float32) error          { return nil }
-func (f *fakeReceiver) Status() sdr.ReceiverStatus     { return sdr.ReceiverStatus{} }
-func (f *fakeReceiver) Stop() error                    { return nil }
+func (f *fakeReceiver) Name() string { return "fake" }
+func (f *fakeReceiver) Capabilities() sdr.Capabilities {
+	return sdr.Capabilities{
+		SampleRateRanges:      []sdr.SampleRateRange{{MinHz: 48_000, MaxHz: 2_400_000}},
+		RecommendedSampleRate: 48_000,
+	}
+}
+func (f *fakeReceiver) Tune(uint64) error          { return nil }
+func (f *fakeReceiver) SetGain(float32) error      { return nil }
+func (f *fakeReceiver) Status() sdr.ReceiverStatus { return sdr.ReceiverStatus{} }
+func (f *fakeReceiver) Stop() error                { return nil }
 
 func (f *fakeReceiver) StartStream(_ context.Context, cfg sdr.StreamConfig) (<-chan sdr.IQFrame, error) {
+	f.streamCfg = cfg
 	ch := make(chan sdr.IQFrame, len(f.frames))
 	for _, fr := range f.frames {
 		ch <- fr
@@ -57,7 +66,7 @@ func TestSpectrum_MissingRadioPath(t *testing.T) {
 	hub := sdr.NewReceiverHub()
 	h := NewStreamHandler(hub)
 
-	req := httptest.NewRequest("GET", "/api/stream/v1/spectrum", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/stream/v1/spectrum", nil)
 	rec := httptest.NewRecorder()
 	h.Spectrum(rec, req)
 
@@ -70,7 +79,7 @@ func TestSpectrum_UnknownRadioPath(t *testing.T) {
 	hub := sdr.NewReceiverHub()
 	h := NewStreamHandler(hub)
 
-	req := httptest.NewRequest("GET", "/api/stream/v1/spectrum?radio_path=nope", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/stream/v1/spectrum?radio_path=nope", nil)
 	rec := httptest.NewRecorder()
 	h.Spectrum(rec, req)
 
@@ -92,13 +101,13 @@ func TestSpectrum_ProducesValidSSTMFrames(t *testing.T) {
 	receiver := &fakeReceiver{
 		frames: makeToneFrames(numBlocks, fftSize, toneHz, sampleRate),
 	}
-	hub.Register("test-path", func() (sdr.Receiver, error) {
+	hub.Register("test-path", sdr.PathConfig{}, func() (sdr.Receiver, error) {
 		return receiver, nil
 	})
 
 	h := NewStreamHandler(hub)
 
-	req := httptest.NewRequest("GET",
+	req := httptest.NewRequest(http.MethodGet,
 		"/api/stream/v1/spectrum?radio_path=test-path&bins=128&fps=30&mode=avg", nil)
 	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
 	defer cancel()
@@ -144,6 +153,265 @@ func TestSpectrum_ProducesValidSSTMFrames(t *testing.T) {
 	totalFrameSize := dsp.HeaderSize + int(payloadLen)
 	if len(body) < totalFrameSize {
 		t.Fatalf("body=%d bytes, need at least %d for one frame", len(body), totalFrameSize)
+	}
+}
+
+func TestSpectrum_RequestsPathSampleRate(t *testing.T) {
+	cases := []struct {
+		name       string
+		configured uint32
+		want       uint32
+	}{
+		{"driver recommended", 0, 48_000},
+		{"configured override", 1_024_000, 1_024_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hub := sdr.NewReceiverHub()
+			receiver := &fakeReceiver{}
+			hub.Register("p", sdr.PathConfig{SampleRateHz: tc.configured}, func() (sdr.Receiver, error) {
+				return receiver, nil
+			})
+
+			req := httptest.NewRequest(http.MethodGet, "/api/stream/v1/spectrum?radio_path=p", nil)
+			NewStreamHandler(hub).Spectrum(httptest.NewRecorder(), req)
+
+			if receiver.streamCfg.SampleRate != tc.want {
+				t.Errorf("stream SampleRate=%d, want %d", receiver.streamCfg.SampleRate, tc.want)
+			}
+		})
+	}
+}
+
+func TestSpectrum_UnsupportedSampleRate(t *testing.T) {
+	hub := sdr.NewReceiverHub()
+	receiver := &fakeReceiver{}
+	hub.Register("p", sdr.PathConfig{SampleRateHz: 10_000_000}, func() (sdr.Receiver, error) {
+		return receiver, nil
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/api/stream/v1/spectrum?radio_path=p", nil)
+	rec := httptest.NewRecorder()
+	NewStreamHandler(hub).Spectrum(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status=%d, want 500", rec.Code)
+	}
+	if receiver.streamCfg != (sdr.StreamConfig{}) {
+		t.Errorf("stream must not start with unsupported rate, got %+v", receiver.streamCfg)
+	}
+}
+
+// liveReceiver выдаёт тон блоками до остановки и, как железо, не даёт запустить второй поток.
+type liveReceiver struct {
+	mu      sync.Mutex
+	starts  int
+	running bool
+	cancel  context.CancelFunc
+	done    chan struct{}
+}
+
+func (l *liveReceiver) Name() string { return "live" }
+func (l *liveReceiver) Capabilities() sdr.Capabilities {
+	return sdr.Capabilities{
+		SampleRateRanges:      []sdr.SampleRateRange{{MinHz: 48_000, MaxHz: 2_400_000}},
+		RecommendedSampleRate: 1_024_000,
+	}
+}
+func (l *liveReceiver) Tune(uint64) error          { return nil }
+func (l *liveReceiver) SetGain(float32) error      { return nil }
+func (l *liveReceiver) Status() sdr.ReceiverStatus { return sdr.ReceiverStatus{} }
+
+func (l *liveReceiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-chan sdr.IQFrame, error) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.running {
+		return nil, errors.New("device busy")
+	}
+	l.starts++
+	l.running = true
+	ctx, l.cancel = context.WithCancel(ctx)
+	l.done = make(chan struct{})
+	ch := make(chan sdr.IQFrame, 4)
+	go func() {
+		defer close(l.done)
+		defer close(ch)
+		for {
+			frames := makeToneFrames(1, cfg.BlockSize, 50_000, float64(cfg.SampleRate))
+			select {
+			case ch <- frames[0]:
+			case <-ctx.Done():
+				return
+			}
+			select {
+			case <-time.After(5 * time.Millisecond):
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch, nil
+}
+
+func (l *liveReceiver) Stop() error {
+	l.mu.Lock()
+	if !l.running {
+		l.mu.Unlock()
+		return nil
+	}
+	l.running = false
+	l.cancel()
+	done := l.done
+	l.mu.Unlock()
+	<-done
+	return nil
+}
+
+func (l *liveReceiver) startCount() int {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.starts
+}
+
+func TestSpectrum_TwoViewersShareDeviceStream(t *testing.T) {
+	hub := sdr.NewReceiverHub()
+	receiver := &liveReceiver{}
+	hub.Register("p", sdr.PathConfig{}, func() (sdr.Receiver, error) { return receiver, nil })
+	h := NewStreamHandler(hub)
+
+	view := func(bins string, rec *httptest.ResponseRecorder, wg *sync.WaitGroup) {
+		defer wg.Done()
+		req := httptest.NewRequest(http.MethodGet, "/api/stream/v1/spectrum?radio_path=p&fps=30&bins="+bins, nil)
+		ctx, cancel := context.WithTimeout(req.Context(), 400*time.Millisecond)
+		defer cancel()
+		h.Spectrum(rec, req.WithContext(ctx))
+	}
+
+	recA, recB := httptest.NewRecorder(), httptest.NewRecorder()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go view("256", recA, &wg)
+	deadline := time.Now().Add(time.Second)
+	for receiver.startCount() == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	wg.Add(1)
+	go view("1024", recB, &wg)
+	wg.Wait()
+
+	if n := receiver.startCount(); n != 1 {
+		t.Errorf("device started %d times, want 1 shared stream", n)
+	}
+	for name, rec := range map[string]*httptest.ResponseRecorder{"A": recA, "B": recB} {
+		if rec.Code != http.StatusOK {
+			t.Errorf("viewer %s: status=%d, body=%q", name, rec.Code, rec.Body.String())
+		}
+		if rec.Body.Len() < dsp.HeaderSize {
+			t.Errorf("viewer %s: got %d bytes, want spectrum frames", name, rec.Body.Len())
+		}
+	}
+	receiver.mu.Lock()
+	running := receiver.running
+	receiver.mu.Unlock()
+	if running {
+		t.Error("device must stop after the last viewer left")
+	}
+}
+
+func TestIQChunker_SplitsIntoOwnBlocks(t *testing.T) {
+	in := make([]complex64, 300)
+	for i := range in {
+		in[i] = complex(float32(i), 0)
+	}
+	c := newIQChunker(128)
+	var blocks [][]complex64
+	emit := func(b []complex64) {
+		blocks = append(blocks, append([]complex64(nil), b...))
+		b[0] = -1 // конвейер меняет блок на месте: вход не должен пострадать
+	}
+	c.feed(in[:100], emit)
+	c.feed(in[100:], emit)
+
+	if len(blocks) != 2 {
+		t.Fatalf("blocks=%d, want 2 (300 samples / 128)", len(blocks))
+	}
+	for bi, b := range blocks {
+		for i, v := range b {
+			if want := float32(bi*128 + i); real(v) != want {
+				t.Fatalf("block %d sample %d = %v, want %v", bi, i, real(v), want)
+			}
+		}
+	}
+	for i, v := range in {
+		if real(v) != float32(i) {
+			t.Fatalf("input sample %d modified: %v", i, v)
+		}
+	}
+
+	c.feed(make([]complex64, 84), emit)
+	if len(blocks) != 3 {
+		t.Errorf("remainder of 44 samples plus 84 must form a third block, blocks=%d", len(blocks))
+	}
+}
+
+func TestIQChunker_ResetDropsPartialBlock(t *testing.T) {
+	c := newIQChunker(4)
+	var blocks [][]complex64
+	emit := func(b []complex64) { blocks = append(blocks, append([]complex64(nil), b...)) }
+
+	c.feed([]complex64{1, 2, 3}, emit)
+	c.reset()
+	c.feed([]complex64{10, 20, 30, 40}, emit)
+
+	if len(blocks) != 1 {
+		t.Fatalf("blocks=%d, want 1", len(blocks))
+	}
+	if blocks[0][0] != 10 {
+		t.Errorf("block starts with %v, want 10: samples from before reset leaked", blocks[0][0])
+	}
+}
+
+// After a retune the first frame must hold only the new tuning: the max-hold
+// accumulator would otherwise keep the old tone as well.
+func TestSpectrum_RetuneResetsAccumulation(t *testing.T) {
+	const (
+		fftSize    = 128
+		sampleRate = 48000.0
+		toneHz     = 6000.0 // 16 bins from the center at 48 kHz / 128
+	)
+	before := makeToneFrames(1, fftSize, toneHz, sampleRate)[0]
+	before.CenterHz = 435_000_000
+	after := makeToneFrames(1, fftSize, -toneHz, sampleRate)[0]
+	after.CenterHz = 436_000_000
+
+	hub := sdr.NewReceiverHub()
+	receiver := &fakeReceiver{frames: []sdr.IQFrame{before, after}}
+	hub.Register("p", sdr.PathConfig{}, func() (sdr.Receiver, error) { return receiver, nil })
+	h := NewStreamHandler(hub)
+
+	req := httptest.NewRequest(http.MethodGet,
+		"/api/stream/v1/spectrum?radio_path=p&bins=128&fps=10&mode=maxhold", nil)
+	ctx, cancel := context.WithTimeout(req.Context(), 2*time.Second)
+	defer cancel()
+	rec := httptest.NewRecorder()
+	h.Spectrum(rec, req.WithContext(ctx))
+
+	body := rec.Body.Bytes()
+	frameLen := dsp.HeaderSize + fftSize*4
+	if len(body) < frameLen {
+		t.Fatalf("body=%d bytes, want at least one frame of %d", len(body), frameLen)
+	}
+	last := body[len(body)-frameLen:]
+	if c := binary.LittleEndian.Uint64(last[16:24]); c != after.CenterHz {
+		t.Fatalf("center=%d, want %d", c, after.CenterHz)
+	}
+	bin := func(i int) float32 {
+		off := dsp.HeaderSize + i*4
+		return math.Float32frombits(binary.LittleEndian.Uint32(last[off : off+4]))
+	}
+	newTone, oldTone := bin(fftSize/2-16), bin(fftSize/2+16)
+	if newTone-oldTone < 40 {
+		t.Errorf("new tone %.1f dB, old tone bin %.1f dB: old tuning leaked into the frame", newTone, oldTone)
 	}
 }
 

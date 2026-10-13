@@ -15,9 +15,20 @@ var ErrDriverNotImplemented = errors.New("driver not yet implemented")
 // ReceiverFactory — создаёт экземпляр Receiver для радиотракта.
 type ReceiverFactory func() (Receiver, error)
 
+// PathConfig — настройки радиотракта из конфига, нужные хабу.
+type PathConfig struct {
+	// SampleRateHz — частота дискретизации из конфига; 0 — рекомендуемая драйвером.
+	SampleRateHz uint32
+}
+
 type hubEntry struct {
+	cfg      PathConfig
 	factory  ReceiverFactory
 	receiver Receiver // nil, пока Get ещё не вызывали
+
+	// Под sessMu нельзя брать ReceiverHub.mu: CloseAll берёт их в порядке mu, затем sessMu.
+	sessMu  sync.Mutex
+	session *session // nil, пока нет зрителей
 }
 
 // ReceiverHub — один приёмник на каждый радиотракт из конфига.
@@ -34,11 +45,29 @@ func NewReceiverHub() *ReceiverHub {
 	}
 }
 
-// Register привязывает фабрику к радиотракту (pathID). Приёмник не открывается до Get.
-func (h *ReceiverHub) Register(pathID string, factory ReceiverFactory) {
+// Register привязывает фабрику и настройки к радиотракту (pathID). Приёмник не открывается до Get.
+func (h *ReceiverHub) Register(pathID string, cfg PathConfig, factory ReceiverFactory) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.entries[pathID] = &hubEntry{factory: factory}
+	h.entries[pathID] = &hubEntry{cfg: cfg, factory: factory}
+}
+
+// SampleRate возвращает частоту дискретизации тракта: из конфига или рекомендуемую драйвером,
+// с проверкой по возможностям драйвера. Открывает приёмник, если он ещё не открыт.
+func (h *ReceiverHub) SampleRate(pathID string) (uint32, error) {
+	r, err := h.Get(pathID)
+	if err != nil {
+		return 0, err
+	}
+	h.mu.Lock()
+	cfg := h.entries[pathID].cfg
+	h.mu.Unlock()
+
+	rate, err := ResolveSampleRate(r.Capabilities(), cfg.SampleRateHz)
+	if err != nil {
+		return 0, fmt.Errorf("radio path %q: %w", pathID, err)
+	}
+	return rate, nil
 }
 
 // Get возвращает Receiver для радиотракта pathID. При первом вызове создаёт через фабрику.
@@ -70,6 +99,13 @@ func (h *ReceiverHub) CloseAll() error {
 
 	var errs []error
 	for id, entry := range h.entries {
+		entry.sessMu.Lock()
+		if entry.session != nil {
+			entry.session.cancel()
+			entry.session = nil
+		}
+		entry.sessMu.Unlock()
+
 		if entry.receiver != nil {
 			if err := entry.receiver.Stop(); err != nil {
 				errs = append(errs, fmt.Errorf("receiver [%q] stopping error: %w", id, err))

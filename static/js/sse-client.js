@@ -77,6 +77,12 @@ class SSEClient {
     /** Множитель задержки (exponential backoff). */
     static get RECONNECT_MULTIPLIER() { return 2; }
 
+    /** События передачи управления приёмником (internal/access). */
+    static get ACCESS_EVENTS() {
+        return ['control_request', 'control_request_closed', 'control_granted', 'control_denied', 'control_revoked',
+            'control_released'];
+    }
+
     // ── Подключение / Отключение ──────────────────────────────
 
     /**
@@ -203,6 +209,20 @@ class SSEClient {
                 console.error('[SSEClient] tx_cycle parse error:', err);
             }
         });
+
+        // Передача управления приёмником: разбирает access-control.js.
+        for (const name of SSEClient.ACCESS_EVENTS) {
+            this._eventSource.addEventListener(name, (e) => {
+                try {
+                    const payload = JSON.parse(e.data);
+                    document.dispatchEvent(new CustomEvent('satellite-scout-access', {
+                        detail: { event: name, data: payload },
+                    }));
+                } catch (err) {
+                    console.error(`[SSEClient] ${name} parse error:`, err);
+                }
+            });
+        }
 
         // Обработка ошибок (потеря соединения и т.д.).
         this._eventSource.onerror = () => {

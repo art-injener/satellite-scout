@@ -80,7 +80,7 @@ func testHubWithImitator(t *testing.T) (*sdr.ReceiverHub, string) {
 	t.Helper()
 	hub := sdr.NewReceiverHub()
 	pathID := "test-radio"
-	hub.Register(pathID, func() (sdr.Receiver, error) {
+	hub.Register(pathID, sdr.PathConfig{}, func() (sdr.Receiver, error) {
 		r := imitator.New(imitator.DefaultOptions())
 		_ = r.Tune(145_800_000)
 		return r, nil

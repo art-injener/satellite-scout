@@ -471,6 +471,21 @@
                         <span class="ml-rx-panel__meter-fill" id="manual-rx-audio-bar"></span>
                     </span>
                 </div>
+                <span class="ml-rx-panel__stream" id="manual-rx-stream" role="status" aria-live="polite"></span>
+            </div>
+
+            <!-- Приёмник общий для всех клиентов. Перестраивает мастер или слейв,
+                 которому мастер разрешил (access-control.js). -->
+            <div class="ml-ctl__section ml-access" id="manual-access">
+                <div class="ml-access__row">
+                    <span class="ml-access__role" id="manual-access-role" data-role="viewer">Режим: Просмотр</span>
+                    <button type="button" class="ml-rx-panel__pill" id="manual-access-manage"
+                            aria-haspopup="dialog" aria-controls="access-modal">Переключить</button>
+                    <button type="button" class="ml-rx-panel__pill" id="manual-access-revoke" hidden>Забрать</button>
+                    <button type="button" class="ml-rx-panel__pill" id="manual-access-release" hidden>Вернуть</button>
+                </div>
+                <span class="ml-access__detail" id="manual-access-detail" hidden></span>
+                <span class="ml-access__notice" id="manual-access-notice" role="status" aria-live="polite"></span>
             </div>
 
             <div class="ml-ctl__section">
@@ -606,6 +621,25 @@
             <button type="button" class="modal__btn modal__btn--primary" id="track-end-session-yes">Да</button>
             <button type="button" class="modal__btn modal__btn--secondary" id="track-end-session-no">Нет</button>
         </div>
+    </div>
+</div>
+
+<!-- Управление приёмником для зрителя: запрос у мастера или вход по паролю (access-control.js) -->
+<div id="access-modal" class="modal modal--hidden access-modal" role="dialog" aria-labelledby="access-modal-title" aria-modal="true">
+    <div class="modal__backdrop" id="access-modal-backdrop"></div>
+    <div class="modal__box">
+        <header class="access-modal__header">
+            <h2 class="access-modal__title" id="access-modal-title">Переход в режим «Контроль»</h2>
+            <button type="button" class="access-modal__close" id="access-modal-close" aria-label="Закрыть">×</button>
+        </header>
+        <button type="button" class="modal__btn modal__btn--primary access-modal__request" id="access-modal-request">Запросить</button>
+        <div class="access-modal__divider"><span>или по паролю станции</span></div>
+        <form class="access-modal__login" id="access-modal-login">
+            <input class="access-modal__input" id="access-modal-password" type="password"
+                   placeholder="Пароль станции" autocomplete="current-password" aria-label="Пароль станции">
+            <button type="submit" class="modal__btn modal__btn--secondary" id="access-modal-submit">Войти</button>
+        </form>
+        <p class="access-modal__error" id="access-modal-error" role="alert"></p>
     </div>
 </div>
 {{end}}

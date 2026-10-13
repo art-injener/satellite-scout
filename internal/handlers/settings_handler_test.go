@@ -175,6 +175,60 @@ func TestSettingsHandler_UpdateInvalidJSON(t *testing.T) {
 	}
 }
 
+func storeWithPassword(t *testing.T, password string) *config.Store {
+	t.Helper()
+	store := newTestStore(t)
+	if err := store.Update(func(c *config.Config) error {
+		c.Server.MasterPassword = password
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	return store
+}
+
+func TestSettingsHandler_GetHidesMasterPassword(t *testing.T) {
+	h := NewSettingsHandler(storeWithPassword(t, "top-secret"))
+
+	w := httptest.NewRecorder()
+	h.Get(w, httptest.NewRequest(http.MethodGet, "/api/settings", nil))
+
+	body := w.Body.Bytes()
+	if bytes.Contains(body, []byte("top-secret")) || bytes.Contains(body, []byte("master_password")) {
+		t.Errorf("master password leaked: %s", w.Body.String())
+	}
+}
+
+func TestSettingsHandler_UpdateKeepsMasterPassword(t *testing.T) {
+	cases := map[string]string{
+		"omitted by settings modal": "",
+		"sent by client":            "attacker-choice",
+	}
+	for name, sent := range cases {
+		t.Run(name, func(t *testing.T) {
+			store := storeWithPassword(t, "top-secret")
+			h := NewSettingsHandler(store)
+
+			updated := config.DefaultConfig()
+			updated.UI.Theme = "classic"
+			updated.Server.MasterPassword = sent
+			body, _ := json.Marshal(updated)
+
+			w := httptest.NewRecorder()
+			h.Update(w, httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewReader(body)))
+			if w.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+			}
+			if got := store.Get().Server.MasterPassword; got != "top-secret" {
+				t.Errorf("password=%q, want unchanged", got)
+			}
+			if got := store.Get().UI.Theme; got != "classic" {
+				t.Errorf("other settings must still apply, theme=%q", got)
+			}
+		})
+	}
+}
+
 func contains(arr []string, s string) bool {
 	return slices.Contains(arr, s)
 }

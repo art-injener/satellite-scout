@@ -593,6 +593,55 @@ test('setHz ignores NaN and non-numbers', () => {
     assert.strictEqual(dial.getHz(), 437800000);
 });
 
+console.log('\n— FreqDial: read-only —');
+
+test('read-only dial ignores buttons, keys, clicks and wheel', () => {
+    const { root, dial, changes } = makeDial();
+    dial.setReadOnly(true);
+    fire(btn(root, 'inc'), 'click');
+    key(root, 'ArrowUp');
+    key(root, '5');
+    fire(digits(root)[2], 'click');
+    fire(digits(root)[2], 'wheel', { deltaY: -1 });
+    fire(btn(root, 'set'), 'click');
+    assert.strictEqual(dial.getHz(), 437800000);
+    assert.strictEqual(editing(root), false);
+    assert.deepStrictEqual(changes, []);
+});
+
+test('read-only dial still follows setHz and is marked for CSS and screen readers', () => {
+    const { root, dial } = makeDial();
+    dial.setReadOnly(true);
+    dial.setHz(436000000);
+    assert.strictEqual(shown(root), '00436000000');
+    assert.ok(root._classes.has('is-readonly'));
+    assert.strictEqual(strip(root).getAttribute('aria-readonly'), 'true');
+    assert.strictEqual(btn(root, 'inc').disabled, true);
+    assert.strictEqual(dial.isReadOnly(), true);
+});
+
+test('switching to read-only drops an unfinished edit, back to editable works again', () => {
+    const { root, dial, changes } = makeDial();
+    fire(btn(root, 'inc'), 'click');
+    assert.strictEqual(editing(root), true);
+    dial.setReadOnly(true);
+    assert.strictEqual(editing(root), false);
+    assert.strictEqual(dial.getHz(), 437800000, 'unapplied edit is cancelled');
+    dial.setReadOnly(false);
+    assert.ok(!root._classes.has('is-readonly'));
+    assert.strictEqual(btn(root, 'inc').disabled, false);
+    fire(btn(root, 'inc'), 'click');
+    fire(btn(root, 'set'), 'click');
+    assert.deepStrictEqual(changes, [437801000]);
+});
+
+test('isEditing reports an unfinished edit', () => {
+    const { root, dial } = makeDial();
+    assert.strictEqual(dial.isEditing(), false);
+    fire(btn(root, 'inc'), 'click');
+    assert.strictEqual(dial.isEditing(), true);
+});
+
 console.log('\n— FreqDial: destroy —');
 
 test('destroy detaches listeners so later events are inert', () => {

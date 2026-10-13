@@ -42,6 +42,11 @@ type Config struct {
 type ServerConfig struct {
 	// Port — порт, на котором слушает HTTP-сервер ("8080").
 	Port string `json:"port"`
+
+	// MasterPassword — пароль мастера для удалённого управления приёмником и настройками.
+	// Пустой — сервер генерирует при старте и пишет в файл конфига, с которым запущен.
+	// Через API не отдаётся и не меняется.
+	MasterPassword string `json:"master_password,omitempty"`
 }
 
 // UIConfig — визуальные настройки пользовательского интерфейса.
@@ -241,6 +246,11 @@ type ReceiverConfig struct {
 
 	// Label — кэшированное имя модели для отображения в UI.
 	Label string `json:"label,omitempty"`
+
+	// SampleRateHz — частота дискретизации тракта, Гц. 0 — рекомендуемая драйвером.
+	// Проверяется по возможностям драйвера при открытии устройства, а не здесь:
+	// железо при разборе конфига может быть не подключено.
+	SampleRateHz uint32 `json:"sample_rate_hz,omitempty"`
 }
 
 // RotatorConfig — параметры поворотной платформы радиотракта.

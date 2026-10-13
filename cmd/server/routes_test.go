@@ -4,9 +4,11 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"testing/fstest"
 
+	"github.com/art-injener/satellite-scout/internal/access"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 )
@@ -70,6 +72,54 @@ func TestSetupRoutes_APIRegistered(t *testing.T) {
 	}
 }
 
+func TestSetupRoutes_ChangesRequireMaster(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, minimalRouteDeps(t))
+
+	for _, tc := range []struct{ method, path string }{
+		{http.MethodPut, "/api/settings"},
+		{http.MethodPost, "/api/sdr/tune"},
+		{http.MethodPost, "/api/access/decide"},
+		{http.MethodPost, "/api/access/revoke"},
+	} {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader("{}"))
+			req.RemoteAddr = "192.168.1.40:50000"
+			rec := httptest.NewRecorder()
+			mux.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("remote viewer: status=%d, want 403", rec.Code)
+			}
+		})
+	}
+
+	req := httptest.NewRequest(http.MethodPut, "/api/settings", strings.NewReader("{"))
+	req.RemoteAddr = "127.0.0.1:50000"
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, req)
+	if rec.Code == http.StatusForbidden {
+		t.Error("local master must reach settings handler")
+	}
+}
+
+func TestSetupRoutes_AccessRegistered(t *testing.T) {
+	mux := http.NewServeMux()
+	setupRoutes(mux, minimalRouteDeps(t))
+
+	rec := httptest.NewRecorder()
+	mux.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/access", nil))
+	if rec.Code != http.StatusOK {
+		t.Errorf("GET /api/access: status=%d", rec.Code)
+	}
+	for _, path := range []string{"/api/access/login", "/api/access/request", "/api/access/release"} {
+		rec = httptest.NewRecorder()
+		mux.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, path, strings.NewReader("{")))
+		if rec.Code == http.StatusNotFound || rec.Code == http.StatusMethodNotAllowed {
+			t.Errorf("POST %s not registered: %d", path, rec.Code)
+		}
+	}
+}
+
 func minimalRouteDeps(t *testing.T) *routeDeps {
 	t.Helper()
 
@@ -88,6 +138,7 @@ func minimalRouteDeps(t *testing.T) *routeDeps {
 		Templates:   templates,
 		Static:      static,
 		SSE:         handlers.NewSSEHub(),
+		Access:      access.NewManager("test-password"),
 		Tracking:    &noopTrackingService{},
 		Exclude:     &noopExcludeStore{},
 		PassCache:   &noopPassCache{},

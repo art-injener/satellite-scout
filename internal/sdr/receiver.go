@@ -36,6 +36,11 @@ type Capabilities struct {
 	MaxFreqHz        uint64
 	MaxBandwidthHz   uint64
 	SupportsParallel bool
+
+	// SampleRateRanges — допустимые частоты дискретизации (у RTL-SDR два участка).
+	SampleRateRanges []SampleRateRange
+	// RecommendedSampleRate — частота, если в конфиге тракта не задана.
+	RecommendedSampleRate uint32
 }
 
 // ReceiverStatus — текущее состояние приёмника (для GET /api/sdr/status).

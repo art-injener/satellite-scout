@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/art-injener/satellite-scout/internal/access"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
@@ -18,6 +19,7 @@ type routeDeps struct {
 	Static      fs.FS
 
 	SSE         *handlers.SSEHub
+	Access      *access.Manager
 	Tracking    handlers.TrackingServiceInterface
 	SatNOGS     *satnogs.Service
 	SDR         *sdr.Service
@@ -46,6 +48,8 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	settingsHandler := handlers.NewSettingsHandler(deps.ConfigStore)
 	sdrHandler := handlers.NewSDRHandler(deps.SDR, deps.ReceiverHub)
 	exclusionsHandler := handlers.NewExclusionsHandler(deps.Exclude, deps.PassCache, deps.Group)
+	accessHandler := handlers.NewAccessHandler(deps.Access)
+	master := deps.Access.RequireMaster
 
 	mux.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(deps.Static))))
 
@@ -62,10 +66,16 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	mux.HandleFunc("GET /api/health", apiHandler.HealthCheck)
 	mux.HandleFunc("GET /api/config", apiHandler.GetConfig)
 	mux.HandleFunc("GET /api/settings", settingsHandler.Get)
-	mux.HandleFunc("PUT /api/settings", settingsHandler.Update)
+	mux.HandleFunc("PUT /api/settings", master(settingsHandler.Update))
+	mux.HandleFunc("GET /api/access", accessHandler.Status)
+	mux.HandleFunc("POST /api/access/login", accessHandler.Login)
+	mux.HandleFunc("POST /api/access/request", accessHandler.Request)
+	mux.HandleFunc("POST /api/access/decide", master(accessHandler.Decide))
+	mux.HandleFunc("POST /api/access/revoke", master(accessHandler.Revoke))
+	mux.HandleFunc("POST /api/access/release", accessHandler.Release)
 	mux.HandleFunc("GET /api/sdr/devices", sdrHandler.ListDevices)
 	mux.HandleFunc("POST /api/sdr/test", sdrHandler.Test)
-	mux.HandleFunc("POST /api/sdr/tune", sdrHandler.Tune)
+	mux.HandleFunc("POST /api/sdr/tune", deps.Access.RequireControl(sdrHandler.Tune))
 	mux.HandleFunc("GET /api/sdr/status", sdrHandler.GetStatus)
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)

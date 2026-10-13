@@ -681,6 +681,77 @@
     transition: width 0.15s linear;
 }
 
+/* Состояние потока спектра под уровнями: подключение, приём, ошибка */
+.ml-rx-panel__stream {
+    min-height: 1.2em;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-label, var(--text-muted));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ml-rx-panel__stream[data-state="live"] {
+    color: var(--accent-success);
+}
+
+.ml-rx-panel__stream[data-state="error"],
+.ml-rx-panel__stream[data-state="no_path"] {
+    color: var(--accent-warning);
+}
+
+/* Регулятор у клиента без прав: только показывает частоту приёмника */
+.fdial.is-readonly .fdial__btn {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.fdial.is-readonly .fdial__digits {
+    cursor: default;
+}
+
+/* ── Управление приёмником: режим и кнопка окна управления ── */
+
+.ml-access [hidden] {
+    display: none;
+}
+
+.ml-access__row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.ml-access__role {
+    flex: 1 1 auto;
+    min-width: 0;
+    font-family: var(--font-mono);
+    font-size: var(--ml-fs-value, 14px);
+    font-weight: 600;
+    color: var(--text-label, var(--text-muted));
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ml-access__role[data-role="master"],
+.ml-access__role[data-role="controller"] {
+    color: var(--accent-primary);
+}
+
+.ml-access__detail,
+.ml-access__notice {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-label, var(--text-muted));
+}
+
+.ml-access__notice:empty {
+    display: none;
+}
+
 /* Строка тракта: подпись слева, регулятор справа. Ширина колонки подписей
    общая для всех секций, чтобы регуляторы стояли ровным столбцом; её задаёт
    самая длинная подпись («Полоса канала»). */

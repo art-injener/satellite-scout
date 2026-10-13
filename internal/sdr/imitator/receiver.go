@@ -18,11 +18,14 @@ var (
 	ErrStreamAlreadyRunning = errors.New("stream already running")
 )
 
-// Options — параметры создания имитатора.
+// Options — параметры создания имитатора. Источник выбирается по первому заданному:
+// Source, затем Beacon, иначе синтетический тон.
 type Options struct {
 	// Source — внешний источник IQ (формат .cfile: float32 I, float32 Q, little-endian).
-	// Если nil — генерируется синтетический тон с частотой ToneOffsetHz.
 	Source io.Reader
+
+	// Beacon — маяк КА на заданной частоте; сигнал сдвигается при перестройке приёмника.
+	Beacon *BeaconConfig
 
 	// ToneOffsetHz — смещение синтетического тона от центральной частоты (Гц).
 	ToneOffsetHz float64
@@ -58,6 +61,9 @@ func (r *Receiver) Capabilities() sdr.Capabilities {
 		MinFreqHz:      24_000_000,
 		MaxFreqHz:      1_766_000_000,
 		MaxBandwidthHz: 2_400_000,
+		// Рекомендуемая частота как у RTL-SDR в SatNOGS.
+		SampleRateRanges:      []sdr.SampleRateRange{{MinHz: 48_000, MaxHz: 2_400_000}},
+		RecommendedSampleRate: 2_048_000,
 	}
 }
 
@@ -98,6 +104,18 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 	if r.running {
 		return nil, ErrStreamAlreadyRunning
 	}
+	if cfg.SampleRate == 0 {
+		return nil, sdr.ErrSampleRateRequired
+	}
+
+	var beacon *beaconSource
+	if r.opts.Source == nil && r.opts.Beacon != nil {
+		var err error
+		if beacon, err = newBeaconSource(*r.opts.Beacon, float64(cfg.SampleRate)); err != nil {
+			return nil, err
+		}
+	}
+
 	r.running = true
 	r.stopped = make(chan struct{})
 	r.sampleRate = cfg.SampleRate
@@ -118,10 +136,13 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 		defer close(ch)
 		defer r.markStopped()
 
-		if r.opts.Source != nil {
+		switch {
+		case r.opts.Source != nil:
 			r.streamFromReader(streamCtx, cfg, blockSize, ch)
-		} else {
-			r.streamSyntheticTone(streamCtx, cfg, blockSize, ch)
+		case beacon != nil:
+			r.streamGenerated(streamCtx, cfg, blockSize, ch, beacon.fill)
+		default:
+			r.streamGenerated(streamCtx, cfg, blockSize, ch, r.syntheticTone(cfg.SampleRate))
 		}
 	}()
 
@@ -158,28 +179,37 @@ func (r *Receiver) markStopped() {
 	close(r.stopped)
 }
 
-// streamSyntheticTone генерирует комплексную экспоненту exp(j*2π*f_offset*n/sampleRate).
-func (r *Receiver) streamSyntheticTone(
+// syntheticTone возвращает генератор комплексной экспоненты exp(j*2π*f_offset*n/sampleRate).
+func (r *Receiver) syntheticTone(sampleRate uint32) func(dst []complex64, centerHz uint64) {
+	phaseInc := 2 * math.Pi * r.opts.ToneOffsetHz / float64(sampleRate)
+	sampleIdx := 0
+	return func(dst []complex64, _ uint64) {
+		for i := range dst {
+			phase := phaseInc * float64(sampleIdx)
+			dst[i] = complex(float32(math.Cos(phase)), float32(math.Sin(phase)))
+			sampleIdx++
+		}
+	}
+}
+
+// streamGenerated выдаёт блоки от генератора в темпе реального времени.
+// Генератор получает текущую частоту настройки приёмника.
+func (r *Receiver) streamGenerated(
 	ctx context.Context,
 	cfg sdr.StreamConfig,
 	blockSize int,
 	ch chan<- sdr.IQFrame,
+	generate func(dst []complex64, centerHz uint64),
 ) {
-	phaseInc := 2 * math.Pi * r.opts.ToneOffsetHz / float64(cfg.SampleRate)
-	sampleIdx := 0
 	frameDuration := time.Duration(float64(blockSize) / float64(cfg.SampleRate) * float64(time.Second))
 
 	for {
-		samples := make([]complex64, blockSize)
-		for i := range samples {
-			phase := phaseInc * float64(sampleIdx)
-			samples[i] = complex(float32(math.Cos(phase)), float32(math.Sin(phase)))
-			sampleIdx++
-		}
-
 		r.mu.Lock()
 		centerHz := r.tuned
 		r.mu.Unlock()
+
+		samples := make([]complex64, blockSize)
+		generate(samples, centerHz)
 
 		frame := sdr.IQFrame{
 			Samples:     samples,

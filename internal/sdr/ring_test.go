@@ -127,6 +127,39 @@ func TestDataRing_Close(t *testing.T) {
 	}
 }
 
+func TestDataRing_Unsubscribe(t *testing.T) {
+	ring := NewDataRing(4)
+	defer ring.Close()
+	gone := ring.Subscribe()
+	stays := ring.Subscribe()
+
+	ring.Unsubscribe(gone)
+	if _, ok := <-gone; ok {
+		t.Fatal("unsubscribed channel must be closed")
+	}
+
+	ring.Write(makeFrame(7))
+	select {
+	case f := <-stays:
+		if frameID(f) != 7 {
+			t.Fatalf("got id=%d, want 7", frameID(f))
+		}
+	case <-time.After(time.Second):
+		t.Fatal("remaining subscriber got nothing")
+	}
+}
+
+func TestDataRing_UnsubscribeTwiceAndAfterClose(t *testing.T) {
+	ring := NewDataRing(4)
+	ch := ring.Subscribe()
+	ring.Unsubscribe(ch)
+	ring.Unsubscribe(ch)
+
+	other := ring.Subscribe()
+	ring.Close()
+	ring.Unsubscribe(other)
+}
+
 func TestDataRing_ConcurrentWriteRead(t *testing.T) {
 	ring := NewDataRing(16)
 	defer ring.Close()

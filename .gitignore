@@ -36,6 +36,7 @@ go.work.sum
 tmp_docs/
 .cursor
 .supercode
+.claude/
 
 CLAUDE.md
 node_modules/

@@ -1,7 +1,8 @@
 {
   "_version": 1,
   "server": {
-    "port": "8080"
+    "port": "8080",
+    "master_password": ""
   },
   "ui": {
     "theme": "default",

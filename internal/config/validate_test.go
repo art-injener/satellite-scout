@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"errors"
 	"slices"
 	"testing"
@@ -205,6 +206,30 @@ func TestRestartRequiredFields_TLEGroupsChanged(t *testing.T) {
 	got := RestartRequiredFields(old, updated)
 	if !hasString(got, "tle.groups") {
 		t.Errorf("expected tle.groups, got %v", got)
+	}
+}
+
+func TestReceiverConfig_SampleRateFromJSON(t *testing.T) {
+	var rc ReceiverConfig
+	if err := json.Unmarshal([]byte(`{"driver":"simulated","sample_rate_hz":2048000}`), &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.SampleRateHz != 2_048_000 {
+		t.Errorf("SampleRateHz=%d, want 2048000", rc.SampleRateHz)
+	}
+}
+
+func TestRestartRequiredFields_ReceiverSampleRateChanged(t *testing.T) {
+	old := DefaultConfig()
+	old.Station.RadioPaths = []RadioPath{sampleRadioPath(1)}
+	updated := DefaultConfig()
+	rp := sampleRadioPath(1)
+	rp.Receiver.SampleRateHz = 1_024_000
+	updated.Station.RadioPaths = []RadioPath{rp}
+
+	got := RestartRequiredFields(old, updated)
+	if !hasString(got, "station.radio_paths") {
+		t.Errorf("sample rate is applied when the device opens, expected restart, got %v", got)
 	}
 }
 

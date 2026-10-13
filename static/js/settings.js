@@ -777,6 +777,10 @@
                 parsed.label = target.receiver.label;
             }
         }
+        // Частота дискретизации допустима только для своего драйвера: при смене драйвера сбрасывается.
+        if (target.receiver && target.receiver.sample_rate_hz && target.receiver.driver === parsed.driver) {
+            parsed.sample_rate_hz = target.receiver.sample_rate_hz;
+        }
         target.receiver = parsed;
         this._setDirty(true);
     };
@@ -1007,7 +1011,7 @@
         this._clearFieldErrors();
         const payload = deepClone(this._workingConfig);
 
-        fetch('/api/settings', {
+        return fetch('/api/settings', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)
@@ -1018,6 +1022,9 @@
                         self._showValidationErrors(errBody);
                         throw new Error('validation');
                     });
+                }
+                if (resp.status === 403) {
+                    throw new Error('Настройки можно менять только на машине с сервером или после входа по паролю станции');
                 }
                 return self._parseJSONOrThrow(resp);
             })
