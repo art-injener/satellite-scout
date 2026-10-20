@@ -359,6 +359,14 @@ func validateImitator(prefix string, rc ReceiverConfig) ValidationErrors {
 		if s.Kind == ImitatorBeacon && s.PeriodS <= 0 {
 			add(sp+".period_s", "для маяка укажите положительный интервал между кадрами")
 		}
+		switch {
+		case s.Modem == "":
+		case s.Kind != ImitatorBeacon:
+			add(sp+".modem", "модем задаётся только для маяка")
+		case !slices.Contains(ImitatorBeaconModems, s.Modem):
+			add(sp+".modem", fmt.Sprintf("неизвестный модем маяка %q, допустимо: %s",
+				s.Modem, strings.Join(ImitatorBeaconModems, ", ")))
+		}
 	}
 	return errs
 }

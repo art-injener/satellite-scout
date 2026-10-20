@@ -142,7 +142,23 @@ func TestSignal_SweepTriangle(t *testing.T) {
 	}
 }
 
-func TestSignal_SweepLimitedToBand(t *testing.T) {
+// The sweep is a property of the air, not of the receiver: a narrower band does not shrink it.
+func TestSignal_SweepNotLimitedByBand(t *testing.T) {
+	sig := testCarrier(0)
+	sig.SweepHz = 23_000 // above 45 % of 48 kHz, inside ±24 kHz
+	sig.SweepPeriod = time.Second
+	s := newTestSource(t, sig)
+
+	x := make([]complex64, int(testRate)/4)
+	s.fill(x, testCenter)
+	peak := make([]complex64, 48)
+	s.fill(peak, testCenter)
+	if f := meanFreq(peak); math.Abs(f-23_000) > 50 {
+		t.Errorf("sweep peak=%.0f Hz, want 23000", f)
+	}
+}
+
+func TestSignal_SweepOutsideBandIsSilent(t *testing.T) {
 	sig := testCarrier(0)
 	sig.SweepHz = 1_000_000
 	sig.SweepPeriod = time.Second
@@ -152,9 +168,8 @@ func TestSignal_SweepLimitedToBand(t *testing.T) {
 	s.fill(x, testCenter)
 	peak := make([]complex64, 48)
 	s.fill(peak, testCenter)
-	want := maxSweepShare * testRate
-	if f := meanFreq(peak); math.Abs(f-want) > 50 {
-		t.Errorf("sweep peak=%.0f Hz, want %.0f (limited to share of sample rate)", f, want)
+	if !isSilent(peak) {
+		t.Error("carrier swept 1 MHz away must be outside a 48 kHz band")
 	}
 }
 

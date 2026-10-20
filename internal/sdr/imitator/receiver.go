@@ -28,11 +28,15 @@ type Options struct {
 	// Приёмник при создании настроен на частоту первого сигнала.
 	Signals []Signal
 
-	// NoiseDBFS — мощность общего шума приёмника во всей полосе дискретизации, dBFS
+	// NoiseDBFS — мощность общего шума приёмника во всей полосе NoiseRefRateHz, dBFS
 	// при усилении 0 дБ; уровни сигналов — тоже при 0 дБ.
-	// SNR сигнала в полосе B: LevelDBFS − (NoiseDBFS + 10·lg(B/fs)). 0 — без шума.
+	// SNR сигнала в полосе B: LevelDBFS − (NoiseDBFS + 10·lg(B/NoiseRefRateHz)). 0 — без шума.
 	NoiseDBFS float64
-	Seed      uint64 // зерно шума: одинаковое зерно даёт одинаковый шум
+	// NoiseRefRateHz — частота дискретизации, при которой задан NoiseDBFS. Плотность шума
+	// постоянна, как у настоящего приёмника: при частоте fs мощность шума в полосе
+	// NoiseDBFS + 10·lg(fs/NoiseRefRateHz). 0 — NoiseDBFS при любой частоте потока.
+	NoiseRefRateHz float64
+	Seed           uint64 // зерно шума: одинаковое зерно даёт одинаковый шум
 
 	// ToneOffsetHz — смещение синтетического тона от центральной частоты (Гц).
 	ToneOffsetHz float64
@@ -43,6 +47,8 @@ const (
 	DefaultFrequencyHz = 436_500_000
 	// DefaultNoiseDBFS — общий шум приёмника по умолчанию: заметно ниже полной шкалы, как у реального SDR.
 	DefaultNoiseDBFS = -60.0
+	// RecommendedSampleRate — частота дискретизации, если в конфиге тракта не задана: как у RTL-SDR в SatNOGS.
+	RecommendedSampleRate = 2_048_000
 )
 
 // DefaultOptions — эфир по умолчанию: несущая ходит ±1 МГц вокруг DefaultFrequencyHz за минуту
@@ -59,8 +65,9 @@ func DefaultOptions() Options {
 			PassSwingDB: 50,
 			PassPeriod:  45 * time.Second,
 		}},
-		NoiseDBFS: DefaultNoiseDBFS,
-		Seed:      1,
+		NoiseDBFS:      DefaultNoiseDBFS,
+		NoiseRefRateHz: RecommendedSampleRate,
+		Seed:           1,
 	}
 }
 
@@ -91,12 +98,11 @@ func (r *Receiver) Name() string { return "imitator" }
 
 func (r *Receiver) Capabilities() sdr.Capabilities {
 	return sdr.Capabilities{
-		MinFreqHz:      24_000_000,
-		MaxFreqHz:      1_766_000_000,
-		MaxBandwidthHz: 2_400_000,
-		// Рекомендуемая частота как у RTL-SDR в SatNOGS.
+		MinFreqHz:             24_000_000,
+		MaxFreqHz:             1_766_000_000,
+		MaxBandwidthHz:        2_400_000,
 		SampleRateRanges:      []sdr.SampleRateRange{{MinHz: 48_000, MaxHz: 2_400_000}},
-		RecommendedSampleRate: 2_048_000,
+		RecommendedSampleRate: RecommendedSampleRate,
 	}
 }
 

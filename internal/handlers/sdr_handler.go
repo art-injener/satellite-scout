@@ -2,8 +2,10 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
+	"slices"
 
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
@@ -48,10 +50,46 @@ type TuneRequest struct {
 	GainDB    *float32 `json:"gain_db,omitempty"`
 }
 
-// TuneResponse — ответ POST /api/sdr/tune.
+// StatusResponse — состояние приёмника тракта вместе с настройками демодулятора.
+// sample_rate — частота тракта из хаба (известна и без потока), sample_rates — варианты «Полосы».
+type StatusResponse struct {
+	sdr.ReceiverStatus
+	SampleRates []uint32            `json:"sample_rates"`
+	Channel     sdr.ChannelSettings `json:"channel"`
+}
+
+// TuneResponse — ответ POST /api/sdr/tune и POST /api/sdr/receiver.
 type TuneResponse struct {
-	OK     bool               `json:"ok"`
-	Status sdr.ReceiverStatus `json:"status"`
+	OK     bool           `json:"ok"`
+	Status StatusResponse `json:"status"`
+}
+
+// ReceiverRequest — тело POST /api/sdr/receiver: все настройки разом, как по «Установить».
+// Отрицательное усиление означает АРУ; частота дискретизации — одна из sample_rates статуса.
+type ReceiverRequest struct {
+	RadioPath    string  `json:"radio_path"`
+	SampleRateHz uint32  `json:"sample_rate_hz"`
+	GainDB       float32 `json:"gain_db"`
+	sdr.ChannelSettings
+}
+
+// status собирает состояние приёмника, частоту тракта и настройки демодулятора.
+func (h *SDRHandler) status(pathID string, receiver sdr.Receiver) (StatusResponse, error) {
+	ch, err := h.hub.Channel(pathID)
+	if err != nil {
+		return StatusResponse{}, err
+	}
+	rate, err := h.hub.SampleRate(pathID)
+	if err != nil {
+		return StatusResponse{}, err
+	}
+	rates, err := h.hub.SampleRateChoices(pathID)
+	if err != nil {
+		return StatusResponse{}, err
+	}
+	st := receiver.Status()
+	st.SampleRate = rate
+	return StatusResponse{ReceiverStatus: st, SampleRates: rates, Channel: ch}, nil
 }
 
 // Tune перестраивает приёмник на новую частоту (и опционально меняет усиление).
@@ -113,10 +151,99 @@ func (h *SDRHandler) Tune(w http.ResponseWriter, r *http.Request) {
 		"radio_path", req.RadioPath,
 		"center_hz", req.CenterHz)
 
-	writeJSON(w, http.StatusOK, TuneResponse{
-		OK:     true,
-		Status: receiver.Status(),
-	})
+	h.writeStatus(w, req.RadioPath, receiver, true)
+}
+
+// SetReceiver применяет усиление и настройки демодулятора тракта.
+// Сначала проверяется всё, затем меняется: отклонённый запрос ничего не трогает.
+// POST /api/sdr/receiver
+func (h *SDRHandler) SetReceiver(w http.ResponseWriter, r *http.Request) {
+	if h.hub == nil {
+		writeJSON(w, http.StatusServiceUnavailable,
+			ErrorResponse{Error: "no receiver hub configured"})
+		return
+	}
+
+	var req ReceiverRequest
+	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&req); err != nil {
+		writeJSON(w, http.StatusBadRequest,
+			ErrorResponse{Error: "invalid JSON: " + err.Error()})
+		return
+	}
+	if req.RadioPath == "" {
+		writeJSON(w, http.StatusBadRequest,
+			ErrorResponse{Error: "radio_path is required"})
+		return
+	}
+
+	receiver, err := h.hub.Get(req.RadioPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest,
+			ErrorResponse{Error: "receiver not available: " + err.Error()})
+		return
+	}
+	rates, err := h.hub.SampleRateChoices(req.RadioPath)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest,
+			ErrorResponse{Error: "receiver not available: " + err.Error()})
+		return
+	}
+	if !slices.Contains(rates, req.SampleRateHz) {
+		writeJSON(w, http.StatusBadRequest,
+			ErrorResponse{Error: fmt.Sprintf("sample_rate_hz %d not in %v", req.SampleRateHz, rates)})
+		return
+	}
+	if err := req.ChannelSettings.Validate(req.SampleRateHz); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	if err := receiver.SetGain(req.GainDB); err != nil {
+		slog.Error("receiver settings: set gain failed",
+			slog.String("radio_path", req.RadioPath), slog.Any("error", err))
+		writeJSON(w, http.StatusBadRequest,
+			ErrorResponse{Error: "set gain failed: " + err.Error()})
+		return
+	}
+	if err := h.hub.SetSampleRate(req.RadioPath, req.SampleRateHz); err != nil {
+		slog.Error("receiver settings: sample rate change failed",
+			slog.String("radio_path", req.RadioPath), slog.Any("error", err))
+		writeJSON(w, http.StatusInternalServerError,
+			ErrorResponse{Error: "sample rate change failed: " + err.Error()})
+		return
+	}
+	if err := h.hub.SetChannel(req.RadioPath, req.ChannelSettings); err != nil {
+		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
+		return
+	}
+
+	slog.Info("receiver settings applied",
+		slog.String("radio_path", req.RadioPath),
+		slog.Int("sample_rate_hz", int(req.SampleRateHz)),
+		slog.Float64("gain_db", float64(req.GainDB)),
+		slog.Int64("offset_hz", req.OffsetHz),
+		slog.Int("bandwidth_hz", int(req.BandwidthHz)),
+		slog.Float64("squelch_dbfs", req.SquelchDBFS),
+		slog.String("demod", req.Demod))
+
+	h.writeStatus(w, req.RadioPath, receiver, true)
+}
+
+// writeStatus отвечает состоянием тракта: в обёртке TuneResponse или как есть.
+func (h *SDRHandler) writeStatus(w http.ResponseWriter, pathID string, receiver sdr.Receiver, wrapped bool) {
+	st, err := h.status(pathID, receiver)
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest,
+			ErrorResponse{Error: "receiver not available: " + err.Error()})
+		return
+	}
+	if wrapped {
+		writeJSON(w, http.StatusOK, TuneResponse{OK: true, Status: st})
+		return
+	}
+	writeJSON(w, http.StatusOK, st)
 }
 
 // GetStatus возвращает текущее состояние приёмника.
@@ -142,5 +269,5 @@ func (h *SDRHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	writeJSON(w, http.StatusOK, receiver.Status())
+	h.writeStatus(w, radioPath, receiver, false)
 }

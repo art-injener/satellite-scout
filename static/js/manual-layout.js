@@ -57,7 +57,6 @@
     const MARKER_EMPTY = '—';
     /** Допуск наведения: сверх него рассогласование подсвечивается, градусы. */
     const POINTING_TOLERANCE_DEG = 2;
-    const STORAGE_AGC = 'ux.manualRxAgc';
     const STORAGE_ROT_STEP = 'ux.rotStep';
     const STORAGE_ROT_MODE = 'ux.rotMode';
     const STORAGE_REC_DIR = 'ux.manualRecDir';
@@ -138,6 +137,8 @@
         this._streamPath = null;
         /** Центр приёмника из последнего кадра, Гц; null — кадров ещё не было. */
         this._streamCenterHz = null;
+        /** Полоса обзора из последнего кадра, Гц. */
+        this._streamSpanHz = null;
         /** Шкала dB по данным потока, общая для спектров и водопада. */
         this._streamRange = null;
         /** Накопление спектра (SPEC_MODES), его кнопки и N для «Накопления». */
@@ -209,6 +210,8 @@
         this._squelchInput = null;
         this._rxPipelineSelect = null;
         this._rxPanelRoot = null;
+        /** Поля колонки приёмника, которые «Установить» отправляет на сервер. */
+        this._rxFields = null;
 
         this._layoutRoot = document.getElementById('layout-manual');
         this._azCanvas = document.getElementById('manual-azimuth-view');
@@ -237,6 +240,7 @@
         this._detectAntennaView();
         this._initDemodPanel();
         this._initTelemetryTable();
+        this._initDemodEvents();
         this._initEyeConstellation();
         this._initRxPanel();
         this._subscribeState();
@@ -989,21 +993,194 @@
             document.getElementById('manual-rx-squelch-unit'),
         ];
         this._squelchInput = document.getElementById('manual-rx-squelch');
+        this._rxFields = {
+            span: document.getElementById('manual-rx-span'),
+            gain: document.getElementById('manual-rx-gain'),
+            agc: document.getElementById('manual-rx-agc'),
+            offset: document.getElementById('manual-rx-doppler-val'),
+            bandwidth: document.getElementById('manual-rx-filter-bw'),
+            squelch: this._squelchInput,
+            demod: this._rxPipelineSelect,
+            apply: document.getElementById('manual-rx-apply'),
+        };
         const self = this;
+        const agc = this._rxFields.agc;
 
         this._initFreqDial();
         this._showMarker(null);
 
-        this._initPill(document.getElementById('manual-rx-agc'), STORAGE_AGC, false);
-
+        this._on(agc, 'click', function() {
+            self._setAgc(agc.getAttribute('aria-pressed') !== 'true');
+        });
         this._on(this._rxPipelineSelect, 'change', function() {
             self._syncEyeFromPipeline();
         });
-        this._on(document.getElementById('manual-rx-apply'), 'click', function() {
+        this._on(this._rxFields.apply, 'click', function() {
             self._syncEyeFromPipeline();
+            self._applyReceiverSettings();
         });
 
         this._syncEyeFromPipeline();
+    };
+
+    /** Значение выбранного пункта селектора; null — пунктов нет. */
+    function selectedValue(sel) {
+        const opt = sel && sel.options ? sel.options[sel.selectedIndex] : null;
+        return opt ? opt.value : null;
+    }
+
+    /** Выбирает пункт селектора по значению; false — такого пункта нет. */
+    function selectByValue(sel, value) {
+        if (!sel || !sel.options) { return false; }
+        for (let j = 0; j < sel.options.length; j++) {
+            if (String(sel.options[j].value) === String(value)) {
+                sel.selectedIndex = j;
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** Подпись частоты дискретизации: «2.048 МГц», «300 кГц». */
+    function rateLabel(hz) {
+        return hz >= 1e6
+            ? Number((hz / 1e6).toFixed(3)) + ' МГц'
+            : Number((hz / 1e3).toFixed(1)) + ' кГц';
+    }
+
+    /** Пункты «Полосы» по списку частот устройства; тот же список не перестраивается. */
+    function fillSpanOptions(sel, rates) {
+        if (!sel || !sel.options) { return; }
+        const same = sel.options.length === rates.length && rates.every(function(hz, j) {
+            return String(sel.options[j].value) === String(hz);
+        });
+        if (same) { return; }
+        while (sel.options.length) { sel.remove(0); }
+        rates.forEach(function(hz) {
+            const opt = document.createElement('option');
+            opt.value = String(hz);
+            opt.text = rateLabel(hz);
+            sel.add(opt);
+        });
+    }
+
+    /** Кнопка АРУ: состояние приходит из статуса приёмника, в браузере не хранится. */
+    ManualLayout.prototype._setAgc = function(on) {
+        const btn = this._rxFields ? this._rxFields.agc : null;
+        if (!btn) { return; }
+        btn.classList.toggle('is-on', on);
+        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    };
+
+    /**
+     * «Установить»: усиление и настройки демодулятора уходят на общий приёмник тракта.
+     * Порог сервер держит в dBFS; введённые dBm переводятся по усилению, которое
+     * отправляется (при АРУ dBm не определены — по текущему).
+     */
+    ManualLayout.prototype._applyReceiverSettings = function() {
+        const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+        if (ac && !ac.canControl()) {
+            ac.setNotice('Менять настройки приёмника можно только в режиме «Контроль».');
+            return;
+        }
+        const path = this._radioPathName();
+        const f = this._rxFields;
+        if (!path || !f || typeof fetch !== 'function') { return; }
+        const notice = function(text) { if (ac) { ac.setNotice(text); } };
+
+        const agcOn = !!f.agc && f.agc.getAttribute('aria-pressed') === 'true';
+        const gain = agcOn ? -1 : Number(f.gain ? f.gain.value : NaN);
+        const offset = Number(f.offset ? f.offset.value : 0);
+        let squelch = Number(f.squelch ? f.squelch.value : NaN);
+        if (![gain, offset, squelch].every(isFinite)) {
+            notice('Настройки не применены: усиление, сдвиг и порог должны быть числами.');
+            return;
+        }
+        const cal = this._calibrationDb();
+        if (this._levelOffset !== null) {
+            const sent = window.SpectrumStream.dbmOffset(cal, gain);
+            squelch -= sent === null ? this._levelOffset : sent;
+        }
+
+        const self = this;
+        fetch('/api/sdr/receiver', {
+            method: 'POST',
+            credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                radio_path: path,
+                sample_rate_hz: Number(selectedValue(f.span)),
+                gain_db: gain,
+                offset_hz: Math.round(offset),
+                bandwidth_hz: Number(selectedValue(f.bandwidth)),
+                squelch_dbfs: Number(squelch.toFixed(1)),
+                demod: selectedValue(f.demod),
+            }),
+        })
+            .then(function(r) {
+                if (r.status === 403) {
+                    notice('Режим «Контроль» отключён, настройки не применены.');
+                    if (ac) { ac.refresh(); }
+                    return null;
+                }
+                return r.json().then(function(b) {
+                    if (!r.ok) {
+                        notice('Настройки не применены: ' + ((b && b.error) || ('HTTP ' + r.status)));
+                        return;
+                    }
+                    if (b && b.status && self._radioPathName() === path) {
+                        self._applyReceiverStatus(path, cal, b.status);
+                    }
+                }, function() {
+                    if (!r.ok) { notice('Настройки не применены: HTTP ' + r.status); }
+                });
+            })
+            .catch(function(err) {
+                notice('Настройки не применены: ' + err.message);
+            });
+    };
+
+    /** Поправка dBm тракта из конфига; undefined — не задана. */
+    ManualLayout.prototype._calibrationDb = function() {
+        const mm = (typeof window !== 'undefined') ? window._modeManager : null;
+        const rp = mm && typeof mm.getRadioPath === 'function' ? mm.getRadioPath() : null;
+        return rp ? rp.calibration_db : undefined;
+    };
+
+    /**
+     * Статус приёмника: единицы уровня по его усилению, поля колонки по его настройкам.
+     * @param {string} path
+     * @param {*} cal — поправка dBm тракта на момент запроса
+     * @param {Object} st
+     */
+    ManualLayout.prototype._applyReceiverStatus = function(path, cal, st) {
+        if (typeof cal === 'number') {
+            this._levelPath = path;
+            this._setLevelOffset(window.SpectrumStream.dbmOffset(cal, st.gain_db));
+        }
+        this._fillReceiverFields(st);
+    };
+
+    /** Поля колонки приёмника по статусу сервера; порог — в единицах экрана. */
+    ManualLayout.prototype._fillReceiverFields = function(st) {
+        const f = this._rxFields;
+        if (!f) { return; }
+        if (Array.isArray(st.sample_rates) && st.sample_rates.length) {
+            fillSpanOptions(f.span, st.sample_rates);
+        }
+        if (typeof st.sample_rate === 'number') { selectByValue(f.span, st.sample_rate); }
+        if (typeof st.gain_db === 'number') {
+            this._setAgc(st.gain_db < 0);
+            if (st.gain_db >= 0 && f.gain) { f.gain.value = String(st.gain_db); }
+        }
+        const ch = st.channel;
+        if (!ch) { return; }
+        if (f.offset && typeof ch.offset_hz === 'number') { f.offset.value = String(ch.offset_hz); }
+        if (typeof ch.bandwidth_hz === 'number') { selectByValue(f.bandwidth, ch.bandwidth_hz); }
+        if (f.squelch && typeof ch.squelch_dbfs === 'number') {
+            f.squelch.value = String(Number((ch.squelch_dbfs + (this._levelOffset || 0)).toFixed(1)));
+        }
+        if (ch.demod && selectByValue(f.demod, ch.demod)) { this._syncEyeFromPipeline(); }
     };
 
     /**
@@ -1128,11 +1305,16 @@
         }
     };
 
-    /** Без прав регулятор только показывает частоту приёмника. */
+    /** Без прав регулятор и поля приёмника только показывают его настройки. */
     ManualLayout.prototype._applyAccess = function() {
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+        const readOnly = !!ac && !ac.canControl();
         if (this._freqDial && typeof this._freqDial.setReadOnly === 'function') {
-            this._freqDial.setReadOnly(!!ac && !ac.canControl());
+            this._freqDial.setReadOnly(readOnly);
+        }
+        const f = this._rxFields || {};
+        for (const key in f) {
+            if (f[key]) { f[key].disabled = readOnly; }
         }
     };
 
@@ -1147,9 +1329,10 @@
         const self = this;
         this._streamPath = path;
         this._streamCenterHz = null;
+        this._streamSpanHz = null;
         this._streamRange = new window.SpectrumStream.AutoRange();
         this._heldValues = null;
-        this._requestLevelOffset(path);
+        this._requestReceiverStatus(path);
         const windowMs = this._specMode === 'avg'
             ? '&window_ms=' + Math.round(this._specAvgN * 1000 / STREAM_FPS)
             : '';
@@ -1163,28 +1346,26 @@
     };
 
     /**
-     * dBm на экране, если у приёмника тракта есть поправка; усиление берётся из статуса
-     * приёмника. Пока ответа нет, у того же тракта остаются прежние единицы.
+     * Статус приёмника тракта: по нему заполняются поля колонки и, если у тракта есть
+     * поправка, экран переходит в dBm. Пока ответа нет, у того же тракта остаются
+     * прежние единицы.
      * @param {string} path
      */
-    ManualLayout.prototype._requestLevelOffset = function(path) {
-        const mm = (typeof window !== 'undefined') ? window._modeManager : null;
-        const rp = mm && typeof mm.getRadioPath === 'function' ? mm.getRadioPath() : null;
-        const cal = rp ? rp.calibration_db : undefined;
+    ManualLayout.prototype._requestReceiverStatus = function(path) {
+        const cal = this._calibrationDb();
         if (typeof cal !== 'number' || path !== this._levelPath) {
             this._levelPath = null;
             this._setLevelOffset(null);
         }
-        if (typeof cal !== 'number' || typeof fetch !== 'function') { return; }
+        if (typeof fetch !== 'function') { return; }
         const self = this;
         fetch('/api/sdr/status?radio_path=' + encodeURIComponent(path), { credentials: 'same-origin' })
             .then(function(r) { return r.ok ? r.json() : null; })
             .then(function(st) {
-                if (self._streamPath !== path) { return; }
-                self._levelPath = path;
-                self._setLevelOffset(window.SpectrumStream.dbmOffset(cal, st && st.gain_db));
+                if (self._streamPath !== path || !st) { return; }
+                self._applyReceiverStatus(path, cal, st);
             })
-            .catch(function() { /* без статуса остаются dBFS */ });
+            .catch(function() { /* без статуса остаются dBFS и прежние поля */ });
     };
 
     /**
@@ -1355,6 +1536,8 @@
         if (!centerHz) { return; }
         const first = this._streamCenterHz === null;
         const changed = centerHz !== this._streamCenterHz;
+        // «Полоса» следует только за сменой в потоке, чтобы не сбить выбор до «Установить»
+        const spanChanged = spanHz > 0 && spanHz !== this._streamSpanHz;
         const centerMHz = centerHz / 1e6;
         const spanMHz = spanHz > 0 ? spanHz / 1e6 : null;
         const views = [this._fft, this._antFft];
@@ -1366,12 +1549,16 @@
         if (this._wf) {
             this._wf._freqCenterMHz = centerMHz;
             if (spanMHz) { this._wf._freqSpanMHz = spanMHz; }
-            if (changed && !first) {
+            if ((changed || spanChanged) && !first) {
                 this._wf.clear();
                 if (this._active) { this._wf.start(); }
             }
         }
         this._streamCenterHz = centerHz;
+        if (spanChanged) {
+            this._streamSpanHz = spanHz;
+            if (this._rxFields) { selectByValue(this._rxFields.span, spanHz); }
+        }
         const editing = this._freqDial && typeof this._freqDial.isEditing === 'function' &&
             this._freqDial.isEditing();
         if (changed && this._tunePending === 0 && !editing) {
@@ -1395,23 +1582,6 @@
         if (m.freq) { m.freq.textContent = mk ? num(mk.freqHz / 1e6, 3) : MARKER_EMPTY; }
         if (m.level) { m.level.textContent = mk ? num(mk.dbfs, 1) : MARKER_EMPTY; }
         if (m.bar) { m.bar.style.width = pct.toFixed(1) + '%'; }
-    };
-
-    ManualLayout.prototype._initPill = function(btn, key, defaultOn) {
-        if (!btn) { return; }
-        let on = defaultOn;
-        try {
-            const raw = localStorage.getItem(key);
-            if (raw !== null) { on = raw === '1' || raw === 'true'; }
-        } catch (_e) { /* noop */ }
-        btn.classList.toggle('is-on', on);
-        btn.setAttribute('aria-pressed', on ? 'true' : 'false');
-        this._on(btn, 'click', function() {
-            const next = btn.getAttribute('aria-pressed') !== 'true';
-            btn.classList.toggle('is-on', next);
-            btn.setAttribute('aria-pressed', next ? 'true' : 'false');
-            try { localStorage.setItem(key, next ? '1' : '0'); } catch (_e) { /* noop */ }
-        });
     };
 
     /** Настройка извне (панорама, TX-список) — индикатор просто следует за ней. */
@@ -1643,6 +1813,28 @@
     ManualLayout.prototype._initTelemetryTable = function() {
         if (typeof window.TelemetryTable !== 'function') { return; }
         this._tmiTable = new window.TelemetryTable();
+    };
+
+    /** Кадры и состояние демодулятора из SSE — только для тракта, выбранного в шапке. */
+    ManualLayout.prototype._initDemodEvents = function() {
+        const self = this;
+        this._on(document, 'satellite-scout-demod', function(e) {
+            const d = e.detail || {};
+            const path = self._radioPathName();
+            if (!path || !d.data || d.data.radio_path !== path) { return; }
+            if (d.event === 'telemetry' && self._tmiTable) {
+                self._tmiTable.addTelemetry(d.data);
+            } else if (d.event === 'demod_status' && self._demodPanel) {
+                self._demodPanel.applyStatus(d.data, self._levelOffset);
+            }
+        });
+    };
+
+    /** Живой приём, когда у станции есть радиотракт; без него таблица и панель на mock. */
+    ManualLayout.prototype._applyLiveDemod = function() {
+        const live = this._radioPathName() !== null;
+        if (this._tmiTable) { this._tmiTable.setLive(live); }
+        if (this._demodPanel) { this._demodPanel.setLive(live); }
     };
 
     ManualLayout.prototype._initEyeConstellation = function() {
@@ -1927,6 +2119,7 @@
         this._detectRotatorKind();
         this._applyRotAvailability();
         this._updateIndicators();
+        this._applyLiveDemod();
     };
 
     ManualLayout.prototype.deactivate = function() {

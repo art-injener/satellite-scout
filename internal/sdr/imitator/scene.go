@@ -24,7 +24,11 @@ func newScene(opts Options, sampleRate float64) (*scene, error) {
 		s.sources = append(s.sources, src)
 	}
 	if opts.NoiseDBFS != 0 {
-		s.noiseStd = math.Sqrt(math.Pow(10, opts.NoiseDBFS/10) / 2)
+		noiseDBFS := opts.NoiseDBFS
+		if opts.NoiseRefRateHz > 0 {
+			noiseDBFS += 10 * math.Log10(sampleRate/opts.NoiseRefRateHz)
+		}
+		s.noiseStd = math.Sqrt(math.Pow(10, noiseDBFS/10) / 2)
 	}
 	return s, nil
 }

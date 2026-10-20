@@ -1,7 +1,7 @@
 // telemetry-table.js — блок «Телеметрия» Ручного режима (ADR-004 § 4.7, блок 4).
 //
-// MVP: одна таблица без вкладок каналов. Mock-генератор пакетов для разработки.
-// Реальные данные — SSE `tmi_packet` (после DEMOD-003).
+// MVP: одна таблица без вкладок каналов. Принятые кадры приходят по SSE `telemetry`;
+// mock-генератор работает, только пока у станции нет радиотракта.
 
 'use strict';
 
@@ -25,9 +25,28 @@
 
     function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
-    function timeNow() {
-        const d = new Date();
+    function timeOf(d) {
         return pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
+    }
+
+    function timeNow() {
+        return timeOf(new Date());
+    }
+
+    /**
+     * Строка таблицы из кадра SSE `telemetry`: отправитель в колонке канала,
+     * получатель и данные — параметрами; не текстовые данные показываются в hex.
+     * @param {Object} ev — событие сервера (internal/demod.TelemetryEvent)
+     */
+    function telemetryPacket(ev) {
+        const data = ev.info ? { key: 'данные', value: ev.info } : { key: 'hex', value: ev.info_hex || '' };
+        return {
+            time: timeOf(new Date(ev.timestamp_ms)),
+            crc: 'OK',
+            channelLabel: ev.src,
+            channelFreqMHz: ev.frequency_hz / 1e6,
+            params: [{ key: 'кому', value: ev.dest }, data],
+        };
     }
 
     function formatFreqMHz(freqMHz) {
@@ -74,6 +93,7 @@
         this._autoScroll = true;
         this._mockTimer = null;
         this._active = false;
+        this._live = false;
         this._channelLabel = 'ISS-FSK';
         this._channelFreq = 437.800;
     }
@@ -198,10 +218,34 @@
         });
     };
 
+    /** Принятый кадр из SSE `telemetry`. */
+    TelemetryTable.prototype.addTelemetry = function(ev) {
+        this.addPacket(telemetryPacket(ev));
+    };
+
     // ── Жизненный цикл ───────────────────────────────────────────────────
+
+    /**
+     * Живой режим — у станции есть радиотракт: строки дают только принятые кадры, mock выключен.
+     * @param {boolean} live
+     */
+    TelemetryTable.prototype.setLive = function(live) {
+        if (this._live === live) { return; }
+        this._live = live;
+        if (live) {
+            this.stopMock();
+            this._active = true;
+        } else if (this._active) {
+            this.startMock();
+        }
+    };
 
     TelemetryTable.prototype.activate = function() {
         if (this._active) { return; }
+        if (this._live) {
+            this._active = true;
+            return;
+        }
         this.startMock();
     };
 
@@ -222,6 +266,6 @@
     }
 
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-        module.exports = { TelemetryTable: TelemetryTable }; // eslint-disable-line no-undef
+        module.exports = { TelemetryTable: TelemetryTable, telemetryPacket: telemetryPacket }; // eslint-disable-line no-undef
     }
 })();

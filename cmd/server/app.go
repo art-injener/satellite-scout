@@ -17,6 +17,7 @@ import (
 	assets "github.com/art-injener/satellite-scout"
 	"github.com/art-injener/satellite-scout/internal/access"
 	"github.com/art-injener/satellite-scout/internal/config"
+	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/exclude"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
@@ -142,12 +143,15 @@ func NewApp(configStore *config.Store) *app {
 		receiverHub.Register(pathID, sdr.PathConfig{SampleRateHz: rc.SampleRateHz}, func() (sdr.Receiver, error) {
 			switch rc.Driver {
 			case "imitator", "simulated", "":
-				return imitator.New(imitatorOptions(rc.Imitator)), nil
+				return imitator.New(pathImitatorOptions(rc.Imitator, rc.SampleRateHz)), nil
 			default:
 				return nil, fmt.Errorf("%w: %q", sdr.ErrDriverNotImplemented, rc.Driver)
 			}
 		})
 	}
+	// Демодулятор принимает телеметрию попутно со зрителями потока тракта и сам поток не держит:
+	// приём идёт, пока открыт «Спектр».
+	receiverHub.SetStreamTap(demod.NewService(receiverHub, sseHub.Broadcast).Run)
 
 	return &app{
 		cfg:         cfg,

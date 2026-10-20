@@ -21,12 +21,19 @@ const (
 	SignalCarrier SignalKind = "carrier"
 	// SignalAFSKPRBS — непрерывный AFSK 1200, биты PRBS-9 идут на линию напрямую: эталон для BER.
 	SignalAFSKPRBS SignalKind = "afsk_prbs"
-	// SignalBeacon — маяк КА: кадр AX.25 в AFSK 1200 раз в Period.
+	// SignalBeacon — маяк КА: кадр AX.25 раз в Period, модуляция по Modem.
 	SignalBeacon SignalKind = "beacon"
 )
 
-// maxSweepShare — наибольший размах хода как доля частоты дискретизации: несущая остаётся внутри полосы.
-const maxSweepShare = 0.45
+// BeaconModem — модуляция кадра маяка; названия совпадают с демодуляторами канала.
+type BeaconModem string
+
+const (
+	// BeaconAFSK1200 — AFSK 1200 поверх FM (Bell 202); пустое значение означает его же.
+	BeaconAFSK1200 BeaconModem = "afsk1200"
+	// BeaconFSK9600G3RUH — GFSK 9600 со скремблером G3RUH.
+	BeaconFSK9600G3RUH BeaconModem = "fsk9600_g3ruh"
+)
 
 // Signal — источник в эфире имитатора. Сдвиг от центра приёмника в момент t:
 // FrequencyHz − центр + DopplerHz + DopplerRateHzS·t + ход(t).
@@ -39,7 +46,7 @@ type Signal struct {
 	DopplerRateHzS float64 // линейный дрейф Доплера, Гц/с
 
 	// SweepHz — размах хода по частоте от FrequencyHz: туда-обратно с постоянной скоростью,
-	// старт с центра вверх. Ограничен maxSweepShare частоты дискретизации. 0 — без хода.
+	// старт с центра вверх. От полосы приёмника не зависит: вне её сигнал не виден. 0 — без хода.
 	SweepHz     float64
 	SweepPeriod time.Duration // полный цикл хода
 
@@ -51,6 +58,7 @@ type Signal struct {
 
 	Frame  ax25.Frame    // кадр маяка
 	Period time.Duration // интервал между началами кадров маяка
+	Modem  BeaconModem   // модуляция маяка
 }
 
 // cleanGen выдаёт сигнал без сдвига по частоте, с единичной амплитудой.
@@ -100,7 +108,7 @@ func newSignalSource(sig Signal, sampleRate float64) (*signalSource, error) {
 	s := &signalSource{
 		sig:        sig,
 		sampleRate: sampleRate,
-		sweepHz:    min(math.Abs(sig.SweepHz), maxSweepShare*sampleRate),
+		sweepHz:    math.Abs(sig.SweepHz),
 		gen:        gen,
 		gain:       float32(math.Pow(10, sig.LevelDBFS/20)),
 		passK:      math.Pow(10, sig.PassSwingDB/10) - 1,

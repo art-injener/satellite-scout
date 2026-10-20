@@ -3,6 +3,7 @@ package sdr
 import (
 	"context"
 	"errors"
+	"slices"
 	"sync"
 	"testing"
 	"time"
@@ -292,4 +293,173 @@ func TestSession_CloseAllClosesViewers(t *testing.T) {
 		t.Fatalf("CloseAll: %v", err)
 	}
 	waitClosed(t, frames)
+}
+
+func TestHub_SampleRateDefaultsAndChoices(t *testing.T) {
+	hub, _ := hubWithStub(PathConfig{})
+	if rate, err := hub.SampleRate("p"); err != nil || rate != 2_048_000 {
+		t.Fatalf("SampleRate=%d, %v; want recommended 2048000", rate, err)
+	}
+	choices, err := hub.SampleRateChoices("p")
+	if err != nil {
+		t.Fatalf("SampleRateChoices: %v", err)
+	}
+	if want := []uint32{2_048_000, 1_024_000, 256_000}; !slices.Equal(choices, want) {
+		t.Errorf("choices=%v, want %v", choices, want)
+	}
+}
+
+func TestHub_SetSampleRateRejectsOutsideChoices(t *testing.T) {
+	hub, _ := hubWithStub(PathConfig{})
+	if err := hub.SetSampleRate("p", 512_000); !errors.Is(err, ErrSampleRateUnsupported) {
+		t.Fatalf("err=%v, want ErrSampleRateUnsupported", err)
+	}
+	if rate, _ := hub.SampleRate("p"); rate != 2_048_000 {
+		t.Errorf("SampleRate=%d after rejected set, want 2048000", rate)
+	}
+	if err := hub.SetSampleRate("nope", 256_000); !errors.Is(err, ErrUnknownRadioPath) {
+		t.Errorf("err=%v, want ErrUnknownRadioPath", err)
+	}
+}
+
+func TestHub_SetSampleRateBeforeStreamUsedByNextSession(t *testing.T) {
+	hub, stub := hubWithStub(PathConfig{})
+	if err := hub.SetSampleRate("p", 256_000); err != nil {
+		t.Fatalf("SetSampleRate: %v", err)
+	}
+	if starts, _ := stub.counts(); starts != 0 {
+		t.Fatalf("starts=%d, want no stream without viewers", starts)
+	}
+	_, unsubscribe, err := hub.Subscribe("p")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer unsubscribe()
+	if stub.cfg.SampleRate != 256_000 {
+		t.Errorf("stream SampleRate=%d, want selected 256000", stub.cfg.SampleRate)
+	}
+}
+
+// Смена частоты при идущем потоке перезапускает поток устройства, а зрители остаются
+// на своих каналах: кадры новой частоты приходят туда же.
+func TestHub_SetSampleRateRestartsStreamKeepingViewers(t *testing.T) {
+	hub, stub := hubWithStub(PathConfig{})
+	frames, unsubscribe, _ := hub.Subscribe("p")
+	defer unsubscribe()
+
+	if err := hub.SetSampleRate("p", 256_000); err != nil {
+		t.Fatalf("SetSampleRate: %v", err)
+	}
+	if starts, stops := stub.counts(); starts != 2 || stops != 1 {
+		t.Fatalf("starts=%d stops=%d, want the device stream restarted once", starts, stops)
+	}
+	if stub.cfg.SampleRate != 256_000 {
+		t.Errorf("restarted stream SampleRate=%d, want 256000", stub.cfg.SampleRate)
+	}
+	stub.send(makeFrame(21))
+	if id := frameID(recvFrame(t, frames)); id != 21 {
+		t.Errorf("got id=%d, want 21 from the restarted stream", id)
+	}
+
+	// Конец потока по вине устройства по-прежнему закрывает зрителей
+	stub.end()
+	waitClosed(t, frames)
+}
+
+// tapRecorder collects the streams handed to the hub stream tap.
+func tapRecorder(hub *ReceiverHub) <-chan (<-chan IQFrame) {
+	taps := make(chan (<-chan IQFrame), 4)
+	hub.SetStreamTap(func(pathID string, frames <-chan IQFrame) {
+		if pathID == "p" {
+			taps <- frames
+		}
+	})
+	return taps
+}
+
+func recvTap(t *testing.T, taps <-chan (<-chan IQFrame)) <-chan IQFrame {
+	t.Helper()
+	select {
+	case ch := <-taps:
+		return ch
+	case <-time.After(time.Second):
+		t.Fatal("stream tap not called")
+	}
+	return nil
+}
+
+// The tap rides along with viewers: it gets the same frames, does not keep the device
+// stream running and is closed when the last viewer leaves.
+func TestHub_StreamTapRidesAlongWithViewers(t *testing.T) {
+	hub, stub := hubWithStub(PathConfig{})
+	taps := tapRecorder(hub)
+	frames, unsubscribe, _ := hub.Subscribe("p")
+	tap := recvTap(t, taps)
+
+	_, unsubscribe2, _ := hub.Subscribe("p")
+	unsubscribe2()
+	select {
+	case <-taps:
+		t.Fatal("tap called again for a viewer joining a running stream")
+	default:
+	}
+
+	stub.send(makeFrame(31))
+	if id := frameID(recvFrame(t, frames)); id != 31 {
+		t.Errorf("viewer got id=%d, want 31", id)
+	}
+	if id := frameID(recvFrame(t, tap)); id != 31 {
+		t.Errorf("tap got id=%d, want 31", id)
+	}
+
+	unsubscribe()
+	if _, stops := stub.counts(); stops != 1 {
+		t.Errorf("stops=%d, want the stream stopped by the last viewer despite the tap", stops)
+	}
+	waitClosed(t, tap)
+
+	// The next session gets a fresh tap.
+	_, unsubscribe3, _ := hub.Subscribe("p")
+	defer unsubscribe3()
+	recvTap(t, taps)
+}
+
+func TestHub_StreamTapKeptAcrossSampleRateChange(t *testing.T) {
+	hub, stub := hubWithStub(PathConfig{})
+	taps := tapRecorder(hub)
+	_, unsubscribe, _ := hub.Subscribe("p")
+	defer unsubscribe()
+	tap := recvTap(t, taps)
+
+	if err := hub.SetSampleRate("p", 256_000); err != nil {
+		t.Fatalf("SetSampleRate: %v", err)
+	}
+	stub.send(makeFrame(41))
+	if id := frameID(recvFrame(t, tap)); id != 41 {
+		t.Errorf("tap got id=%d, want 41 from the restarted stream", id)
+	}
+}
+
+func TestHub_SetSampleRateSameRateKeepsStream(t *testing.T) {
+	hub, stub := hubWithStub(PathConfig{})
+	_, unsubscribe, _ := hub.Subscribe("p")
+	defer unsubscribe()
+	if err := hub.SetSampleRate("p", 2_048_000); err != nil {
+		t.Fatalf("SetSampleRate: %v", err)
+	}
+	if starts, stops := stub.counts(); starts != 1 || stops != 0 {
+		t.Errorf("starts=%d stops=%d, want the stream untouched", starts, stops)
+	}
+}
+
+func TestHub_SetChannelValidatedBySelectedRate(t *testing.T) {
+	hub, _ := hubWithStub(PathConfig{})
+	if err := hub.SetSampleRate("p", 256_000); err != nil {
+		t.Fatalf("SetSampleRate: %v", err)
+	}
+	c := DefaultChannelSettings()
+	c.OffsetHz = 200_000 // внутри 2,048 МГц, за краем 256 кГц
+	if err := hub.SetChannel("p", c); !errors.Is(err, ErrInvalidChannel) {
+		t.Errorf("err=%v, want ErrInvalidChannel at 256 kHz", err)
+	}
 }

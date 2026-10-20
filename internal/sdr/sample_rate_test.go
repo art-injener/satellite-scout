@@ -2,6 +2,7 @@ package sdr
 
 import (
 	"errors"
+	"slices"
 	"testing"
 )
 
@@ -65,5 +66,28 @@ func TestResolveSampleRate_DriverWithoutRangesAcceptsNothingConfigured(t *testin
 	caps := Capabilities{RecommendedSampleRate: 2_048_000}
 	if _, err := ResolveSampleRate(caps, 1_024_000); !errors.Is(err, ErrSampleRateUnsupported) {
 		t.Errorf("err=%v, want ErrSampleRateUnsupported", err)
+	}
+}
+
+func TestSampleRateChoices(t *testing.T) {
+	wide := Capabilities{SampleRateRanges: []SampleRateRange{{MinHz: 48_000, MaxHz: 2_400_000}}}
+	tests := []struct {
+		name string
+		caps Capabilities
+		base uint32
+		want []uint32
+	}{
+		{"wide driver keeps every step", wide, 2_048_000, []uint32{2_048_000, 1_024_000, 512_000, 256_000}},
+		{"rtl gap drops 512 kHz", rtlLikeCaps(), 2_048_000, []uint32{2_048_000, 1_024_000, 256_000}},
+		{"rtl at 2.4 MHz drops 600 kHz", rtlLikeCaps(), 2_400_000, []uint32{2_400_000, 1_200_000, 300_000}},
+		{"steps below the driver minimum dropped", wide, 192_000, []uint32{192_000, 96_000, 48_000}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := SampleRateChoices(tc.caps, tc.base)
+			if !slices.Equal(got, tc.want) {
+				t.Errorf("SampleRateChoices=%v, want %v", got, tc.want)
+			}
+		})
 	}
 }

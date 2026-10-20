@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"sync/atomic"
 )
 
 // ErrUnknownRadioPath — радиотракт не зарегистрирован в хабе.
@@ -25,6 +26,10 @@ type hubEntry struct {
 	cfg      PathConfig
 	factory  ReceiverFactory
 	receiver Receiver // nil, пока Get ещё не вызывали
+	channel  ChannelSettings
+	// rate — частота дискретизации, выбранная оператором; 0 — из конфига или рекомендуемая.
+	// Атомарная: читается под sessMu, где ReceiverHub.mu брать нельзя.
+	rate atomic.Uint32
 
 	// Под sessMu нельзя брать ReceiverHub.mu: CloseAll берёт их в порядке mu, затем sessMu.
 	sessMu  sync.Mutex
@@ -36,6 +41,25 @@ type hubEntry struct {
 type ReceiverHub struct {
 	mu      sync.Mutex
 	entries map[string]*hubEntry
+	tap     StreamTap
+}
+
+// StreamTap — попутный получатель потока тракта (демодулятор). Вызывается в отдельной горутине
+// при запуске каждого потока устройства. Зрителем не считается: поток не держит, его канал
+// закрывается вместе с потоком; смену частоты дискретизации переживает.
+type StreamTap func(pathID string, frames <-chan IQFrame)
+
+// SetStreamTap задаёт попутного получателя для потоков, запущенных после вызова.
+func (h *ReceiverHub) SetStreamTap(tap StreamTap) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.tap = tap
+}
+
+func (h *ReceiverHub) streamTap() StreamTap {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.tap
 }
 
 // NewReceiverHub создаёт пустой хаб приёмников.
@@ -49,25 +73,79 @@ func NewReceiverHub() *ReceiverHub {
 func (h *ReceiverHub) Register(pathID string, cfg PathConfig, factory ReceiverFactory) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.entries[pathID] = &hubEntry{cfg: cfg, factory: factory}
+	h.entries[pathID] = &hubEntry{cfg: cfg, factory: factory, channel: DefaultChannelSettings()}
 }
 
-// SampleRate возвращает частоту дискретизации тракта: из конфига или рекомендуемую драйвером,
-// с проверкой по возможностям драйвера. Открывает приёмник, если он ещё не открыт.
+// Channel возвращает настройки демодулятора тракта.
+func (h *ReceiverHub) Channel(pathID string) (ChannelSettings, error) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	entry, ok := h.entries[pathID]
+	if !ok {
+		return ChannelSettings{}, fmt.Errorf("%w: %q", ErrUnknownRadioPath, pathID)
+	}
+	return entry.channel, nil
+}
+
+// SetChannel проверяет настройки демодулятора по полосе приёмника и сохраняет их.
+// Неподходящие не сохраняются, у тракта остаются прежние.
+func (h *ReceiverHub) SetChannel(pathID string, c ChannelSettings) error {
+	rate, err := h.SampleRate(pathID)
+	if err != nil {
+		return err
+	}
+	if err := c.Validate(rate); err != nil {
+		return err
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.entries[pathID].channel = c
+	return nil
+}
+
+// SampleRate возвращает частоту дискретизации тракта: выбранную оператором, иначе из конфига
+// или рекомендуемую драйвером, с проверкой по возможностям драйвера.
+// Открывает приёмник, если он ещё не открыт.
 func (h *ReceiverHub) SampleRate(pathID string) (uint32, error) {
-	r, err := h.Get(pathID)
+	_, entry, base, err := h.baseRate(pathID)
 	if err != nil {
 		return 0, err
 	}
+	return entry.currentRate(base), nil
+}
+
+// SampleRateChoices возвращает частоты, на которые оператор может переключить тракт.
+func (h *ReceiverHub) SampleRateChoices(pathID string) ([]uint32, error) {
+	r, _, base, err := h.baseRate(pathID)
+	if err != nil {
+		return nil, err
+	}
+	return SampleRateChoices(r.Capabilities(), base), nil
+}
+
+// baseRate открывает приёмник тракта и возвращает частоту из конфига или рекомендуемую драйвером.
+func (h *ReceiverHub) baseRate(pathID string) (Receiver, *hubEntry, uint32, error) {
+	r, err := h.Get(pathID)
+	if err != nil {
+		return nil, nil, 0, err
+	}
 	h.mu.Lock()
-	cfg := h.entries[pathID].cfg
+	entry := h.entries[pathID]
 	h.mu.Unlock()
 
-	rate, err := ResolveSampleRate(r.Capabilities(), cfg.SampleRateHz)
+	rate, err := ResolveSampleRate(r.Capabilities(), entry.cfg.SampleRateHz)
 	if err != nil {
-		return 0, fmt.Errorf("radio path %q: %w", pathID, err)
+		return nil, nil, 0, fmt.Errorf("radio path %q: %w", pathID, err)
 	}
-	return rate, nil
+	return r, entry, rate, nil
+}
+
+// currentRate — выбранная оператором частота или base, если он её не менял.
+func (e *hubEntry) currentRate(base uint32) uint32 {
+	if r := e.rate.Load(); r != 0 {
+		return r
+	}
+	return base
 }
 
 // Get возвращает Receiver для радиотракта pathID. При первом вызове создаёт через фабрику.

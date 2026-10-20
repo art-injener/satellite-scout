@@ -29,14 +29,20 @@ func DefaultBeaconFrame() ax25.Frame {
 	}
 }
 
-// beaconGen выдаёт маяк без сдвига: кадр AX.25 в AFSK 1200 поверх FM, затем тишина до конца периода.
+// lineModulator переводит уровни линии в IQ; состояние сохраняется между вызовами.
+type lineModulator interface {
+	Modulate(dst []complex64, levels []byte) []complex64
+}
+
+// beaconGen выдаёт маяк без сдвига: кадр AX.25 поверх FM, затем тишина до конца периода.
 type beaconGen struct {
 	sampleRate    float64
-	levels        []byte // уровни линии одного кадра после NRZI
-	afsk          modem.AFSKConfig
+	levels        []byte // уровни линии одного кадра
+	baud          float64
+	newMod        func() lineModulator
 	periodSamples int
 
-	mod         *modem.AFSK
+	mod         lineModulator
 	modBuf      []complex64 // буфер модулятора, переиспользуется
 	pending     []complex64 // промодулировано, но ещё не выдано (часть modBuf)
 	symbol      int         // следующий символ кадра
@@ -52,8 +58,21 @@ func newBeaconGen(sig Signal, sampleRate float64) (*beaconGen, error) {
 	b := &beaconGen{
 		sampleRate:    sampleRate,
 		levels:        ax25.NRZI(ax25.HDLCBits(frame, beaconPreambleFlags, beaconPostambleFlags)),
-		afsk:          modem.AFSK1200(sampleRate),
 		periodSamples: int(sig.Period.Seconds() * sampleRate),
+	}
+	switch sig.Modem {
+	case "", BeaconAFSK1200:
+		cfg := modem.AFSK1200(sampleRate)
+		b.baud = cfg.Baud
+		b.newMod = func() lineModulator { return modem.NewAFSK(cfg) }
+	case BeaconFSK9600G3RUH:
+		cfg := modem.FSK9600(sampleRate)
+		var s modem.G3RUHScrambler
+		b.levels = s.Scramble(nil, b.levels)
+		b.baud = cfg.Baud
+		b.newMod = func() lineModulator { return modem.NewFSK(cfg) }
+	default:
+		return nil, fmt.Errorf("%w: unknown beacon modem %q", ErrInvalidSignal, sig.Modem)
 	}
 	b.startBurst()
 	return b, nil
@@ -61,11 +80,11 @@ func newBeaconGen(sig Signal, sampleRate float64) (*beaconGen, error) {
 
 // burstSamples — длительность одного кадра в отсчётах.
 func (b *beaconGen) burstSamples() int {
-	return int(math.Round(float64(len(b.levels)) * b.sampleRate / b.afsk.Baud))
+	return int(math.Round(float64(len(b.levels)) * b.sampleRate / b.baud))
 }
 
 func (b *beaconGen) startBurst() {
-	b.mod = modem.NewAFSK(b.afsk)
+	b.mod = b.newMod()
 	b.pending = nil
 	b.symbol = 0
 	b.inBurst = true

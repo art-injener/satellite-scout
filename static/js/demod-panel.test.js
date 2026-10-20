@@ -39,7 +39,7 @@ global.document = {
 };
 global.window = {};
 
-const { DemodPanel, formatFreqMHz, metricsFromTx } = require('./demod-panel.js');
+const { DemodPanel, formatFreqMHz, metricsFromTx, metricsFromStatus } = require('./demod-panel.js');
 
 let passed = 0;
 let failed = 0;
@@ -114,6 +114,87 @@ test('setChannel populates extended metrics for active tx', () => {
     assert.ok(nodes.get('manual-dm-squelch').classList._set.has('ml-demod__value--ok'));
     assert.strictEqual(nodes.get('manual-dm-sync').textContent, '131');
     assert.strictEqual(nodes.get('manual-dm-last').textContent, '0.8 s');
+    panel.destroy();
+});
+
+const status = {
+    radio_path: 'radio_path_1',
+    active: true,
+    demod: 'afsk1200',
+    supported: true,
+    frequency_hz: 145825000,
+    level_dbfs: -40.04,
+    squelch_dbfs: -90,
+    squelch_open: true,
+    frames_good: 3,
+    frames_bad: 1,
+    last_packet_ms: 10000,
+};
+
+test('metricsFromStatus formats live demodulator state in dBFS', () => {
+    const m = metricsFromStatus(status, null, 12500);
+    assert.strictEqual(m.lock, true);
+    assert.strictEqual(m.pipeline, 'AFSK 1200');
+    assert.strictEqual(m.rate, '1.2 ksym/s');
+    assert.strictEqual(m.rssi, '−40.0 dBFS');
+    assert.strictEqual(m.squelch, 'Open / −90.0 dBFS');
+    assert.strictEqual(m.squelchClosed, false);
+    assert.strictEqual(m.frames, '3');
+    assert.strictEqual(m.sync, '4');
+    assert.strictEqual(m.last, '2.5 s');
+    assert.strictEqual(m.snr, '—');
+});
+
+test('metricsFromStatus uses dBm with calibration and idles when stopped', () => {
+    const m = metricsFromStatus(Object.assign({}, status, { active: false, squelch_open: false }), -32, 12500);
+    assert.strictEqual(m.lock, false);
+    assert.strictEqual(m.rssi, '−72 dBm');
+    assert.strictEqual(m.squelch, 'Closed / −122 dBm');
+    assert.strictEqual(m.squelchClosed, true);
+});
+
+test('metricsFromStatus labels FSK 9600 G3RUH', () => {
+    const m = metricsFromStatus(Object.assign({}, status, { demod: 'fsk9600_g3ruh' }), null, 0);
+    assert.strictEqual(m.pipeline, 'FSK 9600 G3RUH');
+    assert.strictEqual(m.rate, '9.6 ksym/s');
+});
+
+test('metricsFromStatus marks a demodulator that is not implemented', () => {
+    const m = metricsFromStatus(Object.assign({}, status, { demod: 'gmsk9600', supported: false }), null, 0);
+    assert.strictEqual(m.lock, false);
+    assert.strictEqual(m.pipeline, 'gmsk9600 — не реализован');
+});
+
+test('applyStatus shows CRC of the latest frame from counter growth', () => {
+    const panel = new DemodPanel();
+    panel.setLive(true);
+    panel.applyStatus(Object.assign({}, status, { frames_good: 0, frames_bad: 0, last_packet_ms: 0 }), null);
+    assert.strictEqual(nodes.get('manual-dm-crc').textContent, '—');
+    panel.applyStatus(Object.assign({}, status, { frames_good: 1, frames_bad: 0 }), null);
+    assert.strictEqual(nodes.get('manual-dm-crc').textContent, 'OK');
+    panel.applyStatus(Object.assign({}, status, { frames_good: 1, frames_bad: 1 }), null);
+    assert.strictEqual(nodes.get('manual-dm-crc').textContent, 'FAIL');
+    panel.applyStatus(Object.assign({}, status, { frames_good: 1, frames_bad: 1 }), null);
+    assert.strictEqual(nodes.get('manual-dm-crc').textContent, 'FAIL', 'unchanged counters keep the last result');
+    // A new stream session restarts the counters.
+    panel.applyStatus(Object.assign({}, status, { frames_good: 0, frames_bad: 0 }), null);
+    assert.strictEqual(nodes.get('manual-dm-crc').textContent, '—');
+    panel.destroy();
+});
+
+test('live mode turns off the mock drift and keeps live metrics on channel change', () => {
+    const panel = new DemodPanel();
+    panel.setChannel({ freqMHz: 437.8, label: 'ISS-FSK', modulation: 'FSK 9600', active: true });
+    assert.ok(panel._mockTimer, 'mock drift runs without a radio path');
+    panel.setLive(true);
+    assert.strictEqual(panel._mockTimer, null);
+    assert.strictEqual(nodes.get('manual-dm-snr').textContent, '—', 'live mode drops mock values');
+
+    panel.applyStatus(status, null);
+    panel.setChannel({ freqMHz: 145.825, label: 'SCOUT', modulation: 'AFSK 1200', active: true });
+    assert.strictEqual(panel._mockTimer, null);
+    assert.strictEqual(nodes.get('manual-ch-name').textContent, 'SCOUT');
+    assert.strictEqual(nodes.get('manual-dm-rssi').textContent, '−40.0 dBFS', 'channel change keeps live metrics');
     panel.destroy();
 });
 

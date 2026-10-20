@@ -1,8 +1,8 @@
 // demod-panel.js — блок «Демодулятор»: текущий канал + сетка метрик.
 //
-// MVP: один канал, mock-метрики. Обновление шапки — по событию panorama:tune
-// или вызову setChannel() из ManualLayout.
-// SSE vfo_status — после DEMOD-005 на бэке.
+// MVP: один канал. Обновление шапки — по событию panorama:tune или вызову setChannel()
+// из ManualLayout. Метрики живого режима — из SSE `demod_status`; mock — пока у станции
+// нет радиотракта.
 
 'use strict';
 
@@ -83,6 +83,65 @@
         };
     }
 
+    // Подписи демодуляторов сервера (internal/sdr.Demods) и скорость символов.
+    const DEMOD_LABELS = {
+        afsk1200: { pipeline: 'AFSK 1200', rate: '1.2 ksym/s' },
+        fsk9600_g3ruh: { pipeline: 'FSK 9600 G3RUH', rate: '9.6 ksym/s' },
+    };
+
+    /** Уровень в dBm по поправке тракта, без неё — в dBFS; минус типографский. */
+    function formatLevel(dbfs, levelOffset) {
+        const text = typeof levelOffset === 'number'
+            ? (dbfs + levelOffset).toFixed(0) + ' dBm'
+            : dbfs.toFixed(1) + ' dBFS';
+        return text.replace('-', '−');
+    }
+
+    function formatAge(ms) {
+        const s = Math.max(0, ms) / 1000;
+        return s < 10 ? s.toFixed(1) + ' s' : Math.round(s) + ' s';
+    }
+
+    /**
+     * Метрики панели из SSE `demod_status`. Чего демодулятор пока не измеряет — «—».
+     * CRC последнего кадра считает DemodPanel.applyStatus по приросту счётчиков.
+     * @param {Object} st — событие сервера (internal/demod.StatusEvent)
+     * @param {?number} levelOffset — сдвиг dBFS в dBm, null — без поправки
+     * @param {number} nowMs — текущее время, мс эпохи
+     */
+    function metricsFromStatus(st, levelOffset, nowMs) {
+        const known = DEMOD_LABELS[st.demod];
+        const open = st.active && st.squelch_open;
+        return {
+            lock: st.active && st.supported,
+            pipeline: st.supported && known ? known.pipeline : st.demod + ' — не реализован',
+            snr: '—',
+            cn0: '—',
+            esn0: '—',
+            ber: '—',
+            rssi: formatLevel(st.level_dbfs, levelOffset),
+            afc: '—',
+            foff: '—',
+            fec: '—',
+            squelch: (open ? 'Open' : 'Closed') + ' / ' + formatLevel(st.squelch_dbfs, levelOffset),
+            squelchClosed: !open,
+            rate: known ? known.rate : '—',
+            frames: String(st.frames_good),
+            sync: String(st.frames_good + st.frames_bad),
+            crc: '—',
+            last: st.last_packet_ms ? formatAge(nowMs - st.last_packet_ms) : '—',
+        };
+    }
+
+    /** Метрики живого режима до первого состояния с сервера. */
+    function idleLiveMetrics(pipeline) {
+        return {
+            lock: false, pipeline: pipeline || '—', snr: '—', cn0: '—', esn0: '—', ber: '—', rssi: '—',
+            afc: '—', foff: '—', fec: '—', squelch: '—', squelchClosed: true, rate: '—',
+            frames: '—', sync: '—', crc: '—', last: '—',
+        };
+    }
+
     /**
      * DemodPanel — шапка текущего канала и сетка метрик.
      * @param {Object} [opts]
@@ -120,7 +179,47 @@
         this._frames = 0;
         this._syncCount = 0;
         this._lastFrameAt = 0;
+        this._live = false;
+        this._liveCounts = { good: 0, bad: 0, crc: '—' };
     }
+
+    /**
+     * Живой режим — у станции есть радиотракт: метрики только из applyStatus, mock выключен.
+     * @param {boolean} live
+     */
+    DemodPanel.prototype.setLive = function(live) {
+        if (this._live === live) { return; }
+        this._live = live;
+        if (live) {
+            this._stopMockDrift();
+            this._liveCounts = { good: 0, bad: 0, crc: '—' };
+            this._applyMetrics(idleLiveMetrics());
+        } else if (this._channel) {
+            this.setChannel(this._channel);
+        }
+    };
+
+    /**
+     * Состояние демодулятора из SSE `demod_status`.
+     * @param {Object} st
+     * @param {?number} levelOffset — сдвиг dBFS в dBm, null — без поправки
+     */
+    DemodPanel.prototype.applyStatus = function(st, levelOffset) {
+        if (!this._live || !st) { return; }
+        const c = this._liveCounts;
+        if (st.frames_good < c.good || st.frames_bad < c.bad) {
+            c.crc = '—'; // новый сеанс потока: счётчики начались заново
+        } else if (st.frames_good > c.good) {
+            c.crc = 'OK';
+        } else if (st.frames_bad > c.bad) {
+            c.crc = 'FAIL';
+        }
+        c.good = st.frames_good;
+        c.bad = st.frames_bad;
+        const m = metricsFromStatus(st, levelOffset, Date.now());
+        m.crc = c.crc;
+        this._applyMetrics(m);
+    };
 
     DemodPanel.prototype.setChannel = function(ch) {
         if (!ch || typeof ch.freqMHz !== 'number') {
@@ -128,6 +227,9 @@
         }
         this._channel = ch;
         this._renderHeader(ch);
+        if (this._live) {
+            return;
+        }
         this._applyMetrics(metricsFromTx(ch));
         if (ch.active !== false) {
             this._startMockDrift();
@@ -307,6 +409,11 @@
     }
 
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-        module.exports = { DemodPanel: DemodPanel, formatFreqMHz: formatFreqMHz, metricsFromTx: metricsFromTx }; // eslint-disable-line no-undef
+        module.exports = { // eslint-disable-line no-undef
+            DemodPanel: DemodPanel,
+            formatFreqMHz: formatFreqMHz,
+            metricsFromTx: metricsFromTx,
+            metricsFromStatus: metricsFromStatus,
+        };
     }
 })();

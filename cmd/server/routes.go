@@ -76,6 +76,7 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	mux.HandleFunc("GET /api/sdr/devices", sdrHandler.ListDevices)
 	mux.HandleFunc("POST /api/sdr/test", sdrHandler.Test)
 	mux.HandleFunc("POST /api/sdr/tune", deps.Access.RequireControl(sdrHandler.Tune))
+	mux.HandleFunc("POST /api/sdr/receiver", deps.Access.RequireControl(sdrHandler.SetReceiver))
 	mux.HandleFunc("GET /api/sdr/status", sdrHandler.GetStatus)
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)

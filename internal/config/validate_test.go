@@ -243,6 +243,7 @@ func sampleImitator() *ImitatorConfig {
 			{Kind: ImitatorAFSKPRBS, FreqHz: 436_510_000, LevelDBFS: -50, DopplerHz: -2_000, DopplerRateHzS: 15,
 				PassSwingDB: 30, PassPeriodS: 600},
 			{Kind: ImitatorBeacon, FreqHz: 436_490_000, LevelDBFS: -45, PeriodS: 10},
+			{Kind: ImitatorBeacon, FreqHz: 436_470_000, LevelDBFS: -45, PeriodS: 10, Modem: ImitatorFSK9600G3RUH},
 		},
 	}
 }
@@ -277,6 +278,8 @@ func TestValidate_ImitatorSignalErrors(t *testing.T) {
 		{"pass without period", func(im *ImitatorConfig) { im.Signals[1].PassPeriodS = 0 }, ".signals[1].pass_period_s"},
 		{"negative pass swing", func(im *ImitatorConfig) { im.Signals[1].PassSwingDB = -5 }, ".signals[1].pass_swing_db"},
 		{"noise above full scale", func(im *ImitatorConfig) { im.NoiseDBFS = 1 }, ".noise_dbfs"},
+		{"unknown beacon modem", func(im *ImitatorConfig) { im.Signals[3].Modem = "gmsk9600" }, ".signals[3].modem"},
+		{"modem on non-beacon", func(im *ImitatorConfig) { im.Signals[1].Modem = ImitatorAFSK1200 }, ".signals[1].modem"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -370,7 +373,7 @@ func TestReceiverConfig_ImitatorJSON(t *testing.T) {
 		{"kind":"afsk_prbs","freq_hz":437000000,"level_dbfs":-45,"doppler_hz":-1500,"doppler_rate_hz_s":20},
 		{"kind":"carrier","freq_hz":436500000,"level_dbfs":-40,"sweep_hz":500000,"sweep_period_s":30,
 		 "pass_swing_db":50,"pass_period_s":45},
-		{"kind":"beacon","freq_hz":436400000,"level_dbfs":-50,"period_s":5}]}}`
+		{"kind":"beacon","freq_hz":436400000,"level_dbfs":-50,"period_s":5,"modem":"fsk9600_g3ruh"}]}}`
 	var rc ReceiverConfig
 	if err := json.Unmarshal([]byte(raw), &rc); err != nil {
 		t.Fatalf("unmarshal: %v", err)
@@ -379,7 +382,7 @@ func TestReceiverConfig_ImitatorJSON(t *testing.T) {
 		{Kind: ImitatorAFSKPRBS, FreqHz: 437_000_000, LevelDBFS: -45, DopplerHz: -1500, DopplerRateHzS: 20},
 		{Kind: ImitatorCarrier, FreqHz: 436_500_000, LevelDBFS: -40, SweepHz: 500_000, SweepPeriodS: 30,
 			PassSwingDB: 50, PassPeriodS: 45},
-		{Kind: ImitatorBeacon, FreqHz: 436_400_000, LevelDBFS: -50, PeriodS: 5},
+		{Kind: ImitatorBeacon, FreqHz: 436_400_000, LevelDBFS: -50, PeriodS: 5, Modem: ImitatorFSK9600G3RUH},
 	}}
 	if !reflect.DeepEqual(rc.Imitator, want) {
 		t.Errorf("imitator=%+v, want %+v", rc.Imitator, want)

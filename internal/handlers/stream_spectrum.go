@@ -136,6 +136,7 @@ func serveSpectrumLoop(
 		mode:    p.mode,
 	}
 	var center uint64 // частота приёмника в последнем блоке IQ
+	var rate uint32   // частота дискретизации в последнем блоке IQ
 
 	for {
 		select {
@@ -144,12 +145,12 @@ func serveSpectrumLoop(
 				sw.flushPipeline(pipeline)
 				return
 			}
-			// Приёмник перестроили: накопленное относится к прежней частоте
-			if center != 0 && frame.CenterHz != center {
+			// Приёмник перестроили или сменили полосу: накопленное относится к прежней настройке
+			if (center != 0 && frame.CenterHz != center) || (rate != 0 && frame.SampleRate != rate) {
 				chunker.reset()
 				pipeline.Reset()
 			}
-			center = frame.CenterHz
+			center, rate = frame.CenterHz, frame.SampleRate
 			sw.lastCenter = int64(frame.CenterHz)
 			sw.lastSpan = int64(frame.SampleRate)
 			chunker.feed(frame.Samples, pipeline.Push)
