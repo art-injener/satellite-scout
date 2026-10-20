@@ -24,6 +24,17 @@ func TestScene_NoisePowerOverWholeBand(t *testing.T) {
 	}
 }
 
+// Noise density of a real receiver is constant: a band 4 times narrower holds 6 dB less noise.
+func TestScene_NoiseScaledByReferenceRate(t *testing.T) {
+	s := newTestScene(t, Options{NoiseDBFS: -60, NoiseRefRateHz: 4 * testRate, Seed: 3})
+	x := make([]complex64, int(testRate))
+	s.fill(x, testCenter)
+	want := -60 + 10*math.Log10(0.25)
+	if p := 10 * math.Log10(meanPower(x)); math.Abs(p-want) > 0.1 {
+		t.Errorf("noise power %.2f dBFS, want %.2f", p, want)
+	}
+}
+
 func TestScene_NoNoiseByDefault(t *testing.T) {
 	s := newTestScene(t, Options{Signals: []Signal{testCarrier(30_000)}})
 	x := make([]complex64, 4800)

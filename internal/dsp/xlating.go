@@ -1,6 +1,9 @@
 package dsp
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 // DesignLowpass рассчитывает коэффициенты FIR-фильтра нижних частот
 // методом оконного sinc. Если numTaps чётное — увеличивается на 1
@@ -54,6 +57,8 @@ type XlatingFIR struct {
 	taps       []float64
 	phase      float64 // текущая фаза NCO (рад)
 	phaseStep  float64 // приращение фазы за отсчёт
+	shiftFunc  func(t time.Duration) float64
+	n          int // входных отсчётов с начала потока
 	delay      []complex128
 	delayPos   int
 	count      int // счётчик отсчётов до следующей точки децимации
@@ -81,6 +86,12 @@ func (x *XlatingFIR) Process(in []complex64) []complex64 {
 	ntaps := len(x.taps)
 
 	for _, s := range in {
+		if x.shiftFunc != nil {
+			t := time.Duration(float64(x.n) / x.sampleRate * float64(time.Second))
+			x.phaseStep = -2.0 * math.Pi * x.shiftFunc(t) / x.sampleRate
+		}
+		x.n++
+
 		// NCO: сдвигаем частоту
 		sin, cos := math.Sincos(x.phase)
 		shifted := complex128(s) * complex(cos, sin)
@@ -122,9 +133,19 @@ func (x *XlatingFIR) Process(in []complex64) []complex64 {
 	return out
 }
 
-// SetShift перестраивает NCO на новую частоту без сброса фильтра.
+// SetShift перестраивает NCO на новую частоту без сброса фильтра
+// и отменяет функцию сдвига, заданную SetShiftFunc.
 func (x *XlatingFIR) SetShift(hz float64) {
+	x.shiftFunc = nil
 	x.phaseStep = -2.0 * math.Pi * hz / x.sampleRate
+}
+
+// SetShiftFunc задаёт сдвиг как функцию времени t от начала потока (по числу
+// входных отсчётов): сдвиг канала плюс Доплер. Вычисляется на каждом отсчёте,
+// фаза NCO не прерывается. Так снимается Доплер пролёта: канал следует за
+// несущей, и на выходе она остаётся на нуле.
+func (x *XlatingFIR) SetShiftFunc(f func(t time.Duration) float64) {
+	x.shiftFunc = f
 }
 
 // OutputRate возвращает sample rate после децимации.

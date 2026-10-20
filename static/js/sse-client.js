@@ -83,6 +83,11 @@ class SSEClient {
             'control_released'];
     }
 
+    /** События демодулятора (internal/demod). */
+    static get DEMOD_EVENTS() {
+        return ['telemetry', 'demod_status'];
+    }
+
     // ── Подключение / Отключение ──────────────────────────────
 
     /**
@@ -216,6 +221,20 @@ class SSEClient {
                 try {
                     const payload = JSON.parse(e.data);
                     document.dispatchEvent(new CustomEvent('satellite-scout-access', {
+                        detail: { event: name, data: payload },
+                    }));
+                } catch (err) {
+                    console.error(`[SSEClient] ${name} parse error:`, err);
+                }
+            });
+        }
+
+        // Принятые кадры и состояние демодулятора: разбирает manual-layout.js.
+        for (const name of SSEClient.DEMOD_EVENTS) {
+            this._eventSource.addEventListener(name, (e) => {
+                try {
+                    const payload = JSON.parse(e.data);
+                    document.dispatchEvent(new CustomEvent('satellite-scout-demod', {
                         detail: { event: name, data: payload },
                     }));
                 } catch (err) {

@@ -551,7 +551,7 @@ Offset Hex                                                   Decoded
 
 **Механика смены:** параметры фиксируются при открытии стрима. Смена режима, N или «Сброс» → `AbortController.abort()` + новый `fetch` с обновлённым query; при ресайзе стрим не переоткрывается. Протокол это уже поддерживает: self-describing frames + сброс `seq` — клиент детектирует новую сессию (§ I.6). Отдельного REST для display-параметров **нет**.
 
-Реализация — `RXTOOL-001` шаг 3 (`memory-bank/tasks.md`): `internal/dsp/reducer.go` (`SetAvgFrames`), `pipeline.go` (`FlushLive`), `internal/handlers/stream_spectrum.go`, `static/js/manual-layout.js`.
+Реализация — `RXTOOL-001` шаг 3 (`docs/archive/archive-completed-tasks.md`): `internal/dsp/reducer.go` (`SetAvgFrames`), `pipeline.go` (`FlushLive`), `internal/handlers/stream_spectrum.go`, `static/js/manual-layout.js`.
 
 ### Управление SDR — отдельный REST API (вне ADR)
 
@@ -559,8 +559,11 @@ Offset Hex                                                   Decoded
 
 ```text
 POST /api/sdr/tune      {radio_path, center_hz, span_hz, gain_db?}  ← перестройка приёмника тракта
-GET  /api/sdr/status?radio_path=…                                   ← текущая конфигурация приёмника
+GET  /api/sdr/status?radio_path=…                                   ← текущая конфигурация приёмника + channel, sample_rate, sample_rates
+POST /api/sdr/receiver  {radio_path, sample_rate_hz, gain_db, offset_hz, bandwidth_hz, squelch_dbfs, demod}  ← «Установить»
 ```
+
+`sample_rate_hz` (2026-10-14) меняет полосу обзора у всех зрителей тракта: span кадров `/spectrum` следует за ним, накопление сбрасывается (ADR-006 §3.3).
 
 `radio_path` обязателен: стримы и настройка привязаны к конкретному радиотракту (см. Q-C3).
 Это **не часть** транспорта, а DSP-управление. Детали — в SDR-003.

@@ -25,6 +25,9 @@ const (
 	// OmegaEarth — угловая скорость вращения Земли, рад/с.
 	OmegaEarth = 7.292115e-5
 
+	// SpeedOfLightKmps — скорость света в вакууме, км/с.
+	SpeedOfLightKmps = 299792.458
+
 	// Deg2Rad — коэффициент перевода градусов в радианы.
 	Deg2Rad = math.Pi / 180.0
 
@@ -431,4 +434,12 @@ func RangeRateKmps(satECI *ECIPosition, obs *Observer) float64 {
 		return 0
 	}
 	return (rx*vx + ry*vy + rz*vz) / rng
+}
+
+// DopplerShiftHz возвращает доплеровский сдвиг принимаемой частоты, Гц:
+// f_d = -f_dl · range_rate / c. Спутник приближается (range_rate < 0), значит
+// частота выше номинала. Релятивистской поправкой пренебрегаем: при 8 км/с
+// она порядка 1e-10 от номинала.
+func DopplerShiftHz(nominalHz, rangeRateKmps float64) float64 {
+	return -nominalHz * rangeRateKmps / SpeedOfLightKmps
 }

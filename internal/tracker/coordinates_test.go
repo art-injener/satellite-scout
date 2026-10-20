@@ -435,6 +435,35 @@ func TestRangeRateKmps_AgainstFiniteDiff(t *testing.T) {
 	}
 }
 
+// TestDopplerShiftHz checks sign and magnitude of the downlink Doppler shift:
+// approaching satellite (negative range rate) raises the received frequency.
+func TestDopplerShiftHz(t *testing.T) {
+	cases := []struct {
+		name          string
+		nominalHz     float64
+		rangeRateKmps float64
+		want          float64
+	}{
+		{"approaching UHF", 436.5e6, -7, 436.5e6 * 7 / 299792.458},
+		{"receding UHF", 436.5e6, 7, -436.5e6 * 7 / 299792.458},
+		{"receding VHF", 145.8e6, 3, -145.8e6 * 3 / 299792.458},
+		{"zero range rate", 436.5e6, 0, 0},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := DopplerShiftHz(tc.nominalHz, tc.rangeRateKmps)
+			if math.Abs(got-tc.want) > 1e-6 {
+				t.Errorf("DopplerShiftHz(%g, %g) = %.6f, want %.6f", tc.nominalHz, tc.rangeRateKmps, got, tc.want)
+			}
+		})
+	}
+
+	// Sanity: 436.5 MHz at -7 km/s is about +10.19 kHz.
+	if got := DopplerShiftHz(436.5e6, -7); math.Abs(got-10192.1) > 0.1 {
+		t.Errorf("DopplerShiftHz(436.5 MHz, -7 km/s) = %.1f Hz, want ~10192.1", got)
+	}
+}
+
 // BenchmarkECIToECEF измеряет производительность преобразования ECI→ECEF.
 func BenchmarkECIToECEF(b *testing.B) {
 	testTime := time.Date(2024, 1, 15, 12, 0, 0, 0, time.UTC)

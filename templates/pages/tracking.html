@@ -541,9 +541,10 @@
                 <label class="ml-rx-panel__field">
                     <span class="ml-rx-panel__label">Полоса</span>
                     <select class="ml-rx-panel__sel" id="manual-rx-span">
-                        <option>2.4 МГц</option>
-                        <option selected>1.024 МГц</option>
-                        <option>256 кГц</option>
+                        <option value="2048000" selected>2.048 МГц</option>
+                        <option value="1024000">1.024 МГц</option>
+                        <option value="512000">512 кГц</option>
+                        <option value="256000">256 кГц</option>
                     </select>
                 </label>
                 <div class="ml-rx-panel__field">
@@ -571,15 +572,15 @@
                 <label class="ml-rx-panel__field">
                     <span class="ml-rx-panel__label">Полоса канала</span>
                     <select class="ml-rx-panel__sel" id="manual-rx-filter-bw">
-                        <option>2.8 кГц</option>
-                        <option>6 кГц</option>
-                        <option selected>15 кГц</option>
-                        <option>30 кГц</option>
-                        <option>50 кГц</option>
+                        <option value="2800">2.8 кГц</option>
+                        <option value="6000">6 кГц</option>
+                        <option value="15000" selected>15 кГц</option>
+                        <option value="30000">30 кГц</option>
+                        <option value="50000">50 кГц</option>
                     </select>
                 </label>
                 <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label">Squelch</span>
+                    <span class="ml-rx-panel__label" title="Уровень, ниже которого звук и демодуляция закрыты">Порог</span>
                     <span class="ml-rx-panel__controls">
                         <input class="ml-rx-panel__input" id="manual-rx-squelch" type="number" step="1" value="-90">
                         <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit">dBFS</span>
@@ -588,17 +589,17 @@
                 <label class="ml-rx-panel__field">
                     <span class="ml-rx-panel__label">Демодулятор</span>
                     <select class="ml-demod__pipeline-sel" id="manual-rx-pipeline">
-                        <option>FSK 9600 (G3RUH)</option>
-                        <option>FSK 4800</option>
-                        <option>FSK 1200</option>
-                        <option>GMSK 9600</option>
-                        <option>AFSK 1200 (AX.25)</option>
-                        <option>BPSK 1k2</option>
-                        <option>BPSK 9k6</option>
-                        <option>QPSK (CCSDS)</option>
-                        <option>CW</option>
-                        <option>FM</option>
-                        <option>OOK</option>
+                        <option value="fsk9600_g3ruh">FSK 9600 (G3RUH)</option>
+                        <option value="fsk4800">FSK 4800</option>
+                        <option value="fsk1200">FSK 1200</option>
+                        <option value="gmsk9600">GMSK 9600</option>
+                        <option value="afsk1200" selected>AFSK 1200 (AX.25)</option>
+                        <option value="bpsk1200">BPSK 1k2</option>
+                        <option value="bpsk9600">BPSK 9k6</option>
+                        <option value="qpsk_ccsds">QPSK (CCSDS)</option>
+                        <option value="cw">CW</option>
+                        <option value="fm">FM</option>
+                        <option value="ook">OOK</option>
                     </select>
                 </label>
             </div>
@@ -628,7 +629,7 @@
                     <div class="ml-demod__metric"><span class="ml-demod__label">RSSI</span><span class="ml-demod__value" id="manual-dm-rssi">−42 dBm</span></div>
                     <div class="ml-demod__metric"><span class="ml-demod__label">AFC</span><span class="ml-demod__value" id="manual-dm-afc">−18 Hz</span></div>
                     <div class="ml-demod__metric"><span class="ml-demod__label">Δf</span><span class="ml-demod__value" id="manual-dm-foff">+1.2 kHz</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Squelch</span><span class="ml-demod__value ml-demod__value--ok" id="manual-dm-squelch">Open</span></div>
+                    <div class="ml-demod__metric"><span class="ml-demod__label" title="Сигнал выше порога из панели приёмника">Порог</span><span class="ml-demod__value ml-demod__value--ok" id="manual-dm-squelch">Open</span></div>
                     <div class="ml-demod__metric"><span class="ml-demod__label">FEC</span><span class="ml-demod__value" id="manual-dm-fec">12 B</span></div>
                     <div class="ml-demod__metric"><span class="ml-demod__label">Кадров</span><span class="ml-demod__value" id="manual-dm-frames">128</span></div>
                     <div class="ml-demod__metric"><span class="ml-demod__label">Sync</span><span class="ml-demod__value" id="manual-dm-sync">131</span></div>

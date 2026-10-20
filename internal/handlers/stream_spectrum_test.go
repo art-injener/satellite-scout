@@ -533,6 +533,72 @@ func TestSpectrum_ImitatorRetuneMovesPeak(t *testing.T) {
 	}
 }
 
+// Narrowing the device band through the hub changes span_hz of the frames, keeps
+// the carrier at its frequency and drops the peak hold of the wider band.
+func TestSpectrum_SampleRateChangeNarrowsSpanAndResetsHold(t *testing.T) {
+	const (
+		carrierHz = 436_500_000
+		tunedHz   = carrierHz - 50_000
+		bins      = 1024
+	)
+	receiver := imitator.New(imitator.Options{Signals: []imitator.Signal{
+		{Kind: imitator.SignalCarrier, FrequencyHz: carrierHz, LevelDBFS: -20},
+	}})
+	if err := receiver.Tune(tunedHz); err != nil {
+		t.Fatalf("Tune: %v", err)
+	}
+	hub := sdr.NewReceiverHub()
+	hub.Register("p", sdr.PathConfig{}, func() (sdr.Receiver, error) { return receiver, nil })
+	srv := httptest.NewServer(http.HandlerFunc(NewStreamHandler(hub).Spectrum))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet,
+		srv.URL+"/api/stream/v1/spectrum?radio_path=p&fps=20&mode=maxhold&bins="+strconv.Itoa(bins), nil)
+	if err != nil {
+		t.Fatalf("request: %v", err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("GET spectrum: %v", err)
+	}
+	defer resp.Body.Close()
+
+	binOf := func(f sstmFrame) int {
+		return int(math.Round(float64(bins)/2 + 50_000/(float64(f.spanHz)/bins)))
+	}
+	wide := readModeFrame(t, resp.Body, dsp.ModeMaxHold)
+	if wide.spanHz != 2_048_000 {
+		t.Fatalf("span=%d, want the recommended 2048000", wide.spanHz)
+	}
+	oldBin := binOf(wide)
+	if got := peakBin(wide.dbfs); abs(got-oldBin) > 1 {
+		t.Fatalf("peak bin %d at 2.048 MHz, want %d ± 1", got, oldBin)
+	}
+
+	if err := hub.SetSampleRate("p", 256_000); err != nil {
+		t.Fatalf("SetSampleRate: %v", err)
+	}
+	narrow := readModeFrame(t, resp.Body, dsp.ModeMaxHold)
+	for narrow.spanHz != 256_000 {
+		narrow = readModeFrame(t, resp.Body, dsp.ModeMaxHold)
+	}
+	if got, want := peakBin(narrow.dbfs), binOf(narrow); abs(got-want) > 1 {
+		t.Errorf("peak bin %d at 256 kHz, want %d ± 1 (carrier stays at its frequency)", got, want)
+	}
+	if peak := narrow.dbfs[peakBin(narrow.dbfs)]; narrow.dbfs[oldBin] > peak-40 {
+		t.Errorf("bin %d holds %.1f dB vs peak %.1f dB: hold of the wider band leaked", oldBin, narrow.dbfs[oldBin], peak)
+	}
+}
+
+func abs(x int) int {
+	if x < 0 {
+		return -x
+	}
+	return x
+}
+
 // openImitatorSpectrum streams the spectrum of an imitator with one sweeping
 // carrier; the caller reads frames from the returned body.
 func openImitatorSpectrum(t *testing.T, query string) io.ReadCloser {

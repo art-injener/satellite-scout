@@ -137,8 +137,10 @@ for (const id of knownIds) {
 global.document = {
     readyState: 'complete',
     addEventListener: () => {},
+    removeEventListener: () => {},
     getElementById: (id) => _domNodes.get(id) || null,
     querySelector: () => null,
+    createElement: (tag) => ({ tagName: tag.toUpperCase(), value: '', text: '' }),
 };
 global.window = {
     addEventListener: () => {},
@@ -357,6 +359,8 @@ _domNodes.set('manual-rx-marker-bar', makeDomElement('manual-rx-marker-bar'));
 _domNodes.set('manual-rx-marker-unit', makeDomElement('manual-rx-marker-unit', { textContent: 'dBFS' }));
 _domNodes.set('manual-rx-squelch', makeDomElement('manual-rx-squelch', { value: '-90' }));
 _domNodes.set('manual-rx-squelch-unit', makeDomElement('manual-rx-squelch-unit', { textContent: 'dBFS' }));
+_domNodes.set('manual-rx-gain', makeDomElement('manual-rx-gain', { value: '32' }));
+_domNodes.set('manual-rx-doppler-val', makeDomElement('manual-rx-doppler-val', { value: '0' }));
 // Накопление спектра: Мгн. | Накопление | Пик, число циклов N и «Сброс» над графиком
 const specModeBtns = ['current', 'avg', 'maxhold'].reduce(function(acc, mode) {
     acc[mode] = makeDomElement('spec-mode-' + mode, { _attrs: { 'data-spec-mode': mode } });
@@ -427,6 +431,8 @@ function MockDemodPanel() {
     this.calls = [];
 }
 MockDemodPanel.prototype.setChannel = function(ch) { this.calls.push(['setChannel', ch]); };
+MockDemodPanel.prototype.setLive = function(live) { this.calls.push(['setLive', live]); };
+MockDemodPanel.prototype.applyStatus = function(st, off) { this.calls.push(['applyStatus', st, off]); };
 MockDemodPanel.prototype.destroy = function() { this.calls.push(['destroy']); };
 global.window.DemodPanel = MockDemodPanel;
 global.window.formatDemodFreqMHz = (f) => f.toFixed(3).replace('.', ',');
@@ -439,6 +445,8 @@ MockTelemetryTable.prototype.activate = function() { this.calls.push(['activate'
 MockTelemetryTable.prototype.deactivate = function() { this.calls.push(['deactivate']); };
 MockTelemetryTable.prototype.setChannel = function(label, freq) { this.calls.push(['setChannel', label, freq]); };
 MockTelemetryTable.prototype.clear = function() { this.calls.push(['clear']); };
+MockTelemetryTable.prototype.setLive = function(live) { this.calls.push(['setLive', live]); };
+MockTelemetryTable.prototype.addTelemetry = function(ev) { this.calls.push(['addTelemetry', ev]); };
 MockTelemetryTable.prototype.destroy = function() { this.calls.push(['destroy']); };
 global.window.TelemetryTable = MockTelemetryTable;
 
@@ -466,6 +474,7 @@ function makeSelect(id, options, selectedIndex) {
 }
 // Pipeline select с поддержкой addEventListener (для _initRxPanel)
 const pipelineSel = makeSelect('manual-rx-pipeline', ['FSK 9600', 'FSK 1200', 'AFSK 1200', 'BPSK 1k2'], 0);
+['fsk9600_g3ruh', 'fsk1200', 'afsk1200', 'bpsk1200'].forEach((v, i) => { pipelineSel.options[i].value = v; });
 pipelineSel._listeners = {};
 pipelineSel.addEventListener = function(type, fn) {
     if (!this._listeners[type]) { this._listeners[type] = []; }
@@ -477,6 +486,21 @@ pipelineSel.removeEventListener = function(type, fn) {
     if (idx >= 0) { arr.splice(idx, 1); }
 };
 _domNodes.set('manual-rx-pipeline', pipelineSel);
+const filterBwSel = makeSelect('manual-rx-filter-bw', ['2.8 кГц', '6 кГц', '15 кГц', '30 кГц', '50 кГц'], 2);
+['2800', '6000', '15000', '30000', '50000'].forEach((v, i) => { filterBwSel.options[i].value = v; });
+// «Полоса»: пункты перестраиваются по sample_rates статуса
+const spanSel = { id: 'manual-rx-span', selectedIndex: 0, options: [] };
+spanSel.add = function(opt) { this.options.push(opt); };
+spanSel.remove = function(i) { this.options.splice(i, 1); };
+function resetSpanOptions() {
+    spanSel.options = [['2048000', '2.048 МГц'], ['1024000', '1.024 МГц'], ['512000', '512 кГц'], ['256000', '256 кГц']]
+        .map(([value, text]) => ({ value: value, text: text }));
+    spanSel.selectedIndex = 0;
+}
+resetSpanOptions();
+_domNodes.set('manual-rx-span', spanSel);
+function spanValue() { return spanSel.options[spanSel.selectedIndex].value; }
+_domNodes.set('manual-rx-filter-bw', filterBwSel);
 
 // StateEventType — read by the module from window
 global.window.StateEventType = {
@@ -2108,6 +2132,76 @@ test('destroy stops the stream', () => {
     });
 });
 
+console.log('\n— ManualLayout: live demodulator —');
+
+/** Runs fn with document listeners captured: fn(emit) dispatches satellite-scout-demod. */
+function withDemodEvents(fn) {
+    const listeners = [];
+    const prevAdd = global.document.addEventListener;
+    const prevRemove = global.document.removeEventListener;
+    global.document.addEventListener = (type, cb) => { listeners.push([type, cb]); };
+    global.document.removeEventListener = (type, cb) => {
+        const i = listeners.findIndex((l) => l[0] === type && l[1] === cb);
+        if (i >= 0) { listeners.splice(i, 1); }
+    };
+    const emit = (event, data) => {
+        for (const l of listeners.slice()) {
+            if (l[0] === 'satellite-scout-demod') { l[1]({ detail: { event: event, data: data } }); }
+        }
+    };
+    try {
+        fn(emit, listeners);
+    } finally {
+        global.document.addEventListener = prevAdd;
+        global.document.removeEventListener = prevRemove;
+    }
+}
+
+test('demod events reach the table and the panel for the selected tract only', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        const tm = { radio_path: 'radio_path_1', src: 'SCOUT' };
+        emit('telemetry', tm);
+        emit('telemetry', { radio_path: 'radio_path_2', src: 'OTHER' });
+        const st = { radio_path: 'radio_path_1', active: true };
+        emit('demod_status', st);
+        emit('demod_status', { radio_path: 'radio_path_2', active: true });
+
+        assert.deepStrictEqual(m._tmiTable.calls.filter((c) => c[0] === 'addTelemetry'), [['addTelemetry', tm]]);
+        assert.deepStrictEqual(m._demodPanel.calls.filter((c) => c[0] === 'applyStatus'),
+            [['applyStatus', st, m._levelOffset]]);
+        m.destroy();
+    }));
+});
+
+test('live mode follows whether the station has a radio path', () => {
+    const lastLive = (w) => w.calls.filter((c) => c[0] === 'setLive').map((c) => c[1]).pop();
+    withStation({ mm: null }, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        assert.strictEqual(lastLive(m._tmiTable), false);
+        assert.strictEqual(lastLive(m._demodPanel), false);
+        m.destroy();
+    });
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        assert.strictEqual(lastLive(m._tmiTable), true);
+        assert.strictEqual(lastLive(m._demodPanel), true);
+        m.destroy();
+    });
+});
+
+test('destroy removes the demod event listener', () => {
+    withStation({}, () => withDemodEvents((emit, listeners) => {
+        const m = new ManualLayout(makeStateManager());
+        assert.strictEqual(listeners.filter((l) => l[0] === 'satellite-scout-demod').length, 1);
+        m.destroy();
+        assert.strictEqual(listeners.filter((l) => l[0] === 'satellite-scout-demod').length, 0);
+    }));
+});
+
 console.log('\n— ManualLayout: receiver control rights —');
 
 test('viewer: dial is read-only and a transmitter click does not tune', () => {
@@ -2144,6 +2238,99 @@ test('access subscription is made once across activate cycles', () => {
         m.deactivate();
         m.activate();
         assert.strictEqual(ac.listeners.length, 1);
+        m.destroy();
+    });
+});
+
+console.log('\n— ManualLayout: receiver settings («Установить») —');
+
+const RX_FIELD_IDS = ['manual-rx-span', 'manual-rx-gain', 'manual-rx-agc', 'manual-rx-doppler-val',
+    'manual-rx-filter-bw', 'manual-rx-squelch', 'manual-rx-pipeline', 'manual-rx-apply'];
+
+function receiverCalls() {
+    return fetchMock.calls.filter((c) => c.url === '/api/sdr/receiver');
+}
+
+/** Operator's input in the receiver column; squelch in the units shown. */
+function fillRx(o) {
+    spanSel.selectedIndex = o.spanIndex || 0;
+    _domNodes.get('manual-rx-gain').value = String(o.gain);
+    _domNodes.get('manual-rx-agc').setAttribute('aria-pressed', o.agc ? 'true' : 'false');
+    _domNodes.get('manual-rx-doppler-val').value = String(o.offset);
+    filterBwSel.selectedIndex = o.bwIndex;
+    _domNodes.get('manual-rx-squelch').value = String(o.squelch);
+    pipelineSel.selectedIndex = o.demodIndex;
+}
+
+test('«Установить» sends span, gain, channel and demodulator of the tract', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ spanIndex: 1, gain: 28, agc: false, offset: 1500, bwIndex: 3, squelch: -75, demodIndex: 2 });
+        fire(_domNodes.get('manual-rx-apply'), 'click');
+        assert.strictEqual(receiverCalls().length, 1);
+        assert.deepStrictEqual(receiverCalls()[0].body, {
+            radio_path: 'radio_path_1',
+            sample_rate_hz: 1024000,
+            gain_db: 28,
+            offset_hz: 1500,
+            bandwidth_hz: 30000,
+            squelch_dbfs: -75,
+            demod: 'afsk1200',
+        });
+        m.destroy();
+    });
+});
+
+test('АРУ pill sends gain -1', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        fire(_domNodes.get('manual-rx-agc'), 'click');
+        assert.strictEqual(_domNodes.get('manual-rx-agc').getAttribute('aria-pressed'), 'true');
+        fire(_domNodes.get('manual-rx-apply'), 'click');
+        assert.strictEqual(receiverCalls()[0].body.gain_db, -1);
+        m.destroy();
+    });
+});
+
+test('span follows a change on the server; the same span keeps the operator choice', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        spanSel.selectedIndex = 3;
+        s.opts.onFrame(fftFrame(436500000, null, 1024000));
+        assert.strictEqual(spanValue(), '1024000', 'first frame shows the device span');
+        m._wf.calls = [];
+        spanSel.selectedIndex = 3;
+        s.opts.onFrame(fftFrame(436500000, null, 1024000));
+        assert.strictEqual(spanValue(), '256000', 'operator choice survives until «Установить»');
+        assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'));
+        s.opts.onFrame(fftFrame(436500000, null, 512000));
+        assert.strictEqual(spanValue(), '512000', 'another operator changed the span');
+        assert.ok(m._wf.calls.some((c) => c[0] === 'clear'), 'old lines belong to another span');
+        m.destroy();
+    });
+    resetSpanOptions();
+});
+
+test('viewer: receiver fields are disabled and «Установить» sends nothing', () => {
+    withStation({ access: makeAccess(false) }, (ac) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        for (const id of RX_FIELD_IDS) {
+            assert.strictEqual(_domNodes.get(id).disabled, true, id + ' disabled for viewer');
+        }
+        fire(_domNodes.get('manual-rx-apply'), 'click');
+        assert.strictEqual(receiverCalls().length, 0);
+        assert.ok(ac.notices.some((t) => /только в режиме «Контроль»/.test(t)), ac.notices.join(' | '));
+        ac.setRole(true);
+        for (const id of RX_FIELD_IDS) {
+            assert.strictEqual(_domNodes.get(id).disabled, false, id + ' enabled with control');
+        }
         m.destroy();
     });
 });
@@ -2251,12 +2438,100 @@ testAsync('AGC on the receiver keeps dBFS: gain is unknown', async () => {
     m.destroy();
 });
 
-testAsync('tract without calibration stays in dBFS and does not ask for the status', async () => {
+testAsync('tract without calibration stays in dBFS with a known gain', async () => {
     const m = await openWithStatus(TRACT_1, { gain_db: 10 });
-    assert.strictEqual(statusCalls().length, 0);
+    assert.strictEqual(statusCalls().length, 1, 'status still fills the receiver fields');
     MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
     assert.deepStrictEqual(markerText(), ['437.012', '−49.3']);
     assert.deepStrictEqual(levelUnits(), ['dBFS', 'dBFS']);
+    m.destroy();
+});
+
+// ── Receiver settings from the server status ───────────────────
+
+const CHANNEL_FSK = { offset_hz: -2500, bandwidth_hz: 6000, squelch_dbfs: -80, demod: 'fsk9600_g3ruh' };
+
+testAsync('receiver status fills gain, АРУ, channel and demodulator', async () => {
+    fillRx({ gain: 32, agc: true, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 2 });
+    const m = await openWithStatus(TRACT_1, { center_hz: 436500000, gain_db: 20, channel: CHANNEL_FSK });
+    assert.strictEqual(_domNodes.get('manual-rx-gain').value, '20');
+    assert.strictEqual(_domNodes.get('manual-rx-agc').getAttribute('aria-pressed'), 'false');
+    assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500');
+    assert.strictEqual(filterBwSel.options[filterBwSel.selectedIndex].value, '6000');
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-80');
+    assert.strictEqual(pipelineSel.options[pipelineSel.selectedIndex].value, 'fsk9600_g3ruh');
+    const mods = m._eyeView.calls.filter((c) => c[0] === 'setModulation');
+    assert.deepStrictEqual(mods[mods.length - 1], ['setModulation', 'FSK 9600'], 'eye follows the demodulator');
+    m.destroy();
+});
+
+testAsync('receiver status builds span choices and selects the device rate', async () => {
+    const m = await openWithStatus(TRACT_1, {
+        gain_db: 20, sample_rate: 1200000, sample_rates: [2400000, 1200000, 300000], channel: CHANNEL_FSK,
+    });
+    assert.deepStrictEqual(spanSel.options.map((o) => [o.value, o.text]),
+        [['2400000', '2.4 МГц'], ['1200000', '1.2 МГц'], ['300000', '300 кГц']]);
+    assert.strictEqual(spanValue(), '1200000');
+    m.destroy();
+    resetSpanOptions();
+});
+
+testAsync('receiver status with negative gain presses АРУ', async () => {
+    fillRx({ gain: 32, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+    const m = await openWithStatus(TRACT_1, { gain_db: -1, channel: CHANNEL_FSK });
+    assert.strictEqual(_domNodes.get('manual-rx-agc').getAttribute('aria-pressed'), 'true');
+    assert.strictEqual(_domNodes.get('manual-rx-gain').value, '32', 'manual gain is kept for when АРУ is off');
+    m.destroy();
+});
+
+testAsync('squelch in dBm goes out in dBFS by the gain being sent; reply moves dBm to the new gain', async () => {
+    const channel = Object.assign({}, CHANNEL_FSK, { squelch_dbfs: -90 });
+    const m = await openWithStatus(CALIBRATED, { center_hz: 436500000, gain_db: 0, channel: channel });
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-130', '-90 dBFS - 40 dB calibration');
+    fillRx({ gain: 32, agc: false, offset: -2500, bwIndex: 1, squelch: -130, demodIndex: 0 });
+    const prevBody = fetchMock.body;
+    fetchMock.body = { ok: true, status: { center_hz: 436500000, gain_db: 32, channel: Object.assign({}, channel, { squelch_dbfs: -58 }) } };
+    global.window._modeManager = CALIBRATED;
+    global.window._accessControl = makeAccess(true);
+    fire(_domNodes.get('manual-rx-apply'), 'click');
+    assert.strictEqual(receiverCalls()[0].body.squelch_dbfs, -58, '-130 dBm at gain 32: -130 + 40 + 32');
+    await flush();
+    await flush();
+    fetchMock.body = prevBody;
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-130', 'operator sees what he typed');
+    MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
+    assert.deepStrictEqual(markerText(), ['437.012', '−121.3'], 'dBm by the applied gain: -49.3 - 40 - 32');
+    delete global.window._modeManager;
+    delete global.window._accessControl;
+    m.destroy();
+});
+
+testAsync('refused settings: server error is shown, 403 re-reads the role', async () => {
+    const ac = makeAccess(true);
+    const m = withStation({ access: ac }, () => {
+        const layout = new ManualLayout(makeStateManager());
+        layout.activate();
+        fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        fetchMock.status = 400;
+        fetchMock.body = { error: 'invalid channel settings: unknown demod' };
+        fire(_domNodes.get('manual-rx-apply'), 'click');
+        return layout;
+    });
+    global.window._accessControl = ac;
+    global.window._modeManager = TRACT_1;
+    await flush();
+    await flush();
+    assert.ok(ac.notices.some((t) => /^Настройки не применены: invalid channel settings/.test(t)), ac.notices.join(' | '));
+    fetchMock.status = 403;
+    fire(_domNodes.get('manual-rx-apply'), 'click');
+    await flush();
+    await flush();
+    assert.strictEqual(ac.refreshed, 1);
+    assert.ok(ac.notices.some((t) => /Режим «Контроль» отключён/.test(t)), ac.notices.join(' | '));
+    fetchMock.status = 200;
+    fetchMock.body = { ok: true };
+    delete global.window._accessControl;
+    delete global.window._modeManager;
     m.destroy();
 });
 

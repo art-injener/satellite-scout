@@ -4,6 +4,9 @@ import (
 	"math"
 	"math/cmplx"
 	"testing"
+	"time"
+
+	"github.com/art-injener/satellite-scout/internal/modem"
 )
 
 // --- DesignLowpass ---
@@ -196,6 +199,101 @@ func TestXlatingFIR_SetShift(t *testing.T) {
 	}
 }
 
+// Drifting tone like a Doppler-shifted downlink: start offset plus linear drift.
+const (
+	driftFs      = 48000.0
+	driftDecim   = 4
+	driftF0      = 3000.0 // Hz
+	driftRate    = 3000.0 // Hz/s, exaggerated so the tone leaves the passband in 1 s
+	driftCutoff  = 1000.0
+	driftNumTaps = 127
+)
+
+func driftShift(t time.Duration) float64 {
+	return driftF0 + driftRate*t.Seconds()
+}
+
+func newDriftFIR() *XlatingFIR {
+	taps := DesignLowpass(driftCutoff, driftFs, driftNumTaps, WindowBlackmanHarris)
+	return NewXlatingFIR(driftF0, driftFs, driftDecim, taps)
+}
+
+func TestXlatingFIR_ShiftFuncRemovesDopplerDrift(t *testing.T) {
+	x := newDriftFIR()
+	x.SetShiftFunc(driftShift)
+
+	out := x.Process(makeDriftingToneC64(int(driftFs), driftShift, driftFs))
+
+	skip := driftNumTaps/driftDecim + 1
+	outRate := x.OutputRate()
+	var worst float64
+	for i := skip + 1; i < len(out); i++ {
+		d := complex128(out[i]) * cmplx.Conj(complex128(out[i-1]))
+		freq := cmplx.Phase(d) * outRate / (2 * math.Pi)
+		worst = math.Max(worst, math.Abs(freq))
+	}
+	if worst > 1 {
+		t.Errorf("residual frequency after Doppler removal = %.3f Hz, want < 1 Hz", worst)
+	}
+
+	if mag := cmplx.Abs(complex128(out[len(out)-1])); mag < 0.9 {
+		t.Errorf("tone lost at end of drift: magnitude=%g, want ~1", mag)
+	}
+}
+
+func TestXlatingFIR_ConstantShiftLosesDriftingTone(t *testing.T) {
+	x := newDriftFIR()
+
+	out := x.Process(makeDriftingToneC64(int(driftFs), driftShift, driftFs))
+
+	// After 1 s the tone is 3 kHz away from the tuning point, cutoff is 1 kHz.
+	tail := out[len(out)*9/10:]
+	var maxMag float64
+	for _, s := range tail {
+		maxMag = math.Max(maxMag, cmplx.Abs(complex128(s)))
+	}
+	if maxMag > 0.05 {
+		t.Errorf("drifting tone still passes constant shift: max magnitude=%g", maxMag)
+	}
+}
+
+func TestXlatingFIR_ShiftFuncStateful(t *testing.T) {
+	in := makeDriftingToneC64(8000, driftShift, driftFs)
+
+	x := newDriftFIR()
+	x.SetShiftFunc(driftShift)
+	combined := append(x.Process(in[:1001]), x.Process(in[1001:])...)
+
+	x2 := newDriftFIR()
+	x2.SetShiftFunc(driftShift)
+	full := x2.Process(in)
+
+	if len(combined) != len(full) {
+		t.Fatalf("combined len=%d, full len=%d", len(combined), len(full))
+	}
+	for i := range combined {
+		if diff := cmplx.Abs(complex128(combined[i]) - complex128(full[i])); diff > 1e-5 {
+			t.Fatalf("[%d] combined=%v, full=%v, diff=%g", i, combined[i], full[i], diff)
+		}
+	}
+}
+
+func TestXlatingFIR_SetShiftCancelsShiftFunc(t *testing.T) {
+	const fTone = 2000.0
+	x := newDriftFIR()
+	x.SetShiftFunc(driftShift)
+	x.SetShift(fTone)
+
+	out := x.Process(makeToneC64(4096, fTone, driftFs))
+
+	skip := driftNumTaps/driftDecim + 1
+	for i, s := range out[skip:] {
+		if mag := cmplx.Abs(complex128(s)); math.Abs(mag-1) > 0.05 {
+			t.Fatalf("out[%d] magnitude=%g, want ~1: constant shift must replace the function", skip+i, mag)
+		}
+	}
+}
+
 func TestXlatingFIR_OutputRate(t *testing.T) {
 	taps := DesignLowpass(5000, 48000, 31, WindowHann)
 	x := NewXlatingFIR(0, 48000, 6, taps)
@@ -212,4 +310,15 @@ func makeToneC64(n int, freqHz, fs float64) []complex64 {
 		out[i] = complex64(complex(math.Cos(phase), math.Sin(phase)))
 	}
 	return out
+}
+
+// makeDriftingToneC64 passes an unmodulated carrier through the imitator channel,
+// so the tone frequency follows freqHz(t) exactly as the transmitter side shifts it.
+func makeDriftingToneC64(n int, freqHz func(time.Duration) float64, fs float64) []complex64 {
+	carrier := make([]complex64, n)
+	for i := range carrier {
+		carrier[i] = 1
+	}
+	ch := modem.NewChannel(modem.ChannelConfig{SampleRate: fs, OffsetHz: freqHz})
+	return ch.Process(nil, carrier)
 }

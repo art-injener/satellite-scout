@@ -66,6 +66,31 @@ func TestBeacon_SignalAtOffsetFromCenter(t *testing.T) {
 	}
 }
 
+func TestBeacon_FSK9600BurstIsEightTimesShorter(t *testing.T) {
+	afsk := newTestBeaconGen(t, testBeacon())
+	sig := testBeacon()
+	sig.Modem = BeaconFSK9600G3RUH
+	fsk := newTestBeaconGen(t, sig)
+
+	want := float64(afsk.burstSamples()) / 8
+	if got := float64(fsk.burstSamples()); math.Abs(got-want) > 1 {
+		t.Errorf("9600 burst=%v samples, want %v", got, want)
+	}
+	x := make([]complex64, fsk.burstSamples()+100)
+	fsk.fillClean(x)
+	if isSilent(x[:fsk.burstSamples()]) || !isSilent(x[fsk.burstSamples():]) {
+		t.Error("expected 9600 burst followed by silence")
+	}
+}
+
+func TestBeacon_UnknownModem(t *testing.T) {
+	sig := testBeacon()
+	sig.Modem = "gmsk9600"
+	if _, err := newSignalSource(sig, testRate); !errors.Is(err, ErrInvalidSignal) {
+		t.Errorf("err=%v, want ErrInvalidSignal", err)
+	}
+}
+
 func TestBeacon_InvalidFrame(t *testing.T) {
 	sig := testBeacon()
 	sig.Frame.Src.Call = ""

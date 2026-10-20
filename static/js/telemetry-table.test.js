@@ -53,7 +53,7 @@ global.window = {};
 const _tbody = makeTbody();
 const _scrollEl = makeEl('manual-tmi-scroll');
 
-const { TelemetryTable } = require('./telemetry-table.js');
+const { TelemetryTable, telemetryPacket } = require('./telemetry-table.js');
 
 let passed = 0;
 let failed = 0;
@@ -133,6 +133,57 @@ test('activate starts mock timer, deactivate stops it', () => {
     assert.ok(t._mockTimer, 'timer must be set');
     t.deactivate();
     assert.strictEqual(t._mockTimer, null);
+    t.destroy();
+});
+
+const beacon = {
+    radio_path: 'radio_path_1',
+    timestamp_ms: new Date(2026, 9, 14, 11, 10, 15).getTime(),
+    frequency_hz: 145825000,
+    demod: 'afsk1200',
+    src: 'SCOUT',
+    dest: 'CQ',
+    info: 'Satellite Scout imitator beacon',
+    info_hex: '5361',
+};
+
+test('telemetryPacket maps a server frame to a table row', () => {
+    const pkt = telemetryPacket(beacon);
+    assert.strictEqual(pkt.time, '11:10:15');
+    assert.strictEqual(pkt.crc, 'OK');
+    assert.strictEqual(pkt.channelLabel, 'SCOUT');
+    assert.strictEqual(pkt.channelFreqMHz, 145.825);
+    assert.deepStrictEqual(pkt.params, [
+        { key: 'кому', value: 'CQ' },
+        { key: 'данные', value: 'Satellite Scout imitator beacon' },
+    ]);
+});
+
+test('telemetryPacket shows hex when the payload is not text', () => {
+    const pkt = telemetryPacket(Object.assign({}, beacon, { info: '' }));
+    assert.deepStrictEqual(pkt.params[1], { key: 'hex', value: '5361' });
+});
+
+test('live mode stops the mock and keeps it off on activate', () => {
+    const t = new TelemetryTable();
+    t.activate();
+    t.setLive(true);
+    assert.strictEqual(t._mockTimer, null, 'live mode must stop the mock');
+    t.deactivate();
+    t.activate();
+    assert.strictEqual(t._mockTimer, null, 'activate in live mode must not start the mock');
+    t.setLive(false);
+    assert.ok(t._mockTimer, 'leaving live mode while active resumes the mock');
+    t.destroy();
+});
+
+test('addTelemetry appends a live row', () => {
+    _tbody.innerHTML = '';
+    const t = new TelemetryTable();
+    t.addTelemetry(beacon);
+    const row = _tbody.childNodes[0];
+    assert.strictEqual(row.childNodes[0].textContent, 'SCOUT · 145,825 MHz');
+    assert.strictEqual(row.childNodes[1].textContent, '11:10:15');
     t.destroy();
 });
 

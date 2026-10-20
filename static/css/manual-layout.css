@@ -975,9 +975,19 @@
     transition: background 0.12s, color 0.12s;
 }
 
-.ml-rx-panel__btn-apply:hover {
+.ml-rx-panel__btn-apply:hover:not(:disabled) {
     background: var(--accent-success);
     color: var(--bg-primary);
+}
+
+/* Без права управления приёмником поля только показывают его настройки */
+.ml-rx-panel__btn-apply:disabled,
+.ml-rx-panel__pill:disabled,
+.ml-rx-panel__input:disabled,
+.ml-rx-panel__sel:disabled,
+#manual-rx-pipeline:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
 }
 
 /* ───────────── Вкладки: Панорама | Спектр | Антенна ───────────── */

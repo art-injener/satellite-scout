@@ -34,3 +34,22 @@ func ResolveSampleRate(caps Capabilities, configured uint32) (uint32, error) {
 	}
 	return 0, fmt.Errorf("%w: %d Hz", ErrSampleRateUnsupported, configured)
 }
+
+// sampleRateDivisors — ступени «Полосы»: вся базовая частота, половина, четверть и восьмая.
+var sampleRateDivisors = []uint32{1, 2, 4, 8}
+
+// SampleRateChoices — частоты, между которыми оператор переключает «Полосу»: базовая,
+// делённая на ступени, без тех, что драйвер не поддерживает (у RTL-SDR — провал 300–900 кГц).
+func SampleRateChoices(caps Capabilities, base uint32) []uint32 {
+	var out []uint32
+	for _, d := range sampleRateDivisors {
+		// Ноль ResolveSampleRate понял бы как «не задано» и вернул бы рекомендуемую
+		if base/d == 0 {
+			continue
+		}
+		if rate, err := ResolveSampleRate(caps, base/d); err == nil {
+			out = append(out, rate)
+		}
+	}
+	return out
+}

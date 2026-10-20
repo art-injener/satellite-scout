@@ -275,11 +275,20 @@ const DriverSimulated = "simulated"
 const (
 	ImitatorCarrier  = "carrier"   // немодулированная несущая
 	ImitatorAFSKPRBS = "afsk_prbs" // непрерывный AFSK 1200 на PRBS-9, эталон для BER
-	ImitatorBeacon   = "beacon"    // кадр AX.25 в AFSK 1200 раз в period_s
+	ImitatorBeacon   = "beacon"    // кадр AX.25 раз в period_s, модуляция по modem
 )
 
 // ImitatorSignalKinds — все допустимые значения ImitatorSignal.Kind.
 var ImitatorSignalKinds = []string{ImitatorCarrier, ImitatorAFSKPRBS, ImitatorBeacon}
+
+// Модемы маяка имитатора; названия совпадают с демодуляторами канала.
+const (
+	ImitatorAFSK1200     = "afsk1200"      // AFSK 1200 поверх FM
+	ImitatorFSK9600G3RUH = "fsk9600_g3ruh" // GFSK 9600 со скремблером G3RUH
+)
+
+// ImitatorBeaconModems — все допустимые значения ImitatorSignal.Modem для маяка.
+var ImitatorBeaconModems = []string{ImitatorAFSK1200, ImitatorFSK9600G3RUH}
 
 // ImitatorConfig — эфир имитатора: общий шум приёмника и сигналы.
 type ImitatorConfig struct {
@@ -309,6 +318,8 @@ type ImitatorSignal struct {
 
 	// PeriodS — интервал между кадрами маяка, с.
 	PeriodS float64 `json:"period_s,omitempty"`
+	// Modem — модуляция маяка; пусто — afsk1200.
+	Modem string `json:"modem,omitempty"`
 }
 
 // RotatorConfig — параметры поворотной платформы радиотракта.

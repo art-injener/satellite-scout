@@ -894,6 +894,34 @@ test('control events are re-dispatched on document as satellite-scout-access', (
     }
 });
 
+console.log('\nSSEClient — demodulator events');
+
+test('telemetry and demod_status are re-dispatched on document as satellite-scout-demod', () => {
+    const dispatched = [];
+    const prevDocument = global.document;
+    const prevCustomEvent = global.CustomEvent;
+    global.document = { dispatchEvent: (e) => { dispatched.push(e); return true; } };
+    global.CustomEvent = class { constructor(type, init) { this.type = type; this.detail = init.detail; } };
+    try {
+        const client = new SSEClient(new SatelliteStateManager());
+        client.connect();
+        const es = MockEventSource._lastInstance;
+        es._simulateOpen();
+        es._emit('telemetry', { radio_path: 'radio_path_1', src: 'SCOUT' });
+        es._emit('demod_status', { radio_path: 'radio_path_1', active: true });
+        es._emit('telemetry', 'not json');
+
+        assert.deepStrictEqual(dispatched.map((e) => e.type), ['satellite-scout-demod', 'satellite-scout-demod']);
+        assert.deepStrictEqual(dispatched.map((e) => e.detail.event), ['telemetry', 'demod_status']);
+        assert.strictEqual(dispatched[0].detail.data.src, 'SCOUT');
+        assert.strictEqual(dispatched[1].detail.data.active, true);
+        client.disconnect();
+    } finally {
+        global.document = prevDocument;
+        global.CustomEvent = prevCustomEvent;
+    }
+});
+
 // ── Итоги ─────────────────────────────────────────────────
 
 console.log(`\n${'═'.repeat(50)}`);

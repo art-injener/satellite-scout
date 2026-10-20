@@ -79,6 +79,7 @@ func TestSetupRoutes_ChangesRequireMaster(t *testing.T) {
 	for _, tc := range []struct{ method, path string }{
 		{http.MethodPut, "/api/settings"},
 		{http.MethodPost, "/api/sdr/tune"},
+		{http.MethodPost, "/api/sdr/receiver"},
 		{http.MethodPost, "/api/access/decide"},
 		{http.MethodPost, "/api/access/revoke"},
 	} {
