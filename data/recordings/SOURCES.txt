@@ -1,0 +1,31 @@
+IQ recordings for SIGLAB / imitator replay tests
+Downloaded 2026-10-22. License: mostly CC-BY 4.0 (see each .sigmf-meta).
+
+Format: SigMF (.sigmf-data + .sigmf-meta). Not AF from r4uab.
+Current imitator reads .cfile (cf32); SigMF reader is SIGLAB-001.
+
+zenodo-vega-c/  (~1.7 GB)  https://zenodo.org/records/6907821
+  CELESTA, GREENCUBE, MTCube2, ASTROBIO, ASTROBIO2
+  Full pass 2022-07-24T18:47:38, ~40 ksps channels @ ~436.5 MHz
+  + *_doppler.txt for each satellite
+
+zenodo-hades-d/  (~148 MB)  https://zenodo.org/records/10343047
+  HADES-D full pass, Doppler-corrected 32 ksps (two segments)
+  datatype cf32_le — closest to current .cfile
+
+camras-uhf/  (~3.1 GB)  https://data.camras.nl/satellites/raw/
+  asrtu_*     435.3 MHz, 1 Msps, ~258 MB   (short UHF)
+  uresat_*    436.886 MHz, 1 Msps, ~2.0 GB (full UHF pass, ci16_le)
+  lunaroscar2 437.75 MHz, 40 ksps, ~844 MB (long narrowband)
+
+Skipped: HADES raw 4 Msps (~10 GB) — 32 ksps enough for demod path.
+
+pe0sat-geoscan/  (~71 MB SigMF)  https://www.pe0sat.vgnet.nl/download/GEOSCAN/
+  geoscan_edelveis_2022-11-24_57600 — SatNOGS obs 6514407, 57.6 ksps ci16_le @ 436.200 MHz
+  Для профиля fsk9600_geoscan (config-hybrid path1)
+
+pe0sat-astrobio/  (~158 MB SigMF)  https://www.pe0sat.vgnet.nl/download/ASTROBIO/
+  astrobio_2022-10-18_57600 — SatNOGS obs 6626374, 57.6 ksps ci16_le @ 435.600 MHz
+  FSK 9600 G3RUH AX.25 — для профиля fsk9600_g3ruh (config-hybrid path2)
+
+WAV с pe0sat конвертированы в SigMF (ci16_le); исходные .wav удалены после конвертации.

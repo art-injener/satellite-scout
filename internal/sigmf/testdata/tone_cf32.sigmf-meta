@@ -1,0 +1,15 @@
+{
+  "global": {
+    "core:datatype": "cf32_le",
+    "core:sample_rate": 32000,
+    "core:version": "1.0.0"
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:frequency": 436666000,
+      "core:datetime": "2023-12-09T11:14:50Z"
+    }
+  ],
+  "annotations": []
+}
