@@ -87,7 +87,14 @@
     const DEMOD_LABELS = {
         afsk1200: { pipeline: 'AFSK 1200', rate: '1.2 ksym/s' },
         fsk9600_g3ruh: { pipeline: 'FSK 9600 G3RUH', rate: '9.6 ksym/s' },
+        fsk9600_geoscan: { pipeline: 'FSK 9600 GEOSCAN', rate: '9.6 ksym/s' },
     };
+
+    /** Подпись демодулятора по идентификатору сервера; неизвестный — как есть. */
+    function demodLabel(id) {
+        const known = DEMOD_LABELS[id];
+        return known ? known.pipeline : id;
+    }
 
     /** Уровень в dBm по поправке тракта, без неё — в dBFS; минус типографский. */
     function formatLevel(dbfs, levelOffset) {
@@ -406,6 +413,7 @@
     if (typeof window !== 'undefined') {
         window.DemodPanel = DemodPanel;
         window.formatDemodFreqMHz = formatFreqMHz;
+        window.demodLabel = demodLabel;
     }
 
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
@@ -414,6 +422,7 @@
             formatFreqMHz: formatFreqMHz,
             metricsFromTx: metricsFromTx,
             metricsFromStatus: metricsFromStatus,
+            demodLabel: demodLabel,
         };
     }
 })();

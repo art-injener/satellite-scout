@@ -258,7 +258,7 @@ type ReceiverConfig struct {
 	CalibrationDB *float64 `json:"calibration_db,omitempty"`
 
 	// Imitator — эфир имитатора, только для DriverSimulated. nil — эфир по умолчанию:
-	// несущая с ходом ±1 МГц поверх шума.
+	// маяк каждого модема около 436,5 МГц поверх шума.
 	Imitator *ImitatorConfig `json:"imitator,omitempty"`
 }
 
@@ -283,18 +283,22 @@ var ImitatorSignalKinds = []string{ImitatorCarrier, ImitatorAFSKPRBS, ImitatorBe
 
 // Модемы маяка имитатора; названия совпадают с демодуляторами канала.
 const (
-	ImitatorAFSK1200     = "afsk1200"      // AFSK 1200 поверх FM
-	ImitatorFSK9600G3RUH = "fsk9600_g3ruh" // GFSK 9600 со скремблером G3RUH
+	ImitatorAFSK1200       = "afsk1200"        // AFSK 1200 поверх FM
+	ImitatorFSK9600G3RUH   = "fsk9600_g3ruh"   // GFSK 9600 со скремблером G3RUH
+	ImitatorFSK9600GEOSCAN = "fsk9600_geoscan" // GFSK 9600, кадр GEOSCAN (CC1125)
 )
 
 // ImitatorBeaconModems — все допустимые значения ImitatorSignal.Modem для маяка.
-var ImitatorBeaconModems = []string{ImitatorAFSK1200, ImitatorFSK9600G3RUH}
+var ImitatorBeaconModems = []string{ImitatorAFSK1200, ImitatorFSK9600G3RUH, ImitatorFSK9600GEOSCAN}
 
 // ImitatorConfig — эфир имитатора: общий шум приёмника и сигналы.
+// Если задан Replay — воспроизводится запись SigMF (.sigmf-meta), сигналы и шум не используются.
 type ImitatorConfig struct {
 	// NoiseDBFS — мощность шума во всей полосе дискретизации, dBFS. 0 — шум по умолчанию.
 	NoiseDBFS float64          `json:"noise_dbfs,omitempty"`
 	Signals   []ImitatorSignal `json:"signals,omitempty"`
+	// Replay — путь к .sigmf-meta (рядом должен лежать .sigmf-data). Пусто — синтетический эфир.
+	Replay string `json:"replay,omitempty"`
 }
 
 // ImitatorSignal — сигнал имитатора. Сдвиг от центра приёмника в момент t:

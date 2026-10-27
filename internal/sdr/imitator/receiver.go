@@ -22,7 +22,18 @@ var (
 // Source, затем эфир из Signals и NoiseDBFS, иначе синтетический тон.
 type Options struct {
 	// Source — внешний источник IQ (формат .cfile: float32 I, float32 Q, little-endian).
+	// SigMF открывается как Dataset и тоже отдаёт cf32_le (см. internal/sigmf).
 	Source io.Reader
+	// SourceCloser — если задан, закрывается в Stop (файл SigMF / .cfile).
+	SourceCloser io.Closer
+	// SourceOpen — заново открывает запись перед каждым StartStream (после Stop файл уже закрыт).
+	// Если задан, Source/SourceCloser выставляет сам приёмник.
+	SourceOpen func() (io.ReadCloser, error)
+
+	// ReplaySampleRate — частота записи для Capabilities; 0 — обычный имитатор.
+	ReplaySampleRate uint32
+	// ReplayCenterHz — начальная настройка на центр записи; 0 — не трогать.
+	ReplayCenterHz uint64
 
 	// Signals — сигналы в эфире; сдвигаются при перестройке приёмника.
 	// Приёмник при создании настроен на частоту первого сигнала.
@@ -51,24 +62,40 @@ const (
 	RecommendedSampleRate = 2_048_000
 )
 
-// DefaultOptions — эфир по умолчанию: несущая ходит ±1 МГц вокруг DefaultFrequencyHz за минуту
-// поверх шума DefaultNoiseDBFS, уровень по профилю пролёта за 45 с от −40 до −90 dBFS.
-// SNR в полосе 12,5 кГц от 42 до −8 дБ: сигнал уходит под шум у горизонта.
+// DefaultOptions — эфир по умолчанию: маяки всех модемов на −50 dBFS поверх шума
+// DefaultNoiseDBFS (SNR около 30 дБ в 15 кГц), кадр раз в DefaultBeaconPeriod.
 func DefaultOptions() Options {
+	signals := make([]Signal, 0, len(defaultBeacons))
+	for _, b := range defaultBeacons {
+		signals = append(signals, Signal{
+			Kind:        SignalBeacon,
+			FrequencyHz: b.freqHz,
+			LevelDBFS:   -50,
+			Frame:       DefaultBeaconFrame(b.modem),
+			Period:      DefaultBeaconPeriod,
+			Modem:       b.modem,
+		})
+	}
 	return Options{
-		Signals: []Signal{{
-			Kind:        SignalCarrier,
-			FrequencyHz: DefaultFrequencyHz,
-			LevelDBFS:   -40,
-			SweepHz:     1_000_000,
-			SweepPeriod: time.Minute,
-			PassSwingDB: 50,
-			PassPeriod:  45 * time.Second,
-		}},
+		Signals:        signals,
 		NoiseDBFS:      DefaultNoiseDBFS,
 		NoiseRefRateHz: RecommendedSampleRate,
 		Seed:           1,
 	}
+}
+
+// defaultBeacons — маяки эфира по умолчанию, по одному на модем: приём каждого формата
+// проверяется без правки конфига. Частоты — в пределах ±128 кГц от DefaultFrequencyHz,
+// то есть в самой узкой «Полосе», и не ближе 50 кГц друг к другу. Приёмник стартует на
+// частоте первого сигнала, поэтому первым идёт AFSK 1200 в центре: его принимают настройки
+// канала по умолчанию (сдвиг 0, AFSK 1200).
+var defaultBeacons = []struct {
+	modem  BeaconModem
+	freqHz uint64
+}{
+	{BeaconAFSK1200, DefaultFrequencyHz},
+	{BeaconFSK9600G3RUH, DefaultFrequencyHz - 50_000},
+	{BeaconFSK9600GEOSCAN, DefaultFrequencyHz + 50_000},
 }
 
 // Receiver — имитатор SDR-приёмника для TDD без железа.
@@ -85,10 +112,13 @@ type Receiver struct {
 }
 
 // New создаёт имитатор SDR. Если частота первого сигнала в диапазоне приёмника, он сразу
-// на ней: сигнал виден в спектре без перестройки.
+// на ней: сигнал виден в спектре без перестройки. ReplayCenterHz важнее сигналов.
 func New(opts Options) *Receiver {
 	r := &Receiver{opts: opts}
-	if len(opts.Signals) > 0 {
+	switch {
+	case opts.ReplayCenterHz != 0:
+		_ = r.Tune(opts.ReplayCenterHz)
+	case len(opts.Signals) > 0:
 		_ = r.Tune(opts.Signals[0].FrequencyHz)
 	}
 	return r
@@ -97,12 +127,20 @@ func New(opts Options) *Receiver {
 func (r *Receiver) Name() string { return "imitator" }
 
 func (r *Receiver) Capabilities() sdr.Capabilities {
+	rec := uint32(RecommendedSampleRate)
+	minRate := uint32(48_000)
+	if r.opts.ReplaySampleRate != 0 {
+		rec = r.opts.ReplaySampleRate
+		if rec < minRate {
+			minRate = rec
+		}
+	}
 	return sdr.Capabilities{
 		MinFreqHz:             24_000_000,
 		MaxFreqHz:             1_766_000_000,
 		MaxBandwidthHz:        2_400_000,
-		SampleRateRanges:      []sdr.SampleRateRange{{MinHz: 48_000, MaxHz: 2_400_000}},
-		RecommendedSampleRate: RecommendedSampleRate,
+		SampleRateRanges:      []sdr.SampleRateRange{{MinHz: minRate, MaxHz: 2_400_000}},
+		RecommendedSampleRate: rec,
 	}
 }
 
@@ -155,6 +193,10 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 		}
 	}
 
+	if err := r.openReplayLocked(); err != nil {
+		return nil, err
+	}
+
 	r.running = true
 	r.stopped = make(chan struct{})
 	r.sampleRate = cfg.SampleRate
@@ -169,6 +211,9 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 	r.cancel = cancel
 
 	blockSize := cfg.EffectiveBlockSize()
+	if r.opts.Source != nil {
+		blockSize = replayBlockSize(cfg.SampleRate, blockSize)
+	}
 	ch := make(chan sdr.IQFrame, 4)
 
 	go func() {
@@ -194,6 +239,41 @@ func (r *Receiver) Stop() error {
 		return nil
 	}
 	<-stopped
+	r.closeSource()
+	return nil
+}
+
+func (r *Receiver) closeSource() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.closeSourceLocked()
+}
+
+func (r *Receiver) closeSourceLocked() {
+	if c := r.opts.SourceCloser; c != nil {
+		_ = c.Close()
+		r.opts.SourceCloser = nil
+		r.opts.Source = nil
+	}
+}
+
+// openReplayLocked готовит Source к чтению: заново открывает через SourceOpen или Seek(0).
+func (r *Receiver) openReplayLocked() error {
+	if r.opts.SourceOpen != nil {
+		r.closeSourceLocked()
+		rc, err := r.opts.SourceOpen()
+		if err != nil {
+			return fmt.Errorf("imitator replay open: %w", err)
+		}
+		r.opts.Source = rc
+		r.opts.SourceCloser = rc
+		return nil
+	}
+	if s, ok := r.opts.Source.(io.Seeker); ok {
+		if _, err := s.Seek(0, io.SeekStart); err != nil {
+			return fmt.Errorf("imitator replay seek: %w", err)
+		}
+	}
 	return nil
 }
 
@@ -305,30 +385,83 @@ func (r *Receiver) streamGenerated(
 	}
 }
 
-// streamFromReader читает IQ из io.Reader (формат .cfile: float32 I, float32 Q, LE).
-// При EOF — отправляет остаток и завершает чтение.
+// replayBlockSize — длина блока для файла: не длиннее ~50 мс (DefaultBlockSize при 32 ksps
+// даёт полсекунды и редкие тяжёлые рывки), но не мельче 512 отсчётов.
+func replayBlockSize(sampleRate uint32, want int) int {
+	if sampleRate == 0 || want <= 0 {
+		return want
+	}
+	maxBlock := int(sampleRate / 20)
+	if maxBlock < 512 {
+		maxBlock = 512
+	}
+	if want > maxBlock {
+		return maxBlock
+	}
+	return want
+}
+
+// streamFromReader читает IQ из io.Reader (формат .cfile: float32 I, float32 Q, LE)
+// в темпе реального времени. Если Source умеет Seek — при EOF крутит запись с начала;
+// иначе отдаёт остаток кадра и завершает поток.
+// Читает блоками, не по одной паре I/Q: иначе десятки тысяч syscall на кадр и UI «плывёт».
 func (r *Receiver) streamFromReader(ctx context.Context, cfg sdr.StreamConfig, blockSize int, ch chan<- sdr.IQFrame) {
-	pairBuf := make([]byte, 8) // float32 I + float32 Q
-	samples := make([]complex64, 0, blockSize)
+	byteBuf := make([]byte, blockSize*8)
+	frameDuration := time.Duration(float64(blockSize) / float64(cfg.SampleRate) * float64(time.Second))
+	next := time.Now()
+	seeker, canLoop := r.opts.Source.(io.Seeker)
 
 	for {
-		_, err := io.ReadFull(r.opts.Source, pairBuf)
-		if err != nil {
-			if len(samples) > 0 {
-				r.sendFrame(ctx, ch, samples, cfg)
+		samples := make([]complex64, 0, blockSize)
+		for len(samples) < blockSize {
+			need := (blockSize - len(samples)) * 8
+			n, err := io.ReadFull(r.opts.Source, byteBuf[:need])
+			n -= n % 8
+			for off := 0; off < n; off += 8 {
+				re := math.Float32frombits(binary.LittleEndian.Uint32(byteBuf[off : off+4]))
+				im := math.Float32frombits(binary.LittleEndian.Uint32(byteBuf[off+4 : off+8]))
+				samples = append(samples, complex(re, im))
 			}
+			if err == nil {
+				continue
+			}
+			if canLoop && (err == io.EOF || err == io.ErrUnexpectedEOF) {
+				if _, seekErr := seeker.Seek(0, io.SeekStart); seekErr != nil {
+					break
+				}
+				// Пустой файл: Seek снова даёт EOF — не крутить CPU вхолостую.
+				if n == 0 {
+					select {
+					case <-ctx.Done():
+						return
+					case <-time.After(frameDuration):
+					}
+				}
+				continue
+			}
+			break
+		}
+		if len(samples) == 0 {
 			return
 		}
-
-		re := math.Float32frombits(binary.LittleEndian.Uint32(pairBuf[0:4]))
-		im := math.Float32frombits(binary.LittleEndian.Uint32(pairBuf[4:8]))
-		samples = append(samples, complex(re, im))
-
-		if len(samples) == blockSize {
-			if !r.sendFrame(ctx, ch, samples, cfg) {
-				return
-			}
-			samples = make([]complex64, 0, blockSize)
+		if !r.sendFrame(ctx, ch, samples, cfg) {
+			return
+		}
+		if len(samples) < blockSize && !canLoop {
+			return
+		}
+		next = next.Add(frameDuration)
+		wait := time.Until(next)
+		if wait < -maxScheduleLagBlocks*frameDuration {
+			next, wait = time.Now(), 0
+		}
+		if wait <= 0 {
+			continue
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(wait):
 		}
 	}
 }

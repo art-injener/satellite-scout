@@ -1,6 +1,7 @@
 package demod
 
 import (
+	"bytes"
 	"encoding/hex"
 	"encoding/json"
 	"log/slog"
@@ -8,6 +9,7 @@ import (
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
+	"github.com/art-injener/satellite-scout/internal/geoscan"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
@@ -49,8 +51,20 @@ type TelemetryEvent struct {
 	Demod       string `json:"demod"`
 	Src         string `json:"src"`
 	Dest        string `json:"dest"`
-	Info        string `json:"info"` // данные текстом, если все символы печатные; иначе пусто
+	Info        string `json:"info"` // данные текстом без нулей в конце, если все символы печатные; иначе пусто
 	InfoHex     string `json:"info_hex"`
+	// Params — разобранная телеметрия, если формат кадра известен.
+	Params []TelemetryParam `json:"params,omitempty"`
+}
+
+// TelemetryParam — параметр телеметрии для таблицы: ключевые показываются в строке,
+// остальные — в подробностях кадра.
+type TelemetryParam struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Value string `json:"value"`
+	Unit  string `json:"unit,omitempty"`
+	Key   bool   `json:"key,omitempty"`
 }
 
 // StatusEvent — состояние демодулятора тракта для панели приёмника.
@@ -114,10 +128,26 @@ func telemetryEvent(pathID, demod string, p Packet) TelemetryEvent {
 		Dest:        callsign(p.Frame.Dest),
 		InfoHex:     hex.EncodeToString(p.Frame.Info),
 	}
-	if printable(p.Frame.Info) {
-		ev.Info = string(p.Frame.Info)
+	// Кадры фиксированной длины дополняются нулями в конце: текст показывается и без них.
+	if text := bytes.TrimRight(p.Frame.Info, "\x00"); printable(text) {
+		ev.Info = string(text)
+	}
+	if demod == demodGEOSCAN {
+		ev.Params = geoscanParams(p.Frame)
 	}
 	return ev
+}
+
+func geoscanParams(f ax25.Frame) []TelemetryParam {
+	params, ok := geoscan.BeaconParams(f)
+	if !ok {
+		return nil
+	}
+	out := make([]TelemetryParam, 0, len(params))
+	for _, p := range params {
+		out = append(out, TelemetryParam{ID: p.ID, Name: p.Name, Value: p.Value, Unit: p.Unit, Key: p.Key})
+	}
+	return out
 }
 
 func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings, st Status) StatusEvent {

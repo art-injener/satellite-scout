@@ -1,12 +1,15 @@
 package demod
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/ax25"
+	"github.com/art-injener/satellite-scout/internal/geoscan"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
@@ -103,6 +106,69 @@ func TestService_EmitsTelemetryPerFrame(t *testing.T) {
 	}
 	if ts, _ := tm[1]["timestamp_ms"].(float64); ts < 6_000 || ts > 7_000 {
 		t.Errorf("second packet timestamp_ms=%v, want within the second burst", tm[1]["timestamp_ms"])
+	}
+}
+
+// GEOSCAN pads the frame with zeros up to its fixed size: the text is still shown, hex keeps all bytes.
+func TestTelemetryEvent_TextIgnoresZeroPadding(t *testing.T) {
+	cases := []struct {
+		info []byte
+		want string
+	}{
+		{[]byte("beacon\x00\x00\x00"), "beacon"},
+		{[]byte("bea\x00con"), ""},
+		{[]byte("beacon\x01"), ""},
+	}
+	for _, c := range cases {
+		ev := telemetryEvent("radio_path_0", "fsk9600_geoscan", Packet{Frame: ax25.Frame{Info: c.info}})
+		if ev.Info != c.want {
+			t.Errorf("info % X: text %q, want %q", c.info, ev.Info, c.want)
+		}
+		if ev.InfoHex != hex.EncodeToString(c.info) {
+			t.Errorf("info % X: hex %s, want all bytes", c.info, ev.InfoHex)
+		}
+	}
+}
+
+func TestTelemetryEvent_GEOSCANBeaconParams(t *testing.T) {
+	info, err := geoscan.BuildBeacon(map[string]float64{"eps_cell_voltage_full": 7.412})
+	if err != nil {
+		t.Fatal(err)
+	}
+	frame := ax25.Frame{Dest: ax25.Address{Call: geoscan.BeaconDest}, Src: ax25.Address{Call: "RS23S"}, Info: info}
+
+	ev := telemetryEvent("radio_path_0", "fsk9600_geoscan", Packet{Frame: frame})
+	want, _ := geoscan.BeaconParams(frame)
+	if len(ev.Params) != len(want) {
+		t.Fatalf("params=%d, want %d", len(ev.Params), len(want))
+	}
+	data, err := json.Marshal(ev)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded struct {
+		Params []map[string]any `json:"params"`
+	}
+	if err = json.Unmarshal(data, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	var voltage map[string]any
+	for _, p := range decoded.Params {
+		if p["id"] == "eps_cell_voltage_full" {
+			voltage = p
+		}
+	}
+	wantJSON := map[string]any{
+		"id": "eps_cell_voltage_full", "name": "Напряжение АКБ", "value": "7,412", "unit": "В", "key": true,
+	}
+	for k, v := range wantJSON {
+		if voltage[k] != v {
+			t.Errorf("voltage param %s=%v, want %v", k, voltage[k], v)
+		}
+	}
+
+	if afsk := telemetryEvent("radio_path_0", "afsk1200", Packet{Frame: frame}); afsk.Params != nil {
+		t.Errorf("AFSK frame got GEOSCAN params: %v", afsk.Params)
 	}
 }
 

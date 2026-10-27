@@ -194,6 +194,7 @@ MockStream.prototype.stop = function() { this.stopped++; this.running = false; }
 MockStream.prototype.isRunning = function() { return this.running; };
 MockStream.dbfsToUnit = realStream.dbfsToUnit;
 MockStream.AutoRange = realStream.AutoRange;
+MockStream.DisplaySmooth = realStream.DisplaySmooth;
 MockStream.markerReadout = realStream.markerReadout;
 MockStream.dbmOffset = realStream.dbmOffset;
 MockStream.shiftLevels = realStream.shiftLevels;
@@ -2046,6 +2047,65 @@ test('frame is drawn on the FFT and the waterfall in the auto dB scale, band fro
     });
 });
 
+test('stream frames coalesce: many onFrame before rAF yield one draw and one waterfall line', () => {
+    const queued = [];
+    const prevRaf = global.requestAnimationFrame;
+    const prevCancel = global.cancelAnimationFrame;
+    global.requestAnimationFrame = (cb) => { queued.push(cb); return queued.length; };
+    global.cancelAnimationFrame = (id) => { queued[id - 1] = null; };
+    let m = null;
+    try {
+        withStation({}, () => {
+            m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            // Слить rAF вкладки/ресайза, иначе они мешают счёту coalesce
+            while (queued.length) {
+                const cb = queued.shift();
+                if (cb) { cb(); }
+            }
+            const s = MockStream.last();
+            m._fft.calls = [];
+            m._wf.calls = [];
+            s.opts.onFrame(fftFrame(436500000, [-100, -90, -80]));
+            s.opts.onFrame(fftFrame(436500000, [-100, -50, -20]));
+            s.opts.onFrame(fftFrame(436500000, [-100, -40, -10]));
+            assert.strictEqual(m._fft.calls.filter((c) => c[0] === 'draw').length, 0, 'no draw until rAF');
+            assert.strictEqual(m._wf.calls.filter((c) => c[0] === 'pushLine').length, 0);
+            assert.strictEqual(queued.filter(Boolean).length, 1, 'one rAF scheduled');
+            queued[0]();
+            assert.strictEqual(m._fft.calls.filter((c) => c[0] === 'draw').length, 1);
+            assert.strictEqual(m._wf.calls.filter((c) => c[0] === 'pushLine').length, 1);
+            // Первый кадр после coalesce: DisplaySmooth копирует последний
+            const want = Array.from(realStream.dbfsToUnit(new Float32Array([-100, -40, -10]), m._fft._dbMin, m._fft._dbMax));
+            assert.deepStrictEqual(Array.from(m._fft.calls[0][1]), want);
+        });
+    } finally {
+        if (m) { m.destroy(); }
+        global.requestAnimationFrame = prevRaf;
+        global.cancelAnimationFrame = prevCancel;
+    }
+});
+
+test('display smooth blends the second frame on the FFT line', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        s.opts.onFrame(fftFrame(436500000, [-100, -20]));
+        m._fft.calls = [];
+        s.opts.onFrame(fftFrame(436500000, [-80, -40]));
+        const draw = m._fft.calls.find((c) => c[0] === 'draw');
+        // alpha 0.35: -100+0.35*20=-93, -20+0.35*(-20)=-27
+        const blended = new Float32Array([-93, -27]);
+        const want = Array.from(realStream.dbfsToUnit(blended, m._fft._dbMin, m._fft._dbMax));
+        assert.deepStrictEqual(Array.from(draw[1]).map((v) => Math.round(v * 1e6) / 1e6),
+            want.map((v) => Math.round(v * 1e6) / 1e6));
+        m.destroy();
+    });
+});
+
 test('Antenna draws the stream on its compact spectrum', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
@@ -2056,6 +2116,21 @@ test('Antenna draws the stream on its compact spectrum', () => {
         MockStream.last().opts.onFrame(fftFrame(436500000));
         assert.ok(m._antFft.calls.some((c) => c[0] === 'draw'));
         assert.strictEqual(m._antFft.freqCenterMHz, 436.5);
+        m.destroy();
+    });
+});
+
+test('first frame redraws the frequency scale and does not clear the waterfall', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        m._wf.calls = [];
+        MockStream.last().opts.onFrame(fftFrame(436200000, [-80, -40], 57600));
+        assert.strictEqual(m._wf._freqCenterMHz, 436.2);
+        assert.strictEqual(m._wf._freqSpanMHz, 0.0576);
+        assert.ok(m._wf.calls.some((c) => c[0] === 'refresh'), 'scale was drawn for the placeholder band');
+        assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'));
         m.destroy();
     });
 });

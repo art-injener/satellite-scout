@@ -306,6 +306,20 @@ func TestValidate_ImitatorOnlyForSimulatedDriver(t *testing.T) {
 	}
 }
 
+func TestValidate_ImitatorReplayPath(t *testing.T) {
+	im := &ImitatorConfig{Replay: "data/rec/x.sigmf-meta"}
+	cfg := DefaultConfig()
+	cfg.Station.RadioPaths = []RadioPath{imitatorPath(im)}
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("valid replay rejected: %v", err)
+	}
+	im.Replay = "data/rec/x.cfile"
+	verrs := mustValidationErrors(t, cfg.Validate())
+	if !hasField(verrs, "station.radio_paths[0].receiver.imitator.replay") {
+		t.Errorf("expected replay suffix error, got %v", verrs)
+	}
+}
+
 func TestValidate_CalibrationRange(t *testing.T) {
 	const field = "station.radio_paths[0].receiver.calibration_db"
 	cases := []struct {

@@ -4,7 +4,7 @@
 // Структура DOM:
 //   #layout-manual[data-tab]
 //     .ml-timeline          → PassTimelineView (горки El×время), виден всегда
-//     .ml-tabbar            → Панорама | Спектр | Антенна + строка состояния SDR
+//     .ml-tabbar            → рейка слева: Панорама, Спектр, Антенна
 //     .ml-txlist            → лента передатчиков (рендерит ManualPanorama), кроме «Антенны»
 //     Вкладки (.ml-tabpane):
 //       Панорама — SWEEP: панорама (FFT по span + метки TX) и таблица «Эфир»
@@ -54,6 +54,11 @@
     const FRAME_MODE_MAXHOLD = 0x02;
     /** Цифры маркера обновляются не чаще раза в этот интервал: 20 раз в секунду их не прочитать. */
     const MARKER_REFRESH_MS = 250;
+    /**
+     * Доля нового кадра в линии на экране (0…1). Не путать с серверным «Накоплением»:
+     * здесь только сглаживание картинки, чтобы не дёргать canvas на каждом FFT.
+     */
+    const DISPLAY_SMOOTH_ALPHA = 0.35;
     const MARKER_EMPTY = '—';
     /** Допуск наведения: сверх него рассогласование подсвечивается, градусы. */
     const POINTING_TOLERANCE_DEG = 2;
@@ -148,6 +153,12 @@
         this._specAvgNSelects = [];
         /** Последний кадр удержания: рисуется вместе со следующим мгновенным. */
         this._heldValues = null;
+        /** Последний кадр потока, ждущий отрисовки (coalesce до rAF). */
+        this._pendingFrame = null;
+        /** Id requestAnimationFrame отрисовки спектра; 0 — не запланирована. */
+        this._drawRaf = 0;
+        /** Сглаживание линии на экране (не серверное накопление). */
+        this._displaySmooth = null;
         /** Сдвиг уровней из dBFS в dBm на входе антенны; null — экран в dBFS. */
         this._levelOffset = null;
         /** Тракт, для которого получен _levelOffset. */
@@ -1331,7 +1342,11 @@
         this._streamCenterHz = null;
         this._streamSpanHz = null;
         this._streamRange = new window.SpectrumStream.AutoRange();
+        this._displaySmooth = typeof window.SpectrumStream.DisplaySmooth === 'function'
+            ? new window.SpectrumStream.DisplaySmooth(DISPLAY_SMOOTH_ALPHA)
+            : null;
         this._heldValues = null;
+        this._pendingFrame = null;
         this._requestReceiverStatus(path);
         const windowMs = this._specMode === 'avg'
             ? '&window_ms=' + Math.round(this._specAvgN * 1000 / STREAM_FPS)
@@ -1386,6 +1401,7 @@
             sq.value = String(Number((Number(sq.value) + delta).toFixed(1)));
         }
         if (this._streamRange) { this._streamRange = new window.SpectrumStream.AutoRange(); }
+        if (this._displaySmooth) { this._displaySmooth.reset(); }
         this._heldValues = null;
     };
 
@@ -1475,6 +1491,11 @@
     };
 
     ManualLayout.prototype._stopStream = function() {
+        if (this._drawRaf && typeof cancelAnimationFrame === 'function') {
+            cancelAnimationFrame(this._drawRaf);
+        }
+        this._drawRaf = 0;
+        this._pendingFrame = null;
         if (this._stream) {
             this._stream.stop();
             this._stream = null;
@@ -1484,21 +1505,44 @@
         this._showMarker(null);
     };
 
-    /** @param {{header: Object, values: ?Float32Array}} frame */
+    /**
+     * Кадр с потока: удержание «Пика» запоминаем сразу, остальное — в очередь на rAF.
+     * Если кадров больше, чем успевает экран, рисуем только последний (ADR-002 § сценарий 7).
+     * @param {{header: Object, values: ?Float32Array}} frame
+     */
     ManualLayout.prototype._onStreamFrame = function(frame) {
         const h = frame.header;
         this._applyStreamBand(h.centerHz, h.spanHz);
         if (!frame.values || !this._active || !this._streamRange) { return; }
-        const values = this._levelOffset === null
-            ? frame.values
-            : window.SpectrumStream.shiftLevels(frame.values, this._levelOffset);
-        // В «Пике» сервер шлёт удержание и следом мгновенный кадр: рисуем их вместе,
-        // водопад и маркер берут мгновенный
-        const peak = this._specMode === 'maxhold';
-        if (peak && h.displayMode === FRAME_MODE_MAXHOLD) {
-            this._heldValues = values;
+        // В «Пике» сервер шлёт удержание и следом мгновенный: удержание только копим
+        if (this._specMode === 'maxhold' && h.displayMode === FRAME_MODE_MAXHOLD) {
+            this._heldValues = this._levelOffset === null
+                ? frame.values
+                : window.SpectrumStream.shiftLevels(frame.values, this._levelOffset);
             return;
         }
+        this._pendingFrame = frame;
+        if (this._drawRaf) { return; }
+        const self = this;
+        this._drawRaf = requestAnimationFrame(function() {
+            self._drawRaf = 0;
+            self._flushPendingFrame();
+        });
+    };
+
+    /** Отрисовка последнего отложенного кадра: сглаживание линии, шкала, FFT, водопад. */
+    ManualLayout.prototype._flushPendingFrame = function() {
+        const frame = this._pendingFrame;
+        this._pendingFrame = null;
+        if (!frame || !frame.values || !this._active || !this._streamRange) { return; }
+        const h = frame.header;
+        const raw = this._levelOffset === null
+            ? frame.values
+            : window.SpectrumStream.shiftLevels(frame.values, this._levelOffset);
+        // Линия на экране сглажена; маркер читает сырой кадр (как уровень на входе)
+        const values = this._displaySmooth ? this._displaySmooth.update(raw) : raw;
+        // Водопад берёт сглаженный мгновенный; удержание «Пика» — как пришло
+        const peak = this._specMode === 'maxhold';
         const held = peak && h.displayMode === FRAME_MODE_CURRENT ? this._heldValues : null;
         const range = this._streamRange.update(values, held);
         const views = [this._fft, this._antFft];
@@ -1522,7 +1566,7 @@
         const ts = h.timestampMs;
         if (this._markerShownMs === null || !(ts - this._markerShownMs < MARKER_REFRESH_MS)) {
             this._markerShownMs = typeof ts === 'number' ? ts : null;
-            this._showMarker(window.SpectrumStream.markerReadout(values, h.centerHz, h.spanHz));
+            this._showMarker(window.SpectrumStream.markerReadout(raw, h.centerHz, h.spanHz));
         }
     };
 
@@ -1549,10 +1593,19 @@
         if (this._wf) {
             this._wf._freqCenterMHz = centerMHz;
             if (spanMHz) { this._wf._freqSpanMHz = spanMHz; }
-            if ((changed || spanChanged) && !first) {
-                this._wf.clear();
-                if (this._active) { this._wf.start(); }
+            if (changed || spanChanged) {
+                if (first) {
+                    // Шкала нарисована по заглушке. Первый кадр водопад не чистит,
+                    // поэтому подписи частот перерисовываем отдельно.
+                    this._wf.refresh();
+                } else {
+                    this._wf.clear();
+                    if (this._active) { this._wf.start(); }
+                }
             }
+        }
+        if ((changed || spanChanged) && !first && this._displaySmooth) {
+            this._displaySmooth.reset();
         }
         this._streamCenterHz = centerHz;
         if (spanChanged) {

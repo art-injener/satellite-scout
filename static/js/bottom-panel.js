@@ -22,7 +22,16 @@
      * глубокий синий → зелёный → янтарный → персиковый.
      * Применяется во всех темах для единообразия и комфорта глаз.
      */
-    function hotColorMuted(v) {
+    /** Общий буфер RGB: colormap не аллоцирует [r,g,b] на каждый пиксель строки. */
+    const _rgbScratch = [0, 0, 0];
+
+    /**
+     * @param {number} v — 0…1
+     * @param {?number[]} [out] — куда писать; по умолчанию общий scratch
+     * @returns {number[]}
+     */
+    function hotColorMuted(v, out) {
+        out = out || _rgbScratch;
         v = Math.max(0, Math.min(1, v));
         let r; let g; let b;
         if (v < 0.22) {
@@ -51,11 +60,14 @@
             g = Math.round(106 + t * 42);
             b = Math.round(68 + t * 38);
         }
-        return [r, g, b];
+        out[0] = r;
+        out[1] = g;
+        out[2] = b;
+        return out;
     }
 
-    function hotColor(v) {
-        return hotColorMuted(v);
+    function hotColor(v, out) {
+        return hotColorMuted(v, out);
     }
 
     /**
@@ -64,9 +76,10 @@
      * тёмно-красный. Яркость падает с ростом сигнала (обратно тёмной теме),
      * поэтому пятна сигнала читаются как тёмные на светлом поле.
      */
-    function hotColorLight(v) {
+    function hotColorLight(v, out) {
+        out = out || _rgbScratch;
         v = Math.max(0, Math.min(1, v));
-        // Опорные точки [позиция, [r,g,b]] — линейная интерполяция между ними.
+        // Опорные точки [позиция, r, g, b] — линейная интерполяция между ними.
         const stops = [
             [0.00, 238, 242, 247],  // pale near-white (холод)
             [0.25, 120, 196, 206],  // бирюза
@@ -79,15 +92,17 @@
                 const a = stops[i];
                 const b = stops[i + 1];
                 const t = (v - a[0]) / (b[0] - a[0]);
-                return [
-                    Math.round(a[1] + t * (b[1] - a[1])),
-                    Math.round(a[2] + t * (b[2] - a[2])),
-                    Math.round(a[3] + t * (b[3] - a[3]))
-                ];
+                out[0] = Math.round(a[1] + t * (b[1] - a[1]));
+                out[1] = Math.round(a[2] + t * (b[2] - a[2]));
+                out[2] = Math.round(a[3] + t * (b[3] - a[3]));
+                return out;
             }
         }
         const last = stops[stops.length - 1];
-        return [last[1], last[2], last[3]];
+        out[0] = last[1];
+        out[1] = last[2];
+        out[2] = last[3];
+        return out;
     }
 
     /** Выбор colormap водопада по теме: токен --waterfall-colormap (light | dark). */
@@ -253,20 +268,31 @@
         this._marginRight = opts.marginRight || 0;
     }
 
-    // Подгонка размеров canvas под контейнер
+    // Подгонка размеров canvas под контейнер (шкала частот — только при смене размера)
     WaterfallView.prototype._resize = function() {
-        const rect = this._canvas.getBoundingClientRect();
-        let w = Math.floor(rect.width);
-        let h = Math.floor(rect.height);
+        this._syncSize(true);
+    };
+
+    /**
+     * Размер буфера по clientWidth/Height. Шкалу частот перерисовываем только
+     * при реальной смене размера (не на каждой строке водопада).
+     * @param {boolean} [forceScale] — перерисовать шкалу даже без смены размера
+     * @returns {boolean} true, если буфер готов к отрисовке
+     */
+    WaterfallView.prototype._syncSize = function(forceScale) {
+        let w = Math.floor(this._canvas.clientWidth);
+        let h = Math.floor(this._canvas.clientHeight);
         if (w < 10) { w = this._canvas.offsetWidth || 300; }
         if (h < 10) { h = this._canvas.offsetHeight || 150; }
-        if (w >= 10) { this._drawFreqScale(w); }
-        if (w < 2 || h < 2) { return; }
-        if (this._canvas.width !== w || this._canvas.height !== h) {
+        if (w < 2 || h < 2) { return false; }
+        const resized = this._canvas.width !== w || this._canvas.height !== h;
+        if (resized) {
             this._canvas.width = w;
             this._canvas.height = h;
             this._imageData = null;
         }
+        if (resized || forceScale) { this._drawFreqScale(w); }
+        return true;
     };
 
     // Шкала частот на отдельном canvas (над водопадом «Сопровождение»)
@@ -318,10 +344,9 @@
 
     // Добавить строку спектра (Float32Array) в верх водопада со сдвигом вниз
     WaterfallView.prototype.pushLine = function(buf) {
-        this._resize();
+        if (!this._syncSize(false)) { return; }
         const w = this._canvas.width;
         const h = this._canvas.height;
-        if (w < 2 || h < 2) { return; }
 
         if (!this._imageData || this._imageData.width !== w || this._imageData.height !== h) {
             this._imageData = this._ctx.createImageData(w, h);
@@ -346,7 +371,7 @@
 
         // Область отступов — фон полей водопада
         const marginRgb = cssVarRgbHex('--waterfall-margin-bg', '#000000');
-        // Colormap выбираем раз на строку (по теме), не на каждый пиксель
+        // Colormap выбираем раз на строку (по теме), RGB пишем в общий scratch
         const cmap = waterfallColormap();
         const bins = buf.length;
         for (let x = 0; x < w; x++) {
@@ -358,7 +383,7 @@
                 data[idx + 3] = 255;
             } else {
                 const srcIdx = Math.min(Math.floor(((x - ml) / plotW) * bins), bins - 1);
-                const col = cmap(buf[srcIdx]);
+                const col = cmap(buf[srcIdx], _rgbScratch);
                 data[idx] = col[0];
                 data[idx + 1] = col[1];
                 data[idx + 2] = col[2];
@@ -541,15 +566,23 @@
             if (buf[bi] > peakVal) { peakVal = buf[bi]; peakIdx = bi; }
         }
 
+        // Точек не больше ~2 на пиксель: глаз не отличит 4096 от ширины графика
         const trace = function(values, color, width) {
             const n = values.length;
+            const step = Math.max(1, Math.floor(n / (plotW * 2)));
             ctx.save();
             ctx.beginPath();
-            for (let bp = 0; bp < n; bp++) {
+            let first = true;
+            for (let bp = 0; bp < n; bp += step) {
                 const xPt = ml + (bp / (n - 1)) * plotW;
                 const vv = Math.max(0, Math.min(1, values[bp]));
                 const yPt = mt + plotH * (1 - vv);
-                if (bp === 0) { ctx.moveTo(xPt, yPt); } else { ctx.lineTo(xPt, yPt); }
+                if (first) { ctx.moveTo(xPt, yPt); first = false; } else { ctx.lineTo(xPt, yPt); }
+            }
+            if ((n - 1) % step !== 0) {
+                const xLast = ml + plotW;
+                const vLast = Math.max(0, Math.min(1, values[n - 1]));
+                ctx.lineTo(xLast, mt + plotH * (1 - vLast));
             }
             ctx.strokeStyle = color;
             ctx.lineWidth = width;

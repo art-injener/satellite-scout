@@ -39,7 +39,7 @@ global.document = {
 };
 global.window = {};
 
-const { DemodPanel, formatFreqMHz, metricsFromTx, metricsFromStatus } = require('./demod-panel.js');
+const { DemodPanel, formatFreqMHz, metricsFromTx, metricsFromStatus, demodLabel } = require('./demod-panel.js');
 
 let passed = 0;
 let failed = 0;
@@ -157,6 +157,18 @@ test('metricsFromStatus labels FSK 9600 G3RUH', () => {
     const m = metricsFromStatus(Object.assign({}, status, { demod: 'fsk9600_g3ruh' }), null, 0);
     assert.strictEqual(m.pipeline, 'FSK 9600 G3RUH');
     assert.strictEqual(m.rate, '9.6 ksym/s');
+});
+
+test('metricsFromStatus labels FSK 9600 GEOSCAN', () => {
+    const m = metricsFromStatus(Object.assign({}, status, { demod: 'fsk9600_geoscan' }), null, 0);
+    assert.strictEqual(m.pipeline, 'FSK 9600 GEOSCAN');
+    assert.strictEqual(m.rate, '9.6 ksym/s');
+});
+
+test('demodLabel names known demodulators and returns the id for others', () => {
+    assert.strictEqual(demodLabel('afsk1200'), 'AFSK 1200');
+    assert.strictEqual(demodLabel('fsk9600_geoscan'), 'FSK 9600 GEOSCAN');
+    assert.strictEqual(demodLabel('gmsk9600'), 'gmsk9600');
 });
 
 test('metricsFromStatus marks a demodulator that is not implemented', () => {

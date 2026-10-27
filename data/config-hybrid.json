@@ -1,7 +1,8 @@
 {
   "_version": 1,
   "server": {
-    "port": "8083"
+    "port": "8083",
+    "master_password": "5Q2WPJ2P5WOD3BQ64W2D2GT34I"
   },
   "ui": {
     "theme": "default",
@@ -36,7 +37,7 @@
     "radio_paths": [
       {
         "id": 1,
-        "name": "QFH Имитатор",
+        "name": "QFH GEOSCAN",
         "antenna": {
           "name": "QFH 437",
           "type": "stationary",
@@ -46,12 +47,15 @@
         },
         "receiver": {
           "driver": "simulated",
-          "label": "Имитатор (simulated)"
+          "label": "Replay Geoscan-Edelveis (fsk9600_geoscan)",
+          "imitator": {
+            "replay": "data/recordings/pe0sat-geoscan/geoscan_edelveis_2022-11-24_57600.sigmf-meta"
+          }
         }
       },
       {
         "id": 2,
-        "name": "Yagi Имитатор",
+        "name": "Yagi ASTROBIO",
         "antenna": {
           "name": "Yagi 437",
           "type": "rotatable",
@@ -61,14 +65,23 @@
         },
         "receiver": {
           "driver": "simulated",
-          "label": "Имитатор (simulated)"
+          "label": "Replay AstroBio G3RUH (fsk9600_g3ruh)",
+          "imitator": {
+            "replay": "data/recordings/pe0sat-astrobio/astrobio_2022-10-18_57600.sigmf-meta"
+          }
         },
         "rotator": {
           "driver": "rotctld",
           "host": "localhost",
           "port": 4533,
-          "az_range": [0, 360],
-          "el_range": [0, 90],
+          "az_range": [
+            0,
+            360
+          ],
+          "el_range": [
+            0,
+            90
+          ],
           "step_deg": 1
         }
       }

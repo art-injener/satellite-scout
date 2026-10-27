@@ -3,10 +3,12 @@ package demod
 import (
 	"bytes"
 	"math"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
+	"github.com/art-injener/satellite-scout/internal/geoscan"
 	"github.com/art-injener/satellite-scout/internal/modem"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
@@ -45,12 +47,31 @@ func burstSamples(t *testing.T, rate float64) int {
 	return int(math.Round(float64(len(burstLevels(t))) * rate / 1200))
 }
 
-// modulateBurst — one beacon frame in AFSK 1200 or FSK 9600 G3RUH at the given rate.
+// geoscanData — the test frame as GEOSCAN carries it: AX.25 without FCS, zero-padded to the long size.
+func geoscanData(t *testing.T) []byte {
+	t.Helper()
+	b, err := testFrame().Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, geoscan.LongDataLen)
+	copy(data, b[:len(b)-2])
+	return data
+}
+
+// modulateBurst — one beacon frame in AFSK 1200, FSK 9600 G3RUH or GEOSCAN at the given rate.
 func modulateBurst(t *testing.T, rate float64, demod string) []complex64 {
 	t.Helper()
-	if demod == "fsk9600_g3ruh" {
+	switch demod {
+	case "fsk9600_g3ruh":
 		var s modem.G3RUHScrambler
 		return modem.NewFSK(modem.FSK9600(rate)).Modulate(nil, s.Scramble(nil, burstLevels(t)))
+	case "fsk9600_geoscan":
+		levels, err := geoscan.Encode(geoscanData(t), 32, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return modem.NewFSK(modem.FSK9600(rate)).Modulate(nil, levels)
 	}
 	return modem.NewAFSK(modem.AFSK1200(rate)).Modulate(nil, burstLevels(t))
 }
@@ -207,6 +228,30 @@ func TestChain_DecodesFSK9600Beacons(t *testing.T) {
 	}
 }
 
+func TestChain_DecodesGEOSCANBeacons(t *testing.T) {
+	c := NewChain()
+	air := beaconAirOf(t, testRate, 3, time.Second, "fsk9600_geoscan")
+	s := fsk9600Settings(testOffset, -90)
+	s.Demod = "fsk9600_geoscan"
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+
+	if len(got) != 3 {
+		t.Fatalf("packets=%d, want 3", len(got))
+	}
+	f := testFrame()
+	for i, p := range got {
+		if p.Frame.Src != f.Src || p.Frame.Dest != f.Dest || !bytes.HasPrefix(p.Frame.Info, f.Info) {
+			t.Errorf("packet %d frame=%+v, want %+v padded with zeros", i, p.Frame, f)
+		}
+	}
+	if !bytes.Equal(got[0].Raw, geoscanData(t)) {
+		t.Errorf("raw=% X, want frame data without CRC", got[0].Raw)
+	}
+	if st := c.Status(); st.Good != 3 || !st.Supported {
+		t.Errorf("status=%+v, want 3 good, supported", st)
+	}
+}
+
 func TestChain_FollowsDemodChange(t *testing.T) {
 	c := NewChain()
 	frames := toFrames(beaconAirOf(t, testRate, 3, time.Second, "fsk9600_g3ruh"), testRate, sdr.DefaultBlockSize, 0)
@@ -220,6 +265,15 @@ func TestChain_FollowsDemodChange(t *testing.T) {
 		got = append(got, c.Process(f, s)...)
 	}
 	checkPackets(t, got, 2)
+}
+
+// The receiver panel can only set demodulators from sdr.Demods.
+func TestProfiles_AreSelectable(t *testing.T) {
+	for name := range profiles {
+		if !slices.Contains(sdr.Demods, name) {
+			t.Errorf("profile %q is not in sdr.Demods", name)
+		}
+	}
 }
 
 func TestChain_UnsupportedDemodReceivesNothing(t *testing.T) {

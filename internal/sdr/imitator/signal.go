@@ -33,6 +33,9 @@ const (
 	BeaconAFSK1200 BeaconModem = "afsk1200"
 	// BeaconFSK9600G3RUH — GFSK 9600 со скремблером G3RUH.
 	BeaconFSK9600G3RUH BeaconModem = "fsk9600_g3ruh"
+	// BeaconFSK9600GEOSCAN — GFSK 9600, кадр GEOSCAN: AX.25 без FCS, дополненный нулями
+	// до длинного кадра, под PN9 и CRC16 приёмопередатчика CC1125.
+	BeaconFSK9600GEOSCAN BeaconModem = "fsk9600_geoscan"
 )
 
 // Signal — источник в эфире имитатора. Сдвиг от центра приёмника в момент t:
