@@ -329,6 +329,13 @@ func validateImitator(prefix string, rc ReceiverConfig) ValidationErrors {
 	add := func(field, msg string) {
 		errs = append(errs, ValidationError{Field: prefix + field, Message: msg})
 	}
+	if im.Replay != "" {
+		if !strings.HasSuffix(im.Replay, ".sigmf-meta") {
+			add(".replay", "укажите путь к файлу .sigmf-meta")
+		}
+		// При replay сигналы и шум не проверяем — эфир из файла.
+		return errs
+	}
 	if im.NoiseDBFS > 0 {
 		add(".noise_dbfs", "мощность шума не может быть выше полной шкалы (0 dBFS)")
 	}

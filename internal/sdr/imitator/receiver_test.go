@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"io"
 	"math"
 	"math/cmplx"
 	"testing"
@@ -12,6 +13,11 @@ import (
 
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
+
+// replayMem — Seek + Close для тестов циклического replay.
+type replayMem struct{ *bytes.Reader }
+
+func (replayMem) Close() error { return nil }
 
 func TestReceiver_Name(t *testing.T) {
 	r := New(Options{})
@@ -101,6 +107,18 @@ func TestReceiver_StartStream_SyntheticTone(t *testing.T) {
 	}
 }
 
+func TestReplayBlockSize(t *testing.T) {
+	if got := replayBlockSize(32_000, 16_384); got != 1600 {
+		t.Fatalf("32k: got %d, want 1600 (50 ms)", got)
+	}
+	if got := replayBlockSize(2_048_000, 16_384); got != 16_384 {
+		t.Fatalf("2M: got %d, want unchanged 16384", got)
+	}
+	if got := replayBlockSize(1_000, 16_384); got != 512 {
+		t.Fatalf("1k: got %d, want floor 512", got)
+	}
+}
+
 func TestReceiver_StartStream_ReplayReader(t *testing.T) {
 	const numSamples = 2048
 	buf := &bytes.Buffer{}
@@ -138,6 +156,54 @@ func TestReceiver_StartStream_ReplayReader(t *testing.T) {
 
 	if totalSamples != numSamples {
 		t.Fatalf("total samples=%d, want %d", totalSamples, numSamples)
+	}
+}
+
+// Как хаб: Stop закрывает файл; следующий StartStream открывает запись снова, при EOF крутит её.
+func TestReceiver_StartStream_ReplayReopensAfterStopAndLoops(t *testing.T) {
+	const numSamples = 512
+	raw := make([]byte, numSamples*8)
+	for i := range numSamples {
+		binary.LittleEndian.PutUint32(raw[i*8:], math.Float32bits(float32(i)))
+		binary.LittleEndian.PutUint32(raw[i*8+4:], math.Float32bits(0))
+	}
+	open := func() (io.ReadCloser, error) {
+		return &replayMem{Reader: bytes.NewReader(append([]byte(nil), raw...))}, nil
+	}
+	src, err := open()
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := New(Options{Source: src, SourceCloser: src, SourceOpen: open})
+	cfg := sdr.StreamConfig{SampleRate: 48000, BlockSize: 128}
+
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	ch1, err := r.StartStream(ctx1, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := <-ch1; !ok {
+		t.Fatal("first stream empty")
+	}
+	cancel1()
+	for range ch1 {
+	}
+	if err := r.Stop(); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel2()
+	ch2, err := r.StartStream(ctx2, cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	total := 0
+	for frame := range ch2 {
+		total += len(frame.Samples)
+	}
+	if total <= numSamples {
+		t.Fatalf("looping replay: got %d samples, want > %d (file length)", total, numSamples)
 	}
 }
 
@@ -382,28 +448,61 @@ func TestReceiver_StartStream_InvalidSignal(t *testing.T) {
 	}
 }
 
-func TestDefaultOptions_SweepingCarrierOverNoise(t *testing.T) {
+// The default channel (offset 0, AFSK 1200) receives the first beacon without any setup.
+func TestDefaultOptions_AFSKBeaconAtCenter(t *testing.T) {
 	opts := DefaultOptions()
-	if len(opts.Signals) != 1 {
-		t.Fatalf("signals=%d, want one carrier", len(opts.Signals))
+	if len(opts.Signals) == 0 {
+		t.Fatal("no signals, want the AFSK 1200 beacon first")
 	}
 	sig := opts.Signals[0]
-	if sig.Kind != SignalCarrier || sig.FrequencyHz != DefaultFrequencyHz {
-		t.Errorf("signal %s at %d Hz, want carrier at %d", sig.Kind, sig.FrequencyHz, uint64(DefaultFrequencyHz))
-	}
-	if sig.SweepHz != 1_000_000 || sig.SweepPeriod != time.Minute {
-		t.Errorf("sweep ±%.0f Hz over %v, want ±1 MHz over 1 min", sig.SweepHz, sig.SweepPeriod)
-	}
-	if sig.LevelDBFS != -40 || sig.PassSwingDB != 50 || sig.PassPeriod != 45*time.Second {
-		t.Errorf("pass %.0f dBFS -%.0f dB over %v, want -40 dBFS down to -90 over 45 s",
-			sig.LevelDBFS, sig.PassSwingDB, sig.PassPeriod)
+	if sig.Kind != SignalBeacon || sig.Modem != BeaconAFSK1200 || sig.FrequencyHz != DefaultFrequencyHz {
+		t.Errorf("first signal %s %s at %d Hz, want AFSK 1200 beacon at %d",
+			sig.Kind, sig.Modem, sig.FrequencyHz, uint64(DefaultFrequencyHz))
 	}
 	if opts.NoiseDBFS >= sig.LevelDBFS || opts.NoiseDBFS > -20 {
-		t.Errorf("noise %.0f dBFS, carrier %.0f dBFS: want noise well below full scale and the carrier",
+		t.Errorf("noise %.0f dBFS, beacon %.0f dBFS: want noise well below full scale and the beacon",
 			opts.NoiseDBFS, sig.LevelDBFS)
 	}
 	if got := New(opts).Status().CenterHz; got != DefaultFrequencyHz {
-		t.Errorf("CenterHz=%d, want sweep center %d", got, uint64(DefaultFrequencyHz))
+		t.Errorf("CenterHz=%d, want %d", got, uint64(DefaultFrequencyHz))
+	}
+}
+
+func TestDefaultOptions_BeaconsOfEveryFormat(t *testing.T) {
+	opts := DefaultOptions()
+	// The narrowest receiver band is a quarter of the recommended rate on each side of the center.
+	const halfNarrowBand = RecommendedSampleRate / 8 / 2
+	// Channel noise at the recommended rate in 30 kHz, the widest channel of 9600 Bd.
+	noise := opts.NoiseDBFS + 10*math.Log10(30_000.0/RecommendedSampleRate)
+
+	modems := make(map[BeaconModem]bool)
+	var freqs []uint64
+	for _, s := range opts.Signals {
+		if s.Kind != SignalBeacon {
+			t.Errorf("signal %s at %d Hz, want only beacons", s.Kind, s.FrequencyHz)
+			continue
+		}
+		modems[s.Modem] = true
+		if d := math.Abs(float64(s.FrequencyHz) - DefaultFrequencyHz); d > halfNarrowBand-15_000 {
+			t.Errorf("%s at %d Hz: %.0f Hz from the center, not inside the narrowest band", s.Modem, s.FrequencyHz, d)
+		}
+		if s.LevelDBFS-noise < 20 {
+			t.Errorf("%s: SNR %.0f dB in 30 kHz, want at least 20", s.Modem, s.LevelDBFS-noise)
+		}
+		if s.Period != DefaultBeaconPeriod || s.Frame.Src.Call == "" {
+			t.Errorf("%s: period %v frame %+v, want the default beacon", s.Modem, s.Period, s.Frame)
+		}
+		for _, f := range freqs {
+			if math.Abs(float64(s.FrequencyHz)-float64(f)) < 30_000 {
+				t.Errorf("%s at %d Hz overlaps a beacon at %d Hz", s.Modem, s.FrequencyHz, f)
+			}
+		}
+		freqs = append(freqs, s.FrequencyHz)
+	}
+	for _, m := range []BeaconModem{BeaconAFSK1200, BeaconFSK9600G3RUH, BeaconFSK9600GEOSCAN} {
+		if !modems[m] {
+			t.Errorf("no default beacon for %s", m)
+		}
 	}
 }
 

@@ -13,7 +13,7 @@ var ErrInvalidChannel = errors.New("invalid channel settings")
 // Demods — демодуляторы, которые можно выбрать в панели приёмника. Идентификаторы
 // совпадают со значениями селектора «Демодулятор» в UI.
 var Demods = []string{
-	"fsk9600_g3ruh", "fsk4800", "fsk1200", "gmsk9600", "afsk1200",
+	"fsk9600_g3ruh", "fsk9600_geoscan", "fsk4800", "fsk1200", "gmsk9600", "afsk1200",
 	"bpsk1200", "bpsk9600", "qpsk_ccsds", "cw", "fm", "ook",
 }
 

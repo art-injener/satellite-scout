@@ -191,6 +191,40 @@
     };
 
     /**
+     * Плавное обновление линии спектра на экране: экспоненциальное сглаживание по бинам.
+     * Это не серверное «Накопление» (avg по окну FFT), а только сглаживание картинки,
+     * как у анализаторов спектра / осциллографов: поток быстрее глаза, рисуем спокойнее.
+     * @param {number} [alpha] — доля нового кадра (0…1); 1 = без сглаживания
+     */
+    function DisplaySmooth(alpha) {
+        this._alpha = typeof alpha === 'number' && alpha > 0 && alpha <= 1 ? alpha : 0.35;
+        this._prev = null;
+    }
+
+    /** Сброс при смене полосы, единиц или переоткрытии потока. */
+    DisplaySmooth.prototype.reset = function() {
+        this._prev = null;
+    };
+
+    /**
+     * @param {Float32Array} dbfs — новый кадр (не меняется)
+     * @returns {Float32Array} сглаженный кадр (свой буфер, не держать дольше одного кадра UI)
+     */
+    DisplaySmooth.prototype.update = function(dbfs) {
+        if (!this._prev || this._prev.length !== dbfs.length) {
+            this._prev = new Float32Array(dbfs.length);
+            this._prev.set(dbfs);
+            return this._prev;
+        }
+        const a = this._alpha;
+        const out = this._prev;
+        for (let i = 0; i < dbfs.length; i++) {
+            out[i] += a * (dbfs[i] - out[i]);
+        }
+        return out;
+    };
+
+    /**
      * Маркер на пике кадра. Частота бина — как у перекрестья на спектре (от левого края полосы),
      * шумовая полка — медиана кадра, как у AutoRange. С/Ш — пик над полкой в одном бине БПФ.
      * @param {?Float32Array} dbfs
@@ -319,6 +353,7 @@
     SpectrumStream.parseHeader = parseHeader;
     SpectrumStream.dbfsToUnit = dbfsToUnit;
     SpectrumStream.AutoRange = AutoRange;
+    SpectrumStream.DisplaySmooth = DisplaySmooth;
     SpectrumStream.markerReadout = markerReadout;
     SpectrumStream.dbmOffset = dbmOffset;
     SpectrumStream.shiftLevels = shiftLevels;
@@ -334,6 +369,7 @@
             parseHeader: parseHeader,
             dbfsToUnit: dbfsToUnit,
             AutoRange: AutoRange,
+            DisplaySmooth: DisplaySmooth,
             markerReadout: markerReadout,
             dbmOffset: dbmOffset,
             shiftLevels: shiftLevels,

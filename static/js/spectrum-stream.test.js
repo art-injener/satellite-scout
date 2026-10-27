@@ -19,7 +19,8 @@ const assert = require('assert');
 
 global.window = {};
 const {
-    SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, markerReadout, dbmOffset, shiftLevels,
+    SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, DisplaySmooth,
+    markerReadout, dbmOffset, shiftLevels,
 } = require('./spectrum-stream.js');
 
 const HEADER = 40;
@@ -199,6 +200,24 @@ test('AutoRange: floor is the median, so a band full of carriers below half does
     const peaks = {};
     for (let i = 0; i < 400; i++) { peaks[i] = -20; }
     assert.strictEqual(new AutoRange().update(noiseFrame(-69, peaks)).min, -80);
+});
+
+// ── Display smooth (client EMA, not server avg) ───────────────────────
+
+test('DisplaySmooth: first frame is a copy, next blends by alpha', () => {
+    const s = new DisplaySmooth(0.5);
+    const a = s.update(new Float32Array([-100, -20]));
+    assert.deepStrictEqual(Array.from(a), [-100, -20]);
+    const b = s.update(new Float32Array([-80, -40]));
+    assert.deepStrictEqual(Array.from(b), [-90, -30]);
+});
+
+test('DisplaySmooth: reset starts a fresh trace; length change does too', () => {
+    const s = new DisplaySmooth(0.5);
+    s.update(new Float32Array([-100, -20]));
+    s.reset();
+    assert.deepStrictEqual(Array.from(s.update(new Float32Array([-50, -50]))), [-50, -50]);
+    assert.deepStrictEqual(Array.from(s.update(new Float32Array([-10, -10, -10]))), [-10, -10, -10]);
 });
 
 // ── Peak marker ───────────────────────────────────────────────────────

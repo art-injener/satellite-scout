@@ -7,8 +7,15 @@ import (
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
 	"github.com/art-injener/satellite-scout/internal/dsp"
+	"github.com/art-injener/satellite-scout/internal/geoscan"
 	"github.com/art-injener/satellite-scout/internal/modem"
 )
+
+type frameSync interface {
+	Push(dst [][]byte, levels []byte) [][]byte
+	Good() int
+	Bad() int
+}
 
 // End-to-end reception of the imitator beacon: scene with Doppler and receiver noise,
 // Doppler removal and two-stage channel filter, demodulator, HDLC deframer, AX.25 parser.
@@ -29,6 +36,7 @@ func TestBeacon_ReceivedThroughDemodChain(t *testing.T) {
 		fineDecim  int
 		fineCut    float64
 		demod      func() func([]complex64) []byte
+		deframer   frameSync
 	}{
 		{
 			modem: BeaconAFSK1200, coarseCut: 20_000, coarseTaps: 127, fineDecim: 2, fineCut: 7_500,
@@ -36,6 +44,7 @@ func TestBeacon_ReceivedThroughDemodChain(t *testing.T) {
 				d := modem.NewAFSKDemod(modem.AFSK1200(midRate / 2))
 				return func(iq []complex64) []byte { return d.Demodulate(nil, iq) }
 			},
+			deframer: &ax25.Deframer{},
 		},
 		{
 			modem: BeaconFSK9600G3RUH, coarseCut: 25_600, coarseTaps: 257, fineDecim: 1, fineCut: 9_600,
@@ -44,6 +53,15 @@ func TestBeacon_ReceivedThroughDemodChain(t *testing.T) {
 				var ds modem.G3RUHDescrambler
 				return func(iq []complex64) []byte { return ds.Descramble(nil, d.Demodulate(nil, iq)) }
 			},
+			deframer: &ax25.Deframer{},
+		},
+		{
+			modem: BeaconFSK9600GEOSCAN, coarseCut: 25_600, coarseTaps: 257, fineDecim: 1, fineCut: 9_600,
+			demod: func() func([]complex64) []byte {
+				d := modem.NewFSKDemod(modem.FSK9600(midRate))
+				return func(iq []complex64) []byte { return d.Demodulate(nil, iq) }
+			},
+			deframer: &geoscan.Deframer{},
 		},
 	}
 	for _, tc := range cases {
@@ -55,7 +73,7 @@ func TestBeacon_ReceivedThroughDemodChain(t *testing.T) {
 				LevelDBFS:      -40,
 				DopplerHz:      8000,
 				DopplerRateHzS: -200,
-				Frame:          DefaultBeaconFrame(),
+				Frame:          DefaultBeaconFrame(tc.modem),
 				Period:         time.Second,
 			}
 			// Noise over the whole band fs: SNR ≈ 20 dB in 15 kHz, ≈ 19 dB in 19.2 kHz.
@@ -74,7 +92,7 @@ func TestBeacon_ReceivedThroughDemodChain(t *testing.T) {
 				dsp.DesignLowpass(tc.fineCut, midRate, 255, dsp.WindowBlackmanHarris))
 			sq := dsp.Squelch{ThresholdDBFS: -90}
 			demod := tc.demod()
-			var deframer ax25.Deframer
+			deframer := tc.deframer
 
 			var frames [][]byte
 			air := make([]complex64, block)
@@ -90,13 +108,15 @@ func TestBeacon_ReceivedThroughDemodChain(t *testing.T) {
 			if len(frames) != 4 {
 				t.Errorf("received %d frames in %v, want 4 (good=%d bad=%d)", len(frames), duration, deframer.Good(), deframer.Bad())
 			}
-			want := DefaultBeaconFrame()
+			want := DefaultBeaconFrame(tc.modem)
 			for i, b := range frames {
 				f, err := ax25.Parse(b)
 				if err != nil {
 					t.Fatalf("frame %d: Parse: %v", i, err)
 				}
-				if f.Dest != want.Dest || f.Src != want.Src || !bytes.Equal(f.Info, want.Info) {
+				// GEOSCAN pads the frame with zeros up to its fixed size.
+				if f.Dest != want.Dest || f.Src != want.Src ||
+					!bytes.Equal(bytes.TrimRight(f.Info, "\x00"), bytes.TrimRight(want.Info, "\x00")) {
 					t.Errorf("frame %d = %s>%s %q, want %s>%s %q", i, f.Src.Call, f.Dest.Call, f.Info, want.Src.Call, want.Dest.Call, want.Info)
 				}
 			}

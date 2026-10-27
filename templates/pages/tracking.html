@@ -216,8 +216,8 @@
         </div>
     </section>
 
-    <!-- Вкладки: «Панорама» и «Спектр» переключают режим SDR, «Антенна» — только вид -->
-    <div class="ml-tabbar" id="manual-tabbar" role="tablist">
+    <!-- Вкладки слева от графиков: «Панорама» и «Спектр» переключают режим SDR, «Антенна» — только вид -->
+    <div class="ml-tabbar" id="manual-tabbar" role="tablist" aria-orientation="vertical">
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="panorama" aria-selected="true">Панорама</button>
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="spectrum" aria-selected="false">Спектр</button>
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="antenna" aria-selected="false">Антенна</button>
@@ -459,6 +459,7 @@
                                 <thead>
                                     <tr>
                                         <th class="ml-tmi__th">Канал</th>
+                                        <th class="ml-tmi__th">Демодулятор</th>
                                         <th class="ml-tmi__th">Время</th>
                                         <th class="ml-tmi__th">Frame#</th>
                                         <th class="ml-tmi__th">CRC</th>
@@ -590,6 +591,7 @@
                     <span class="ml-rx-panel__label">Демодулятор</span>
                     <select class="ml-demod__pipeline-sel" id="manual-rx-pipeline">
                         <option value="fsk9600_g3ruh">FSK 9600 (G3RUH)</option>
+                        <option value="fsk9600_geoscan">FSK 9600 (GEOSCAN)</option>
                         <option value="fsk4800">FSK 4800</option>
                         <option value="fsk1200">FSK 1200</option>
                         <option value="gmsk9600">GMSK 9600</option>
@@ -689,6 +691,22 @@
             <button type="submit" class="modal__btn modal__btn--secondary" id="access-modal-submit">Войти</button>
         </form>
         <p class="access-modal__error" id="access-modal-error" role="alert"></p>
+    </div>
+</div>
+
+<!-- Все параметры принятого кадра (telemetry-table.js): открывается кликом по строке таблицы ТМИ -->
+<div id="manual-tmi-details" class="modal modal--hidden ml-tmi-details" role="dialog" aria-labelledby="manual-tmi-details-title" aria-modal="true">
+    <div class="modal__backdrop" data-action="close"></div>
+    <div class="modal__box">
+        <header class="ml-tmi-details__header">
+            <h2 class="ml-tmi-details__title" id="manual-tmi-details-title">Кадр</h2>
+            <button type="button" class="ml-tmi-details__close" data-action="close" aria-label="Закрыть">×</button>
+        </header>
+        <div class="ml-tmi-details__scroll">
+            <table class="ml-tmi-details__table">
+                <tbody id="manual-tmi-details-tbody"></tbody>
+            </table>
+        </div>
     </div>
 </div>
 {{end}}

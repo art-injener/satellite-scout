@@ -24,6 +24,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/sdr/imitator"
 	"github.com/art-injener/satellite-scout/internal/services"
+	"github.com/art-injener/satellite-scout/internal/sigmf"
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
 
@@ -140,10 +141,20 @@ func NewApp(configStore *config.Store) *app {
 	for _, rp := range cfg.Station.RadioPaths {
 		rc := rp.Receiver
 		pathID := fmt.Sprintf("radio_path_%d", rp.ID)
-		receiverHub.Register(pathID, sdr.PathConfig{SampleRateHz: rc.SampleRateHz}, func() (sdr.Receiver, error) {
+		sampleRate := rc.SampleRateHz
+		if rc.Imitator != nil && rc.Imitator.Replay != "" {
+			if m, err := sigmf.LoadMeta(rc.Imitator.Replay); err == nil {
+				sampleRate = m.SampleRate()
+			}
+		}
+		receiverHub.Register(pathID, sdr.PathConfig{SampleRateHz: sampleRate}, func() (sdr.Receiver, error) {
 			switch rc.Driver {
 			case "imitator", "simulated", "":
-				return imitator.New(pathImitatorOptions(rc.Imitator, rc.SampleRateHz)), nil
+				opts, _, err := pathImitatorOptions(rc.Imitator, sampleRate)
+				if err != nil {
+					return nil, err
+				}
+				return imitator.New(opts), nil
 			default:
 				return nil, fmt.Errorf("%w: %q", sdr.ErrDriverNotImplemented, rc.Driver)
 			}

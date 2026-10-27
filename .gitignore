@@ -49,3 +49,7 @@ docs/archive/
 /.claude/skills/ui-design/SKILL.md
 /.claude/launch.json
 /.claude/settings.local.json
+
+# Large IQ/SigMF downloads (local only); keep inventory
+data/recordings/*
+!data/recordings/SOURCES.txt

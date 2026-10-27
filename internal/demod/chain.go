@@ -6,6 +6,7 @@ import (
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
 	"github.com/art-injener/satellite-scout/internal/dsp"
+	"github.com/art-injener/satellite-scout/internal/geoscan"
 	"github.com/art-injener/satellite-scout/internal/modem"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
@@ -24,22 +25,40 @@ type lineDemod interface {
 	Demodulate(dst []byte, iq []complex64) []byte
 }
 
-// profile — реализованный демодулятор: прореживание точного фильтра после midRateHz
-// и сборка демодулятора на частоте его выхода.
-type profile struct {
-	fineDecim int
-	newDemod  func(rate float64) lineDemod
+// deframer выделяет из уровней линии кадры с верной контрольной суммой.
+type deframer interface {
+	Push(dst [][]byte, levels []byte) [][]byte
+	Good() int
+	Bad() int
 }
+
+// profile — реализованный демодулятор: прореживание точного фильтра после midRateHz,
+// сборка демодулятора на частоте его выхода и выделитель кадров.
+type profile struct {
+	fineDecim   int
+	newDemod    func(rate float64) lineDemod
+	newDeframer func() deframer
+}
+
+func newHDLCDeframer() deframer { return &ax25.Deframer{} }
+
+// demodGEOSCAN — профиль кадров CC1125: кроме кадра он даёт и разбор маяка Geoscan.
+const demodGEOSCAN = "fsk9600_geoscan"
 
 var profiles = map[string]profile{
 	// AFSK 1200 хватает 32 кГц.
-	"afsk1200": {fineDecim: 2, newDemod: func(rate float64) lineDemod {
+	"afsk1200": {fineDecim: 2, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
 		return modem.NewAFSKDemod(modem.AFSK1200(rate))
 	}},
 	// 9600 на 64 кГц: около 6,7 отсчёта на символ, меньше ФАПЧ тактов не держит.
-	"fsk9600_g3ruh": {fineDecim: 1, newDemod: func(rate float64) lineDemod {
+	"fsk9600_g3ruh": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
 		return &g3ruhDemod{fsk: modem.NewFSKDemod(modem.FSK9600(rate))}
 	}},
+	// Кадр CC1125: свой скремблер в кадре, на линии NRZ без G3RUH.
+	demodGEOSCAN: {fineDecim: 1, newDeframer: func() deframer { return &geoscan.Deframer{} },
+		newDemod: func(rate float64) lineDemod {
+			return modem.NewFSKDemod(modem.FSK9600(rate))
+		}},
 }
 
 // g3ruhDemod — FSK с дескремблером G3RUH; NRZI снимает уже выделитель кадров.
@@ -73,8 +92,9 @@ type Status struct {
 }
 
 // Chain — цепочка приёма одного канала: выделение канала из полосы приёмника
-// в два этапа, порог, демодулятор, выделение и разбор кадров AX.25.
-// Фильтры пересоздаются при смене частоты дискретизации, сдвига или полосы.
+// в два этапа, порог, демодулятор, выделение кадров по профилю и разбор AX.25.
+// Фильтры пересоздаются при смене частоты дискретизации, сдвига или полосы,
+// выделитель кадров со счётчиками — при смене демодулятора.
 // Не потокобезопасна: работает в горутине потока.
 type Chain struct {
 	rate      uint32
@@ -85,7 +105,7 @@ type Chain struct {
 	coarse, fine *dsp.XlatingFIR
 	demod        lineDemod
 	squelch      dsp.Squelch
-	deframer     ax25.Deframer
+	deframer     deframer
 
 	status Status
 	levels []byte
@@ -150,6 +170,9 @@ func (c *Chain) Status() Status {
 // плоско до 0,15 от новой частоты, подавляет с 0,65 — наложенное при прореживании ложится дальше
 // 0,35 от центра, за точный фильтр. Поэтому «Полоса канала» шире 0,3 от неё обрезается.
 func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod string, p profile) {
+	if c.deframer == nil || demod != c.demodName {
+		c.deframer = p.newDeframer()
+	}
 	c.rate, c.offsetHz, c.bandwidth, c.demodName = rate, offsetHz, bandwidth, demod
 
 	fs := float64(rate)

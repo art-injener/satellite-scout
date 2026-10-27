@@ -33,20 +33,43 @@
         return timeOf(new Date());
     }
 
+    /** Подпись демодулятора из панели приёмника (demod-panel.js), без неё — идентификатор. */
+    function demodLabel(id) {
+        const label = typeof window !== 'undefined' && window.demodLabel;
+        return label ? label(id) : id;
+    }
+
+    /** Параметр телеметрии сервера в виде «подпись: значение единица». */
+    function paramEntry(p) {
+        return { key: p.name, value: p.unit ? p.value + ' ' + p.unit : p.value };
+    }
+
     /**
-     * Строка таблицы из кадра SSE `telemetry`: отправитель в колонке канала,
-     * получатель и данные — параметрами; не текстовые данные показываются в hex.
+     * Строка таблицы из кадра SSE `telemetry`: отправитель в колонке канала, демодулятор.
+     * Разобранная телеметрия: в строке ключевые поля, все поля с получателем и hex — в details.
+     * Без разбора: получатель и данные параметрами; не текстовые данные показываются в hex.
      * @param {Object} ev — событие сервера (internal/demod.TelemetryEvent)
      */
     function telemetryPacket(ev) {
-        const data = ev.info ? { key: 'данные', value: ev.info } : { key: 'hex', value: ev.info_hex || '' };
-        return {
+        const pkt = {
             time: timeOf(new Date(ev.timestamp_ms)),
             crc: 'OK',
             channelLabel: ev.src,
             channelFreqMHz: ev.frequency_hz / 1e6,
-            params: [{ key: 'кому', value: ev.dest }, data],
+            demod: demodLabel(ev.demod),
         };
+        const parsed = ev.params || [];
+        if (parsed.length > 0) {
+            pkt.params = parsed.filter(function(p) { return p.key; }).map(paramEntry);
+            pkt.details = parsed.map(paramEntry).concat([
+                { key: 'кому', value: ev.dest },
+                { key: 'hex', value: ev.info_hex || '' },
+            ]);
+            return pkt;
+        }
+        const data = ev.info ? { key: 'данные', value: ev.info } : { key: 'hex', value: ev.info_hex || '' };
+        pkt.params = [{ key: 'кому', value: ev.dest }, data];
+        return pkt;
     }
 
     function formatFreqMHz(freqMHz) {
@@ -88,6 +111,20 @@
         opts = opts || {};
         this._tbody = opts.tbody || document.getElementById('manual-tmi-tbody');
         this._scrollEl = opts.scrollEl || document.getElementById('manual-tmi-scroll');
+        this._modal = document.getElementById('manual-tmi-details');
+        this._modalTitle = document.getElementById('manual-tmi-details-title');
+        this._modalTbody = document.getElementById('manual-tmi-details-tbody');
+        const self = this;
+        this._onModalClick = function(e) {
+            if (e.target && e.target.dataset && e.target.dataset.action === 'close') { self._hideDetails(); }
+        };
+        this._onKeydown = function(e) {
+            if (e.key === 'Escape') { self._hideDetails(); }
+        };
+        if (this._modal) {
+            this._modal.addEventListener('click', this._onModalClick);
+            document.addEventListener('keydown', this._onKeydown);
+        }
         this._count = 0;
         this._frameSeq = 1;
         this._autoScroll = true;
@@ -114,7 +151,9 @@
      * @param {string} [pkt.crc] — 'OK' | 'FAIL'
      * @param {string} [pkt.channelLabel]
      * @param {number} [pkt.channelFreqMHz]
+     * @param {string} [pkt.demod] — подпись демодулятора, принявшего кадр
      * @param {Array<{key:string,value:string}>} [pkt.params] — параметры пакета
+     * @param {Array<{key:string,value:string}>} [pkt.details] — все параметры: строка открывает их по клику
      */
     TelemetryTable.prototype.addPacket = function(pkt) {
         if (!this._tbody) { return; }
@@ -122,18 +161,34 @@
 
         const tr = document.createElement('tr');
         const crcOk = pkt.crc !== 'FAIL';
-        if (!crcOk) {
-            tr.className = 'ml-tmi__row--fail';
+        const classes = [];
+        if (!crcOk) { classes.push('ml-tmi__row--fail'); }
+        if (pkt.details) { classes.push('ml-tmi__row--details'); }
+        if (classes.length > 0) {
+            tr.className = classes.join(' ');
         }
 
+        const channel = this._channelText(pkt);
         const tdChan = document.createElement('td');
         tdChan.className = 'ml-tmi__chan';
-        tdChan.textContent = this._channelText(pkt);
+        tdChan.textContent = channel;
         tr.appendChild(tdChan);
 
+        const tdDemod = document.createElement('td');
+        tdDemod.textContent = pkt.demod || '—';
+        tr.appendChild(tdDemod);
+
+        const time = pkt.time || timeNow();
         const tdTime = document.createElement('td');
-        tdTime.textContent = pkt.time || timeNow();
+        tdTime.textContent = time;
         tr.appendChild(tdTime);
+
+        if (pkt.details) {
+            const self = this;
+            const title = [channel, time, pkt.demod].filter(Boolean).join(' · ');
+            tr.title = 'Все параметры кадра';
+            tr.addEventListener('click', function() { self._showDetails(title, pkt.details); });
+        }
 
         const tdFrame = document.createElement('td');
         tdFrame.textContent = String(pkt.frame != null ? pkt.frame : this._frameSeq);
@@ -182,6 +237,30 @@
     TelemetryTable.prototype.setChannel = function(label, freqMHz) {
         this._channelLabel = label || 'Unknown';
         this._channelFreq = freqMHz || 0;
+    };
+
+    /** Окно со всеми параметрами кадра; повторное открытие заменяет строки. */
+    TelemetryTable.prototype._showDetails = function(title, details) {
+        if (!this._modal || !this._modalTbody) { return; }
+        if (this._modalTitle) { this._modalTitle.textContent = title; }
+        this._modalTbody.innerHTML = '';
+        for (let i = 0; i < details.length; i++) {
+            const tr = document.createElement('tr');
+            const tdKey = document.createElement('td');
+            tdKey.className = 'ml-tmi-details__key';
+            tdKey.textContent = details[i].key;
+            tr.appendChild(tdKey);
+            const tdVal = document.createElement('td');
+            tdVal.className = 'ml-tmi-details__val';
+            tdVal.textContent = details[i].value;
+            tr.appendChild(tdVal);
+            this._modalTbody.appendChild(tr);
+        }
+        this._modal.classList.remove('modal--hidden');
+    };
+
+    TelemetryTable.prototype._hideDetails = function() {
+        if (this._modal) { this._modal.classList.add('modal--hidden'); }
     };
 
     TelemetryTable.prototype.clear = function() {
@@ -255,6 +334,11 @@
 
     TelemetryTable.prototype.destroy = function() {
         this.stopMock();
+        if (this._modal) {
+            this._modal.removeEventListener('click', this._onModalClick);
+            document.removeEventListener('keydown', this._onKeydown);
+            this._modal = null;
+        }
         this._tbody = null;
         this._scrollEl = null;
     };
