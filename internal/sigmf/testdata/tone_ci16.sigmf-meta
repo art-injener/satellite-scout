@@ -1,0 +1,15 @@
+{
+  "global": {
+    "core:datatype": "ci16_le",
+    "core:sample_rate": 40000,
+    "core:version": "1.0.0"
+  },
+  "captures": [
+    {
+      "core:sample_start": 0,
+      "core:frequency": 436500000,
+      "core:datetime": "2022-07-24T18:47:41Z"
+    }
+  ],
+  "annotations": []
+}
