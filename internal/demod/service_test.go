@@ -14,8 +14,18 @@ import (
 )
 
 type channelsStub struct {
-	mu sync.Mutex
-	s  sdr.ChannelSettings
+	mu   sync.Mutex
+	s    sdr.ChannelSettings
+	gain float32
+}
+
+func (c *channelsStub) GainDB(pathID string) (float32, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if pathID != "radio_path_0" {
+		return 0, fmt.Errorf("unknown path %q", pathID)
+	}
+	return c.gain, nil
 }
 
 func (c *channelsStub) Channel(pathID string) (sdr.ChannelSettings, error) {
@@ -80,6 +90,25 @@ func runService(t *testing.T, s sdr.ChannelSettings, frames []sdr.IQFrame) *sink
 		t.Fatal("Run did not return after the stream closed")
 	}
 	return sink
+}
+
+func TestService_DemodOffIgnoresTheSignal(t *testing.T) {
+	s := afskSettings(testOffset, -90)
+	s.DemodOff = true
+	frames := toFrames(beaconAir(t, testRate, 2, time.Second), testRate, sdr.DefaultBlockSize, 5_000)
+	sink := runService(t, s, frames)
+
+	if n := len(sink.ofType(EventTelemetry)); n != 0 {
+		t.Fatalf("telemetry events=%d, want none while the demodulator is off", n)
+	}
+	st := sink.ofType(EventStatus)
+	if len(st) == 0 {
+		t.Fatal("no status")
+	}
+	last := st[len(st)-1]
+	if last["demod_off"] != true || last["frames_good"] != float64(0) || last["squelch_open"] != false {
+		t.Fatalf("status=%v, want demod off, no frames, squelch closed", last)
+	}
 }
 
 func TestService_EmitsTelemetryPerFrame(t *testing.T) {
@@ -195,6 +224,81 @@ func TestService_StatusWhileStreamingAndOnStop(t *testing.T) {
 	}
 	if lvl, _ := last["level_dbfs"].(float64); lvl > -55 || lvl < -65 {
 		t.Errorf("last status level_dbfs=%v, want about -60 on noise", last["level_dbfs"])
+	}
+}
+
+// Other clients follow the channel by the status: it carries all channel settings.
+func TestStatusEvent_CarriesChannelSettings(t *testing.T) {
+	cs := sdr.ChannelSettings{OffsetHz: -40_000, BandwidthHz: 18_000, SquelchDBFS: -85, Demod: DemodSSTV}
+	data, err := json.Marshal(statusEvent("radio_path_0", true, 436_460_000, cs, Status{Demod: DemodSSTV}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatal(err)
+	}
+	for k, want := range map[string]any{"offset_hz": -40_000.0, "bandwidth_hz": 18_000.0, "squelch_dbfs": -85.0, "demod": "sstv"} {
+		if got[k] != want {
+			t.Errorf("%s=%v, want %v", k, got[k], want)
+		}
+	}
+}
+
+// Other clients follow the receiver gain by the status as well: the dBm units depend on it.
+func TestService_StatusCarriesReceiverGain(t *testing.T) {
+	sink := &sinkStub{}
+	svc := NewService(&channelsStub{s: afskSettings(testOffset, -90), gain: 32.8}, sink.emit)
+	ch := make(chan sdr.IQFrame, 1)
+	ch <- sdr.IQFrame{Samples: make([]complex64, 4096), CenterHz: testCenter, SampleRate: testRate}
+	close(ch)
+	svc.Run("radio_path_0", ch)
+
+	statuses := sink.ofType(EventStatus)
+	if len(statuses) == 0 {
+		t.Fatal("no status events")
+	}
+	for i, st := range statuses {
+		if st["gain_db"] != 32.8 {
+			t.Errorf("status %d: gain_db=%v, want 32.8", i, st["gain_db"])
+		}
+	}
+}
+
+func TestStatusEvent_ReceptionStages(t *testing.T) {
+	cs := sdr.ChannelSettings{BandwidthHz: 18_000, Demod: demodGEOSCAN}
+	blank := statusEvent("radio_path_0", true, 0, cs, Status{Demod: demodGEOSCAN})
+	if blank.Reception != nil || blank.BandwidthHz != 18_000 {
+		t.Errorf("before the signal: reception=%+v bandwidth=%d, want none and 18000", blank.Reception, blank.BandwidthHz)
+	}
+
+	st := Status{Measured: true, CarrierHz: -1500, DeviationHz: 2800, ClockJitter: 0.03,
+		SyncCounted: true, SyncWords: 4, SyncBitErrors: 2}
+	data, err := json.Marshal(statusEvent("radio_path_0", true, 0, cs, st))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m map[string]any
+	if err := json.Unmarshal(data, &m); err != nil {
+		t.Fatal(err)
+	}
+	rx, _ := m["reception"].(map[string]any)
+	want := map[string]any{"carrier_hz": -1500.0, "deviation_hz": 2800.0, "clock_jitter": 0.03,
+		"sync": map[string]any{"words": 4.0, "bit_errors": 2.0}}
+	for k, v := range want {
+		if fmt.Sprint(rx[k]) != fmt.Sprint(v) {
+			t.Errorf("reception %s=%v, want %v", k, rx[k], v)
+		}
+	}
+
+	// AFSK: no deviation meter and no sync word counter.
+	st.DeviationHz, st.SyncCounted = 0, false
+	ev := statusEvent("radio_path_0", true, 0, cs, st)
+	if ev.Reception == nil || ev.Reception.Sync != nil {
+		t.Errorf("reception=%+v, want stages without sync", ev.Reception)
+	}
+	if data, _ := json.Marshal(ev.Reception); string(data) != `{"carrier_hz":-1500,"clock_jitter":0.03}` {
+		t.Errorf("reception json=%s, want no deviation and no sync", data)
 	}
 }
 

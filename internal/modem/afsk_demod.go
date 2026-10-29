@@ -27,7 +27,11 @@ type AFSKDemod struct {
 	clock     float64 // фаза символа в долях: отсчёт решения на переходе через 1
 	clockStep float64
 	lastMark  bool
+	jitter    float64 // средняя ошибка фазы тактов на переходах, доли символа
 }
+
+// ClockJitter — средняя ошибка фазы тактов на переходах уровня, в долях символа.
+func (d *AFSKDemod) ClockJitter() float64 { return d.jitter }
 
 // NewAFSKDemod создаёт демодулятор; cfg.SampleRate — частота дискретизации канала.
 func NewAFSKDemod(cfg AFSKConfig) *AFSKDemod {
@@ -38,6 +42,7 @@ func NewAFSKDemod(cfg AFSKConfig) *AFSKDemod {
 		markRing:  make([]complex128, window),
 		spaceRing: make([]complex128, window),
 		clockStep: cfg.Baud / cfg.SampleRate,
+		jitter:    jitterNoLock,
 	}
 }
 
@@ -63,6 +68,7 @@ func (d *AFSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
 		// Переход уровня должен приходиться на середину между отсчётами решения.
 		mark := cmplx.Abs(d.markSum) > cmplx.Abs(d.spaceSum)
 		if mark != d.lastMark {
+			d.jitter = trackJitter(d.jitter, d.clock)
 			d.clock += afskClockGain * (0.5 - d.clock)
 			d.lastMark = mark
 		}

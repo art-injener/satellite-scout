@@ -93,6 +93,22 @@ func recvFrame(t *testing.T, ch <-chan IQFrame) IQFrame {
 	return IQFrame{}
 }
 
+func waitStops(t *testing.T, stub *streamStub, want int) {
+	t.Helper()
+	deadline := time.Now().Add(sessionIdleGrace + time.Second)
+	for time.Now().Before(deadline) {
+		if _, stops := stub.counts(); stops >= want {
+			if stops != want {
+				t.Fatalf("stops=%d, want %d", stops, want)
+			}
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	_, stops := stub.counts()
+	t.Fatalf("stops=%d, want %d", stops, want)
+}
+
 func waitClosed(t *testing.T, ch <-chan IQFrame) {
 	t.Helper()
 	deadline := time.After(time.Second)
@@ -204,9 +220,10 @@ func TestSession_LastViewerStopsStream(t *testing.T) {
 	}
 
 	unsubB()
-	if _, stops := stub.counts(); stops != 1 {
-		t.Fatalf("stops=%d after last viewer left, want 1", stops)
+	if _, stops := stub.counts(); stops != 0 {
+		t.Fatalf("stops=%d right after the last viewer left, want 0 during grace", stops)
 	}
+	waitStops(t, stub, 1)
 
 	_, unsubC, err := hub.Subscribe("p")
 	if err != nil {
@@ -388,8 +405,46 @@ func recvTap(t *testing.T, taps <-chan (<-chan IQFrame)) <-chan IQFrame {
 	return nil
 }
 
+// A spectrum mode change drops the only viewer and subscribes again at once.
+// The device stream and the demod tap stay up across that gap.
+func TestSession_ResubscribeDuringGraceKeepsDeviceAndTap(t *testing.T) {
+	hub, stub := hubWithStub(PathConfig{})
+	taps := tapRecorder(hub)
+	_, unsubscribe, _ := hub.Subscribe("p")
+	tap := recvTap(t, taps)
+
+	unsubscribe()
+	frames, unsubscribe2, err := hub.Subscribe("p")
+	if err != nil {
+		t.Fatalf("Subscribe during grace: %v", err)
+	}
+	defer unsubscribe2()
+
+	if starts, stops := stub.counts(); starts != 1 || stops != 0 {
+		t.Fatalf("starts=%d stops=%d, want the same device stream", starts, stops)
+	}
+	select {
+	case <-taps:
+		t.Fatal("tap restarted for a viewer returning during grace")
+	default:
+	}
+
+	stub.send(makeFrame(51))
+	if id := frameID(recvFrame(t, frames)); id != 51 {
+		t.Errorf("viewer got id=%d, want 51", id)
+	}
+	if id := frameID(recvFrame(t, tap)); id != 51 {
+		t.Errorf("tap got id=%d, want 51 from the same stream", id)
+	}
+
+	time.Sleep(sessionIdleGrace + 200*time.Millisecond)
+	if _, stops := stub.counts(); stops != 0 {
+		t.Fatalf("stops=%d, grace must not stop a stream that has a viewer again", stops)
+	}
+}
+
 // The tap rides along with viewers: it gets the same frames, does not keep the device
-// stream running and is closed when the last viewer leaves.
+// stream running and is closed after the grace that follows the last viewer.
 func TestHub_StreamTapRidesAlongWithViewers(t *testing.T) {
 	hub, stub := hubWithStub(PathConfig{})
 	taps := tapRecorder(hub)
@@ -413,9 +468,10 @@ func TestHub_StreamTapRidesAlongWithViewers(t *testing.T) {
 	}
 
 	unsubscribe()
-	if _, stops := stub.counts(); stops != 1 {
-		t.Errorf("stops=%d, want the stream stopped by the last viewer despite the tap", stops)
+	if _, stops := stub.counts(); stops != 0 {
+		t.Errorf("stops=%d right after the last viewer left, want 0 during grace", stops)
 	}
+	waitStops(t, stub, 1)
 	waitClosed(t, tap)
 
 	// The next session gets a fresh tap.

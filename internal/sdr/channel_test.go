@@ -15,6 +15,9 @@ func TestDefaultChannelSettings_ValidAndAFSK(t *testing.T) {
 	if c.Demod != "afsk1200" {
 		t.Errorf("demod=%q, want afsk1200", c.Demod)
 	}
+	if !c.DemodOff {
+		t.Error("demodulator must start off")
+	}
 	if !slices.Contains(Demods, c.Demod) {
 		t.Errorf("default demod %q not in Demods", c.Demod)
 	}
@@ -32,6 +35,8 @@ func TestChannelSettings_Validate(t *testing.T) {
 		{"valid", func(*ChannelSettings) {}, false},
 		{"zero bandwidth", func(c *ChannelSettings) { c.BandwidthHz = 0 }, true},
 		{"bandwidth wider than sample rate", func(c *ChannelSettings) { c.BandwidthHz = rate + 1 }, true},
+		{"widest channel", func(c *ChannelSettings) { c.BandwidthHz = MaxChannelBandwidthHz }, false},
+		{"wider than the demodulator passes", func(c *ChannelSettings) { c.BandwidthHz = MaxChannelBandwidthHz + 1 }, true},
 		{"channel at upper band edge", func(c *ChannelSettings) { c.OffsetHz = rate/2 - 7_500 }, false},
 		{"channel past upper band edge", func(c *ChannelSettings) { c.OffsetHz = rate/2 - 7_499 }, true},
 		{"channel past lower band edge", func(c *ChannelSettings) { c.OffsetHz = -(rate/2 - 7_499) }, true},
@@ -80,7 +85,7 @@ func TestReceiverHub_ChannelDefaults(t *testing.T) {
 
 func TestReceiverHub_SetChannelKeptPerPath(t *testing.T) {
 	hub := hubWithChannelPaths("p1", "p2")
-	want := ChannelSettings{OffsetHz: -12_000, BandwidthHz: 30_000, SquelchDBFS: -70, Demod: "fsk9600_g3ruh"}
+	want := ChannelSettings{OffsetHz: -12_000, BandwidthHz: 18_000, SquelchDBFS: -70, Demod: "fsk9600_g3ruh"}
 	if err := hub.SetChannel("p1", want); err != nil {
 		t.Fatalf("SetChannel: %v", err)
 	}
@@ -101,6 +106,24 @@ func TestReceiverHub_SetChannelRejectsInvalidAndKeepsPrevious(t *testing.T) {
 	}
 	if got, _ := hub.Channel("p1"); got != DefaultChannelSettings() {
 		t.Errorf("Channel()=%+v after rejected set, want defaults", got)
+	}
+}
+
+// The demodulator status carries the gain, so other clients follow it.
+func TestReceiverHub_GainDB(t *testing.T) {
+	hub := hubWithChannelPaths("p1")
+	r, err := hub.Get("p1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := r.SetGain(32.8); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := hub.GainDB("p1"); err != nil || got != 32.8 {
+		t.Errorf("GainDB()=%v, %v; want 32.8", got, err)
+	}
+	if _, err := hub.GainDB("nope"); !errors.Is(err, ErrUnknownRadioPath) {
+		t.Errorf("GainDB err=%v, want ErrUnknownRadioPath", err)
 	}
 }
 

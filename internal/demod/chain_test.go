@@ -30,7 +30,17 @@ func afskSettings(offsetHz int64, squelchDBFS float64) sdr.ChannelSettings {
 }
 
 func fsk9600Settings(offsetHz int64, squelchDBFS float64) sdr.ChannelSettings {
-	return sdr.ChannelSettings{OffsetHz: offsetHz, BandwidthHz: 30_000, SquelchDBFS: squelchDBFS, Demod: "fsk9600_g3ruh"}
+	return sdr.ChannelSettings{OffsetHz: offsetHz, BandwidthHz: sdr.MaxChannelBandwidthHz, SquelchDBFS: squelchDBFS, Demod: "fsk9600_g3ruh"}
+}
+
+// The widest channel the server accepts must lie in the flat part of the coarse filter
+// at every sample rate a receiver offers, so the channel edges drawn on the spectrum are real.
+func TestChain_WidestChannelIsFlat(t *testing.T) {
+	for _, rate := range []float64{250_000, 300_000, 1_024_000, 2_048_000, 2_400_000, 2_500_000, 3_000_000, 6_000_000, 10_000_000} {
+		if flat := 0.3 * midRate(rate); flat < sdr.MaxChannelBandwidthHz {
+			t.Errorf("rate %.0f: flat band %.0f Hz, narrower than the widest channel %d Hz", rate, flat, sdr.MaxChannelBandwidthHz)
+		}
+	}
 }
 
 // burstLevels — line levels of one beacon frame, as the imitator transmits it.
@@ -249,6 +259,51 @@ func TestChain_DecodesGEOSCANBeacons(t *testing.T) {
 	}
 	if st := c.Status(); st.Good != 3 || !st.Supported {
 		t.Errorf("status=%+v, want 3 good, supported", st)
+	}
+}
+
+func TestChain_ReportsReceptionStages(t *testing.T) {
+	// The channel is tuned 1.5 kHz above the beacon: its carrier sits at -1500 Hz in the channel.
+	const mistune = 1500
+	c := NewChain()
+	if st := c.Status(); st.Measured {
+		t.Fatalf("status=%+v, want nothing measured before the signal", st)
+	}
+	air := beaconAirOf(t, testRate, 3, time.Second, "fsk9600_geoscan")
+	// The threshold between the noise (-60 dBFS) and the beacon: meters see only the signal.
+	s := fsk9600Settings(testOffset+mistune, -50)
+	s.Demod = "fsk9600_geoscan"
+	if got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s); len(got) != 3 {
+		t.Fatalf("packets=%d, want 3", len(got))
+	}
+
+	st := c.Status()
+	if !st.Measured {
+		t.Fatalf("status=%+v, want measured", st)
+	}
+	if math.Abs(st.CarrierHz+mistune) > 300 {
+		t.Errorf("carrier %.0f Hz, want about %d", st.CarrierHz, -mistune)
+	}
+	if st.DeviationHz < 2200 || st.DeviationHz > 3300 {
+		t.Errorf("deviation %.0f Hz, want about 3000", st.DeviationHz)
+	}
+	if st.ClockJitter > 0.12 {
+		t.Errorf("clock jitter %.3f symbol, want locked (< 0.12)", st.ClockJitter)
+	}
+	if !st.SyncCounted || st.SyncWords != 3 || st.SyncBitErrors > 3 {
+		t.Errorf("sync counted/words/bit errors=%v/%d/%d, want true/3/few", st.SyncCounted, st.SyncWords, st.SyncBitErrors)
+	}
+}
+
+func TestChain_HDLCProfileHasNoSyncCounter(t *testing.T) {
+	c := NewChain()
+	run(c, toFrames(beaconAir(t, testRate, 1, time.Second), testRate, sdr.DefaultBlockSize, 0), afskSettings(testOffset, -50))
+	st := c.Status()
+	if !st.Measured || st.SyncCounted || st.DeviationHz != 0 {
+		t.Errorf("status=%+v, want measured, no sync counter, no deviation for AFSK", st)
+	}
+	if st.ClockJitter > 0.12 {
+		t.Errorf("clock jitter %.3f symbol, want locked (< 0.12)", st.ClockJitter)
 	}
 }
 

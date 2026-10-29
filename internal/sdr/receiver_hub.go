@@ -46,7 +46,7 @@ type ReceiverHub struct {
 
 // StreamTap — попутный получатель потока тракта (демодулятор). Вызывается в отдельной горутине
 // при запуске каждого потока устройства. Зрителем не считается: поток не держит, его канал
-// закрывается вместе с потоком; смену частоты дискретизации переживает.
+// закрывается вместе с потоком. Короткую паузу без зрителей и смену частоты дискретизации переживает.
 type StreamTap func(pathID string, frames <-chan IQFrame)
 
 // SetStreamTap задаёт попутного получателя для потоков, запущенных после вызова.
@@ -87,6 +87,15 @@ func (h *ReceiverHub) Channel(pathID string) (ChannelSettings, error) {
 	return entry.channel, nil
 }
 
+// GainDB возвращает усиление приёмника тракта; отрицательное — автоусиление.
+func (h *ReceiverHub) GainDB(pathID string) (float32, error) {
+	r, err := h.Get(pathID)
+	if err != nil {
+		return 0, err
+	}
+	return r.Status().GainDB, nil
+}
+
 // SetChannel проверяет настройки демодулятора по полосе приёмника и сохраняет их.
 // Неподходящие не сохраняются, у тракта остаются прежние.
 func (h *ReceiverHub) SetChannel(pathID string, c ChannelSettings) error {
@@ -100,6 +109,18 @@ func (h *ReceiverHub) SetChannel(pathID string, c ChannelSettings) error {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.entries[pathID].channel = c
+	return nil
+}
+
+// SetDemodOff включает или останавливает демодулятор тракта, не трогая сдвиг, полосу, порог и профиль.
+func (h *ReceiverHub) SetDemodOff(pathID string, off bool) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	entry, ok := h.entries[pathID]
+	if !ok {
+		return fmt.Errorf("%w: %q", ErrUnknownRadioPath, pathID)
+	}
+	entry.channel.DemodOff = off
 	return nil
 }
 
@@ -179,6 +200,7 @@ func (h *ReceiverHub) CloseAll() error {
 	for id, entry := range h.entries {
 		entry.sessMu.Lock()
 		if entry.session != nil {
+			entry.session.stopIdle()
 			entry.session.cancel()
 			entry.session = nil
 		}

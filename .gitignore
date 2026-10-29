@@ -53,3 +53,6 @@ docs/archive/
 # Large IQ/SigMF downloads (local only); keep inventory
 data/recordings/*
 !data/recordings/SOURCES.txt
+
+# Картинки, принятые демодулятором
+data/products/

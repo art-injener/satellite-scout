@@ -233,22 +233,28 @@ body.mode-overview:not(.station-basic) #layout-manual {
     display: none;
 }
 
+/* Вкладка «Передатчики» спрятана: карта занимает всю высоту под шапкой. */
 body.mode-overview:not(.station-basic) .bottom-panel {
-    display: flex;
+    display: none;
 }
 
-body.mode-overview:not(.station-basic) .main-wrapper.tracking-page {
-    grid-template-rows: 44px 1fr var(--bottom-panel-height);
-}
-
-/* Свёрнутая нижняя панель в Авто: правило mode-overview выше по специфичности,
-   чем .bottom-panel-collapsed — без этого override высота строки не уменьшается. */
+body.mode-overview:not(.station-basic) .main-wrapper.tracking-page,
 body.mode-overview:not(.station-basic) .main-wrapper.tracking-page.bottom-panel-collapsed {
-    grid-template-rows: 44px 1fr 36px;
+    grid-template-rows: 44px 1fr;
+}
+
+body.mode-overview:not(.station-basic) .main-wrapper.tracking-page.bottom-panel-collapsed .tracking-left {
+    justify-content: stretch;
+}
+
+body.mode-overview:not(.station-basic) .main-wrapper.tracking-page.bottom-panel-collapsed .tracking-left .map-area {
+    flex: 1;
+    aspect-ratio: auto;
+    max-height: none;
 }
 
 /* ───────────────── Ручной режим: layout вместо карты, нижняя панель скрыта ─────────────────
-   В Авто карта (#tracking-layout) и нижняя панель видны.
+   В «Карте» видна карта на всю высоту, вкладка «Передатчики» спрятана.
    В Ручном карту прячем, нижнюю панель прячем, а #layout-manual растягивается во всю
    главную зону. Grid-rows main-wrapper переключаем на 2 строки (без bottom-panel). */
 
@@ -341,6 +347,11 @@ body.mode-manual:not(.station-basic) .right-panel {
 .app-header__controls .app-header__section,
 .app-header__info .app-header__section {
     padding: 0 8px 0 10px;
+}
+
+/* Секция «Тракт» в шапке скрыта. Выбор — в колонке «Приёмник». */
+.app-header__path[hidden] {
+    display: none;
 }
 
 .app-header__section > .app-header__label {

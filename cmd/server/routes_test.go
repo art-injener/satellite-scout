@@ -11,6 +11,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/access"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
 func TestSetupRoutes_LegacyRedirects(t *testing.T) {
@@ -80,6 +81,8 @@ func TestSetupRoutes_ChangesRequireMaster(t *testing.T) {
 		{http.MethodPut, "/api/settings"},
 		{http.MethodPost, "/api/sdr/tune"},
 		{http.MethodPost, "/api/sdr/receiver"},
+		{http.MethodPost, "/api/sdr/channel"},
+		{http.MethodPost, "/api/sdr/demod"},
 		{http.MethodPost, "/api/access/decide"},
 		{http.MethodPost, "/api/access/revoke"},
 	} {
@@ -144,6 +147,7 @@ func minimalRouteDeps(t *testing.T) *routeDeps {
 		Exclude:     &noopExcludeStore{},
 		PassCache:   &noopPassCache{},
 		Group:       &noopGroupRefresher{},
+		SDR:         sdr.NewService(),
 	}
 }
 

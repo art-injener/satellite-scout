@@ -276,10 +276,14 @@ const (
 	ImitatorCarrier  = "carrier"   // немодулированная несущая
 	ImitatorAFSKPRBS = "afsk_prbs" // непрерывный AFSK 1200 на PRBS-9, эталон для BER
 	ImitatorBeacon   = "beacon"    // кадр AX.25 раз в period_s, модуляция по modem
+	ImitatorSSTV     = "sstv"      // картинка SSTV в режиме sstv_mode поверх ЧМ раз в period_s
 )
 
 // ImitatorSignalKinds — все допустимые значения ImitatorSignal.Kind.
-var ImitatorSignalKinds = []string{ImitatorCarrier, ImitatorAFSKPRBS, ImitatorBeacon}
+var ImitatorSignalKinds = []string{ImitatorCarrier, ImitatorAFSKPRBS, ImitatorBeacon, ImitatorSSTV}
+
+// ImitatorSSTVModes — допустимые значения ImitatorSignal.SSTVMode; пусто — robot36.
+var ImitatorSSTVModes = []string{"robot36", "pd120", "pd180"}
 
 // Модемы маяка имитатора; названия совпадают с демодуляторами канала.
 const (
@@ -324,6 +328,13 @@ type ImitatorSignal struct {
 	PeriodS float64 `json:"period_s,omitempty"`
 	// Modem — модуляция маяка; пусто — afsk1200.
 	Modem string `json:"modem,omitempty"`
+	// SSTVMode — режим SSTV; пусто — robot36.
+	SSTVMode string `json:"sstv_mode,omitempty"`
+	// Image — картинка SSTV (PNG или JPEG); пусто — испытательная таблица.
+	Image string `json:"image,omitempty"`
+	// Audio — запись звука SSTV (WAV) вместо картинки: передаётся в ЧМ как есть,
+	// режим определяет декодер по заголовку VIS.
+	Audio string `json:"audio,omitempty"`
 }
 
 // RotatorConfig — параметры поворотной платформы радиотракта.

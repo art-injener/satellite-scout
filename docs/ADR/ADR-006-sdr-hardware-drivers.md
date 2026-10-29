@@ -51,13 +51,12 @@ ADR-004 определяет контракт `Receiver` (интерфейс SDR
 Структура `internal/usbdrivers`:
 
 ```text
-internal/usbdrivers/
-├── sysfs.go           # перечисление устройств (/sys/bus/usb/devices)
-├── device.go          # Open(path), Close, ClaimInterface
-├── control.go         # ControlTransfer (USBDEVFS_CONTROL)
-├── bulk.go            # BulkRead / BulkWrite (USBDEVFS_BULK)
-├── ioctl_linux.go     # //go:build linux — константы ioctl
-└── *_linux_test.go    # unit-тесты sysfs; live-тесты с dongle
+internal/usbdrivers/          (✅ 2026-10-28)
+├── sysfs.go           # List: перечисление устройств (/sys/bus/usb/devices)
+├── device_linux.go    # Open, Close, ClaimInterface (DISCONNECT_CLAIM), ClearHalt, Control, BulkRead
+├── stream.go          # Stream: кольцо асинхронных URB (SUBMITURB / REAPURB / DISCARDURB)
+├── ioctl_linux.go     # структуры и коды ioctl из usbdevice_fs.h
+└── *_test.go          # коды ioctl, sysfs, кольцо на поддельном ядре; live — при SCOUT_USB_LIVE=1
 ```
 
 ### 2.3. Единый внутренний формат IQ — `complex64`
@@ -144,7 +143,7 @@ flowchart TB
 
 | Пакет | Роль | Источник паттерна | Статус |
 |-------|------|-------------------|--------|
-| `internal/usbdrivers/` | sysfs → open → control → bulk ioctl | Самописный (ADR-005 §2.4) | ⏳ Этап C |
+| `internal/usbdrivers/` | sysfs → open → control → bulk ioctl | Самописный (ADR-005 §2.4) | ✅ 2026-10-28 |
 | `internal/sdr/receiver.go` | Интерфейс `Receiver`, `IQFrame`, `Capabilities`, `StreamConfig` | ADR-004 §2.3 | ✅ |
 | `internal/sdr/chipdrivers/` | Registry + `rtlsdr`, `airspy`, `rtltcp` | GopherTrunk chip drivers | ⏳ Этап C |
 | `internal/sdr/imitator/` | Синтетический тон + replay `.cfile` из `io.Reader` (TDD без железа) | sdr-modem replay | ✅ |

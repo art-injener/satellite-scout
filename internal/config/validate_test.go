@@ -244,6 +244,7 @@ func sampleImitator() *ImitatorConfig {
 				PassSwingDB: 30, PassPeriodS: 600},
 			{Kind: ImitatorBeacon, FreqHz: 436_490_000, LevelDBFS: -45, PeriodS: 10},
 			{Kind: ImitatorBeacon, FreqHz: 436_470_000, LevelDBFS: -45, PeriodS: 10, Modem: ImitatorFSK9600G3RUH},
+			{Kind: ImitatorSSTV, FreqHz: 436_450_000, LevelDBFS: -45, PeriodS: 120, SSTVMode: "pd120"},
 		},
 	}
 }
@@ -280,6 +281,14 @@ func TestValidate_ImitatorSignalErrors(t *testing.T) {
 		{"noise above full scale", func(im *ImitatorConfig) { im.NoiseDBFS = 1 }, ".noise_dbfs"},
 		{"unknown beacon modem", func(im *ImitatorConfig) { im.Signals[3].Modem = "gmsk9600" }, ".signals[3].modem"},
 		{"modem on non-beacon", func(im *ImitatorConfig) { im.Signals[1].Modem = ImitatorAFSK1200 }, ".signals[1].modem"},
+		{"sstv without period", func(im *ImitatorConfig) { im.Signals[4].PeriodS = 0 }, ".signals[4].period_s"},
+		{"unknown sstv mode", func(im *ImitatorConfig) { im.Signals[4].SSTVMode = "martin1" }, ".signals[4].sstv_mode"},
+		{"sstv mode on beacon", func(im *ImitatorConfig) { im.Signals[2].SSTVMode = "robot36" }, ".signals[2].sstv_mode"},
+		{"sstv image on carrier", func(im *ImitatorConfig) { im.Signals[0].Image = "a.png" }, ".signals[0].sstv_mode"},
+		{"sstv audio on carrier", func(im *ImitatorConfig) { im.Signals[0].Audio = "a.wav" }, ".signals[0].audio"},
+		{"sstv audio with image", func(im *ImitatorConfig) {
+			im.Signals[4].Audio, im.Signals[4].Image = "a.wav", "a.png"
+		}, ".signals[4].audio"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

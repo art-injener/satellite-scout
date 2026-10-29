@@ -366,6 +366,24 @@ func validateImitator(prefix string, rc ReceiverConfig) ValidationErrors {
 		if s.Kind == ImitatorBeacon && s.PeriodS <= 0 {
 			add(sp+".period_s", "для маяка укажите положительный интервал между кадрами")
 		}
+		if s.Kind == ImitatorSSTV && s.PeriodS <= 0 {
+			add(sp+".period_s", "для SSTV укажите положительный интервал между передачами")
+		}
+		switch {
+		case s.SSTVMode == "" && s.Image == "":
+		case s.Kind != ImitatorSSTV:
+			add(sp+".sstv_mode", "режим и картинка SSTV задаются только для сигнала sstv")
+		case s.SSTVMode != "" && !slices.Contains(ImitatorSSTVModes, s.SSTVMode):
+			add(sp+".sstv_mode", fmt.Sprintf("неизвестный режим SSTV %q, допустимо: %s",
+				s.SSTVMode, strings.Join(ImitatorSSTVModes, ", ")))
+		}
+		switch {
+		case s.Audio == "":
+		case s.Kind != ImitatorSSTV:
+			add(sp+".audio", "запись звука задаётся только для сигнала sstv")
+		case s.Image != "":
+			add(sp+".audio", "укажите либо запись звука, либо картинку SSTV")
+		}
 		switch {
 		case s.Modem == "":
 		case s.Kind != ImitatorBeacon:

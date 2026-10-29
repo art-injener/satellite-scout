@@ -10,13 +10,14 @@ type stubReceiver struct {
 	name    string
 	stopped bool
 	caps    Capabilities
+	gain    float32
 }
 
 func (s *stubReceiver) Name() string               { return s.name }
 func (s *stubReceiver) Capabilities() Capabilities { return s.caps }
 func (s *stubReceiver) Tune(uint64) error          { return nil }
-func (s *stubReceiver) SetGain(float32) error      { return nil }
-func (s *stubReceiver) Status() ReceiverStatus     { return ReceiverStatus{} }
+func (s *stubReceiver) SetGain(db float32) error   { s.gain = db; return nil }
+func (s *stubReceiver) Status() ReceiverStatus     { return ReceiverStatus{GainDB: s.gain} }
 func (s *stubReceiver) StartStream(context.Context, StreamConfig) (<-chan IQFrame, error) {
 	// Закрытый канал: stub не стримит, но не возвращает (nil, nil).
 	ch := make(chan IQFrame)
@@ -151,6 +152,31 @@ func TestReceiverHub_SampleRate(t *testing.T) {
 
 func TestReceiverHub_SampleRate_UnknownPath(t *testing.T) {
 	if _, err := NewReceiverHub().SampleRate("nope"); !errors.Is(err, ErrUnknownRadioPath) {
+		t.Errorf("err=%v, want ErrUnknownRadioPath", err)
+	}
+}
+
+func TestReceiverHub_SetDemodOffKeepsTheChannel(t *testing.T) {
+	hub := NewReceiverHub()
+	hub.Register("p", PathConfig{SampleRateHz: 256_000}, func() (Receiver, error) {
+		return &stubReceiver{caps: rtlLikeCaps()}, nil
+	})
+	want := ChannelSettings{OffsetHz: 12_000, BandwidthHz: 15_000, SquelchDBFS: -80, Demod: "sstv"}
+	if err := hub.SetChannel("p", want); err != nil {
+		t.Fatal(err)
+	}
+	if err := hub.SetDemodOff("p", true); err != nil {
+		t.Fatal(err)
+	}
+	got, err := hub.Channel("p")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want.DemodOff = true
+	if got != want {
+		t.Fatalf("channel=%+v, want %+v", got, want)
+	}
+	if err := hub.SetDemodOff("nope", true); !errors.Is(err, ErrUnknownRadioPath) {
 		t.Errorf("err=%v, want ErrUnknownRadioPath", err)
 	}
 }

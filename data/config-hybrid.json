@@ -84,6 +84,67 @@
           ],
           "step_deg": 1
         }
+      },
+      {
+        "id": 3,
+        "name": "QFH SSTV",
+        "antenna": {
+          "name": "QFH 437",
+          "type": "stationary",
+          "kind": "qfh",
+          "freq_min_mhz": 430,
+          "freq_max_mhz": 440
+        },
+        "receiver": {
+          "driver": "simulated",
+          "label": "Имитатор SSTV: записи ARISS PD120 и Robot 36, модулятор Robot 36",
+          "imitator": {
+            "signals": [
+              {
+                "kind": "sstv",
+                "freq_hz": 436500000,
+                "level_dbfs": -40,
+                "period_s": 150,
+                "audio": "data/recordings/sstv/pd120_ariss20_image1.wav",
+                "sweep_hz": 2000,
+                "sweep_period_s": 300
+              },
+              {
+                "kind": "sstv",
+                "freq_hz": 436540000,
+                "level_dbfs": -40,
+                "period_s": 60,
+                "audio": "data/recordings/sstv/robot36_pt7apm.wav",
+                "sweep_hz": 2000,
+                "sweep_period_s": 300
+              },
+              {
+                "kind": "sstv",
+                "freq_hz": 436580000,
+                "level_dbfs": -40,
+                "period_s": 60,
+                "sstv_mode": "robot36",
+                "sweep_hz": 2000,
+                "sweep_period_s": 300
+              }
+            ]
+          }
+        }
+      },
+      {
+        "id": 4,
+        "name": "RTL-SDR V3",
+        "antenna": {
+          "name": "Штырь",
+          "type": "stationary",
+          "kind": "whip"
+        },
+        "receiver": {
+          "driver": "rtlsdr",
+          "serial": "00000001",
+          "device_path": "/dev/bus/usb/003/013",
+          "label": "RTL-SDR Blog V3 (R820T2)"
+        }
       }
     ]
   }

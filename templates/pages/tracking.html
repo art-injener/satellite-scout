@@ -208,7 +208,7 @@
      «Панорама» и «Спектр» и есть режим SDR — один тюнер либо обходит полосы обзора,
      либо стоит на канале; «Антенна» только показывает свою панель.
      План сеансов и SkyView — правая панель, в Ручном свёрнута по умолчанию. -->
-<section class="layout-manual" id="layout-manual" data-tab="panorama" aria-hidden="true">
+<section class="layout-manual" id="layout-manual" data-tab="spectrum" aria-hidden="true">
     <!-- Таймлайн пролётов: угол места по времени, общий для всех вкладок -->
     <section class="ml-panel ml-timeline">
         <div class="ml-panel__body ml-timeline__body">
@@ -218,8 +218,8 @@
 
     <!-- Вкладки слева от графиков: «Панорама» и «Спектр» переключают режим SDR, «Антенна» — только вид -->
     <div class="ml-tabbar" id="manual-tabbar" role="tablist" aria-orientation="vertical">
-        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="panorama" aria-selected="true">Панорама</button>
-        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="spectrum" aria-selected="false">Спектр</button>
+        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="panorama" hidden aria-selected="false">Панорама</button>
+        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="spectrum" aria-selected="true">Спектр</button>
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="antenna" aria-selected="false">Антенна</button>
     </div>
 
@@ -236,7 +236,7 @@
     <div class="ml-panes">
         <!-- Вкладка «Панорама» (обзор): FFT по span с метками передатчиков,
              под ним водопад обходов, ниже сводная таблица «Эфир». Управлять в обзоре нечем — колонки приёмника нет. -->
-        <div class="ml-tabpane ml-tabpane--panorama is-active" data-pane="panorama" role="tabpanel">
+        <div class="ml-tabpane ml-tabpane--panorama" data-pane="panorama" role="tabpanel" hidden>
             <section class="ml-panel ml-panorama" id="manual-panorama">
                 <div class="ml-panel__body ml-panorama__body">
                     <div class="ml-panorama__fft">
@@ -449,8 +449,8 @@
                     <div class="ml-demod__result-head">
                         <div class="ml-demod__result-tabs" id="manual-result-tabs" role="tablist">
                             <button type="button" class="ml-demod__result-tab" role="tab" data-view="table" aria-selected="true">Таблица</button>
-                            <button type="button" class="ml-demod__result-tab" role="tab" data-view="hex" aria-selected="false">Hex</button>
                             <button type="button" class="ml-demod__result-tab" role="tab" data-view="chart" aria-selected="false">Диаграмма</button>
+                            <button type="button" class="ml-demod__result-tab" role="tab" data-view="pictures" aria-selected="false">Снимки</button>
                         </div>
                     </div>
                     <div class="ml-demod__result-view is-active" data-view="table">
@@ -470,8 +470,20 @@
                             </table>
                         </div>
                     </div>
-                    <div class="ml-demod__result-view" data-view="hex">
-                        <pre class="ml-demod__hex" id="manual-demod-hex" aria-label="Дамп последнего кадра в hex и ASCII"></pre>
+                    <!-- Картинки демодулятора (SSTV): крупно выбранная, справа — миниатюры; разметку списка строит product-gallery.js -->
+                    <div class="ml-demod__result-view ml-demod__result-view--pictures" data-view="pictures">
+                        <figure class="ml-pics__main">
+                            <div class="ml-pics__frame">
+                                <img class="ml-pics__img" id="manual-pics-img" alt="" title="Открыть крупно" hidden>
+                                <p class="ml-pics__empty" id="manual-pics-empty">Снимков пока нет. Выберите профиль «SSTV» — картинка проявится здесь по строкам.</p>
+                            </div>
+                            <figcaption class="ml-pics__cap">
+                                <span class="ml-pics__title" id="manual-pics-title"></span>
+                                <span class="ml-pics__progress" aria-hidden="true"><span class="ml-pics__bar" id="manual-pics-bar"></span></span>
+                                <span class="ml-pics__lines" id="manual-pics-lines"></span>
+                            </figcaption>
+                        </figure>
+                        <ol class="ml-pics__list" id="manual-pics-list" aria-label="Принятые снимки"></ol>
                     </div>
                     <div class="ml-demod__result-view ml-demod__result-view--chart" data-view="chart">
                         <div class="ml-eye__canvas-wrap">
@@ -490,25 +502,73 @@
         </div>
     </div>
 
-    <!-- Колонка приёмника: дисплей частоты и уровней, регуляторы с кнопкой
-         «Установить», параметры демодуляции, запись IQ. Видна на «Спектре»
-         и «Антенне»: настраивать приёмник можно, не уходя от наведения. -->
+    <!-- Колонка приёмника: дисплей частоты и уровней, регуляторы.
+         У секции «Приёмник» и у секции «Демодулятор» своя кнопка «Установить».
+         Видна на «Спектре» и «Антенне»: настраивать можно, не уходя от наведения. -->
     <section class="ml-panel ml-ctl" id="manual-rx-panel">
         <div class="ml-panel__body ml-ctl__body">
-            <div class="ml-rx-panel__display">
+            <div class="ml-ctl__section">
+                <span class="ml-ctl__section-title">Приёмник</span>
+                <!-- Приёмник общий для всех клиентов. Перестраивает мастер или слейв,
+                     которому мастер разрешил (access-control.js). -->
+                <div class="ml-access" id="manual-access">
+                    <span class="ml-rx-panel__label">Режим</span>
+                    <div class="ml-rx-panel__controls">
+                        <span class="ml-access__role" id="manual-access-role" data-role="viewer">Просмотр</span>
+                        <button type="button" class="ml-rx-panel__pill" id="manual-access-manage"
+                                aria-haspopup="dialog" aria-controls="access-modal">Переключить</button>
+                        <button type="button" class="ml-rx-panel__pill" id="manual-access-revoke" hidden>Забрать</button>
+                        <button type="button" class="ml-rx-panel__pill" id="manual-access-release" hidden>Вернуть</button>
+                    </div>
+                    <span class="ml-access__detail" id="manual-access-detail" hidden></span>
+                    <span class="ml-access__notice" id="manual-access-notice" role="status" aria-live="polite"></span>
+                </div>
                 <!-- Индикатор-регулятор частоты: разметку строит freq-dial.js -->
-                <div class="ml-rx-panel__dial" id="manual-rx-dial"></div>
+                <div class="ml-rx-panel__display">
+                    <div class="ml-rx-panel__dial" id="manual-rx-dial"></div>
+                </div>
+                <label class="ml-rx-panel__field">
+                    <span class="ml-rx-panel__label">Тракт</span>
+                    <select class="ml-rx-panel__sel" id="manual-rx-path" aria-label="Активный радиотракт"></select>
+                </label>
+                <label class="ml-rx-panel__field">
+                    <span class="ml-rx-panel__label">Полоса</span>
+                    <select class="ml-rx-panel__sel" id="manual-rx-span">
+                        <option value="2048000" selected>2.048 МГц</option>
+                        <option value="1024000">1.024 МГц</option>
+                        <option value="512000">512 кГц</option>
+                        <option value="256000">256 кГц</option>
+                    </select>
+                </label>
+                <div class="ml-rx-panel__field">
+                    <label class="ml-rx-panel__label" for="manual-rx-gain">Усиление</label>
+                    <div class="ml-rx-panel__controls">
+                        <span class="ml-rx-stepper">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-gain-dec" aria-label="Меньше">−</button>
+                            <input class="ml-rx-panel__input" id="manual-rx-gain" type="text" inputmode="decimal"
+                                   autocomplete="off" spellcheck="false" value="32">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-gain-inc" aria-label="Больше">+</button>
+                        </span>
+                        <span class="ml-rx-panel__unit">дБ</span>
+                        <button type="button" class="ml-rx-panel__pill" id="manual-rx-agc" aria-pressed="false">АРУ</button>
+                    </div>
+                </div>
+                <button class="ml-rx-panel__btn-apply" type="button" id="manual-rx-apply">Установить</button>
+            </div>
+
+            <div class="ml-ctl__section">
+                <span class="ml-ctl__section-title">Измерения</span>
                 <!-- Пик спектра: те же частота и амплитуда, что у перекрестья на графике -->
                 <div class="ml-rx-ind">
                     <div class="ml-rx-ind__cell">
-                        <span class="ml-rx-ind__lbl">Freq. сигнала</span>
+                        <span class="ml-rx-ind__lbl">Сигнал</span>
                         <span class="ml-rx-ind__val">
                             <span class="ml-rx-ind__num" id="manual-rx-marker-freq">—</span>
                             <span class="ml-rx-ind__unit">МГц</span>
                         </span>
                     </div>
                     <div class="ml-rx-ind__cell">
-                        <span class="ml-rx-ind__lbl" title="Амплитуда самого сильного бина БПФ в полосе">Амп. max</span>
+                        <span class="ml-rx-ind__lbl" title="Амплитуда самого сильного бина БПФ в полосе">Амплитуда max</span>
                         <span class="ml-rx-ind__val">
                             <span class="ml-rx-ind__num" id="manual-rx-marker-level">—</span>
                             <span class="ml-rx-ind__unit" id="manual-rx-marker-unit">dBFS</span>
@@ -523,72 +583,27 @@
                 </div>
             </div>
 
-            <!-- Приёмник общий для всех клиентов. Перестраивает мастер или слейв,
-                 которому мастер разрешил (access-control.js). -->
-            <div class="ml-ctl__section ml-access" id="manual-access">
-                <div class="ml-access__row">
-                    <span class="ml-access__role" id="manual-access-role" data-role="viewer">Режим: Просмотр</span>
-                    <button type="button" class="ml-rx-panel__pill" id="manual-access-manage"
-                            aria-haspopup="dialog" aria-controls="access-modal">Переключить</button>
-                    <button type="button" class="ml-rx-panel__pill" id="manual-access-revoke" hidden>Забрать</button>
-                    <button type="button" class="ml-rx-panel__pill" id="manual-access-release" hidden>Вернуть</button>
-                </div>
-                <span class="ml-access__detail" id="manual-access-detail" hidden></span>
-                <span class="ml-access__notice" id="manual-access-notice" role="status" aria-live="polite"></span>
-            </div>
-
-            <div class="ml-ctl__section">
-                <span class="ml-ctl__section-title">Приёмник</span>
-                <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label">Полоса</span>
-                    <select class="ml-rx-panel__sel" id="manual-rx-span">
-                        <option value="2048000" selected>2.048 МГц</option>
-                        <option value="1024000">1.024 МГц</option>
-                        <option value="512000">512 кГц</option>
-                        <option value="256000">256 кГц</option>
-                    </select>
-                </label>
-                <div class="ml-rx-panel__field">
-                    <label class="ml-rx-panel__label" for="manual-rx-gain">Усиление</label>
-                    <div class="ml-rx-panel__controls">
-                        <input class="ml-rx-panel__input" id="manual-rx-gain" type="number" min="0" max="49.6" step="0.1" value="32">
-                        <span class="ml-rx-panel__unit">дБ</span>
-                        <button type="button" class="ml-rx-panel__pill" id="manual-rx-agc" aria-pressed="false">АРУ</button>
-                    </div>
+            <!-- Демодулятор вырезает из полосы приёмника свой канал: сдвиг от центра
+                 и ширина. Канал виден на спектре заливкой, приёмник при этом не
+                 перестраивается. -->
+            <div class="ml-ctl__section ml-ctl__section--demod" id="manual-demod-settings">
+                <div class="ml-ctl__section-title ml-ctl__section-title--check">
+                    <span>Демодулятор</span>
+                    <label class="ml-demod-switch">
+                        <input class="ml-rx-panel__check" id="manual-rx-channel-show" type="checkbox"
+                               title="Включён — приём и линии канала. Выключен — только спектр и водопад"
+                               aria-label="Демодулятор">
+                        <span class="ml-demod-switch__state" aria-hidden="true">
+                            <span class="ml-demod-switch__word ml-demod-switch__word--on">Вкл</span>
+                            <span class="ml-demod-switch__word ml-demod-switch__word--off">Выкл</span>
+                        </span>
+                        <span class="ml-demod-switch__track" aria-hidden="true">
+                            <span class="ml-demod-switch__knob"></span>
+                        </span>
+                    </label>
                 </div>
                 <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label">Доплер</span>
-                    <select class="ml-rx-panel__sel" id="manual-rx-doppler-mode">
-                        <option>Авто</option>
-                        <option>Фикс.</option>
-                    </select>
-                </label>
-                <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label">Сдвиг</span>
-                    <span class="ml-rx-panel__controls">
-                        <input class="ml-rx-panel__input" id="manual-rx-doppler-val" type="number" step="1" value="0">
-                        <span class="ml-rx-panel__unit">Гц</span>
-                    </span>
-                </label>
-                <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label">Полоса канала</span>
-                    <select class="ml-rx-panel__sel" id="manual-rx-filter-bw">
-                        <option value="2800">2.8 кГц</option>
-                        <option value="6000">6 кГц</option>
-                        <option value="15000" selected>15 кГц</option>
-                        <option value="30000">30 кГц</option>
-                        <option value="50000">50 кГц</option>
-                    </select>
-                </label>
-                <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label" title="Уровень, ниже которого звук и демодуляция закрыты">Порог</span>
-                    <span class="ml-rx-panel__controls">
-                        <input class="ml-rx-panel__input" id="manual-rx-squelch" type="number" step="1" value="-90">
-                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit">dBFS</span>
-                    </span>
-                </label>
-                <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label">Демодулятор</span>
+                    <span class="ml-rx-panel__label">Профиль</span>
                     <select class="ml-demod__pipeline-sel" id="manual-rx-pipeline">
                         <option value="fsk9600_g3ruh">FSK 9600 (G3RUH)</option>
                         <option value="fsk9600_geoscan">FSK 9600 (GEOSCAN)</option>
@@ -602,13 +617,56 @@
                         <option value="cw">CW</option>
                         <option value="fm">FM</option>
                         <option value="ook">OOK</option>
+                        <option value="sstv">SSTV</option>
                     </select>
                 </label>
+                <label class="ml-rx-panel__field">
+                    <span class="ml-rx-panel__label" title="Сдвиг центра канала от частоты приёмника">Сдвиг канала</span>
+                    <span class="ml-rx-panel__controls">
+                        <span class="ml-rx-stepper">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-dec" aria-label="Меньше">−</button>
+                            <input class="ml-rx-panel__input" id="manual-rx-doppler-val" type="text" inputmode="numeric"
+                                   autocomplete="off" spellcheck="false" value="0">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-inc" aria-label="Больше">+</button>
+                        </span>
+                        <span class="ml-rx-panel__unit">Гц</span>
+                    </span>
+                </label>
+                <label class="ml-rx-panel__field">
+                    <span class="ml-rx-panel__label">Полоса канала</span>
+                    <select class="ml-rx-panel__sel" id="manual-rx-filter-bw">
+                        <option value="2800">2.8 кГц</option>
+                        <option value="6000">6 кГц</option>
+                        <option value="15000" selected>15 кГц</option>
+                        <option value="18000">18 кГц</option>
+                    </select>
+                </label>
+                <label class="ml-rx-panel__field">
+                    <span class="ml-rx-panel__label" title="Уровень, ниже которого звук и демодуляция закрыты">Порог</span>
+                    <span class="ml-rx-panel__controls">
+                        <span class="ml-rx-stepper">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-squelch-dec" aria-label="Меньше">−</button>
+                            <input class="ml-rx-panel__input" id="manual-rx-squelch" type="text" inputmode="decimal"
+                                   autocomplete="off" spellcheck="false" value="-90">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-squelch-inc" aria-label="Больше">+</button>
+                        </span>
+                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit">dBFS</span>
+                    </span>
+                </label>
+                <label class="ml-rx-panel__field">
+                    <span class="ml-rx-panel__label">Доплер</span>
+                    <select class="ml-rx-panel__sel" id="manual-rx-doppler-mode">
+                        <option>Авто</option>
+                        <option>Фикс.</option>
+                    </select>
+                </label>
+                <button class="ml-rx-panel__btn-apply" type="button" id="manual-demod-apply">Установить</button>
             </div>
 
-            <button class="ml-rx-panel__btn-apply" type="button" id="manual-rx-apply">Установить</button>
-
-            <!-- Параметры демодуляции: заполняет DemodPanel -->
+            <!-- Обработка по этапам: заполняет DemodPanel -->
+            <div class="ml-ctl__section ml-ctl__section--progress">
+                <span class="ml-ctl__section-title">Обработка</span>
+            </div>
             <div class="ml-ctl__metrics" id="manual-demod-panel">
                 <div class="ml-demod__ch">
                     <span class="ml-demod__channel-led ml-demod__channel-led--lock" id="manual-ch-lock" title="Lock">●</span>
@@ -620,23 +678,18 @@
                     <span class="ml-demod__muted">pipeline</span>
                     <span id="manual-ch-pipeline">FSK 1k2 · AX.25</span>
                 </div>
-                <div class="ml-demod__metrics">
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Lock</span><span class="ml-demod__value ml-demod__value--ok" id="manual-dm-lock" title="Символьная синхронизация">●</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">SNR</span><span class="ml-demod__value" id="manual-dm-snr">12.4 dB</span></div>
-                    <div class="ml-demod__metric ml-demod__metric--pipeline"><span class="ml-demod__label">Пайплайн</span><span class="ml-demod__value" id="manual-dm-pipeline">FSK 9600</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Скор.</span><span class="ml-demod__value" id="manual-dm-rate">9.6 ksym/s</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Es/N0</span><span class="ml-demod__value" id="manual-dm-esn0">8.4 dB</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">C/N0</span><span class="ml-demod__value" id="manual-dm-cn0">52.3 dB·Hz</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">BER</span><span class="ml-demod__value" id="manual-dm-ber">3.2e-4</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">RSSI</span><span class="ml-demod__value" id="manual-dm-rssi">−42 dBm</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">AFC</span><span class="ml-demod__value" id="manual-dm-afc">−18 Hz</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Δf</span><span class="ml-demod__value" id="manual-dm-foff">+1.2 kHz</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label" title="Сигнал выше порога из панели приёмника">Порог</span><span class="ml-demod__value ml-demod__value--ok" id="manual-dm-squelch">Open</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">FEC</span><span class="ml-demod__value" id="manual-dm-fec">12 B</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Кадров</span><span class="ml-demod__value" id="manual-dm-frames">128</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Sync</span><span class="ml-demod__value" id="manual-dm-sync">131</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">CRC</span><span class="ml-demod__value ml-demod__value--ok" id="manual-dm-crc">OK</span></div>
-                    <div class="ml-demod__metric"><span class="ml-demod__label">Посл.</span><span class="ml-demod__value" id="manual-dm-last">0.8 s</span></div>
+                <ol class="ml-stages" aria-label="Этапы обработки">
+                    <li class="ml-stage ml-stage--idle" id="manual-st-signal" title="Уровень в полосе канала и порог"><span class="ml-stage__led" aria-hidden="true"></span><span class="ml-stage__name" id="manual-st-signal-name">Сигнал</span><span class="ml-stage__value" id="manual-st-signal-val">—</span><span class="ml-stage__sub" id="manual-st-signal-sub"></span></li>
+                    <li class="ml-stage ml-stage--idle" id="manual-st-carrier" title="Смещение несущей от центра канала и принятая девиация"><span class="ml-stage__led" aria-hidden="true"></span><span class="ml-stage__name" id="manual-st-carrier-name">Несущая</span><span class="ml-stage__value" id="manual-st-carrier-val">—</span><span class="ml-stage__sub" id="manual-st-carrier-sub"></span></li>
+                    <li class="ml-stage ml-stage--idle" id="manual-st-clock" title="Захват символьной синхронизации и ошибка её фазы"><span class="ml-stage__led" aria-hidden="true"></span><span class="ml-stage__name" id="manual-st-clock-name">Такты</span><span class="ml-stage__value" id="manual-st-clock-val">—</span><span class="ml-stage__sub" id="manual-st-clock-sub"></span></li>
+                    <li class="ml-stage ml-stage--idle" id="manual-st-sync" title="Найдено синхрослов и BER по их битам"><span class="ml-stage__led" aria-hidden="true"></span><span class="ml-stage__name" id="manual-st-sync-name">Синхро</span><span class="ml-stage__value" id="manual-st-sync-val">—</span><span class="ml-stage__sub" id="manual-st-sync-sub"></span></li>
+                    <li class="ml-stage ml-stage--idle" id="manual-st-frames" title="Кадры с верной и неверной CRC"><span class="ml-stage__led" aria-hidden="true"></span><span class="ml-stage__name" id="manual-st-frames-name">Кадры</span><span class="ml-stage__value" id="manual-st-frames-val">—</span><span class="ml-stage__sub" id="manual-st-frames-sub"></span></li>
+                </ol>
+                <div class="ml-diag ml-diag--idle" id="manual-dm-diag" role="status">—</div>
+                <div class="ml-strip" id="manual-dm-strip-box" title="Кадры за 60 с: зелёный — CRC верна, красный — нет">
+                    <span class="ml-strip__axis">−60 с</span>
+                    <div class="ml-strip__track" id="manual-dm-strip"></div>
+                    <span class="ml-strip__axis">сейчас</span>
                 </div>
             </div>
 
@@ -691,6 +744,18 @@
             <button type="submit" class="modal__btn modal__btn--secondary" id="access-modal-submit">Войти</button>
         </form>
         <p class="access-modal__error" id="access-modal-error" role="alert"></p>
+    </div>
+</div>
+
+<!-- Снимок демодулятора крупно (product-gallery.js): открывается щелчком по картинке на вкладке «Снимки» -->
+<div id="manual-pics-zoom" class="modal modal--hidden ml-pics-zoom" role="dialog" aria-labelledby="manual-pics-zoom-title" aria-modal="true">
+    <div class="modal__backdrop" data-action="close"></div>
+    <div class="modal__box">
+        <header class="ml-tmi-details__header">
+            <h2 class="ml-tmi-details__title" id="manual-pics-zoom-title"></h2>
+            <button type="button" class="ml-tmi-details__close" data-action="close" aria-label="Закрыть">×</button>
+        </header>
+        <img class="ml-pics-zoom__img" id="manual-pics-zoom-img" alt="">
     </div>
 </div>
 

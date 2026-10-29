@@ -83,9 +83,9 @@ class SSEClient {
             'control_released'];
     }
 
-    /** События демодулятора (internal/demod). */
+    /** События демодулятора (internal/demod): кадры, состояние и картинки. */
     static get DEMOD_EVENTS() {
-        return ['telemetry', 'demod_status'];
+        return ['telemetry', 'demod_status', 'product'];
     }
 
     // ── Подключение / Отключение ──────────────────────────────
@@ -229,7 +229,7 @@ class SSEClient {
             });
         }
 
-        // Принятые кадры и состояние демодулятора: разбирает manual-layout.js.
+        // Принятые кадры, состояние демодулятора и картинки: разбирает manual-layout.js.
         for (const name of SSEClient.DEMOD_EVENTS) {
             this._eventSource.addEventListener(name, (e) => {
                 try {

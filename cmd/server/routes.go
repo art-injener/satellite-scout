@@ -8,6 +8,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/access"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
@@ -24,6 +25,7 @@ type routeDeps struct {
 	SatNOGS     *satnogs.Service
 	SDR         *sdr.Service
 	ReceiverHub *sdr.ReceiverHub
+	Products    *products.Store
 
 	Exclude   handlers.ExclusionAdder
 	PassCache handlers.PassCacheInvalidator
@@ -77,6 +79,8 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	mux.HandleFunc("POST /api/sdr/test", sdrHandler.Test)
 	mux.HandleFunc("POST /api/sdr/tune", deps.Access.RequireControl(sdrHandler.Tune))
 	mux.HandleFunc("POST /api/sdr/receiver", deps.Access.RequireControl(sdrHandler.SetReceiver))
+	mux.HandleFunc("POST /api/sdr/channel", deps.Access.RequireControl(sdrHandler.SetChannel))
+	mux.HandleFunc("POST /api/sdr/demod", deps.Access.RequireControl(sdrHandler.SetDemod))
 	mux.HandleFunc("GET /api/sdr/status", sdrHandler.GetStatus)
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
@@ -87,6 +91,12 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	if deps.SatNOGS != nil {
 		satnogsHandler := handlers.NewSatNOGSHandler(deps.SatNOGS)
 		mux.HandleFunc("GET /api/satnogs/transmitters/{norad}", satnogsHandler.GetTransmitters)
+	}
+
+	if deps.Products != nil {
+		productsHandler := handlers.NewProductsHandler(deps.Products)
+		mux.HandleFunc("GET /api/products", productsHandler.List)
+		mux.HandleFunc("GET /api/products/{id}", productsHandler.Image)
 	}
 
 	mux.Handle("GET /api/sse", deps.SSE)

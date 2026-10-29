@@ -29,3 +29,21 @@ pe0sat-astrobio/  (~158 MB SigMF)  https://www.pe0sat.vgnet.nl/download/ASTROBIO
   FSK 9600 G3RUH AX.25 — для профиля fsk9600_g3ruh (config-hybrid path2)
 
 WAV с pe0sat конвертированы в SigMF (ci16_le); исходные .wav удалены после конвертации.
+
+SSTV audio (AF, not IQ) for SSTV decoder tests and the imitator «sstv» source (`audio`)
+Downloaded 2026-10-27 from https://github.com/kevinnz/SSTV-MEL (Git LFS,
+media.githubusercontent.com/media/kevinnz/SSTV-MEL/main/...). *.expected.* are pictures
+decoded by SSTV-MEL (repo expected/), used by internal/sstv/recording_test.go as reference.
+
+sstv/  (~93 MB)
+  pd120_ariss20_image1.wav   samples/PD120/Space_Comms_-_2017-07-23 _-_0246_UTC_-_ARISS_20_Year_-_image_1.wav
+                             ARISS 20th Anniversary, ISS 145.800 MHz, 2017-07-23
+  pd180_gagarin_image5.wav   samples/PD180/Space_Comms_-_2015-04-12_-_0428_UTC_-_80th_Yuri_Gagarin_image_5.wav
+                             Yuri Gagarin 80th Birthday, ISS 145.800 MHz, 2015-04-12
+  robot36_pt7apm.wav         samples/Robot36/01 - PT7APM.wav  (amateur Robot 36 callsign ID)
+  WAV mono 16-bit PCM, 44.1/48 kHz.
+
+License: SSTV-MEL code is MIT (c) 2025 Kevin Alcock ZL3XA. The recordings have no license of
+their own: per SSTV-MEL samples/README.md they are public amateur broadcasts (ARISS events,
+amateur SSTV) shared within the ham community for educational and technical use.
+Not in git; do not redistribute as part of the project.

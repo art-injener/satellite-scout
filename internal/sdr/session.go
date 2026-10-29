@@ -7,10 +7,15 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // sessionRingCapacity — сколько блоков ждёт медленного зрителя, прежде чем старые начнут выбрасываться.
 const sessionRingCapacity = 16
+
+// sessionIdleGrace — пауза после ухода последнего зрителя.
+// Новый запрос спектра (смена режима, сброс) успевает подписаться, и демодулятор не теряет поток.
+const sessionIdleGrace = 500 * time.Millisecond
 
 // session — один запущенный поток устройства, раздаваемый всем зрителям тракта.
 type session struct {
@@ -21,11 +26,15 @@ type session struct {
 	// перенос кадров заменённого потока не дописал в кольцо прежнюю частоту и не закрыл его.
 	// Меняется под sessMu, читается и без него.
 	gen atomic.Int64
+	// idle — отложенная остановка, пока зрителей нет. nil, пока сеанс кому-то нужен.
+	// Пишется только под sessMu.
+	idle *time.Timer
 }
 
 // Subscribe подключает зрителя к потоку IQ тракта и возвращает канал кадров и функцию отписки.
-// Поток устройства один на тракт: первый зритель запускает приёмник, последний отписавшийся
-// останавливает. Медленный зритель теряет старые кадры, не задерживая остальных.
+// Поток устройства один на тракт: первый зритель запускает приёмник. Последний отписавшийся
+// останавливает его после короткой паузы, чтобы новый запрос спектра застал тот же поток.
+// Медленный зритель теряет старые кадры, не задерживая остальных.
 // Канал закрывается при отписке, при остановке хаба и когда устройство само завершило поток.
 func (h *ReceiverHub) Subscribe(pathID string) (<-chan IQFrame, func(), error) {
 	receiver, entry, base, err := h.baseRate(pathID)
@@ -53,6 +62,8 @@ func (h *ReceiverHub) Subscribe(pathID string) (<-chan IQFrame, func(), error) {
 		}
 		go pumpSession(entry, receiver, s, in, s.gen.Load())
 	} else {
+		// Зритель вернулся, пока приёмник ещё не остановлен: тот же поток и тот же демодулятор.
+		s.stopIdle()
 		frames = s.ring.Subscribe()
 	}
 	s.viewers++
@@ -149,7 +160,8 @@ func pumpSession(entry *hubEntry, receiver Receiver, s *session, in <-chan IQFra
 	s.ring.Close()
 }
 
-// leaveSession отписывает зрителя; последний зритель текущего сеанса останавливает приёмник.
+// leaveSession отписывает зрителя. Последний зритель не гасит приёмник сразу:
+// пауза покрывает переоткрытие потока спектра, демодулятор остаётся на кольце.
 func leaveSession(entry *hubEntry, receiver Receiver, s *session, frames <-chan IQFrame) {
 	s.ring.Unsubscribe(frames)
 
@@ -159,6 +171,35 @@ func leaveSession(entry *hubEntry, receiver Receiver, s *session, frames <-chan 
 	if s.viewers > 0 || entry.session != s {
 		return
 	}
+	s.armIdle(entry, receiver)
+}
+
+// armIdle ставит остановку сеанса, если за паузу никто не вернётся. Вызов под sessMu.
+func (s *session) armIdle(entry *hubEntry, receiver Receiver) {
+	s.stopIdle()
+	s.idle = time.AfterFunc(sessionIdleGrace, func() {
+		stopIdleSession(entry, receiver, s)
+	})
+}
+
+// stopIdle отменяет отложенную остановку. Вызов под sessMu.
+// Колбэк таймера мог уже начаться: он берёт sessMu и сам проверяет, что зрителей нет.
+func (s *session) stopIdle() {
+	if s.idle == nil {
+		return
+	}
+	s.idle.Stop()
+	s.idle = nil
+}
+
+// stopIdleSession гасит приёмник, если за паузу зритель не вернулся.
+func stopIdleSession(entry *hubEntry, receiver Receiver, s *session) {
+	entry.sessMu.Lock()
+	defer entry.sessMu.Unlock()
+	if entry.session != s || s.viewers > 0 {
+		return
+	}
+	s.idle = nil
 	entry.session = nil
 	s.cancel()
 	if err := receiver.Stop(); err != nil {

@@ -182,7 +182,7 @@ test('builds 11 digit cells and 5 buttons with SET in the middle', () => {
     const acts = walk(root)
         .filter((n) => n.getAttribute && n.getAttribute('data-act') !== null)
         .map((n) => n.getAttribute('data-act'));
-    assert.deepStrictEqual(acts, ['dec', 'left', 'set', 'right', 'inc']);
+    assert.deepStrictEqual(acts, ['left', 'dec', 'set', 'inc', 'right']);
     assert.strictEqual(btn(root, 'set').textContent, 'SET');
 });
 
