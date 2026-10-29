@@ -13,6 +13,8 @@ const (
 	// за несколько десятков символов, то есть в преамбуле.
 	fskLevelAttack = 1.0 / 4
 	fskLevelDecay  = 1.0 / 64
+	// fskSwingGain — вес символа в оценке девиации: около 256 символов памяти.
+	fskSwingGain = 1.0 / 256
 )
 
 // FSKDemod — некогерентный демодулятор двухпозиционной FM (FSK, GFSK, GMSK): частотный
@@ -35,17 +37,34 @@ type FSKDemod struct {
 	clock     float64 // фаза символа в долях: отсчёт решения на переходе через 1
 	clockStep float64
 	lastHigh  bool
+	jitter    float64 // средняя ошибка фазы тактов на переходах, доли символа
+
+	deviationHz float64
+	swing       float64 // среднее отклонение частоты от порога в середине символа, доли девиации
 }
 
 // NewFSKDemod создаёт демодулятор; cfg.SampleRate — частота дискретизации канала.
 func NewFSKDemod(cfg FSKConfig) *FSKDemod {
 	window := max(int(math.Round(cfg.SampleRate/cfg.Baud)), 1)
 	return &FSKDemod{
-		norm:      cfg.SampleRate / (twoPi * cfg.DeviationHz),
-		ring:      make([]float64, window),
-		clockStep: cfg.Baud / cfg.SampleRate,
+		norm:        cfg.SampleRate / (twoPi * cfg.DeviationHz),
+		ring:        make([]float64, window),
+		clockStep:   cfg.Baud / cfg.SampleRate,
+		jitter:      jitterNoLock,
+		deviationHz: cfg.DeviationHz,
 	}
 }
+
+// DeviationHz — принятая девиация: среднее отклонение мгновенной частоты от порога
+// в середине символа. Уровни решения для этого не годятся: усреднение по символу
+// держит их внутри глаза. Гауссово сглаживание даёт чуть меньше девиации передатчика.
+func (d *FSKDemod) DeviationHz() float64 {
+	return d.swing * d.deviationHz
+}
+
+// ClockJitter — средняя ошибка фазы тактов на переходах уровня, в долях символа:
+// у захваченного сигнала доли процента, на шуме около четверти символа.
+func (d *FSKDemod) ClockJitter() float64 { return d.jitter }
 
 // Demodulate дописывает в dst принятые уровни линии и возвращает расширенный срез.
 func (d *FSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
@@ -62,6 +81,7 @@ func (d *FSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
 		// Переход уровня должен приходиться на середину между отсчётами решения.
 		high := y > d.threshold
 		if high != d.lastHigh {
+			d.jitter = trackJitter(d.jitter, d.clock)
 			d.clock += fskClockGain * (0.5 - d.clock)
 			d.lastHigh = high
 		}
@@ -75,6 +95,9 @@ func (d *FSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
 		d.high = trackLevel(d.high, y, y > d.high)
 		d.low = trackLevel(d.low, y, y < d.low)
 		d.threshold = (d.high + d.low) / 2
+		// Окно усреднения сейчас лежит на символе: его середина — середина символа.
+		mid := d.ring[(d.pos+len(d.ring)/2)%len(d.ring)]
+		d.swing += fskSwingGain * (math.Abs(mid-d.threshold) - d.swing)
 		bit := byte(0)
 		if high {
 			bit = 1

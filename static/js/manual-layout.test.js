@@ -200,6 +200,22 @@ MockStream.dbmOffset = realStream.dbmOffset;
 MockStream.shiftLevels = realStream.shiftLevels;
 global.window.SpectrumStream = MockStream;
 
+// ChannelOverlay mock: geometry is tested in channel-overlay.test.js; here — wiring
+function MockChannelOverlay(host, opts) {
+    this.host = host;
+    this.opts = opts;
+    this.calls = [];
+    MockChannelOverlay.last = this;
+}
+['setBand', 'setChannel', 'setStatus', 'setVisible', 'render', 'destroy'].forEach((name) => {
+    MockChannelOverlay.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
+});
+MockChannelOverlay.prototype.lastCall = function(name) {
+    const c = this.calls.filter((x) => x[0] === name);
+    return c.length ? c[c.length - 1] : null;
+};
+global.window.ChannelOverlay = MockChannelOverlay;
+
 /** FFT frame as SpectrumStream hands it over. */
 function fftFrame(centerHz, values, spanHz) {
     return {
@@ -330,6 +346,7 @@ function makeLayoutRoot() {
 _domNodes.set('layout-manual', makeLayoutRoot());
 _domNodes.set('manual-rx-agc', makeDomElement('manual-rx-agc'));
 _domNodes.set('manual-rx-apply', makeDomElement('manual-rx-apply'));
+_domNodes.set('manual-demod-apply', makeDomElement('manual-demod-apply'));
 _domNodes.set('manual-rx-panel', makeDomElement('manual-rx-panel'));
 _domNodes.set('manual-rx-dial', makeDomElement('manual-rx-dial'));
 
@@ -359,9 +376,15 @@ _domNodes.set('manual-rx-marker-level', makeDomElement('manual-rx-marker-level')
 _domNodes.set('manual-rx-marker-bar', makeDomElement('manual-rx-marker-bar'));
 _domNodes.set('manual-rx-marker-unit', makeDomElement('manual-rx-marker-unit', { textContent: 'dBFS' }));
 _domNodes.set('manual-rx-squelch', makeDomElement('manual-rx-squelch', { value: '-90' }));
+_domNodes.set('manual-rx-squelch-dec', makeDomElement('manual-rx-squelch-dec'));
+_domNodes.set('manual-rx-squelch-inc', makeDomElement('manual-rx-squelch-inc'));
 _domNodes.set('manual-rx-squelch-unit', makeDomElement('manual-rx-squelch-unit', { textContent: 'dBFS' }));
 _domNodes.set('manual-rx-gain', makeDomElement('manual-rx-gain', { value: '32' }));
+_domNodes.set('manual-rx-gain-dec', makeDomElement('manual-rx-gain-dec'));
+_domNodes.set('manual-rx-gain-inc', makeDomElement('manual-rx-gain-inc'));
 _domNodes.set('manual-rx-doppler-val', makeDomElement('manual-rx-doppler-val', { value: '0' }));
+_domNodes.set('manual-rx-doppler-val-dec', makeDomElement('manual-rx-doppler-val-dec'));
+_domNodes.set('manual-rx-doppler-val-inc', makeDomElement('manual-rx-doppler-val-inc'));
 // Накопление спектра: Мгн. | Накопление | Пик, число циклов N и «Сброс» над графиком
 const specModeBtns = ['current', 'avg', 'maxhold'].reduce(function(acc, mode) {
     acc[mode] = makeDomElement('spec-mode-' + mode, { _attrs: { 'data-spec-mode': mode } });
@@ -384,25 +407,22 @@ _domNodes.set('manual-ant-spec-mode', makeDomElement('manual-ant-spec-mode', {
 _domNodes.set('manual-ant-spec-reset', makeDomElement('manual-ant-spec-reset'));
 const antSpecAvgN = makeDomElement('manual-ant-spec-avg-n', { value: '10', hidden: false });
 _domNodes.set('manual-ant-spec-avg-n', antSpecAvgN);
-// Вкладка «Демодулятор»: переключатель Таблица/Hex + кнопки записи и прослушивания
+// Вкладка «Демодулятор»: переключатель Таблица/Диаграмма + кнопки записи и прослушивания
 const resultTabTable = makeDomElement('result-tab-table', { _attrs: { 'data-view': 'table', 'aria-selected': 'true' } });
-const resultTabHex = makeDomElement('result-tab-hex', { _attrs: { 'data-view': 'hex', 'aria-selected': 'false' } });
 const resultTabChart = makeDomElement('result-tab-chart', { _attrs: { 'data-view': 'chart', 'aria-selected': 'false' } });
 const resultViewTable = makeDomElement('result-view-table', { _attrs: { 'data-view': 'table' } });
-const resultViewHex = makeDomElement('result-view-hex', { _attrs: { 'data-view': 'hex' } });
 const resultViewChart = makeDomElement('result-view-chart', { _attrs: { 'data-view': 'chart' } });
 resultViewTable.classList._set.add('is-active');
 
 const resultCol = makeDomElement('result-col', {
     querySelectorAll: (sel) => (sel.indexOf('ml-demod__result-view') >= 0
-        ? [resultViewTable, resultViewHex, resultViewChart]
+        ? [resultViewTable, resultViewChart]
         : []),
 });
 _domNodes.set('manual-result-tabs', makeDomElement('manual-result-tabs', {
     closest: () => resultCol,
-    querySelectorAll: () => [resultTabTable, resultTabHex, resultTabChart],
+    querySelectorAll: () => [resultTabTable, resultTabChart],
 }));
-_domNodes.set('manual-demod-hex', makeDomElement('manual-demod-hex'));
 // Секция «Данные»: папка записи и транспорт ● / ■
 _domNodes.set('manual-rec-path', makeDomElement('manual-rec-path', { value: '', readOnly: false }));
 _domNodes.set('manual-rec-start', makeDomElement('manual-rec-start', { disabled: false }));
@@ -487,8 +507,12 @@ pipelineSel.removeEventListener = function(type, fn) {
     if (idx >= 0) { arr.splice(idx, 1); }
 };
 _domNodes.set('manual-rx-pipeline', pipelineSel);
-const filterBwSel = makeSelect('manual-rx-filter-bw', ['2.8 кГц', '6 кГц', '15 кГц', '30 кГц', '50 кГц'], 2);
-['2800', '6000', '15000', '30000', '50000'].forEach((v, i) => { filterBwSel.options[i].value = v; });
+const filterBwSel = makeSelect('manual-rx-filter-bw', ['2.8 кГц', '6 кГц', '15 кГц', '18 кГц'], 2);
+['2800', '6000', '15000', '18000'].forEach((v, i) => { filterBwSel.options[i].value = v; });
+filterBwSel._listeners = {};
+filterBwSel.addEventListener = pipelineSel.addEventListener;
+filterBwSel.removeEventListener = pipelineSel.removeEventListener;
+_domNodes.set('manual-spectrum', makeDomElement('manual-spectrum'));
 // «Полоса»: пункты перестраиваются по sample_rates статуса
 const spanSel = { id: 'manual-rx-span', selectedIndex: 0, options: [] };
 spanSel.add = function(opt) { this.options.push(opt); };
@@ -592,20 +616,19 @@ test('constructor wires info element ids to indicators', () => {
 
 console.log('\n— ManualLayout: activate / deactivate —');
 
-test('activate starts in panorama (SWEEP); spectrum timer runs only in spectrum view (HOLD)', () => {
+test('activate starts on Spectrum; a panorama request does not start the sweep', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
     assert.strictEqual(m.isActive(), false);
     m.activate();
     assert.strictEqual(m.isActive(), true);
-    // Панорама: спектр/водопад выключены — таймера нет
-    assert.strictEqual(m._spectrumTimer, null, 'panorama view must not run spectrum timer');
-    // Настройка на канал → вид «Спектр»: таймер запускается
-    m._setView('spectrum');
+    assert.strictEqual(m._view, 'spectrum');
     assert.ok(m._spectrumTimer, 'spectrum view must run the timer');
-    // Возврат в «Панораму» → таймер очищается
     m._setView('panorama');
-    assert.strictEqual(m._spectrumTimer, null, 'back to panorama clears the timer');
+    assert.strictEqual(m._view, 'spectrum', 'panorama is off, so the sweep is not started');
+    assert.ok(m._spectrumTimer, 'the spectrum timer stays while panorama is off');
+    const sweep = m._panorama.calls.filter((c) => c[0] === 'activate');
+    assert.strictEqual(sweep.length, 0);
     m.deactivate();
     assert.strictEqual(m.isActive(), false);
     assert.strictEqual(m._spectrumTimer, null, 'spectrum timer must be cleared');
@@ -711,12 +734,12 @@ test('constructor creates ManualPanorama instance', () => {
     m.destroy();
 });
 
-test('activate calls panorama.activate', () => {
+test('activate does not start the panorama imitator', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
     m.activate();
     const activateCalls = m._panorama.calls.filter((c) => c[0] === 'activate');
-    assert.strictEqual(activateCalls.length, 1);
+    assert.strictEqual(activateCalls.length, 0);
     m.destroy();
 });
 
@@ -726,7 +749,7 @@ test('deactivate calls panorama.deactivate', () => {
     m.activate();
     m.deactivate();
     const deactivateCalls = m._panorama.calls.filter((c) => c[0] === 'deactivate');
-    assert.strictEqual(deactivateCalls.length, 1);
+    assert.strictEqual(deactivateCalls.length, 2, 'spectrum entry and leaving Manual both stop the sweep');
     m.destroy();
 });
 
@@ -981,46 +1004,14 @@ test('level bar clamps out-of-range values to 0..100%', () => {
 
 console.log('\n— ManualLayout: demod result view —');
 
-test('hex dump is rendered on init with offset, hex and ASCII columns', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    const lines = _domNodes.get('manual-demod-hex').textContent.split('\n');
-    assert.ok(lines.length >= 2, 'dump must span several lines');
-    assert.ok(/^0000 {2}([0-9a-f]{2} ){8}/.test(lines[0]), `bad first line: ${lines[0]}`);
-    assert.ok(lines[0].indexOf('|') >= 0, 'ASCII column must be present');
-    assert.strictEqual(lines[1].slice(0, 4), '0010');
-    m.destroy();
-});
-
-test('hex dump renders supplied bytes', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    m._renderHexDump([0x41, 0x42, 0x00]);
-    const line = _domNodes.get('manual-demod-hex').textContent;
-    assert.ok(line.indexOf('41 42 00') >= 0, `bad hex: ${line}`);
-    assert.ok(line.indexOf('|AB.|') >= 0, `bad ascii: ${line}`);
-    m.destroy();
-});
-
-test('switching to Hex marks its tab and view active', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    fire(resultTabHex, 'click');
-    assert.strictEqual(resultTabHex.getAttribute('aria-selected'), 'true');
-    assert.strictEqual(resultTabTable.getAttribute('aria-selected'), 'false');
-    assert.strictEqual(resultViewHex.classList.contains('is-active'), true);
-    assert.strictEqual(resultViewTable.classList.contains('is-active'), false);
-    m.destroy();
-});
-
 test('switching back to Table restores the table view', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
-    fire(resultTabHex, 'click');
+    fire(resultTabChart, 'click');
     fire(resultTabTable, 'click');
     assert.strictEqual(resultTabTable.getAttribute('aria-selected'), 'true');
     assert.strictEqual(resultViewTable.classList.contains('is-active'), true);
-    assert.strictEqual(resultViewHex.classList.contains('is-active'), false);
+    assert.strictEqual(resultViewChart.classList.contains('is-active'), false);
     m.destroy();
 });
 
@@ -1196,12 +1187,12 @@ function activeTabOf(m) {
     return tabs[0];
 }
 
-test('entering Manual opens the Panorama tab in SWEEP', () => {
+test('entering Manual opens the Spectrum tab and does not sweep', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
-    assert.strictEqual(activeTabOf(m), 'panorama');
-    assert.strictEqual(m._view, 'panorama');
-    assert.strictEqual(m._spectrumTimer, null);
+    assert.strictEqual(activeTabOf(m), 'spectrum');
+    assert.strictEqual(m._view, 'spectrum');
+    assert.ok(m._spectrumTimer);
     m.destroy();
 });
 
@@ -1215,14 +1206,14 @@ test('Spectrum tab switches the SDR to HOLD', () => {
     m.destroy();
 });
 
-test('Panorama tab returns the SDR to SWEEP', () => {
+test('hidden Panorama tab does not leave Spectrum', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
     fire(tabSpectrum, 'click');
     fire(tabPanorama, 'click');
-    assert.strictEqual(activeTabOf(m), 'panorama');
-    assert.strictEqual(m._view, 'panorama');
-    assert.strictEqual(m._spectrumTimer, null);
+    assert.strictEqual(activeTabOf(m), 'spectrum');
+    assert.strictEqual(m._view, 'spectrum');
+    assert.ok(m._spectrumTimer);
     m.destroy();
 });
 
@@ -1243,16 +1234,15 @@ test('Antenna from Spectrum keeps the channel and the dial retune', () => {
     m.destroy();
 });
 
-test('Antenna from Panorama tunes to the transmitter selected there and stays on Antenna', () => {
+test('Antenna does not tune from a panorama selection while the tab is hidden', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
     m._panorama._selected = AO91;
     fire(tabAntenna, 'click');
     assert.strictEqual(activeTabOf(m), 'antenna');
-    assert.strictEqual(m._view, 'spectrum', 'one SDR: Antenna shows the channel, so it holds');
+    assert.strictEqual(m._view, 'spectrum');
     assert.ok(m._spectrumTimer);
-    assert.strictEqual(m._freqDial.getHz(), 435250000);
-    assert.strictEqual(m._chanFreqMHz, 435.25);
+    assert.strictEqual(m._freqDial.getHz(), 436000000, 'sweep selection is not applied');
     m.destroy();
 });
 
@@ -1262,7 +1252,7 @@ test('Antenna from Panorama without a selection resumes the last channel', () =>
     tuneTo(AO91.freqMHz, AO91);
     m._freqDial.emit(435260000);
     fire(tabPanorama, 'click');
-    assert.strictEqual(m._view, 'panorama');
+    assert.strictEqual(m._view, 'spectrum', 'hidden panorama tab is ignored');
     fire(tabAntenna, 'click');
     assert.strictEqual(m._view, 'spectrum');
     assert.strictEqual(m._freqDial.getHz(), 435260000, 'dial retune is kept');
@@ -1294,23 +1284,24 @@ test('with nothing chosen Antenna holds without retuning the shared receiver', (
     });
 });
 
-test('Panorama from Antenna returns the SDR to SWEEP', () => {
+test('hidden Panorama tab does not leave Antenna', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
     fire(tabAntenna, 'click');
     fire(tabPanorama, 'click');
-    assert.strictEqual(activeTabOf(m), 'panorama');
-    assert.strictEqual(m._view, 'panorama');
-    assert.strictEqual(m._spectrumTimer, null);
+    assert.strictEqual(activeTabOf(m), 'antenna');
+    assert.strictEqual(m._view, 'spectrum');
+    assert.ok(m._spectrumTimer);
     m.destroy();
 });
 
-test('SWEEP started while on Antenna brings up the Panorama tab', () => {
+test('a panorama request while on Antenna stays on Antenna', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
     fire(tabAntenna, 'click');
     m._setView('panorama');
-    assert.strictEqual(activeTabOf(m), 'panorama', 'Antenna cannot show a sweep');
+    assert.strictEqual(activeTabOf(m), 'antenna');
+    assert.strictEqual(m._view, 'spectrum');
     m.destroy();
 });
 
@@ -1326,20 +1317,20 @@ test('tuning to a transmitter opens the Spectrum tab', () => {
     m.destroy();
 });
 
-test('re-entering Manual always starts on Panorama', () => {
+test('re-entering Manual starts on Spectrum', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
-    fire(tabSpectrum, 'click');
+    fire(tabAntenna, 'click');
     m.deactivate();
     m.activate();
-    assert.strictEqual(activeTabOf(m), 'panorama');
-    assert.strictEqual(m._view, 'panorama');
+    assert.strictEqual(activeTabOf(m), 'spectrum');
+    assert.strictEqual(m._view, 'spectrum');
     m.destroy();
 });
 
 console.log('\n— ManualLayout: leaving HOLD while recording —');
 
-test('Panorama while recording asks; declining keeps HOLD and the recording', () => {
+test('hidden Panorama tab does not interrupt a recording', () => {
     const { m, start } = makeRecorder();
     let asked = 0;
     m._confirm = () => { asked++; return false; };
@@ -1347,23 +1338,23 @@ test('Panorama while recording asks; declining keeps HOLD and the recording', ()
     fire(tabSpectrum, 'click');
     fire(start, 'click');
     fire(tabPanorama, 'click');
-    assert.strictEqual(asked, 1);
+    assert.strictEqual(asked, 0);
     assert.strictEqual(activeTabOf(m), 'spectrum');
     assert.strictEqual(m._view, 'spectrum');
     assert.ok(m._rec.file, 'recording must go on');
     m.destroy();
 });
 
-test('confirming stops the recording and returns to SWEEP', () => {
+test('confirming a hidden Panorama click does not stop the recording', () => {
     const { m, start, stop } = makeRecorder();
     m._confirm = () => true;
     m.activate();
     fire(tabSpectrum, 'click');
     fire(start, 'click');
     fire(tabPanorama, 'click');
-    assert.strictEqual(activeTabOf(m), 'panorama');
-    assert.strictEqual(m._rec.file, null, 'tuner leaves the channel, recording stops');
-    assert.strictEqual(stop.disabled, true);
+    assert.strictEqual(activeTabOf(m), 'spectrum');
+    assert.ok(m._rec.file, 'hidden tab does not leave the channel');
+    assert.strictEqual(stop.disabled, false);
     m.destroy();
 });
 
@@ -1391,7 +1382,7 @@ test('Antenna while recording does not ask and keeps recording', () => {
     m.destroy();
 });
 
-test('Panorama from Antenna while recording asks too', () => {
+test('hidden Panorama tab from Antenna does not ask while recording', () => {
     const { m, start } = makeRecorder();
     let asked = 0;
     m._confirm = () => { asked++; return false; };
@@ -1400,7 +1391,7 @@ test('Panorama from Antenna while recording asks too', () => {
     fire(start, 'click');
     fire(tabAntenna, 'click');
     fire(tabPanorama, 'click');
-    assert.strictEqual(asked, 1);
+    assert.strictEqual(asked, 0);
     assert.strictEqual(activeTabOf(m), 'antenna');
     assert.ok(m._rec.file, 'recording must go on');
     m.destroy();
@@ -1647,12 +1638,10 @@ test('tract subscription is made once and dropped on destroy', () => {
 
 console.log('\n— ManualLayout: live spectrum stream —');
 
-test('Spectrum opens one stream for the selected tract, Panorama and deactivate stop it', () => {
+test('Spectrum opens one stream for the selected tract and leaving Manual stops it', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
-        assert.strictEqual(m._stream, null, 'no stream while sweeping');
-        fire(tabSpectrum, 'click');
         const s = MockStream.last();
         assert.ok(/^\/api\/stream\/v1\/spectrum\?/.test(s.opts.url), s.opts.url);
         assert.ok(s.opts.url.indexOf('radio_path=radio_path_1') >= 0, s.opts.url);
@@ -1660,11 +1649,9 @@ test('Spectrum opens one stream for the selected tract, Panorama and deactivate 
         fire(tabAntenna, 'click');
         assert.strictEqual(MockStream.last(), s, 'Antenna keeps the same stream');
         fire(tabPanorama, 'click');
-        assert.strictEqual(s.stopped, 1);
-        fire(tabSpectrum, 'click');
-        const s2 = MockStream.last();
+        assert.strictEqual(s.stopped, 0, 'hidden panorama does not stop the stream');
         m.deactivate();
-        assert.strictEqual(s2.stopped, 1, 'leaving Manual closes the stream');
+        assert.strictEqual(s.stopped, 1, 'leaving Manual closes the stream');
         m.destroy();
     });
 });
@@ -1848,11 +1835,12 @@ test('without an open stream the mode is only remembered, reset does nothing', (
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
+        m._stopStream();
         const before = MockStream.instances.length;
         fire(specModeBtns.maxhold, 'click');
         fire(_domNodes.get('manual-spec-reset'), 'click');
-        assert.strictEqual(MockStream.instances.length, before, 'Panorama has no stream to reopen');
-        fire(tabSpectrum, 'click');
+        assert.strictEqual(MockStream.instances.length, before, 'no stream to reopen');
+        m._setView('spectrum');
         assert.strictEqual(urlParam(MockStream.last().opts.url, 'mode'), 'maxhold');
         fire(specModeBtns.current, 'click');
         m.destroy();
@@ -2250,6 +2238,64 @@ test('demod events reach the table and the panel for the selected tract only', (
     }));
 });
 
+test('channel changed on the server follows into the fields; repeats keep the operator edit', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        const st = { radio_path: 'radio_path_1', active: true, demod: 'fsk9600_g3ruh',
+            offset_hz: -2500, bandwidth_hz: 6000, squelch_dbfs: -80 };
+        emit('demod_status', st);
+        const bw = () => filterBwSel.options[filterBwSel.selectedIndex].value;
+        assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500');
+        assert.strictEqual(bw(), '6000');
+        assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-80');
+        assert.strictEqual(pipelineSel.options[pipelineSel.selectedIndex].value, 'fsk9600_g3ruh');
+
+        _domNodes.get('manual-rx-doppler-val').value = '1500';
+        emit('demod_status', st);
+        assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '1500', 'same settings keep the edit');
+
+        emit('demod_status', Object.assign({}, st, { bandwidth_hz: 18000 }));
+        assert.strictEqual(bw(), '18000');
+        assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500');
+
+        emit('demod_status', { radio_path: 'radio_path_2', active: true, demod: 'afsk1200',
+            offset_hz: 9000, bandwidth_hz: 15000, squelch_dbfs: -90 });
+        assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500', 'other tract is ignored');
+        m.destroy();
+    }));
+});
+
+test('gain changed on the server follows into the field and the dBm units; repeats keep the operator edit', () => {
+    const calibrated = Object.assign({}, TRACT_1, { getRadioPath: () => ({ id: 1, calibration_db: -40 }) });
+    withStation({ mm: calibrated }, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        const st = { radio_path: 'radio_path_1', active: true, demod: 'afsk1200',
+            offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -90, gain_db: 0 };
+        emit('demod_status', st);
+        assert.strictEqual(_domNodes.get('manual-rx-gain').value, '0');
+        assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-130', '-90 dBFS - 40 dB calibration');
+
+        emit('demod_status', Object.assign({}, st, { gain_db: 20 }));
+        assert.strictEqual(_domNodes.get('manual-rx-gain').value, '20');
+        assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-150', 'squelch in dBm moves with the gain');
+        assert.strictEqual(_domNodes.get('manual-rx-squelch-unit').textContent, 'dBm');
+
+        _domNodes.get('manual-rx-gain').value = '33';
+        emit('demod_status', Object.assign({}, st, { gain_db: 20 }));
+        assert.strictEqual(_domNodes.get('manual-rx-gain').value, '33', 'same gain keeps the edit');
+
+        emit('demod_status', Object.assign({}, st, { gain_db: -1 }));
+        assert.strictEqual(_domNodes.get('manual-rx-agc').getAttribute('aria-pressed'), 'true');
+        assert.strictEqual(_domNodes.get('manual-rx-squelch-unit').textContent, 'dBFS', 'АРУ: gain unknown');
+        assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-90');
+        m.destroy();
+    }));
+});
+
 test('live mode follows whether the station has a radio path', () => {
     const lastLive = (w) => w.calls.filter((c) => c[0] === 'setLive').map((c) => c[1]).pop();
     withStation({ mm: null }, () => {
@@ -2284,6 +2330,7 @@ test('viewer: dial is read-only and a transmitter click does not tune', () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
         assert.strictEqual(m._freqDial.readOnly, true);
+        assert.strictEqual(_domNodes.get('manual-rx-gain-inc').disabled, true, 'stepper is locked with the dial');
         tuneTo(AO91.freqMHz, AO91);
         assert.strictEqual(tuneCalls().length, 0);
         assert.ok(ac.notices.some((t) => /только в режиме «Контроль»\.$/.test(t)), ac.notices.join(' | '));
@@ -2299,6 +2346,7 @@ test('role change switches the dial between read-only and editable', () => {
         assert.strictEqual(m._freqDial.readOnly, true);
         ac.setRole(true);
         assert.strictEqual(m._freqDial.readOnly, false);
+        assert.strictEqual(_domNodes.get('manual-rx-gain-inc').disabled, false);
         ac.setRole(false);
         assert.strictEqual(m._freqDial.readOnly, true);
         m.destroy();
@@ -2320,10 +2368,14 @@ test('access subscription is made once across activate cycles', () => {
 console.log('\n— ManualLayout: receiver settings («Установить») —');
 
 const RX_FIELD_IDS = ['manual-rx-span', 'manual-rx-gain', 'manual-rx-agc', 'manual-rx-doppler-val',
-    'manual-rx-filter-bw', 'manual-rx-squelch', 'manual-rx-pipeline', 'manual-rx-apply'];
+    'manual-rx-filter-bw', 'manual-rx-squelch', 'manual-rx-pipeline', 'manual-rx-apply', 'manual-demod-apply'];
 
 function receiverCalls() {
     return fetchMock.calls.filter((c) => c.url === '/api/sdr/receiver');
+}
+
+function channelCalls() {
+    return fetchMock.calls.filter((c) => c.url === '/api/sdr/channel');
 }
 
 /** Operator's input in the receiver column; squelch in the units shown. */
@@ -2337,21 +2389,41 @@ function fillRx(o) {
     pipelineSel.selectedIndex = o.demodIndex;
 }
 
-test('«Установить» sends span, gain, channel and demodulator of the tract', () => {
+test('receiver «Установить» sends frequency, span and gain', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        m._freqDial.setHz(437125000);
+        fillRx({ spanIndex: 1, gain: 28, agc: false, offset: 1500, bwIndex: 3, squelch: -75, demodIndex: 2 });
+        fire(_domNodes.get('manual-rx-apply'), 'click');
+        assert.strictEqual(receiverCalls().length, 1);
+        assert.strictEqual(channelCalls().length, 0);
+        assert.strictEqual(tuneCalls().length, 0, 'SET is the only path that tunes by itself');
+        assert.deepStrictEqual(receiverCalls()[0].body, {
+            radio_path: 'radio_path_1',
+            center_hz: 437125000,
+            sample_rate_hz: 1024000,
+            gain_db: 28,
+        });
+        m.destroy();
+    });
+});
+
+test('demodulator «Установить» sends only the channel', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
         fillRx({ spanIndex: 1, gain: 28, agc: false, offset: 1500, bwIndex: 3, squelch: -75, demodIndex: 2 });
-        fire(_domNodes.get('manual-rx-apply'), 'click');
-        assert.strictEqual(receiverCalls().length, 1);
-        assert.deepStrictEqual(receiverCalls()[0].body, {
+        fire(_domNodes.get('manual-demod-apply'), 'click');
+        assert.strictEqual(channelCalls().length, 1);
+        assert.strictEqual(receiverCalls().length, 0);
+        assert.deepStrictEqual(channelCalls()[0].body, {
             radio_path: 'radio_path_1',
-            sample_rate_hz: 1024000,
-            gain_db: 28,
             offset_hz: 1500,
-            bandwidth_hz: 30000,
+            bandwidth_hz: 18000,
             squelch_dbfs: -75,
             demod: 'afsk1200',
+            demod_off: false,
         });
         m.destroy();
     });
@@ -2392,6 +2464,113 @@ test('span follows a change on the server; the same span keeps the operator choi
     resetSpanOptions();
 });
 
+console.log('\n— ManualLayout: demodulator channel on the spectrum —');
+
+test('stream frame gives the channel overlay the receiver band', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const ov = MockChannelOverlay.last;
+        assert.ok(ov, 'overlay is created over the spectrum');
+        fillRx({ gain: 28, offset: -12000, bwIndex: 3, squelch: -90, demodIndex: 0 });
+        fire(_domNodes.get('manual-rx-doppler-val'), 'input');
+        MockStream.last().opts.onFrame(fftFrame(436200000, null, 1024000));
+        assert.deepStrictEqual(ov.lastCall('setBand'), ['setBand', 436200000, 1024000]);
+        assert.deepStrictEqual(ov.lastCall('setChannel'), ['setChannel', -12000, 18000]);
+        m.destroy();
+    });
+    resetSpanOptions();
+});
+
+test('demod checkbox stops the chain, hides the lines and follows the server', () => {
+    const box = makeDomElement('manual-rx-channel-show', { checked: true });
+    _domNodes.set('manual-rx-channel-show', box);
+    try {
+        withStation({}, () => withDemodEvents((emit) => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            const ov = MockChannelOverlay.last;
+            box.checked = false;
+            fire(box, 'change');
+            const posts = fetchMock.calls.filter((c) => c.url === '/api/sdr/demod');
+            assert.strictEqual(posts.length, 1);
+            assert.deepStrictEqual(posts[0].body, { radio_path: 'radio_path_1', demod_off: true });
+            assert.deepStrictEqual(ov.lastCall('setVisible'), ['setVisible', false]);
+
+            emit('demod_status', {
+                radio_path: 'radio_path_1', active: true, demod: 'afsk1200',
+                offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -90, demod_off: false,
+            });
+            assert.strictEqual(box.checked, true, 'server switched the demodulator back on');
+            assert.deepStrictEqual(ov.lastCall('setVisible'), ['setVisible', true]);
+            m.destroy();
+        }));
+        withStation({ access: makeAccess(false) }, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            box.checked = false;
+            fire(box, 'change');
+            assert.strictEqual(box.checked, true, 'a viewer cannot stop the demodulator');
+            assert.strictEqual(fetchMock.calls.filter((c) => c.url === '/api/sdr/demod').length, 0);
+            m.destroy();
+        });
+    } finally {
+        _domNodes.delete('manual-rx-channel-show');
+    }
+});
+
+test('channel bandwidth select moves the overlay before «Установить»', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        const ov = MockChannelOverlay.last;
+        fillRx({ gain: 28, offset: 0, bwIndex: 3, squelch: -90, demodIndex: 0 });
+        fire(filterBwSel, 'change');
+        assert.deepStrictEqual(ov.lastCall('setChannel'), ['setChannel', 0, 18000]);
+        assert.strictEqual(receiverCalls().length, 0, 'only a preview, nothing sent');
+        m.destroy();
+    });
+});
+
+test('gesture on the channel fills the fields and sends the settings at once', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -75, demodIndex: 1 });
+        const ov = MockChannelOverlay.last;
+        assert.deepStrictEqual(ov.opts.bandwidthOptions(), [2800, 6000, 15000, 18000]);
+        ov.opts.onChange(2500, 18000);
+        assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '2500');
+        assert.strictEqual(filterBwSel.options[filterBwSel.selectedIndex].value, '18000');
+        assert.strictEqual(channelCalls().length, 1);
+        assert.strictEqual(receiverCalls().length, 0, 'a channel gesture does not retune the receiver');
+        const body = channelCalls()[0].body;
+        assert.strictEqual(body.offset_hz, 2500);
+        assert.strictEqual(body.bandwidth_hz, 18000);
+        assert.strictEqual(body.demod, 'fsk1200', 'the rest of the demodulator column goes as is');
+        assert.strictEqual(body.gain_db, undefined);
+        m.destroy();
+    });
+});
+
+test('demod status labels the channel with profile and good frames', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        const ov = MockChannelOverlay.last;
+        emit('demod_status', {
+            radio_path: 'radio_path_1', demod: 'afsk1200', squelch_open: true, frames_good: 7,
+        });
+        assert.deepStrictEqual(ov.lastCall('setStatus'), ['setStatus', 'AFSK 1200 · ✔ 7', 'open']);
+        emit('demod_status', {
+            radio_path: 'radio_path_1', demod: 'afsk1200', squelch_open: false, frames_good: 7,
+        });
+        assert.deepStrictEqual(ov.lastCall('setStatus'), ['setStatus', 'AFSK 1200 · ✔ 7', 'idle']);
+        m.destroy();
+    }));
+});
+
 test('viewer: receiver fields are disabled and «Установить» sends nothing', () => {
     withStation({ access: makeAccess(false) }, (ac) => {
         const m = new ManualLayout(makeStateManager());
@@ -2400,8 +2579,11 @@ test('viewer: receiver fields are disabled and «Установить» sends no
             assert.strictEqual(_domNodes.get(id).disabled, true, id + ' disabled for viewer');
         }
         fire(_domNodes.get('manual-rx-apply'), 'click');
+        fire(_domNodes.get('manual-demod-apply'), 'click');
         assert.strictEqual(receiverCalls().length, 0);
-        assert.ok(ac.notices.some((t) => /только в режиме «Контроль»/.test(t)), ac.notices.join(' | '));
+        assert.strictEqual(channelCalls().length, 0);
+        assert.ok(ac.notices.some((t) => /приёмника можно только в режиме «Контроль»/.test(t)), ac.notices.join(' | '));
+        assert.ok(ac.notices.some((t) => /демодулятора можно только в режиме «Контроль»/.test(t)), ac.notices.join(' | '));
         ac.setRole(true);
         for (const id of RX_FIELD_IDS) {
             assert.strictEqual(_domNodes.get(id).disabled, false, id + ' enabled with control');
@@ -2559,21 +2741,40 @@ testAsync('receiver status with negative gain presses АРУ', async () => {
     m.destroy();
 });
 
-testAsync('squelch in dBm goes out in dBFS by the gain being sent; reply moves dBm to the new gain', async () => {
+testAsync('demod apply converts shown dBm by the gain already applied', async () => {
     const channel = Object.assign({}, CHANNEL_FSK, { squelch_dbfs: -90 });
     const m = await openWithStatus(CALIBRATED, { center_hz: 436500000, gain_db: 0, channel: channel });
     assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-130', '-90 dBFS - 40 dB calibration');
+    fillRx({ gain: 32, agc: false, offset: -2500, bwIndex: 1, squelch: -100, demodIndex: 0 });
+    global.window._modeManager = CALIBRATED;
+    global.window._accessControl = makeAccess(true);
+    fire(_domNodes.get('manual-demod-apply'), 'click');
+    assert.strictEqual(channelCalls().length, 1);
+    assert.strictEqual(receiverCalls().length, 0);
+    assert.strictEqual(channelCalls()[0].body.squelch_dbfs, -60, '-100 dBm at the applied gain 0: -100 - (-40)');
+    assert.strictEqual(channelCalls()[0].body.gain_db, undefined, 'unsent gain is not part of the demodulator');
+    delete global.window._modeManager;
+    delete global.window._accessControl;
+    m.destroy();
+});
+
+testAsync('receiver apply shifts the shown dBm and does not send the channel', async () => {
+    const channel = Object.assign({}, CHANNEL_FSK, { squelch_dbfs: -90 });
+    const m = await openWithStatus(CALIBRATED, { center_hz: 436500000, gain_db: 0, channel: channel });
     fillRx({ gain: 32, agc: false, offset: -2500, bwIndex: 1, squelch: -130, demodIndex: 0 });
     const prevBody = fetchMock.body;
-    fetchMock.body = { ok: true, status: { center_hz: 436500000, gain_db: 32, channel: Object.assign({}, channel, { squelch_dbfs: -58 }) } };
+    fetchMock.body = { ok: true, status: { center_hz: 436500000, gain_db: 32, sample_rate: 2048000 } };
     global.window._modeManager = CALIBRATED;
     global.window._accessControl = makeAccess(true);
     fire(_domNodes.get('manual-rx-apply'), 'click');
-    assert.strictEqual(receiverCalls()[0].body.squelch_dbfs, -58, '-130 dBm at gain 32: -130 + 40 + 32');
+    assert.deepStrictEqual(receiverCalls()[0].body, {
+        radio_path: 'radio_path_1', center_hz: 436000000, sample_rate_hz: 2048000, gain_db: 32,
+    });
     await flush();
     await flush();
     fetchMock.body = prevBody;
-    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-130', 'operator sees what he typed');
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-162', 'same -90 dBFS, shown at gain 32');
+    assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500', 'unsent channel offset stays');
     MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
     assert.deepStrictEqual(markerText(), ['437.012', '−121.3'], 'dBm by the applied gain: -49.3 - 40 - 32');
     delete global.window._modeManager;
@@ -2589,16 +2790,16 @@ testAsync('refused settings: server error is shown, 403 re-reads the role', asyn
         fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
         fetchMock.status = 400;
         fetchMock.body = { error: 'invalid channel settings: unknown demod' };
-        fire(_domNodes.get('manual-rx-apply'), 'click');
+        fire(_domNodes.get('manual-demod-apply'), 'click');
         return layout;
     });
     global.window._accessControl = ac;
     global.window._modeManager = TRACT_1;
     await flush();
     await flush();
-    assert.ok(ac.notices.some((t) => /^Настройки не применены: invalid channel settings/.test(t)), ac.notices.join(' | '));
+    assert.ok(ac.notices.some((t) => /^Настройки демодулятора не применены: invalid channel settings/.test(t)), ac.notices.join(' | '));
     fetchMock.status = 403;
-    fire(_domNodes.get('manual-rx-apply'), 'click');
+    fire(_domNodes.get('manual-demod-apply'), 'click');
     await flush();
     await flush();
     assert.strictEqual(ac.refreshed, 1);
@@ -2608,6 +2809,53 @@ testAsync('refused settings: server error is shown, 403 re-reads the role', asyn
     delete global.window._accessControl;
     delete global.window._modeManager;
     m.destroy();
+});
+
+console.log('\n— ManualLayout: numeric steppers —');
+
+const GAIN_SPEC = { kind: 'gain', step: 0.1, min: 0, max: 49.6, decimals: 1 };
+const OFFSET_SPEC = { kind: 'offset', step: 1, decimals: 0 };
+const SQUELCH_SPEC = { kind: 'squelch', step: 1, decimals: 1 };
+
+test('filterNumericText keeps digits and one sign or dot', () => {
+    assert.strictEqual(ManualLayout.filterNumericText('32abc', 'gain'), '32');
+    assert.strictEqual(ManualLayout.filterNumericText('-12.5', 'gain'), '12.5');
+    assert.strictEqual(ManualLayout.filterNumericText('1.2.3', 'gain'), '1.23');
+    assert.strictEqual(ManualLayout.filterNumericText('-1500.2', 'offset'), '-1500');
+    assert.strictEqual(ManualLayout.filterNumericText('--90x.5', 'squelch'), '-90.5');
+    assert.strictEqual(ManualLayout.filterNumericText('90-', 'squelch'), '90');
+});
+
+test('stepNumericText steps and clamps gain, offset and squelch', () => {
+    assert.strictEqual(ManualLayout.stepNumericText('32', 0.1, GAIN_SPEC), '32.1');
+    assert.strictEqual(ManualLayout.stepNumericText('32.1', -0.1, GAIN_SPEC), '32');
+    assert.strictEqual(ManualLayout.stepNumericText('49.6', 0.1, GAIN_SPEC), '49.6');
+    assert.strictEqual(ManualLayout.stepNumericText('0', -0.1, GAIN_SPEC), '0');
+    assert.strictEqual(ManualLayout.stepNumericText('', -1, OFFSET_SPEC), '-1');
+    assert.strictEqual(ManualLayout.stepNumericText('-90', 1, SQUELCH_SPEC), '-89');
+    assert.strictEqual(ManualLayout.stepNumericText('-', 1, SQUELCH_SPEC), '1');
+});
+
+test('stepper buttons change the field and letters are stripped', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        const gain = _domNodes.get('manual-rx-gain');
+        gain.disabled = false;
+        gain.value = '32';
+        fire(_domNodes.get('manual-rx-gain-inc'), 'click');
+        assert.strictEqual(gain.value, '32.1');
+        gain.value = '0';
+        fire(_domNodes.get('manual-rx-gain-dec'), 'click');
+        assert.strictEqual(gain.value, '0');
+        gain.value = '12a-3.4.5';
+        fire(gain, 'input');
+        assert.strictEqual(gain.value, '123.45');
+        const offset = _domNodes.get('manual-rx-doppler-val');
+        offset.value = '-12.9x';
+        fire(offset, 'input');
+        assert.strictEqual(offset.value, '-12');
+        m.destroy();
+    });
 });
 
 // ── Summary ───────────────────────────────────────────────────

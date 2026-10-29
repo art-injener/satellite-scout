@@ -20,8 +20,10 @@ import (
 	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/exclude"
 	"github.com/art-injener/satellite-scout/internal/handlers"
+	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sdr/chipdrivers/rtlsdr"
 	"github.com/art-injener/satellite-scout/internal/sdr/imitator"
 	"github.com/art-injener/satellite-scout/internal/services"
 	"github.com/art-injener/satellite-scout/internal/sigmf"
@@ -30,6 +32,9 @@ import (
 
 // Ключ атрибута slog для ошибок.
 const slogKeyError = "error"
+
+// productsDir — каталог принятых картинок, рядом с конфигом по умолчанию.
+const productsDir = "data/products"
 
 // app собирает все ключевые модули приложения в одном месте.
 type app struct {
@@ -48,6 +53,7 @@ type app struct {
 
 	sdrService  *sdr.Service     // обнаружение и проверка SDR-приёмников
 	receiverHub *sdr.ReceiverHub // приёмники по радиотрактам из конфига
+	products    *products.Store  // картинки, принятые демодулятором; nil — каталог недоступен
 
 	satnogs        *satnogs.Service           // интеграция с SatNOGS
 	satnogsAdapter *satnogsTransmitterAdapter // адаптер SatNOGS → services
@@ -155,14 +161,23 @@ func NewApp(configStore *config.Store) *app {
 					return nil, err
 				}
 				return imitator.New(opts), nil
+			case "rtlsdr":
+				return rtlsdr.New(rtlsdr.Options{Serial: rc.Serial, DevicePath: rc.DevicePath}), nil
 			default:
 				return nil, fmt.Errorf("%w: %q", sdr.ErrDriverNotImplemented, rc.Driver)
 			}
 		})
 	}
 	// Демодулятор принимает телеметрию попутно со зрителями потока тракта и сам поток не держит:
-	// приём идёт, пока открыт «Спектр».
-	receiverHub.SetStreamTap(demod.NewService(receiverHub, sseHub.Broadcast).Run)
+	// приём идёт, пока открыт «Спектр». Картинки SSTV складываются в productsDir.
+	demodService := demod.NewService(receiverHub, sseHub.Broadcast)
+	productStore, err := products.NewStore(productsDir)
+	if err != nil {
+		slog.Error("products disabled", slogKeyError, err)
+	} else {
+		demodService.WithProducts(productStore)
+	}
+	receiverHub.SetStreamTap(demodService.Run)
 
 	return &app{
 		cfg:         cfg,
@@ -175,8 +190,9 @@ func NewApp(configStore *config.Store) *app {
 		tracking:    trackingService,
 		pass:        passService,
 		exclude:     excludeStore,
-		sdrService:  sdr.NewService(),
+		sdrService:  sdr.NewService().WithProbe("rtlsdr", rtlsdr.Probe),
 		receiverHub: receiverHub,
+		products:    productStore,
 	}
 }
 
@@ -310,9 +326,9 @@ func (a *app) startSatNOGS(ctx context.Context) {
 	a.tracking.SetTransmitterProvider(a.satnogsAdapter)
 	slog.InfoContext(ctx, "satnogs integration enabled", "cache_ttl", a.cfg.SatNOGS.CacheTTL.Duration())
 
-	// Шлём события tx_cycle — обновляем таблицу передатчиков в auto-link.
-	txCycleMock := services.NewTxCycleMock(a.sseHub, a.tracking, a.satnogsAdapter, services.DefaultTxCycleInterval)
-	go txCycleMock.Run(ctx)
+	// Имитация приёма в таблице передатчиков (пакеты, уровень, SNR, lock) пока выключена.
+	// txCycleMock := services.NewTxCycleMock(a.sseHub, a.tracking, a.satnogsAdapter, services.DefaultTxCycleInterval)
+	// go txCycleMock.Run(ctx)
 }
 
 // startHotReload подписывается на изменения конфига: при правке наблюдателя
@@ -358,6 +374,7 @@ func (a *app) routeDeps() *routeDeps {
 		SatNOGS:     a.satnogs,
 		SDR:         a.sdrService,
 		ReceiverHub: a.receiverHub,
+		Products:    a.products,
 		Exclude:     a.exclude,
 		PassCache:   a.pass,
 		Group:       a.tracking,

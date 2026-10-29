@@ -196,10 +196,103 @@
 
 /* Спектр — FFT + шкала + водопад */
 .ml-spectrum {
+    position: relative;
     display: flex;
     flex-direction: column;
     min-height: 0;
     min-width: 0;
+}
+
+/* Канал демодулятора поверх БПФ, шкалы и водопада. Переключатель накопления
+   (z-index 2) остаётся над каналом. */
+.ml-chan {
+    position: absolute;
+    z-index: 1;
+    top: 0;
+    bottom: 0;
+    pointer-events: none;
+    --ml-chan-color: var(--text-muted);
+}
+
+.ml-chan.is-open {
+    --ml-chan-color: var(--accent-success);
+}
+
+.ml-chan__fill {
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--ml-chan-color) 16%, transparent);
+    border-left: 1px solid color-mix(in srgb, var(--ml-chan-color) 70%, transparent);
+    border-right: 1px solid color-mix(in srgb, var(--ml-chan-color) 70%, transparent);
+    pointer-events: auto;
+    cursor: grab;
+}
+
+.ml-chan__center {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 7px;
+    margin-left: -3px;
+    background: linear-gradient(to right, transparent 3px, var(--ml-chan-color) 3px, var(--ml-chan-color) 4px, transparent 4px);
+    pointer-events: auto;
+    cursor: grab;
+}
+
+/* Ручки краёв: широкая невидимая зона захвата, видимая метка сверху */
+.ml-chan__handle {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 9px;
+    pointer-events: auto;
+    cursor: ew-resize;
+}
+
+.ml-chan__handle::after {
+    content: '';
+    position: absolute;
+    top: 14px;
+    left: 3px;
+    width: 3px;
+    height: 16px;
+    border-radius: 2px;
+    background: var(--ml-chan-color);
+}
+
+.ml-chan__handle--l { left: -5px; }
+.ml-chan__handle--r { right: -5px; }
+
+.ml-chan__label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    padding: 1px 5px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    white-space: nowrap;
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--ml-chan-color) 35%, var(--bg-primary));
+    border-radius: 0 0 var(--radius-sm) 0;
+    pointer-events: none;
+}
+
+.ml-chan__label:empty {
+    display: none;
+}
+
+/* Канал за краем окна приёмника */
+.ml-chan-arrow {
+    position: absolute;
+    z-index: 1;
+    top: 4px;
+    padding: 1px 6px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-primary);
+    background: color-mix(in srgb, var(--accent-warning) 35%, var(--bg-primary));
+    border-radius: var(--radius-sm);
+    pointer-events: none;
 }
 
 .ml-spectrum__fft {
@@ -213,7 +306,7 @@
    там над шумом обычно пусто, а canvas не теряет высоту */
 .ml-spec-mode {
     position: absolute;
-    z-index: 1;
+    z-index: 2;
     top: 4px;
     right: 6px;
     display: flex;
@@ -445,6 +538,9 @@
     gap: var(--ml-gap);
     padding: var(--ml-gap) 8px;
     overflow-y: auto;
+    /* Место под полосу прокрутки занято всегда: иначе включение демодулятора
+       удлиняет колонку, полоса появляется и вся вёрстка сужается. */
+    scrollbar-gutter: stable;
 }
 
 /* Блоки колонки не сжимаются: иначе при нехватке высоты flex сплющивает
@@ -479,12 +575,130 @@
     color: var(--panel-header-title, var(--text-primary));
 }
 
+/* Слово «Демодулятор» по центру полосы, переключатель остаётся справа. */
+.ml-ctl__section-title--check {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    text-align: center;
+}
+
+.ml-ctl__section-title--check > span {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+/* Переключатель в языке колонки: рамка как у поля, бегунок едет, слово состояния рядом. */
+.ml-demod-switch {
+    position: relative;
+    z-index: 1;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin: 0;
+    text-transform: none;
+    letter-spacing: 0;
+    cursor: pointer;
+}
+
+.ml-demod-switch input {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    opacity: 0;
+    cursor: pointer;
+}
+
+.ml-demod-switch__state {
+    position: relative;
+    width: 2.8em;
+    height: 1em;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.ml-demod-switch__word {
+    position: absolute;
+    top: 0;
+    right: 0;
+    line-height: 1;
+    color: var(--text-muted);
+}
+
+.ml-demod-switch__word--on { opacity: 0; }
+
+.ml-demod-switch:has(input:checked) .ml-demod-switch__word--off { opacity: 0; }
+.ml-demod-switch:has(input:checked) .ml-demod-switch__word--on {
+    opacity: 1;
+    color: var(--accent-success);
+}
+
+.ml-demod-switch__track {
+    position: relative;
+    display: block;
+    box-sizing: border-box;
+    width: 32px;
+    height: 16px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-primary);
+}
+
+.ml-demod-switch:hover .ml-demod-switch__track {
+    border-color: var(--accent-primary);
+}
+
+.ml-demod-switch:has(input:checked) .ml-demod-switch__track,
+.ml-demod-switch:has(input:checked):hover .ml-demod-switch__track {
+    border-color: var(--accent-success);
+}
+
+.ml-demod-switch__knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 10px;
+    height: 10px;
+    border-radius: 2px;
+    background: var(--text-muted);
+    transition: transform 0.12s ease;
+}
+
+.ml-demod-switch:has(input:checked) .ml-demod-switch__knob {
+    background: var(--accent-success);
+    transform: translateX(16px);
+}
+
+.ml-demod-switch:has(input:focus-visible) .ml-demod-switch__track {
+    outline: 1px solid var(--border-focus);
+    outline-offset: 2px;
+}
+
+.ml-demod-switch:has(input:disabled) {
+    cursor: not-allowed;
+    opacity: 0.45;
+}
+
+.ml-demod-switch:has(input:disabled) input {
+    cursor: not-allowed;
+}
+
 /* Имя канала, pipeline-строка и метрика «Пайплайн» дублируют то, что уже есть
    рядом: имя — в шапке колонки, частота — на дисплее, пайплайн — в селекте выше.
    Держим в DOM (их обновляет DemodPanel), но не показываем дважды. */
 .ml-ctl .ml-demod__ch,
-.ml-ctl .ml-demod__ch-pipeline,
-.ml-ctl .ml-demod__metric--pipeline {
+.ml-ctl .ml-demod__ch-pipeline {
     display: none;
 }
 
@@ -520,11 +734,11 @@
     grid-row: 1;
 }
 
-.fdial__btn--dec { grid-area: 2 / 1; }
-.fdial__btn--left { grid-area: 2 / 2; }
+.fdial__btn--left { grid-area: 2 / 1; }
+.fdial__btn--dec { grid-area: 2 / 2; }
 .fdial__btn--set { grid-area: 2 / 3; }
-.fdial__btn--right { grid-area: 2 / 4; }
-.fdial__btn--inc { grid-area: 2 / 5; }
+.fdial__btn--inc { grid-area: 2 / 4; }
+.fdial__btn--right { grid-area: 2 / 5; }
 
 .fdial__btn {
     height: 34px;
@@ -813,26 +1027,36 @@
     cursor: default;
 }
 
-/* ── Управление приёмником: режим и кнопка окна управления ── */
+/* Режим — та же сетка, что у строк «подпись | значение». */
+
+.ml-access {
+    display: grid;
+    grid-template-columns: 9.5em 1fr;
+    column-gap: 8px;
+    row-gap: 2px;
+    align-items: center;
+    min-width: 0;
+}
 
 .ml-access [hidden] {
     display: none;
 }
 
-.ml-access__row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-}
-
 .ml-access__role {
     flex: 1 1 auto;
+    display: flex;
+    align-items: center;
+    box-sizing: border-box;
+    height: var(--ml-row-h, 30px);
     min-width: 0;
+    padding: 0 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
     font-family: var(--font-mono);
     font-size: var(--ml-fs-value, 14px);
     font-weight: 600;
-    color: var(--text-label, var(--text-muted));
+    color: var(--text-primary);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -845,9 +1069,16 @@
 
 .ml-access__detail,
 .ml-access__notice {
+    grid-column: 1 / -1;
+    margin: 0;
     font-family: var(--font-mono);
     font-size: 11px;
+    line-height: 1.35;
     color: var(--text-label, var(--text-muted));
+}
+
+.ml-access__notice {
+    color: var(--accent-warning, var(--text-primary));
 }
 
 .ml-access__notice:empty {
@@ -857,12 +1088,25 @@
 /* Строка тракта: подпись слева, регулятор справа. Ширина колонки подписей
    общая для всех секций, чтобы регуляторы стояли ровным столбцом; её задаёт
    самая длинная подпись («Полоса канала»). */
+.ml-rx-panel__check {
+    justify-self: start;
+    width: auto;
+    accent-color: var(--accent-success);
+}
+
 .ml-rx-panel__field {
     display: grid;
     grid-template-columns: 9.5em 1fr;
     align-items: center;
     gap: 8px;
     font-size: var(--ml-fs-label, 13px);
+    min-width: 0;
+}
+
+/* Иначе длинная подпись тракта раздвигает селектор, и правый край обрезается колонкой. */
+.ml-rx-panel__field > *,
+.ml-access > * {
+    min-width: 0;
 }
 
 .ml-rx-panel__label {
@@ -882,6 +1126,49 @@
     gap: 8px;
     align-items: center;
     min-width: 0;
+}
+
+/* − и + по бокам поля: те же клавиши, что под индикатором частоты, но в строку. */
+.ml-rx-stepper {
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: row;
+    align-items: stretch;
+    gap: 4px;
+    min-width: 0;
+}
+
+.ml-rx-stepper__btn {
+    flex: 0 0 var(--ml-row-h, 30px);
+    width: var(--ml-row-h, 30px);
+    height: var(--ml-row-h, 30px);
+    padding: 0;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 18px;
+    font-weight: 700;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+.ml-rx-stepper__btn:hover:not(:disabled) {
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.ml-rx-stepper__btn:active:not(:disabled) {
+    background: var(--accent-primary-dim, rgba(0, 212, 170, 0.12));
+}
+
+.ml-rx-stepper .ml-rx-panel__input {
+    flex: 1 1 auto;
+    width: auto;
+    text-align: center;
 }
 
 .ml-rx-panel__input {
@@ -904,19 +1191,32 @@
     border-color: var(--accent-primary);
 }
 
-.ml-rx-panel__sel {
+.ml-rx-panel__sel,
+.ml-demod__pipeline-sel {
+    appearance: none;
+    -webkit-appearance: none;
     height: var(--ml-row-h, 30px);
     font-family: var(--font-mono);
     font-size: var(--ml-fs-value, 14px);
     font-weight: 600;
-    background: var(--bg-primary);
+    background-color: var(--bg-primary);
+    background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position: calc(100% - 10px) calc(50% - 2px), calc(100% - 6px) calc(50% - 2px);
+    background-size: 4px 4px, 4px 4px;
+    background-repeat: no-repeat;
     border: 1px solid var(--border-color);
     border-radius: 3px;
-    padding: 0 8px;
+    padding: 0 22px 0 8px;
     color: var(--text-primary);
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     box-sizing: border-box;
     cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .ml-rx-panel__sel:focus {
@@ -958,7 +1258,7 @@
     border: none;
 }
 
-/* «Установить» применяет настройки приёмника и фильтра — стоит сразу под ними */
+/* «Установить» своей секции: у приёмника и у демодулятора кнопки отдельные. */
 .ml-rx-panel__btn-apply {
     flex-shrink: 0;
     height: var(--ml-row-h, 30px);
@@ -985,6 +1285,7 @@
 .ml-rx-panel__pill:disabled,
 .ml-rx-panel__input:disabled,
 .ml-rx-panel__sel:disabled,
+.ml-rx-stepper__btn:disabled,
 #manual-rx-pipeline:disabled {
     opacity: 0.4;
     cursor: not-allowed;
@@ -1005,6 +1306,10 @@
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     overflow: hidden;
+}
+
+.ml-tabbar__btn[hidden] {
+    display: none;
 }
 
 .ml-tabbar__btn {
@@ -1730,21 +2035,6 @@ table.ml-air__grid tbody tr.is-current {
     text-overflow: ellipsis;
 }
 
-.ml-demod__pipeline-sel {
-    width: 100%;
-    box-sizing: border-box;
-    background: var(--bg-primary);
-    border: 1px solid var(--border-color);
-    color: var(--text-primary);
-    border-radius: 3px;
-    height: var(--ml-row-h, 30px);
-    padding: 0 8px;
-    font-family: var(--font-mono);
-    font-size: var(--ml-fs-value, 14px);
-    font-weight: 600;
-    cursor: pointer;
-}
-
 .ml-demod__pipeline-sel:focus {
     outline: none;
     border-color: var(--accent-primary);
@@ -1831,56 +2121,135 @@ table.ml-air__grid tbody tr.is-current {
     border-left: 1px solid var(--border-color);
 }
 
-/* Метрики в колонке тракта — два ровных столбца «подпись … значение».
-   Самое длинное значение («52.3 dB·Hz») влезает в половину ширины, поэтому
-   строки не рвутся. */
-.ml-demod__metrics {
+/* Обработка: этапы сверху вниз, у каждого лампа состояния, значение и пояснение.
+   Первый неисправный этап называет строка диагноза под ними. */
+.ml-stages {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.ml-stage {
+    --ml-stage-color: var(--text-muted, #7a8a9c);
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 0 18px;
-}
-
-.ml-demod__metric {
-    display: flex;
+    grid-template-columns: 10px auto minmax(0, 1fr);
+    grid-template-areas:
+        "led name value"
+        ". sub sub";
+    column-gap: 6px;
     align-items: baseline;
-    justify-content: space-between;
-    gap: 8px;
-    min-width: 0;
-    padding: 1px 2px;
-    line-height: 1.25;
+    padding: 2px 2px 3px;
     border-bottom: 1px solid var(--border-color);
+    line-height: 1.25;
 }
 
-.ml-demod__label {
-    flex-shrink: 0;
+.ml-stage--ok   { --ml-stage-color: var(--accent-success, #00d4aa); }
+.ml-stage--warn { --ml-stage-color: var(--accent-warning, #f0b429); }
+.ml-stage--bad  { --ml-stage-color: var(--accent-danger, #ff6b6b); }
+
+.ml-stage__led {
+    grid-area: led;
+    align-self: center;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ml-stage-color);
+}
+
+.ml-stage--idle .ml-stage__led {
+    background: transparent;
+    box-shadow: inset 0 0 0 1px var(--ml-stage-color);
+}
+
+.ml-stage__name {
+    grid-area: name;
     font-family: var(--font-mono);
     font-size: var(--ml-fs-label, 13px);
     color: var(--bp-info-label, var(--panel-header-title, var(--text-muted)));
 }
 
-.ml-demod__value {
+.ml-stage__value {
+    grid-area: value;
     font-family: var(--font-mono);
     font-size: var(--ml-fs-value, 14px);
     font-weight: 600;
     font-variant-numeric: tabular-nums;
-    color: var(--bp-info-value, var(--text-primary));
     text-align: right;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
+    color: var(--bp-info-value, var(--text-primary));
 }
 
-.ml-demod__value--ok {
-    color: var(--accent-success, #00d4aa);
-}
-
-.ml-demod__value--idle {
+.ml-stage--idle .ml-stage__value {
     color: var(--text-muted, #7a8a9c);
 }
 
-.ml-demod__value--bad {
-    color: var(--accent-danger, #ff6b6b);
+.ml-stage__sub {
+    grid-area: sub;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    text-align: right;
+    color: var(--text-muted, #7a8a9c);
 }
+
+.ml-stage__sub:empty {
+    display: none;
+}
+
+.ml-diag {
+    --ml-diag-color: var(--text-muted, #7a8a9c);
+    margin-top: 5px;
+    padding: 3px 6px;
+    border: 1px solid color-mix(in srgb, var(--ml-diag-color) 55%, transparent);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--ml-diag-color) 10%, transparent);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.3;
+    color: var(--ml-diag-color);
+}
+
+.ml-diag--ok   { --ml-diag-color: var(--accent-success, #00d4aa); }
+.ml-diag--warn { --ml-diag-color: var(--accent-warning, #f0b429); }
+.ml-diag--bad  { --ml-diag-color: var(--accent-danger, #ff6b6b); }
+
+/* Лента кадров за 60 с: точка на момент приёма, правый край — сейчас. */
+.ml-strip {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 5px;
+    margin-top: 5px;
+}
+
+/* У SSTV нет кадров: строка этапа и лента скрываются. */
+.ml-strip[hidden],
+.ml-stage[hidden] { display: none; }
+
+.ml-strip__axis {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted, #7a8a9c);
+}
+
+.ml-strip__track {
+    position: relative;
+    height: 12px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.ml-strip__dot {
+    position: absolute;
+    top: 2px;
+    width: 6px;
+    height: 6px;
+    margin-left: -3px;
+    border-radius: 50%;
+}
+
+.ml-strip__dot--good { background: var(--accent-success, #00d4aa); }
+.ml-strip__dot--bad  { background: var(--accent-danger, #ff6b6b); }
 
 /* ── Секция «Данные»: папка записи и транспорт ● / ■ ── */
 
@@ -2025,7 +2394,7 @@ table.ml-air__grid tbody tr.is-current {
     margin-bottom: 4px;
 }
 
-/* Переключатель представления результата: Таблица | Hex | График */
+/* Переключатель представления результата: Таблица | Диаграмма | Снимки */
 .ml-demod__result-tabs {
     display: flex;
     gap: 3px;
@@ -2091,18 +2460,151 @@ table.ml-air__grid tbody tr.is-current {
     height: 100%;
 }
 
-.ml-demod__hex {
+/* Вид «Снимки»: выбранная картинка слева, миниатюры столбцом справа */
+.ml-demod__result-view--pictures.is-active {
+    flex-direction: row;
+    gap: 6px;
+}
+
+.ml-pics__main {
+    flex: 1 1 auto;
+    min-width: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ml-pics__frame {
     flex: 1 1 auto;
     min-height: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: var(--spectrum-instrument-bg, var(--bg-primary));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+}
+
+/* Пиксели SSTV крупные: без сглаживания при увеличении */
+.ml-pics__img {
+    max-width: 100%;
+    max-height: 100%;
+    object-fit: contain;
+    image-rendering: pixelated;
+    cursor: zoom-in;
+}
+
+/* Снимок крупно: вписан в окно с сохранением пропорций, мелкая картинка растягивается без размытия. */
+.ml-pics-zoom .modal__box {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    width: auto;
+    max-width: none;
+    max-height: none;
+    padding: 12px;
+}
+
+.ml-pics-zoom__img {
+    width: 92vw;
+    height: 82vh;
+    object-fit: contain;
+    image-rendering: pixelated;
+    background: var(--spectrum-instrument-bg, var(--bg-primary));
+}
+
+.ml-pics__empty {
     margin: 0;
-    padding: 6px 8px;
-    background: var(--bg-primary);
+    padding: 0 16px;
+    max-width: 36em;
+    text-align: center;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.ml-pics__cap {
+    flex-shrink: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
     font-family: var(--font-mono);
     font-size: 11px;
-    line-height: 1.45;
     color: var(--text-primary);
-    white-space: pre;
-    overflow: auto;
+}
+
+.ml-pics__title {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.ml-pics__progress {
+    flex: 1 1 auto;
+    min-width: 40px;
+    height: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.ml-pics__bar {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--accent-primary);
+}
+
+.ml-pics__lines {
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.ml-pics__list {
+    flex: 0 0 132px;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.ml-pics__thumb {
+    width: 100%;
+    padding: 2px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    background: var(--bg-elevated, var(--bg-tertiary));
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.ml-pics__thumb:hover {
+    border-color: var(--accent-primary);
+}
+
+.ml-pics__thumb img {
+    width: 100%;
+    aspect-ratio: 4 / 3;
+    object-fit: contain;
+    background: var(--bg-primary);
+}
+
+.ml-pics__item.is-selected .ml-pics__thumb {
+    border-color: var(--accent-primary);
+    background: var(--accent-primary-dim, rgba(0, 212, 170, 0.14));
+}
+
+.ml-pics__item.is-live .ml-pics__thumb-cap::before {
+    content: "● ";
+    color: var(--accent-danger, #ff6b6b);
 }
 
 /* ── TMI — таблица телеметрии (пакет = строка) ── */

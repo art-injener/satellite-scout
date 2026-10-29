@@ -532,9 +532,9 @@
             const existing = this._sm.getSatelliteGroup && this._sm.getSatelliteGroup();
             if (existing) { this._onGroupUpdate(existing); }
 
-            // Непрерывная анимация водопадов всех передатчиков.
+            // Имитация водопада в таблице передатчиков пока выключена.
             this._wfRaf = 0;
-            this._startWaterfall();
+            // this._startWaterfall();
 
             // Подписи футера колонок (El, пакеты, LOS) — раз в секунду.
             this._labelTimer = setInterval(() => this._updateAllColLabels(), 1000);

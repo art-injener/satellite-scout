@@ -2,6 +2,7 @@ package demod
 
 import (
 	"math"
+	"math/cmplx"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
@@ -9,6 +10,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/geoscan"
 	"github.com/art-injener/satellite-scout/internal/modem"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sstv"
 )
 
 const (
@@ -32,18 +34,46 @@ type deframer interface {
 	Bad() int
 }
 
+// clockMeter — демодулятор с ФАПЧ тактов, сообщающий её ошибку фазы.
+type clockMeter interface {
+	ClockJitter() float64
+}
+
+// deviationMeter — демодулятор ЧМ, сообщающий принятую девиацию.
+type deviationMeter interface {
+	DeviationHz() float64
+}
+
+// syncCounter — выделитель кадров по синхрослову, считающий найденные слова и их ошибки.
+type syncCounter interface {
+	SyncWords() int
+	SyncBitErrors() int
+}
+
+// pictureRx принимает картинки из IQ канала (SSTV).
+type pictureRx interface {
+	Push(iq []complex64) []sstv.Event
+	Done() int
+}
+
 // profile — реализованный демодулятор: прореживание точного фильтра после midRateHz,
-// сборка демодулятора на частоте его выхода и выделитель кадров.
+// сборка демодулятора на частоте его выхода и выделитель кадров. Профиль картинок
+// (newPictures) вместо кадров даёт картинки и слушает канал без порога: развёртка
+// идёт по часам, и пропуск звука сдвинул бы строки.
 type profile struct {
 	fineDecim   int
 	newDemod    func(rate float64) lineDemod
 	newDeframer func() deframer
+	newPictures func(rate float64) pictureRx
 }
 
 func newHDLCDeframer() deframer { return &ax25.Deframer{} }
 
 // demodGEOSCAN — профиль кадров CC1125: кроме кадра он даёт и разбор маяка Geoscan.
 const demodGEOSCAN = "fsk9600_geoscan"
+
+// DemodSSTV — профиль картинок SSTV поверх ЧМ; режим определяется по заголовку VIS.
+const DemodSSTV = "sstv"
 
 var profiles = map[string]profile{
 	// AFSK 1200 хватает 32 кГц.
@@ -59,6 +89,8 @@ var profiles = map[string]profile{
 		newDemod: func(rate float64) lineDemod {
 			return modem.NewFSKDemod(modem.FSK9600(rate))
 		}},
+	// ЧМ с девиацией до 5 кГц и звуком до 2,3 кГц укладывается в 32 кГц.
+	DemodSSTV: {fineDecim: 2, newPictures: newSSTVRx},
 }
 
 // g3ruhDemod — FSK с дескремблером G3RUH; NRZI снимает уже выделитель кадров.
@@ -72,6 +104,9 @@ func (d *g3ruhDemod) Demodulate(dst []byte, iq []complex64) []byte {
 	d.buf = d.fsk.Demodulate(d.buf[:0], iq)
 	return d.desc.Descramble(dst, d.buf)
 }
+
+func (d *g3ruhDemod) ClockJitter() float64 { return d.fsk.ClockJitter() }
+func (d *g3ruhDemod) DeviationHz() float64 { return d.fsk.DeviationHz() }
 
 // Packet — принятый кадр.
 type Packet struct {
@@ -89,6 +124,28 @@ type Status struct {
 	SquelchOpen  bool
 	Good, Bad    int    // кадры с верной FCS и отрезки, не прошедшие её
 	LastPacketMs uint64 // время последнего кадра; 0 — кадров не было
+
+	// Ход приёма: меры последнего блока с уровнем выше порога (без удержания порога —
+	// на хвосте шума ФАПЧ тактов теряет захват). Measured=false — такого блока ещё не было
+	// после смены настроек.
+	Measured      bool
+	CarrierHz     float64 // смещение несущей от центра канала
+	DeviationHz   float64 // принятая девиация; 0 — демодулятор её не меряет
+	ClockJitter   float64 // ошибка фазы тактов, доли символа
+	SyncCounted   bool    // выделитель кадров считает синхрослова
+	SyncWords     int
+	SyncBitErrors int
+
+	// Picture — картинка, которая сейчас проявляется; nil — её нет. Не меняется после выдачи.
+	Picture *PictureProgress
+}
+
+// PictureProgress — ход картинки в приёме.
+type PictureProgress struct {
+	Mode     string `json:"mode"`
+	ModeName string `json:"mode_name"`
+	Lines    int    `json:"lines"`
+	Height   int    `json:"height"`
 }
 
 // Chain — цепочка приёма одного канала: выделение канала из полосы приёмника
@@ -98,6 +155,7 @@ type Status struct {
 // Не потокобезопасна: работает в горутине потока.
 type Chain struct {
 	rate      uint32
+	outRate   float64 // частота отсчётов канала на входе демодулятора
 	offsetHz  int64
 	bandwidth uint32
 	demodName string
@@ -110,6 +168,11 @@ type Chain struct {
 	status Status
 	levels []byte
 	frames [][]byte
+	prevCh complex64 // последний отсчёт канала прошлого блока для оценки несущей
+
+	picRx    pictureRx
+	pictures []sstv.Event
+	centerHz uint64 // настройка приёмника, на которой идёт картинка
 }
 
 // NewChain создаёт цепочку; фильтры строятся по первому блоку.
@@ -127,6 +190,14 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 		c.status.SquelchOpen = false
 		return nil
 	}
+	if f.CenterHz != c.centerHz {
+		// Другая частота приёмника — другой передатчик: картинка в приёме бросается.
+		c.centerHz = f.CenterHz
+		if c.picRx != nil && p.newPictures != nil && s.Demod == c.demodName {
+			c.picRx = p.newPictures(c.outRate)
+			c.status.Picture = nil
+		}
+	}
 	if c.coarse == nil || f.SampleRate != c.rate || s.OffsetHz != c.offsetHz || s.BandwidthHz != c.bandwidth ||
 		s.Demod != c.demodName {
 		c.build(f.SampleRate, s.OffsetHz, s.BandwidthHz, s.Demod, p)
@@ -136,6 +207,22 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	ch := c.fine.Process(c.coarse.Process(f.Samples))
 	c.status.SquelchOpen = c.squelch.Open(ch)
 	c.status.LevelDBFS = c.squelch.LevelDBFS()
+	c.pictures = c.pictures[:0]
+	if c.picRx != nil {
+		c.pictures = c.picRx.Push(ch)
+		c.status.Good = c.picRx.Done()
+		for _, e := range c.pictures {
+			c.status.Picture = nil
+			if e.Kind != sstv.EventDone {
+				c.status.Picture = &PictureProgress{Mode: e.Mode.ID, ModeName: e.Mode.Name, Lines: e.Lines, Height: e.Mode.Height}
+			}
+		}
+		if float64(c.status.LevelDBFS) >= s.SquelchDBFS {
+			c.measure(ch)
+		}
+		c.prevCh = ch[len(ch)-1]
+		return nil
+	}
 	if !c.status.SquelchOpen {
 		return nil
 	}
@@ -143,6 +230,10 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	c.levels = c.demod.Demodulate(c.levels[:0], ch)
 	c.frames = c.deframer.Push(c.frames[:0], c.levels)
 	c.status.Good, c.status.Bad = c.deframer.Good(), c.deframer.Bad()
+	if float64(c.status.LevelDBFS) >= s.SquelchDBFS {
+		c.measure(ch)
+	}
+	c.prevCh = ch[len(ch)-1]
 
 	var out []Packet
 	for _, b := range c.frames {
@@ -161,23 +252,58 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	return out
 }
 
+// Pictures — события картинок последнего блока; срез действителен до следующего Process.
+func (c *Chain) Pictures() []sstv.Event {
+	return c.pictures
+}
+
 // Status — состояние после последнего блока.
 func (c *Chain) Status() Status {
 	return c.status
+}
+
+// measure снимает меры хода приёма с блока канала. Несущая — средний поворот фазы
+// между соседними отсчётами: у ЧМ со сбалансированными данными он равен смещению несущей.
+func (c *Chain) measure(ch []complex64) {
+	var sum complex128
+	prev := complex128(c.prevCh)
+	for _, s := range ch {
+		x := complex128(s)
+		sum += x * cmplx.Conj(prev)
+		prev = x
+	}
+	st := &c.status
+	st.Measured = true
+	st.CarrierHz = cmplx.Phase(sum) * c.outRate / (2 * math.Pi)
+	if m, ok := c.demod.(clockMeter); ok {
+		st.ClockJitter = m.ClockJitter()
+	}
+	if m, ok := c.demod.(deviationMeter); ok {
+		st.DeviationHz = m.DeviationHz()
+	}
+	if sc, ok := c.deframer.(syncCounter); ok {
+		st.SyncCounted = true
+		st.SyncWords, st.SyncBitErrors = sc.SyncWords(), sc.SyncBitErrors()
+	}
+}
+
+// midRate — частота отсчётов после грубого фильтра: ближайшая к midRateHz, кратная частоте приёмника.
+func midRate(fs float64) float64 {
+	return fs / float64(max(1, int(math.Round(fs/midRateHz))))
 }
 
 // build строит фильтры канала и демодулятор. Грубый фильтр прореживает до midRateHz: пропускает
 // плоско до 0,15 от новой частоты, подавляет с 0,65 — наложенное при прореживании ложится дальше
 // 0,35 от центра, за точный фильтр. Поэтому «Полоса канала» шире 0,3 от неё обрезается.
 func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod string, p profile) {
-	if c.deframer == nil || demod != c.demodName {
-		c.deframer = p.newDeframer()
-	}
+	newProfile := demod != c.demodName
+	newRate := rate != c.rate
+	newOffset := offsetHz != c.offsetHz
 	c.rate, c.offsetHz, c.bandwidth, c.demodName = rate, offsetHz, bandwidth, demod
 
 	fs := float64(rate)
-	decim := max(1, int(math.Round(fs/midRateHz)))
-	mid := fs / float64(decim)
+	mid := midRate(fs)
+	decim := int(math.Round(fs / mid))
 	transition := 0.25 * mid
 	// Окно Блэкмана-Харриса: половина главного лепестка — 4 отсчёта спектра, то есть 4·fs/N.
 	coarseTaps := int(math.Ceil(4*fs/transition)) | 1
@@ -187,7 +313,26 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 	cutoff := min(float64(bandwidth)/2, 0.15*mid)
 	c.fine = dsp.NewXlatingFIR(0, mid, p.fineDecim, dsp.DesignLowpass(cutoff, mid, fineTaps, dsp.WindowBlackmanHarris))
 
-	out := mid / float64(p.fineDecim)
-	c.demod = p.newDemod(out)
-	c.squelch.HoldSamples = int(squelchHold.Seconds() * out)
+	c.outRate = mid / float64(p.fineDecim)
+	if p.newPictures != nil {
+		// Картинка в приёме переживает смену полосы канала; новый сдвиг — другой передатчик,
+		// и заголовок VIS ищется заново.
+		if c.picRx == nil || newProfile || newRate || newOffset {
+			c.picRx = p.newPictures(c.outRate)
+			c.status.Picture = nil
+		}
+		c.demod, c.deframer = nil, nil
+		c.status.Bad = 0
+	} else {
+		c.picRx, c.status.Picture = nil, nil
+		c.demod = p.newDemod(c.outRate)
+		if c.deframer == nil || newProfile {
+			c.deframer = p.newDeframer()
+		}
+	}
+	c.squelch.HoldSamples = int(squelchHold.Seconds() * c.outRate)
+	c.prevCh = 0
+	m := &c.status
+	m.Measured, m.CarrierHz, m.DeviationHz, m.ClockJitter = false, 0, 0, 0
+	m.SyncCounted, m.SyncWords, m.SyncBitErrors = false, 0, 0
 }

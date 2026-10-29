@@ -20,7 +20,8 @@ type Deframer struct {
 	nbits   int  // бит в cur
 	buf     []byte
 
-	good, bad int
+	good, bad       int
+	syncs, syncErrs int
 }
 
 // Push дописывает в dst данные кадров с верной CRC (без CRC) и возвращает расширенный срез.
@@ -30,7 +31,9 @@ func (d *Deframer) Push(dst [][]byte, levels []byte) [][]byte {
 		b := lv & 1
 		if !d.inFrame {
 			d.shift = d.shift<<1 | uint32(b)
-			if bits.OnesCount32(d.shift^SyncWord) <= syncMaxErrors {
+			if errs := bits.OnesCount32(d.shift ^ SyncWord); errs <= syncMaxErrors {
+				d.syncs++
+				d.syncErrs += errs
 				d.inFrame = true
 				d.buf, d.nbits = d.buf[:0], 0
 			}
@@ -87,3 +90,10 @@ func (d *Deframer) Good() int { return d.good }
 
 // Bad — сколько найденных синхрослов не дали кадра с верной CRC ни при одной длине.
 func (d *Deframer) Bad() int { return d.bad }
+
+// SyncWords — сколько синхрослов найдено.
+func (d *Deframer) SyncWords() int { return d.syncs }
+
+// SyncBitErrors — сколько бит с ошибкой было во всех найденных синхрословах:
+// отношение к 32·SyncWords — оценка BER линии до CRC.
+func (d *Deframer) SyncBitErrors() int { return d.syncErrs }

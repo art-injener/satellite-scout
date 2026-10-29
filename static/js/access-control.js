@@ -28,8 +28,10 @@
         emptyPassword: 'Введите пароль станции.',
     };
 
-    const MODE_CONTROL = 'Режим: Контроль';
-    const MODE_VIEW = 'Режим: Просмотр';
+    const MODE_CONTROL = 'Контроль';
+    const MODE_VIEW = 'Просмотр';
+    /** Сколько держать разовое сообщение в строке режима, мс. */
+    const NOTICE_MS = 6000;
 
     /**
      * Что показать в панели управления для текущего состояния. Режимов для
@@ -83,6 +85,8 @@
         };
         this._listeners = [];
         this._onEvent = null;
+        this._noticeTimer = null;
+        this._noticeMs = opts.noticeMs > 0 ? opts.noticeMs : NOTICE_MS;
     }
 
     AccessControl.prototype.getState = function() {
@@ -115,9 +119,35 @@
         }
     };
 
-    /** Сообщение пользователю в панели управления. */
+    /**
+     * Разовое сообщение в строке режима. Само пропадает: строка не копит
+     * старые ошибки. Пустая строка гасит текущее сразу.
+     */
     AccessControl.prototype.setNotice = function(text) {
-        this._set({ notice: text || '' });
+        this._armNotice(text, false);
+    };
+
+    /**
+     * sticky — сообщение ждёт следующего события (запрос ещё не отвечен)
+     * и само не гаснет.
+     * @param {string} text
+     * @param {boolean} sticky
+     * @param {Object} [extra] — поля состояния вместе с текстом
+     */
+    AccessControl.prototype._armNotice = function(text, sticky, extra) {
+        if (this._noticeTimer) {
+            clearTimeout(this._noticeTimer);
+            this._noticeTimer = null;
+        }
+        const patch = extra ? Object.assign({}, extra) : {};
+        patch.notice = text || '';
+        this._set(patch);
+        if (!text || sticky) { return; }
+        const self = this;
+        this._noticeTimer = setTimeout(function() {
+            self._noticeTimer = null;
+            if (self._state.notice === text) { self._set({ notice: '' }); }
+        }, this._noticeMs);
     };
 
     AccessControl.prototype.start = function() {
@@ -133,6 +163,10 @@
             this._doc.removeEventListener(ACCESS_EVENT, this._onEvent);
         }
         this._onEvent = null;
+        if (this._noticeTimer) {
+            clearTimeout(this._noticeTimer);
+            this._noticeTimer = null;
+        }
     };
 
     AccessControl.prototype.refresh = function() {
@@ -164,17 +198,15 @@
         const self = this;
         return this._post('/api/access/request').then(function(r) {
             if (r.status === 202) {
-                self._set({ requestPending: true, notice: NOTICE.pending });
+                self._armNotice(NOTICE.pending, true, { requestPending: true });
                 return null;
             }
             if (r.status === 200) { return self.refresh(); }
             return r.json().then(function(b) {
                 const code = b && b.code;
-                self._set({
-                    notice: code === 'no_master_online' ? NOTICE.noMaster
-                        : code === 'request_pending' ? NOTICE.alreadyPending
-                            : 'Запрос не принят: ' + ((b && b.error) || ('HTTP ' + r.status)),
-                });
+                self._armNotice(code === 'no_master_online' ? NOTICE.noMaster
+                    : code === 'request_pending' ? NOTICE.alreadyPending
+                        : 'Запрос не принят: ' + ((b && b.error) || ('HTTP ' + r.status)), false);
             });
         }).catch(function(err) { self.setNotice('Запрос не отправлен: ' + err.message); });
     };
@@ -187,7 +219,7 @@
         const self = this;
         return this._post('/api/access/login', { password: password }).then(function(r) {
             if (r.status === 204) {
-                self._set({ notice: '' });
+                self._armNotice('', false);
                 return self.refresh().then(function() { return ''; });
             }
             return r.status === 401 ? NOTICE.badPassword
@@ -218,7 +250,7 @@
     AccessControl.prototype.release = function() {
         const self = this;
         return this._post('/api/access/release').then(function() {
-            self._set({ notice: '' });
+            self._armNotice('', false);
             return self.refresh();
         }).catch(function(err) { self.setNotice('Управление не возвращено: ' + err.message); });
     };
@@ -235,14 +267,14 @@
                 }
                 break;
             case 'control_granted':
-                this._set({ requestPending: false, notice: NOTICE.granted });
+                this._armNotice(NOTICE.granted, false, { requestPending: false });
                 this.refresh();
                 break;
             case 'control_denied':
-                this._set({ requestPending: false, notice: data.reason === 'timeout' ? NOTICE.timeout : NOTICE.rejected });
+                this._armNotice(data.reason === 'timeout' ? NOTICE.timeout : NOTICE.rejected, false, { requestPending: false });
                 break;
             case 'control_revoked':
-                this._set({ notice: NOTICE.revoked });
+                this._armNotice(NOTICE.revoked, false);
                 this.refresh();
                 break;
             case 'control_released':

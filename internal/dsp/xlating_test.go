@@ -5,8 +5,6 @@ import (
 	"math/cmplx"
 	"testing"
 	"time"
-
-	"github.com/art-injener/satellite-scout/internal/modem"
 )
 
 // --- DesignLowpass ---
@@ -312,13 +310,15 @@ func makeToneC64(n int, freqHz, fs float64) []complex64 {
 	return out
 }
 
-// makeDriftingToneC64 passes an unmodulated carrier through the imitator channel,
-// so the tone frequency follows freqHz(t) exactly as the transmitter side shifts it.
+// makeDriftingToneC64 is a unit carrier whose frequency follows freqHz(t): the phase
+// accumulates sample by sample, as on the transmitter side.
 func makeDriftingToneC64(n int, freqHz func(time.Duration) float64, fs float64) []complex64 {
-	carrier := make([]complex64, n)
-	for i := range carrier {
-		carrier[i] = 1
+	out := make([]complex64, n)
+	phase := 0.0
+	for i := range out {
+		out[i] = complex64(complex(math.Cos(phase), math.Sin(phase)))
+		t := time.Duration(float64(i) / fs * float64(time.Second))
+		phase = math.Mod(phase+2*math.Pi*freqHz(t)/fs, 2*math.Pi)
 	}
-	ch := modem.NewChannel(modem.ChannelConfig{SampleRate: fs, OffsetHz: freqHz})
-	return ch.Process(nil, carrier)
+	return out
 }

@@ -64,6 +64,20 @@ func TestDeframer_SyncWordErrors(t *testing.T) {
 	}
 }
 
+func TestDeframer_CountsSyncWordsAndTheirBitErrors(t *testing.T) {
+	a := mustEncode(t, testData(LongDataLen), 8, 0)
+	b := mustEncode(t, testData(ShortDataLen), 8, 2)
+	for i := range 3 {
+		a[8*8+i*6] ^= 1
+	}
+	b[8*8+5] ^= 1
+	var d Deframer
+	d.Push(nil, append(a, b...))
+	if d.SyncWords() != 2 || d.SyncBitErrors() != 4 {
+		t.Errorf("sync words/bit errors=%d/%d, want 2/4", d.SyncWords(), d.SyncBitErrors())
+	}
+}
+
 func TestDeframer_FlippedDataBitCountsAsBad(t *testing.T) {
 	levels := mustEncode(t, testData(LongDataLen), 8, 2)
 	levels[(8+4+10)*8+3] ^= 1

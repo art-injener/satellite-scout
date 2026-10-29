@@ -3,11 +3,13 @@ package imitator
 import (
 	"errors"
 	"fmt"
+	"image"
 	"math"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
 	"github.com/art-injener/satellite-scout/internal/modem"
+	"github.com/art-injener/satellite-scout/internal/sstv"
 )
 
 // ErrInvalidSignal — сигнал имитатора задан неверно: неизвестный вид или ход без периода.
@@ -23,6 +25,8 @@ const (
 	SignalAFSKPRBS SignalKind = "afsk_prbs"
 	// SignalBeacon — маяк КА: кадр AX.25 раз в Period, модуляция по Modem.
 	SignalBeacon SignalKind = "beacon"
+	// SignalSSTV — картинка SSTV в режиме SSTVMode поверх ЧМ раз в Period.
+	SignalSSTV SignalKind = "sstv"
 )
 
 // BeaconModem — модуляция кадра маяка; названия совпадают с демодуляторами канала.
@@ -60,8 +64,15 @@ type Signal struct {
 	PassPeriod  time.Duration
 
 	Frame  ax25.Frame    // кадр маяка
-	Period time.Duration // интервал между началами кадров маяка
+	Period time.Duration // интервал между началами кадров маяка или передач SSTV
 	Modem  BeaconModem   // модуляция маяка
+
+	SSTVMode sstv.Mode   // режим SSTV
+	Image    image.Image // картинка SSTV; nil — испытательная таблица
+	// Audio — записанный звук SSTV с частотой AudioRate: передаётся вместо картинки
+	// SSTVMode, приведённый к полной девиации.
+	Audio     []float32
+	AudioRate float64
 }
 
 // cleanGen выдаёт сигнал без сдвига по частоте, с единичной амплитудой.
@@ -104,6 +115,12 @@ func newSignalSource(sig Signal, sampleRate float64) (*signalSource, error) {
 			return nil, err
 		}
 		gen = b
+	case SignalSSTV:
+		g, err := newSSTVGen(sig, sampleRate)
+		if err != nil {
+			return nil, err
+		}
+		gen = g
 	default:
 		return nil, fmt.Errorf("%w: unknown kind %q", ErrInvalidSignal, sig.Kind)
 	}

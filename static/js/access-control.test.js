@@ -213,6 +213,28 @@ test('release posts, re-reads the role and leaves the panel quiet', async () => 
     assert.strictEqual(ac.getState().notice, '');
 });
 
+test('a panel notice clears itself, the wait for an answer stays', async () => {
+    const ac = new AccessControl({
+        fetchImpl: makeFetch({
+            'GET /api/access': VIEWER,
+            'POST /api/access/request': { status: 202, body: { status: 'pending' } },
+        }),
+        doc: makeDoc(),
+        noticeMs: 30,
+    });
+    ac.setNotice('Демодулятор не переключён: HTTP 405');
+    assert.strictEqual(ac.getState().notice, 'Демодулятор не переключён: HTTP 405');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.strictEqual(ac.getState().notice, '');
+    await ac.requestControl();
+    assert.ok(/ждём ответа/.test(ac.getState().notice), ac.getState().notice);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    assert.ok(/ждём ответа/.test(ac.getState().notice), 'the pending wait is not a flash message');
+    ac.setNotice('');
+    assert.strictEqual(ac.getState().notice, '');
+    ac.stop();
+});
+
 test('SSE denied ends the wait and names the reason', async () => {
     const doc = makeDoc();
     const ac = new AccessControl({ fetchImpl: makeFetch({
@@ -260,7 +282,7 @@ test('onChange fires on every state change and can be removed', async () => {
 
 test('describeAccess: viewer is in view mode and can open the control dialog', () => {
     const d = describeAccess({ role: 'viewer', controllerActive: false, requestPending: false });
-    assert.strictEqual(d.roleLabel, 'Режим: Просмотр');
+    assert.strictEqual(d.roleLabel, 'Просмотр');
     assert.strictEqual(d.showManage, true);
     assert.strictEqual(d.canRequest, true);
     assert.strictEqual(d.showRevoke, false);
@@ -269,7 +291,7 @@ test('describeAccess: viewer is in view mode and can open the control dialog', (
 
 test('describeAccess: master is in control mode and can take control back from a slave', () => {
     const d = describeAccess({ role: 'master', controllerActive: true, controllerAddr: '10.0.0.5' });
-    assert.strictEqual(d.roleLabel, 'Режим: Контроль');
+    assert.strictEqual(d.roleLabel, 'Контроль');
     assert.strictEqual(d.showRevoke, true);
     assert.ok(/10\.0\.0\.5/.test(d.detail), d.detail);
     assert.strictEqual(d.showManage, false);
@@ -278,7 +300,7 @@ test('describeAccess: master is in control mode and can take control back from a
 
 test('describeAccess: controller is in control mode and can only give it back; viewer sees someone else controls', () => {
     const c = describeAccess({ role: 'controller', controllerActive: true });
-    assert.strictEqual(c.roleLabel, 'Режим: Контроль');
+    assert.strictEqual(c.roleLabel, 'Контроль');
     assert.strictEqual(c.showManage || c.showRevoke, false);
     assert.strictEqual(c.showRelease, true);
     const v = describeAccess({ role: 'viewer', controllerActive: true, requestPending: false });
@@ -360,7 +382,7 @@ async function viewerPanel(routes) {
 
 test('panel: viewer sees the mode and one button; it opens the dialog', async () => {
     const { els } = await viewerPanel();
-    assert.strictEqual(els.role.textContent, 'Режим: Просмотр');
+    assert.strictEqual(els.role.textContent, 'Просмотр');
     assert.strictEqual(els.manage.hidden, false);
     assert.strictEqual(isOpen(els), false);
     els.manage.fire('click');
@@ -373,7 +395,7 @@ test('panel: master does not see the control button', async () => {
     await ac.refresh();
     const els = makePanelEls();
     new AccessPanel(ac, els);
-    assert.strictEqual(els.role.textContent, 'Режим: Контроль');
+    assert.strictEqual(els.role.textContent, 'Контроль');
     assert.strictEqual(els.manage.hidden, true);
     assert.strictEqual(els.release.hidden, true);
 });
@@ -394,7 +416,7 @@ test('panel: controller sees «Вернуть» and gives control back with it',
     await flush();
     await flush();
     assert.ok(fetchImpl.calls.some((c) => c.key === 'POST /api/access/release'));
-    assert.strictEqual(els.role.textContent, 'Режим: Просмотр');
+    assert.strictEqual(els.role.textContent, 'Просмотр');
     assert.strictEqual(els.release.hidden, true);
     assert.strictEqual(els.manage.hidden, false);
 });
@@ -443,7 +465,7 @@ test('dialog: wrong password keeps it open with the error, right one closes it',
     await flush();
     assert.strictEqual(isOpen(els), false);
     assert.strictEqual(els.modal.password.value, '', 'password is not kept in the field');
-    assert.strictEqual(els.role.textContent, 'Режим: Контроль');
+    assert.strictEqual(els.role.textContent, 'Контроль');
 });
 
 test('dialog: empty password is not sent', async () => {

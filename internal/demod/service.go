@@ -4,27 +4,32 @@ import (
 	"bytes"
 	"encoding/hex"
 	"encoding/json"
+	"image"
 	"log/slog"
 	"strconv"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
 	"github.com/art-injener/satellite-scout/internal/geoscan"
+	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sstv"
 )
 
 // События SSE демодулятора.
 const (
 	EventTelemetry = "telemetry"
 	EventStatus    = "demod_status"
+	EventProduct   = "product"
 )
 
 // statusInterval — как часто панель приёмника получает состояние демодулятора.
 const statusInterval = time.Second
 
-// ChannelSource — текущие настройки канала тракта (хаб приёмников).
+// ChannelSource — текущие настройки канала и усиление приёмника тракта (хаб приёмников).
 type ChannelSource interface {
 	Channel(pathID string) (sdr.ChannelSettings, error)
+	GainDB(pathID string) (float32, error)
 }
 
 // Sink — получатель событий (рассылка SSE).
@@ -36,11 +41,18 @@ type Service struct {
 	channels ChannelSource
 	emit     Sink
 	now      func() time.Time
+	products *products.Store
 }
 
 // NewService создаёт сервис демодуляции.
 func NewService(channels ChannelSource, emit Sink) *Service {
 	return &Service{channels: channels, emit: emit, now: time.Now}
+}
+
+// WithProducts включает сбор картинок: без хранилища профиль SSTV принимает, но ничего не публикует.
+func (s *Service) WithProducts(store *products.Store) *Service {
+	s.products = store
+	return s
 }
 
 // TelemetryEvent — принятый кадр для таблицы телеметрии.
@@ -80,6 +92,30 @@ type StatusEvent struct {
 	FramesGood   int     `json:"frames_good"`
 	FramesBad    int     `json:"frames_bad"`
 	LastPacketMs uint64  `json:"last_packet_ms"`
+	// DemodOff — оператор выключил демодулятор: спектр идёт, кадров и снимков нет.
+	DemodOff    bool   `json:"demod_off,omitempty"`
+	BandwidthHz uint32 `json:"bandwidth_hz"`
+	OffsetHz    int64  `json:"offset_hz"` // по сдвигу, полосе, порогу и профилю клиенты следуют за каналом
+	// GainDB — усиление приёмника, отрицательное при АРУ; нет, если приёмник его не сообщил.
+	GainDB *float32 `json:"gain_db,omitempty"`
+	// Reception — меры хода приёма; нет, пока уровень в канале не поднимался выше порога.
+	Reception *ReceptionStages `json:"reception,omitempty"`
+	// Picture — картинка в приёме (профиль SSTV); frames_good у него — число картинок.
+	Picture *PictureProgress `json:"picture,omitempty"`
+}
+
+// ReceptionStages — по одной мере на этап приёма: несущая, такты, синхрослова.
+type ReceptionStages struct {
+	CarrierHz   float64    `json:"carrier_hz"`             // смещение от центра канала
+	DeviationHz float64    `json:"deviation_hz,omitempty"` // нет — демодулятор её не меряет
+	ClockJitter float64    `json:"clock_jitter"`           // ошибка фазы тактов, доли символа
+	Sync        *SyncStats `json:"sync,omitempty"`         // нет — кадры без синхрослова
+}
+
+// SyncStats — найденные синхрослова и ошибочные биты в них.
+type SyncStats struct {
+	Words     int `json:"words"`
+	BitErrors int `json:"bit_errors"`
 }
 
 // Run демодулирует поток тракта до его закрытия. Подходит как sdr.StreamTap.
@@ -90,6 +126,8 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 		cs         sdr.ChannelSettings
 		freq       uint64
 		lastStatus time.Time
+		picture    pictureState
+		demodOff   bool
 	)
 	for f := range frames {
 		var err error
@@ -98,15 +136,94 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 			continue
 		}
 		freq = uint64(int64(f.CenterHz) + cs.OffsetHz)
+		if cs.DemodOff {
+			if !demodOff {
+				// Выключение обрывает недоснятый кадр и забывает состояние, чтобы включение начало с чистого.
+				if picture.id != "" {
+					s.finishPicture(picture.id, nil)
+					picture = pictureState{}
+				}
+				chain = NewChain()
+				demodOff = true
+				s.sendStatus(pathID, true, freq, cs, Status{})
+				lastStatus = s.now()
+			} else if now := s.now(); now.Sub(lastStatus) >= statusInterval {
+				s.sendStatus(pathID, true, freq, cs, Status{})
+				lastStatus = now
+			}
+			continue
+		}
+		demodOff = false
 		for _, p := range chain.Process(f, cs) {
 			s.send(EventTelemetry, telemetryEvent(pathID, cs.Demod, p))
 		}
+		s.publishPictures(pathID, freq, f.TimestampMs, chain.Pictures(), &picture)
+		if picture.id != "" && chain.Status().Picture == nil {
+			// Цепочка бросила картинку (перестройка, другой профиль): сохраняется принятая часть.
+			s.finishPicture(picture.id, nil)
+			picture.id = ""
+		}
 		if now := s.now(); lastStatus.IsZero() || now.Sub(lastStatus) >= statusInterval {
-			s.send(EventStatus, statusEvent(pathID, true, freq, cs, chain.Status()))
+			s.sendStatus(pathID, true, freq, cs, chain.Status())
 			lastStatus = now
 		}
 	}
-	s.send(EventStatus, statusEvent(pathID, false, freq, cs, chain.Status()))
+	s.sendStatus(pathID, false, freq, cs, chain.Status())
+	if picture.id != "" {
+		// Поток закрылся посреди картинки: сохраняется то, что успело проявиться.
+		s.finishPicture(picture.id, nil)
+	}
+}
+
+// pictureState — картинка, которая сейчас проявляется в тракте.
+type pictureState struct {
+	id     string
+	sentMs uint64 // время потока, когда ушло последнее событие хода
+}
+
+// publishPictures переносит события декодера картинок в хранилище и SSE `product`;
+// ход проявления — не чаще statusInterval по времени потока: запись проигрывается
+// быстрее реального.
+func (s *Service) publishPictures(pathID string, freq, nowMs uint64, events []sstv.Event, st *pictureState) {
+	if s.products == nil {
+		return
+	}
+	for _, e := range events {
+		switch e.Kind {
+		case sstv.EventStart:
+			if st.id != "" {
+				s.finishPicture(st.id, nil)
+			}
+			p := s.products.Begin(products.Meta{
+				RadioPath: pathID, Kind: products.KindSSTV, Mode: e.Mode.ID, ModeName: e.Mode.Name, FrequencyHz: freq,
+			}, e.Image)
+			st.id, st.sentMs = p.ID, nowMs
+			s.send(EventProduct, p)
+		case sstv.EventLines:
+			if st.id == "" {
+				continue
+			}
+			p := s.products.Update(st.id, e.Lines, e.Image)
+			if nowMs-st.sentMs >= uint64(statusInterval.Milliseconds()) {
+				s.send(EventProduct, p)
+				st.sentMs = nowMs
+			}
+		case sstv.EventDone:
+			if st.id != "" {
+				s.finishPicture(st.id, e.Image)
+				st.id = ""
+			}
+		}
+	}
+}
+
+func (s *Service) finishPicture(id string, img *image.RGBA) {
+	p, err := s.products.Finish(id, img)
+	if err != nil {
+		slog.Error("demod: save picture", slog.String("id", id), slog.Any("error", err))
+		return
+	}
+	s.send(EventProduct, p)
 }
 
 func (s *Service) send(eventType string, v any) {
@@ -150,11 +267,28 @@ func geoscanParams(f ax25.Frame) []TelemetryParam {
 	return out
 }
 
+// sendStatus рассылает состояние демодулятора вместе с усилением приёмника.
+func (s *Service) sendStatus(pathID string, active bool, freq uint64, cs sdr.ChannelSettings, st Status) {
+	ev := statusEvent(pathID, active, freq, cs, st)
+	if g, err := s.channels.GainDB(pathID); err == nil {
+		ev.GainDB = &g
+	}
+	s.send(EventStatus, ev)
+}
+
 func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings, st Status) StatusEvent {
-	return StatusEvent{
+	if cs.DemodOff {
+		st = Status{}
+	}
+	demod := st.Demod
+	if demod == "" {
+		demod = cs.Demod
+	}
+	ev := StatusEvent{
 		RadioPath:    pathID,
 		Active:       active,
-		Demod:        st.Demod,
+		Demod:        demod,
+		DemodOff:     cs.DemodOff,
 		Supported:    st.Supported,
 		FrequencyHz:  freq,
 		LevelDBFS:    st.LevelDBFS,
@@ -163,7 +297,17 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		FramesGood:   st.Good,
 		FramesBad:    st.Bad,
 		LastPacketMs: st.LastPacketMs,
+		BandwidthHz:  cs.BandwidthHz,
+		OffsetHz:     cs.OffsetHz,
+		Picture:      st.Picture,
 	}
+	if st.Measured {
+		ev.Reception = &ReceptionStages{CarrierHz: st.CarrierHz, DeviationHz: st.DeviationHz, ClockJitter: st.ClockJitter}
+		if st.SyncCounted {
+			ev.Reception.Sync = &SyncStats{Words: st.SyncWords, BitErrors: st.SyncBitErrors}
+		}
+	}
+	return ev
 }
 
 // callsign — позывной с SSID, как его пишут радиолюбители: SCOUT-1; SSID 0 не пишется.

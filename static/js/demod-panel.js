@@ -1,12 +1,21 @@
-// demod-panel.js — блок «Демодулятор»: текущий канал + сетка метрик.
+// demod-panel.js — блок «Обработка»: этапы приёма по порядку (сигнал, несущая,
+// такты, синхрослово, кадры), диагноз первого неисправного этапа и лента кадров за 60 с.
 //
-// MVP: один канал. Обновление шапки — по событию panorama:tune или вызову setChannel()
-// из ManualLayout. Метрики живого режима — из SSE `demod_status`; mock — пока у станции
-// нет радиотракта.
+// Живой режим — из SSE `demod_status` (internal/demod.StatusEvent), mock — пока у станции
+// нет радиотракта. Шапка канала обновляется вызовом setChannel() из ManualLayout.
 
 'use strict';
 
 (function() {
+
+    const STAGE_KEYS = ['signal', 'carrier', 'clock', 'sync', 'frames'];
+    const STAGE_STATES = ['ok', 'warn', 'bad', 'idle'];
+    // Ошибка фазы тактов ниже этой доли символа — захват: на шуме она около четверти.
+    const CLOCK_LOCK_JITTER = 0.12;
+    // BER по синхрословам выше этого — линия на грани: CRC будет сходиться редко.
+    const SYNC_BER_WARN = 0.05;
+    const STRIP_WINDOW_MS = 60000;
+    const STAGE_NAMES = { signal: 'Сигнал', carrier: 'Несущая', clock: 'Такты', sync: 'Синхро', frames: 'Кадры' };
 
     /** Частота в MHz для отображения (десятичная запятая). */
     function formatFreqMHz(freqMHz) {
@@ -16,84 +25,27 @@
         return freqMHz.toFixed(3).replace('.', ',');
     }
 
-    /** Подбор mock-метрик по строке модуляции. */
-    function metricsFromTx(tx) {
-        const active = tx.active !== false;
-        const mod = (tx.modulation || '').toLowerCase();
-        let pipeline = tx.modulation || '—';
-        let rate = '—';
-
-        if (mod.indexOf('fsk') >= 0 && (mod.indexOf('1k2') >= 0 || mod.indexOf('1200') >= 0)) {
-            pipeline = 'FSK 1200';
-            rate = '1.2 ksym/s';
-        } else if (mod.indexOf('fsk') >= 0 && mod.indexOf('9600') >= 0) {
-            pipeline = 'FSK 9600';
-            rate = '9.6 ksym/s';
-        } else if (mod.indexOf('afsk') >= 0) {
-            pipeline = 'AFSK 1200';
-            rate = '1.2 ksym/s';
-        } else if (mod.indexOf('bpsk') >= 0) {
-            pipeline = 'BPSK 1200';
-            rate = '1.2 ksym/s';
-        } else if (mod.indexOf('fm') >= 0) {
-            pipeline = 'FM';
-            rate = '—';
-        }
-
-        if (!active) {
-            return {
-                lock: false,
-                pipeline: pipeline,
-                snr: '—',
-                cn0: '—',
-                esn0: '—',
-                ber: '—',
-                rssi: '—',
-                afc: '—',
-                foff: '—',
-                fec: '—',
-                squelch: 'Closed',
-                squelchClosed: true,
-                rate: rate,
-                frames: '0',
-                sync: '0',
-                crc: '—',
-                last: '—',
-            };
-        }
-
-        return {
-            lock: true,
-            pipeline: pipeline,
-            snr: '12.4 dB',
-            cn0: '52.3 dB·Hz',
-            esn0: '8.4 dB',
-            ber: '3.2e-4',
-            rssi: '−42 dBm',
-            afc: '−18 Hz',
-            foff: '+1.2 kHz',
-            fec: '12 B',
-            squelch: 'Open / −85 dB',
-            squelchClosed: false,
-            rate: rate,
-            frames: '128',
-            sync: '131',
-            crc: 'OK',
-            last: '0.8 s',
-        };
+    /** Частота в Гц или кГц с десятичной запятой; signed — со знаком, минус типографский. */
+    function formatHz(hz, signed) {
+        const abs = Math.abs(hz);
+        const text = abs >= 1000
+            ? (abs / 1000).toFixed(1).replace('.', ',') + ' кГц'
+            : Math.round(abs) + ' Гц';
+        if (!signed || Math.round(abs) === 0) { return text; }
+        return (hz < 0 ? '−' : '+') + text;
     }
 
-    // Подписи демодуляторов сервера (internal/sdr.Demods) и скорость символов.
+    // Подписи демодуляторов сервера (internal/sdr.Demods).
     const DEMOD_LABELS = {
-        afsk1200: { pipeline: 'AFSK 1200', rate: '1.2 ksym/s' },
-        fsk9600_g3ruh: { pipeline: 'FSK 9600 G3RUH', rate: '9.6 ksym/s' },
-        fsk9600_geoscan: { pipeline: 'FSK 9600 GEOSCAN', rate: '9.6 ksym/s' },
+        afsk1200: 'AFSK 1200',
+        fsk9600_g3ruh: 'FSK 9600 G3RUH',
+        fsk9600_geoscan: 'FSK 9600 GEOSCAN',
+        sstv: 'SSTV',
     };
 
     /** Подпись демодулятора по идентификатору сервера; неизвестный — как есть. */
     function demodLabel(id) {
-        const known = DEMOD_LABELS[id];
-        return known ? known.pipeline : id;
+        return DEMOD_LABELS[id] || id;
     }
 
     /** Уровень в dBm по поправке тракта, без неё — в dBFS; минус типографский. */
@@ -106,101 +58,244 @@
 
     function formatAge(ms) {
         const s = Math.max(0, ms) / 1000;
-        return s < 10 ? s.toFixed(1) + ' s' : Math.round(s) + ' s';
+        return s < 120 ? Math.round(s) + ' с' : Math.round(s / 60) + ' мин';
+    }
+
+    /** Форма слова «кадр» для числа. */
+    function framesWord(n) {
+        const d = n % 10;
+        const dd = n % 100;
+        if (d === 1 && dd !== 11) { return 'кадр'; }
+        if (d >= 2 && d <= 4 && (dd < 12 || dd > 14)) { return 'кадра'; }
+        return 'кадров';
+    }
+
+    function stage(state, value, sub) {
+        return { state: state, value: value, sub: sub || '' };
+    }
+
+    /** Этап под своим именем: у SSTV вместо тактов и синхрослов — VIS и строки. */
+    function named(name, s) {
+        s.name = name;
+        return s;
     }
 
     /**
-     * Метрики панели из SSE `demod_status`. Чего демодулятор пока не измеряет — «—».
-     * CRC последнего кадра считает DemodPanel.applyStatus по приросту счётчиков.
-     * @param {Object} st — событие сервера (internal/demod.StatusEvent)
+     * Этапы SSTV после несущей. Декодер слушает канал и при закрытом пороге,
+     * поэтому ход картинки не приглушается. Кадров у SSTV нет: строка скрыта,
+     * итог приёма — в диагнозе и на вкладке «Снимки».
+     */
+    function sstvStages(st, out) {
+        const p = st.picture;
+        out.clock = named('VIS', p
+            ? stage('ok', p.mode_name || p.mode, 'заголовок принят')
+            : stage('idle', 'ждём', 'заголовок VIS'));
+        out.sync = named('Строки', p
+            ? stage('ok', p.lines + ' / ' + p.height, 'строк')
+            : stage('idle', '—', 'строк'));
+        out.frames = stage('idle', '—');
+        out.frames.hidden = true;
+        return out;
+    }
+
+    /**
+     * Этапы приёма из `demod_status`. Меры несущей, тактов и синхрослов сервер снимает
+     * только с сигнала выше порога: при закрытом пороге они остаются от последнего сигнала
+     * и показываются приглушёнными.
+     * @param {Object} st — событие сервера
      * @param {?number} levelOffset — сдвиг dBFS в dBm, null — без поправки
+     */
+    function stagesFromStatus(st, levelOffset) {
+        if (st.demod_off) {
+            const idle = stage('idle', '—');
+            return { signal: idle, carrier: stage('idle', '—'), clock: stage('idle', '—'), sync: stage('idle', '—'), frames: stage('idle', '—') };
+        }
+        const open = st.active && st.squelch_open;
+        const rx = st.reception;
+        const dim = function(state) { return open ? state : 'idle'; };
+        const out = {
+            signal: stage(open ? 'ok' : 'idle', formatLevel(st.level_dbfs, levelOffset),
+                'порог ' + formatLevel(st.squelch_dbfs, levelOffset)),
+        };
+
+        if (!rx) {
+            out.carrier = stage('idle', '—');
+            out.clock = stage('idle', '—');
+            out.sync = stage('idle', '—');
+        } else {
+            const bw = st.bandwidth_hz || 0;
+            const drift = bw > 0 && Math.abs(rx.carrier_hz) > bw / 4;
+            out.carrier = stage(dim(drift ? 'warn' : 'ok'), formatHz(rx.carrier_hz, true),
+                rx.deviation_hz ? 'девиация ' + formatHz(rx.deviation_hz, false) : '');
+
+            const locked = rx.clock_jitter < CLOCK_LOCK_JITTER;
+            out.clock = stage(dim(locked ? 'ok' : 'bad'), locked ? 'захват' : 'нет захвата',
+                'джиттер ' + Math.round(rx.clock_jitter * 100) + ' %');
+
+            if (!rx.sync) {
+                out.sync = stage('idle', 'HDLC', 'флаги, без синхрослова');
+            } else if (rx.sync.words === 0) {
+                out.sync = stage('idle', '0');
+            } else {
+                const ber = rx.sync.bit_errors / (32 * rx.sync.words);
+                out.sync = stage(dim(ber > SYNC_BER_WARN ? 'warn' : 'ok'), String(rx.sync.words),
+                    'BER ' + ber.toExponential(1).replace('.', ','));
+            }
+        }
+
+        if (st.demod === 'sstv') { return sstvStages(st, out); }
+
+        const good = st.frames_good;
+        const bad = st.frames_bad;
+        const framesState = good > 0 ? 'ok' : (bad > 0 ? 'bad' : 'idle');
+        out.frames = stage(framesState, good + bad > 0 ? good + ' / ' + bad : '—', 'CRC верна / нет');
+        return out;
+    }
+
+    /**
+     * Диагноз: первый этап, на котором приём обрывается, или итог приёма.
+     * @param {Object} st — событие сервера
+     * @param {Object} stages — результат stagesFromStatus
      * @param {number} nowMs — текущее время, мс эпохи
      */
-    function metricsFromStatus(st, levelOffset, nowMs) {
-        const known = DEMOD_LABELS[st.demod];
-        const open = st.active && st.squelch_open;
-        return {
-            lock: st.active && st.supported,
-            pipeline: st.supported && known ? known.pipeline : st.demod + ' — не реализован',
-            snr: '—',
-            cn0: '—',
-            esn0: '—',
-            ber: '—',
-            rssi: formatLevel(st.level_dbfs, levelOffset),
-            afc: '—',
-            foff: '—',
-            fec: '—',
-            squelch: (open ? 'Open' : 'Closed') + ' / ' + formatLevel(st.squelch_dbfs, levelOffset),
-            squelchClosed: !open,
-            rate: known ? known.rate : '—',
-            frames: String(st.frames_good),
-            sync: String(st.frames_good + st.frames_bad),
-            crc: '—',
-            last: st.last_packet_ms ? formatAge(nowMs - st.last_packet_ms) : '—',
-        };
+    function diagnose(st, stages, nowMs) {
+        const good = st.frames_good;
+        const age = st.last_packet_ms ? ', последний ' + formatAge(nowMs - st.last_packet_ms) + ' назад' : '';
+        const rx = st.reception;
+        if (!st.active) { return { state: 'idle', text: 'Поток приёмника остановлен' }; }
+        if (st.demod_off) { return { state: 'idle', text: 'Демодулятор выключен' }; }
+        if (!st.supported) { return { state: 'bad', text: 'Демодулятор ' + st.demod + ' не реализован' }; }
+        if (st.demod === 'sstv') { return diagnoseSSTV(st); }
+        if (!st.squelch_open) {
+            return good > 0
+                ? { state: 'idle', text: 'Сигнала нет; кадров принято: ' + good + age }
+                : { state: 'idle', text: 'Нет сигнала выше порога' };
+        }
+        if (stages.carrier.state === 'warn') {
+            return { state: 'warn', text: 'Несущая ушла на ' + stages.carrier.value + ' от центра канала: поправьте сдвиг' };
+        }
+        if (stages.clock.state === 'bad') {
+            return { state: 'bad', text: 'Нет захвата тактов: проверьте профиль и полосу' };
+        }
+        if (good === 0) {
+            const syncs = rx && rx.sync ? rx.sync.words : null;
+            if (syncs === 0) { return { state: 'warn', text: 'Такты есть, синхрослово не найдено' }; }
+            if (st.frames_bad > 0 || syncs > 0) {
+                return { state: 'bad', text: syncs === null
+                    ? 'Флаги HDLC есть, CRC не сходится'
+                    : 'Синхрослова есть, CRC не сходится' };
+            }
+            return { state: 'idle', text: 'Сигнал есть, ждём кадр' };
+        }
+        return { state: 'ok', text: 'Приём идёт: ' + good + ' ' + framesWord(good) + age };
     }
 
-    /** Метрики живого режима до первого состояния с сервера. */
-    function idleLiveMetrics(pipeline) {
+    function diagnoseSSTV(st) {
+        const p = st.picture;
+        if (p && p.lines === 0) {
+            return { state: 'ok', text: 'Обнаружен сигнал SSTV: ' + (p.mode_name || p.mode) };
+        }
+        if (p) {
+            return { state: 'ok', text: 'Идёт обработка: ' + (p.mode_name || p.mode) + ', ' + p.lines + ' из ' + p.height + ' строк' };
+        }
+        if (st.frames_good > 0) {
+            return { state: 'ok', text: 'Приём завершён; принято картинок: ' + st.frames_good };
+        }
+        if (!st.squelch_open) { return { state: 'idle', text: 'Нет сигнала выше порога' }; }
+        return { state: 'idle', text: 'Сигнал есть, ждём заголовок VIS' };
+    }
+
+    /** Этапы имитации, пока у станции нет радиотракта. */
+    function mockStages(active) {
+        if (!active) {
+            const out = {};
+            for (const k of STAGE_KEYS) { out[k] = stage('idle', '—'); }
+            return out;
+        }
         return {
-            lock: false, pipeline: pipeline || '—', snr: '—', cn0: '—', esn0: '—', ber: '—', rssi: '—',
-            afc: '—', foff: '—', fec: '—', squelch: '—', squelchClosed: true, rate: '—',
-            frames: '—', sync: '—', crc: '—', last: '—',
+            signal: stage('ok', '−42 dBm', 'порог −85 dBm'),
+            carrier: stage('ok', '+1,2 кГц', 'девиация 2,4 кГц'),
+            clock: stage('ok', 'захват', 'джиттер 4 %'),
+            sync: stage('ok', '131', 'BER 3,2e-4'),
+            frames: stage('ok', '128 / 3', 'CRC верна / нет'),
         };
     }
 
     /**
-     * DemodPanel — шапка текущего канала и сетка метрик.
+     * FrameStrip — кадры за последнее окно времени для ленты: верные и с ошибкой CRC.
+     * @param {number} windowMs
+     */
+    function FrameStrip(windowMs) {
+        this._window = windowMs;
+        this._items = [];
+    }
+
+    /** Добавляет count кадров вида kind ('good' | 'bad') в момент tMs. */
+    FrameStrip.prototype.add = function(kind, tMs, count) {
+        for (let i = 0; i < count; i++) {
+            this._items.push({ kind: kind, t: tMs });
+        }
+    };
+
+    FrameStrip.prototype.clear = function() {
+        this._items = [];
+    };
+
+    /** Кадры окна, заканчивающегося в nowMs; x — доля окна от его начала (0…1). */
+    FrameStrip.prototype.points = function(nowMs) {
+        const start = nowMs - this._window;
+        this._items = this._items.filter(function(it) { return it.t >= start; });
+        const w = this._window;
+        return this._items.map(function(it) {
+            return { kind: it.kind, x: Math.min(1, (it.t - start) / w) };
+        });
+    };
+
+    /**
+     * DemodPanel — шапка канала и блок «Обработка».
      * @param {Object} [opts]
-     * @param {HTMLElement} [opts.root] — #manual-demod-panel
+     * @param {function(): number} [opts.now] — часы, мс эпохи
      */
     function DemodPanel(opts) {
         opts = opts || {};
-        this._root = opts.root || document.getElementById('manual-demod-panel');
+        this._now = opts.now || Date.now;
         this._channel = null;
-        this._metrics = null;
-        this._mockTimer = null;
+        this._live = false;
+        this._counts = { good: 0, bad: 0 };
+        this._strip = new FrameStrip(STRIP_WINDOW_MS);
 
         this._els = {
             lockHead: document.getElementById('manual-ch-lock'),
             name: document.getElementById('manual-ch-name'),
             freq: document.getElementById('manual-ch-freq'),
             pipeline: document.getElementById('manual-ch-pipeline'),
-            dmLock: document.getElementById('manual-dm-lock'),
-            snr: document.getElementById('manual-dm-snr'),
-            cn0: document.getElementById('manual-dm-cn0'),
-            esn0: document.getElementById('manual-dm-esn0'),
-            pipelineVal: document.getElementById('manual-dm-pipeline'),
-            ber: document.getElementById('manual-dm-ber'),
-            rssi: document.getElementById('manual-dm-rssi'),
-            afc: document.getElementById('manual-dm-afc'),
-            foff: document.getElementById('manual-dm-foff'),
-            fec: document.getElementById('manual-dm-fec'),
-            squelch: document.getElementById('manual-dm-squelch'),
-            rate: document.getElementById('manual-dm-rate'),
-            frames: document.getElementById('manual-dm-frames'),
-            sync: document.getElementById('manual-dm-sync'),
-            crc: document.getElementById('manual-dm-crc'),
-            last: document.getElementById('manual-dm-last'),
+            diag: document.getElementById('manual-dm-diag'),
+            strip: document.getElementById('manual-dm-strip'),
+            stripBox: document.getElementById('manual-dm-strip-box'),
+            stages: {},
         };
-        this._frames = 0;
-        this._syncCount = 0;
-        this._lastFrameAt = 0;
-        this._live = false;
-        this._liveCounts = { good: 0, bad: 0, crc: '—' };
+        for (const k of STAGE_KEYS) {
+            this._els.stages[k] = {
+                row: document.getElementById('manual-st-' + k),
+                name: document.getElementById('manual-st-' + k + '-name'),
+                value: document.getElementById('manual-st-' + k + '-val'),
+                sub: document.getElementById('manual-st-' + k + '-sub'),
+            };
+        }
     }
 
     /**
-     * Живой режим — у станции есть радиотракт: метрики только из applyStatus, mock выключен.
+     * Живой режим — у станции есть радиотракт: этапы только из applyStatus.
      * @param {boolean} live
      */
     DemodPanel.prototype.setLive = function(live) {
         if (this._live === live) { return; }
         this._live = live;
+        this._counts = { good: 0, bad: 0 };
+        this._strip.clear();
         if (live) {
-            this._stopMockDrift();
-            this._liveCounts = { good: 0, bad: 0, crc: '—' };
-            this._applyMetrics(idleLiveMetrics());
+            this._render(mockStages(false), { state: 'idle', text: 'Ждём состояние приёмника' });
+            this._renderStrip();
         } else if (this._channel) {
             this.setChannel(this._channel);
         }
@@ -213,19 +308,22 @@
      */
     DemodPanel.prototype.applyStatus = function(st, levelOffset) {
         if (!this._live || !st) { return; }
-        const c = this._liveCounts;
+        const now = this._now();
+        const c = this._counts;
         if (st.frames_good < c.good || st.frames_bad < c.bad) {
-            c.crc = '—'; // новый сеанс потока: счётчики начались заново
-        } else if (st.frames_good > c.good) {
-            c.crc = 'OK';
-        } else if (st.frames_bad > c.bad) {
-            c.crc = 'FAIL';
+            this._strip.clear(); // новый сеанс потока: счётчики начались заново
+        } else {
+            this._strip.add('good', now, st.frames_good - c.good);
+            this._strip.add('bad', now, st.frames_bad - c.bad);
         }
         c.good = st.frames_good;
         c.bad = st.frames_bad;
-        const m = metricsFromStatus(st, levelOffset, Date.now());
-        m.crc = c.crc;
-        this._applyMetrics(m);
+
+        const stages = stagesFromStatus(st, levelOffset);
+        this._render(stages, diagnose(st, stages, now));
+        // Лента кадров у SSTV пуста: картинка идёт минуты, её ход виден в этапах.
+        if (this._els.stripBox) { this._els.stripBox.hidden = st.demod === 'sstv'; }
+        this._renderStrip();
     };
 
     DemodPanel.prototype.setChannel = function(ch) {
@@ -237,16 +335,10 @@
         if (this._live) {
             return;
         }
-        this._applyMetrics(metricsFromTx(ch));
-        if (ch.active !== false) {
-            this._startMockDrift();
-        } else {
-            this._stopMockDrift();
-        }
-    };
-
-    DemodPanel.prototype.applyMetrics = function(metrics) {
-        this._applyMetrics(metrics || {});
+        const active = ch.active !== false;
+        this._render(mockStages(active), active
+            ? { state: 'ok', text: 'Имитация: у станции нет радиотракта' }
+            : { state: 'idle', text: 'Нет сигнала выше порога' });
     };
 
     DemodPanel.prototype.getChannel = function() {
@@ -273,141 +365,44 @@
         }
     };
 
-    DemodPanel.prototype._applyMetrics = function(metrics) {
-        this._metrics = metrics;
-        const els = this._els;
-        const locked = metrics.lock === true;
-
-        if (els.dmLock) {
-            els.dmLock.textContent = locked ? '●' : '○';
-            els.dmLock.classList.toggle('ml-demod__value--ok', locked);
-            els.dmLock.classList.toggle('ml-demod__value--idle', !locked);
-        }
-        if (els.snr) {
-            this._setText(els.snr, metrics.snr, locked);
-        }
-        if (els.cn0) {
-            this._setText(els.cn0, metrics.cn0, locked);
-        }
-        if (els.esn0) {
-            this._setText(els.esn0, metrics.esn0, locked);
-        }
-        if (els.pipelineVal) {
-            this._setText(els.pipelineVal, metrics.pipeline, locked);
-        }
-        if (els.ber) {
-            this._setText(els.ber, metrics.ber, locked);
-        }
-        if (els.rssi) {
-            this._setText(els.rssi, metrics.rssi, locked);
-        }
-        if (els.afc) {
-            this._setText(els.afc, metrics.afc, locked);
-        }
-        if (els.foff) {
-            this._setText(els.foff, metrics.foff, locked);
-        }
-        if (els.fec) {
-            this._setText(els.fec, metrics.fec, locked);
-        }
-        if (els.squelch) {
-            const squelchOpen = !metrics.squelchClosed && locked;
-            els.squelch.textContent = metrics.squelch != null ? String(metrics.squelch) : '—';
-            els.squelch.classList.toggle('ml-demod__value--ok', squelchOpen);
-            els.squelch.classList.toggle('ml-demod__value--idle', !locked || metrics.squelch === '—');
-        }
-        if (els.rate) {
-            this._setText(els.rate, metrics.rate, locked);
-        }
-        if (els.frames) {
-            this._setText(els.frames, metrics.frames, locked);
-        }
-        if (els.sync) {
-            this._setText(els.sync, metrics.sync, locked);
-        }
-        if (els.crc) {
-            const crcOk = metrics.crc === 'OK';
-            els.crc.textContent = metrics.crc != null ? String(metrics.crc) : '—';
-            els.crc.classList.toggle('ml-demod__value--ok', crcOk);
-            els.crc.classList.toggle('ml-demod__value--idle', !locked || metrics.crc === '—');
-            els.crc.classList.toggle('ml-demod__value--bad', metrics.crc === 'FAIL');
-        }
-        if (els.last) {
-            this._setText(els.last, metrics.last, locked);
-        }
-        this._frames = parseInt(metrics.frames, 10) || 0;
-        this._syncCount = parseInt(metrics.sync, 10) || 0;
-        this._lastFrameAt = locked ? Date.now() : 0;
-    };
-
-    DemodPanel.prototype._setText = function(el, value, locked) {
-        el.textContent = value != null ? String(value) : '—';
-        el.classList.toggle('ml-demod__value--idle', !locked || value === '—');
-    };
-
-    /** Имитация дрейфа метрик при активном канале. */
-    DemodPanel.prototype._startMockDrift = function() {
-        this._stopMockDrift();
-        const self = this;
-        this._mockTimer = setInterval(function() {
-            if (!self._metrics || self._metrics.lock !== true) {
-                return;
-            }
-            const els = self._els;
-
-            const snrBase = 12.4 + (Math.random() - 0.5) * 1.2;
-            const afcBase = -18 + Math.round((Math.random() - 0.5) * 8);
-            const foffBase = 1.2 + (Math.random() - 0.5) * 0.4;
-            const cn0Base = 52.3 + (Math.random() - 0.5) * 1.5;
-            const esn0Base = snrBase - 4.0 + (Math.random() - 0.5) * 0.3;
-            const rssiBase = -42 + Math.round((Math.random() - 0.5) * 4);
-
-            if (els.snr) { els.snr.textContent = snrBase.toFixed(1) + ' dB'; }
-            if (els.cn0) { els.cn0.textContent = cn0Base.toFixed(1) + ' dB·Hz'; }
-            if (els.esn0) { els.esn0.textContent = esn0Base.toFixed(1) + ' dB'; }
-            if (els.rssi) { els.rssi.textContent = rssiBase + ' dBm'; }
-            if (els.afc) {
-                const afcSign = afcBase >= 0 ? '+' : '';
-                els.afc.textContent = afcSign + afcBase + ' Hz';
-            }
-            if (els.foff) {
-                const foffSign = foffBase >= 0 ? '+' : '';
-                els.foff.textContent = foffSign + foffBase.toFixed(2) + ' kHz';
-            }
-
-            if (Math.random() < 0.55) {
-                self._frames += 1;
-                self._syncCount += 1;
-                self._lastFrameAt = Date.now();
-                if (els.frames) { els.frames.textContent = String(self._frames); }
-                if (els.sync) { els.sync.textContent = String(self._syncCount); }
-                if (els.fec) {
-                    const fecBytes = Math.floor(Math.random() * 18);
-                    els.fec.textContent = fecBytes + ' B';
+    DemodPanel.prototype._render = function(stages, diag) {
+        for (const k of STAGE_KEYS) {
+            const el = this._els.stages[k];
+            const s = stages[k];
+            if (el.row) {
+                el.row.hidden = s.hidden === true;
+                for (const state of STAGE_STATES) {
+                    el.row.classList.toggle('ml-stage--' + state, s.state === state);
                 }
-            } else if (Math.random() < 0.2) {
-                self._syncCount += 1;
-                if (els.sync) { els.sync.textContent = String(self._syncCount); }
             }
-
-            if (els.last && self._lastFrameAt > 0) {
-                const dt = (Date.now() - self._lastFrameAt) / 1000;
-                els.last.textContent = dt < 10 ? dt.toFixed(1) + ' s' : Math.round(dt) + ' s';
+            if (el.name) { el.name.textContent = s.name || STAGE_NAMES[k]; }
+            if (el.value) { el.value.textContent = s.value; }
+            if (el.sub) { el.sub.textContent = s.sub; }
+        }
+        const d = this._els.diag;
+        if (d) {
+            d.textContent = diag.text;
+            for (const state of STAGE_STATES) {
+                d.classList.toggle('ml-diag--' + state, diag.state === state);
             }
-        }, 1200);
+        }
     };
 
-    DemodPanel.prototype._stopMockDrift = function() {
-        if (this._mockTimer) {
-            clearInterval(this._mockTimer);
-            this._mockTimer = null;
+    DemodPanel.prototype._renderStrip = function() {
+        const host = this._els.strip;
+        if (!host) { return; }
+        host.replaceChildren();
+        for (const p of this._strip.points(this._now())) {
+            const dot = document.createElement('span');
+            dot.className = 'ml-strip__dot ml-strip__dot--' + p.kind;
+            dot.style.left = (p.x * 100) + '%';
+            host.appendChild(dot);
         }
     };
 
     DemodPanel.prototype.destroy = function() {
-        this._stopMockDrift();
         this._channel = null;
-        this._metrics = null;
+        this._strip.clear();
     };
 
     if (typeof window !== 'undefined') {
@@ -419,10 +414,12 @@
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
         module.exports = { // eslint-disable-line no-undef
             DemodPanel: DemodPanel,
+            FrameStrip: FrameStrip,
             formatFreqMHz: formatFreqMHz,
-            metricsFromTx: metricsFromTx,
-            metricsFromStatus: metricsFromStatus,
+            formatHz: formatHz,
             demodLabel: demodLabel,
+            stagesFromStatus: stagesFromStatus,
+            diagnose: diagnose,
         };
     }
 })();

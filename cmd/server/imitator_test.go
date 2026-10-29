@@ -2,6 +2,9 @@ package main
 
 import (
 	"context"
+	"image"
+	"image/png"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
@@ -144,6 +147,10 @@ func TestImitatorOptions_EveryConfigKindStarts(t *testing.T) {
 		signals = append(signals, config.ImitatorSignal{Kind: config.ImitatorBeacon, FreqHz: 436_500_000, LevelDBFS: -40,
 			PeriodS: 10, Modem: m})
 	}
+	for _, m := range config.ImitatorSSTVModes {
+		signals = append(signals, config.ImitatorSignal{Kind: config.ImitatorSSTV, FreqHz: 436_500_000, LevelDBFS: -40,
+			PeriodS: 10, SSTVMode: m})
+	}
 	for _, s := range signals {
 		r := imitator.New(mustOpts(t, &config.ImitatorConfig{Signals: []config.ImitatorSignal{s}}))
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
@@ -157,5 +164,62 @@ func TestImitatorOptions_EveryConfigKindStarts(t *testing.T) {
 		for range ch {
 		}
 		_ = r.Stop()
+	}
+}
+
+func TestImitatorOptions_MapsSSTV(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "pic.png")
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := png.Encode(f, image.NewRGBA(image.Rect(0, 0, 8, 8))); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	opts := mustOpts(t, &config.ImitatorConfig{Signals: []config.ImitatorSignal{
+		{Kind: config.ImitatorSSTV, FreqHz: 436_500_000, PeriodS: 200, SSTVMode: "pd180", Image: path},
+		{Kind: config.ImitatorSSTV, FreqHz: 436_500_000, PeriodS: 60},
+	}})
+	pd, robot := opts.Signals[0], opts.Signals[1]
+	if pd.SSTVMode.ID != "pd180" || pd.Period != 200*time.Second || pd.Image == nil || pd.Image.Bounds().Dx() != 8 {
+		t.Errorf("pd180 signal: mode %q period %v image %v", pd.SSTVMode.ID, pd.Period, pd.Image != nil)
+	}
+	if robot.SSTVMode.ID != "robot36" || robot.Image != nil {
+		t.Errorf("default signal: mode %q image %v, want robot36 and the test pattern", robot.SSTVMode.ID, robot.Image != nil)
+	}
+
+	_, err = imitatorOptions(&config.ImitatorConfig{Signals: []config.ImitatorSignal{
+		{Kind: config.ImitatorSSTV, FreqHz: 436_500_000, PeriodS: 60, Image: filepath.Join(dir, "missing.png")},
+	}})
+	if err == nil {
+		t.Error("missing image accepted")
+	}
+}
+
+func TestImitatorOptions_MapsSSTVRecording(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "rec.wav")
+	// 16-bit mono PCM at 8 kHz, three samples.
+	wavFile := []byte("RIFF\x2a\x00\x00\x00WAVEfmt \x10\x00\x00\x00\x01\x00\x01\x00\x40\x1f\x00\x00" +
+		"\x80\x3e\x00\x00\x02\x00\x10\x00data\x06\x00\x00\x00\x00\x00\x00\x40\x00\xc0")
+	if err := os.WriteFile(path, wavFile, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := mustOpts(t, &config.ImitatorConfig{Signals: []config.ImitatorSignal{
+		{Kind: config.ImitatorSSTV, FreqHz: 436_500_000, PeriodS: 60, Audio: path},
+	}})
+	sig := opts.Signals[0]
+	if sig.AudioRate != 8000 || len(sig.Audio) != 3 || sig.Audio[1] != 0.5 || sig.Audio[2] != -0.5 {
+		t.Errorf("recording: rate %v samples %v", sig.AudioRate, sig.Audio)
+	}
+
+	_, err := imitatorOptions(&config.ImitatorConfig{Signals: []config.ImitatorSignal{
+		{Kind: config.ImitatorSSTV, FreqHz: 436_500_000, PeriodS: 60, Audio: filepath.Join(dir, "missing.wav")},
+	}})
+	if err == nil {
+		t.Error("missing recording accepted")
 	}
 }
