@@ -257,6 +257,11 @@ type ReceiverConfig struct {
 	// известного уровня или ориентировочно для модели приёмника. nil — калибровки нет, UI в dBFS.
 	CalibrationDB *float64 `json:"calibration_db,omitempty"`
 
+	// FreqCorrectionPPM — уход кварца приёмника в миллионных долях, как ключ -p у rtl_sdr.
+	// Положительный, если кварц быстрее номинала: без поправки сигнал виден ниже настоящей
+	// частоты, на 437 МГц около 437 Гц на каждый ppm. 0 — без поправки.
+	FreqCorrectionPPM int `json:"freq_correction_ppm,omitempty"`
+
 	// Imitator — эфир имитатора, только для DriverSimulated. nil — эфир по умолчанию:
 	// маяк каждого модема около 436,5 МГц поверх шума.
 	Imitator *ImitatorConfig `json:"imitator,omitempty"`
@@ -267,6 +272,10 @@ const (
 	CalibrationMinDB = -100.0
 	CalibrationMaxDB = 30.0
 )
+
+// FreqCorrectionMaxPPM — предел ReceiverConfig.FreqCorrectionPPM по модулю: уход дешёвых донглов
+// без термостабилизации до сотни ppm, регистр RTL2832U вмещает до 488.
+const FreqCorrectionMaxPPM = 200
 
 // DriverSimulated — драйвер приёмника-имитатора.
 const DriverSimulated = "simulated"

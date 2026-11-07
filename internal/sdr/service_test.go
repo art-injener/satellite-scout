@@ -38,6 +38,29 @@ func TestService_TestRunsDriverProbe(t *testing.T) {
 	}
 }
 
+func TestService_TestPicksTwinBySavedPath(t *testing.T) {
+	var gotPath string
+	probed := false
+	svc := NewService().WithProbe("rtlsdr", func(_, path string) (ProbeReport, error) {
+		gotPath, probed = path, true
+		return ProbeReport{Samples: 256}, nil
+	})
+	svc.discover = func() []Device { return twinDongles }
+
+	if resp := svc.Test(TestRequest{Driver: "rtlsdr", Serial: "00000001", DevicePath: "/dev/bus/usb/003/014"}); !resp.OK {
+		t.Fatalf("probe failed: %v", resp.Lines)
+	}
+	if gotPath != "/dev/bus/usb/003/014" {
+		t.Errorf("probed %q, want the saved twin /dev/bus/usb/003/014", gotPath)
+	}
+
+	probed = false
+	resp := svc.Test(TestRequest{Driver: "rtlsdr", Serial: "00000001", DevicePath: "/dev/bus/usb/003/099"})
+	if resp.OK || probed {
+		t.Errorf("stale path with twin serials: ok=%v probed=%v, want a refusal without opening", resp.OK, probed)
+	}
+}
+
 func TestService_TestReportsProbeFailure(t *testing.T) {
 	svc := serviceWithDongle(func(string, string) (ProbeReport, error) {
 		return ProbeReport{}, errors.New("device or resource busy")

@@ -49,6 +49,22 @@
             'ind-satellite-line': 'rgba(200, 208, 216, 0.35)',
             'ind-out-of-view':    'rgba(208, 85, 69, 0.5)'
         },
+        // Сигнал: зелёный «есть» и золотой «тихо» на почти чёрном фоне
+        'signal': {
+            'map-footprint':            'rgba(31, 184, 117, 0.75)',
+            'map-footprint-fill':       'rgba(31, 184, 117, 0.14)',
+            'map-selected-footprint':      'rgba(232, 202, 82, 0.70)',
+            'map-selected-footprint-fill': 'rgba(232, 202, 82, 0.12)',
+            'map-observer-label-stroke': 'rgba(0,0,0,0.9)',
+            'map-observer-label-bg':     'rgba(18, 28, 40, 0.92)',
+            'map-sat-label-stroke':      'rgba(0,0,0,0.85)',
+            'map-sat-label-bg':          'rgba(18, 28, 40, 0.92)',
+            'sky-satellite-glow':   'rgba(142, 180, 200, 0.25)',
+            'sky-satellite-signal': 'rgba(31, 184, 117, 0.35)',
+            'sky-satellite-aura':   'rgba(209, 89, 73, 0.7)',
+            'ind-satellite-line': 'rgba(215, 222, 230, 0.35)',
+            'ind-out-of-view':    'rgba(209, 89, 73, 0.5)'
+        },
         // Breeze Dark (оригинальный KDE Breeze Dark, почти чёрный)
         'breeze-dark': {
             'map-footprint':            'rgba(61, 174, 233, 0.80)',

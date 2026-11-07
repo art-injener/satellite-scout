@@ -20,7 +20,7 @@ const assert = require('assert');
 global.window = {};
 const {
     SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, DisplaySmooth,
-    markerReadout, dbmOffset, shiftLevels,
+    markerReadout, cursorSample, dbmOffset, shiftLevels, zoomView, panView, viewSlice,
 } = require('./spectrum-stream.js');
 
 const HEADER = 40;
@@ -101,6 +101,23 @@ test('parseHeader reads all fields, center above 2^32 Hz', () => {
     assert.strictEqual(h.spanHz, 2048000);
     assert.strictEqual(h.payloadLen, 8);
     assert.strictEqual(h.seq, 7);
+});
+
+test('PCM frame of the audio stream gives samples in fractions of full scale', () => {
+    const pcm = [0, 16384, -32767, 32767];
+    const f = makeFrame({ type: 0x03, centerHz: 436550000, spanHz: 12000 });
+    const dv = new DataView(f.buffer);
+    dv.setUint32(32, pcm.length * 2, true);
+    const body = new Uint8Array(pcm.length * 2);
+    const bdv = new DataView(body.buffer);
+    pcm.forEach((v, i) => bdv.setInt16(i * 2, v, true));
+
+    const frames = new FrameReader().push(concat([f, body]));
+    assert.strictEqual(frames.length, 1);
+    assert.strictEqual(frames[0].header.spanHz, 12000);
+    const got = Array.from(frames[0].values);
+    const want = [0, 0.5, -32767 / 32768, 32767 / 32768];
+    got.forEach((v, i) => assert.ok(Math.abs(v - want[i]) < 1e-6, 'sample ' + i + ': ' + v));
 });
 
 test('frame split across chunks is assembled once complete', () => {
@@ -238,6 +255,86 @@ test('markerReadout: frequency matches the bin the canvas marks, from the left e
 test('markerReadout: no data gives null', () => {
     assert.strictEqual(markerReadout(new Float32Array(0), 436500000, 2048000), null);
     assert.strictEqual(markerReadout(null, 436500000, 2048000), null);
+});
+
+test('cursorSample: fraction picks the bin on the trace and its frequency', () => {
+    // 5 bins, 4 MHz span: each step is 1 MHz, edges at ±2 MHz from 436.5
+    const bins = new Float32Array([-90, -40, -80, -70, -60]);
+    const left = cursorSample(bins, 436500000, 4000000, 0);
+    assert.strictEqual(left.index, 0);
+    assert.strictEqual(left.freqHz, 434500000);
+    assert.strictEqual(left.dbfs, -90);
+    const second = cursorSample(bins, 436500000, 4000000, 0.25);
+    assert.strictEqual(second.index, 1);
+    assert.strictEqual(second.freqHz, 435500000);
+    assert.strictEqual(second.dbfs, -40);
+    // Frequency follows the pointer; power stays on the nearest bin.
+    const between = cursorSample(bins, 436500000, 4000000, 0.2);
+    assert.strictEqual(between.index, 1);
+    assert.strictEqual(between.freqHz, 435300000);
+    assert.strictEqual(between.dbfs, -40);
+    const right = cursorSample(bins, 436500000, 4000000, 1);
+    assert.strictEqual(right.index, 4);
+    assert.strictEqual(right.freqHz, 438500000);
+});
+
+test('cursorSample: outside the plot and empty data give null', () => {
+    const bins = new Float32Array([-90, -40]);
+    assert.strictEqual(cursorSample(bins, 436500000, 4000000, -0.01), null);
+    assert.strictEqual(cursorSample(bins, 436500000, 4000000, 1.01), null);
+    assert.strictEqual(cursorSample(bins, 436500000, 0, 0.5), null);
+    assert.strictEqual(cursorSample(new Float32Array(1), 436500000, 4000000, 0.5), null);
+    assert.strictEqual(cursorSample(null, 436500000, 4000000, 0.5), null);
+});
+
+// ── Spectrum zoom window ──────────────────────────────────────────────
+
+const FULL = 2048000;
+
+test('zoomView: zoom in from the whole band keeps the point under the pointer', () => {
+    const v = zoomView(null, FULL, 4, 512000, 16000);
+    assert.deepStrictEqual(v, { offsetHz: 384000, spanHz: 512000 });
+    // the point sat at 3/4 of the band before and stays at 3/4 of the window
+    assert.strictEqual((512000 - v.offsetHz) / v.spanHz + 0.5, 0.75);
+});
+
+test('zoomView: window never narrows below the minimum span', () => {
+    assert.deepStrictEqual(zoomView({ offsetHz: 0, spanHz: 20000 }, FULL, 4, 0, 16000),
+        { offsetHz: 0, spanHz: 16000 });
+});
+
+test('zoomView: zoom out to the whole band gives null', () => {
+    assert.strictEqual(zoomView({ offsetHz: 0, spanHz: 1500000 }, FULL, 0.5, 0, 16000), null);
+});
+
+test('zoomView: window stays inside the band', () => {
+    const v = zoomView({ offsetHz: 700000, spanHz: 512000 }, FULL, 0.5, -200000, 16000);
+    assert.deepStrictEqual(v, { offsetHz: 512000, spanHz: 1024000 });
+});
+
+test('panView: shift is held at the band edge, the whole band does not pan', () => {
+    assert.deepStrictEqual(panView({ offsetHz: 0, spanHz: 512000 }, FULL, 1000000),
+        { offsetHz: 768000, spanHz: 512000 });
+    assert.deepStrictEqual(panView({ offsetHz: 0, spanHz: 512000 }, FULL, -1000000),
+        { offsetHz: -768000, spanHz: 512000 });
+    assert.strictEqual(panView(null, FULL, 5000), null);
+});
+
+test('viewSlice: bins of the window, its center and span sit on the bin grid', () => {
+    // 4096 bins over 2.048 MHz: 500 Hz per bin
+    const s = viewSlice(4096, FULL, { offsetHz: 384000, spanHz: 512000 });
+    assert.deepStrictEqual(s, { start: 2304, count: 1025, offsetHz: 384000, spanHz: 512000 });
+});
+
+test('viewSlice: window off the grid is snapped to the nearest bins', () => {
+    assert.deepStrictEqual(viewSlice(4096, FULL, { offsetHz: 1234, spanHz: 16000 }),
+        { start: 2034, count: 33, offsetHz: 1000, spanHz: 16000 });
+});
+
+test('viewSlice: window at the band edge ends at the last bin', () => {
+    const s = viewSlice(4096, FULL, { offsetHz: 768000, spanHz: 512000 });
+    assert.strictEqual(s.start + s.count, 4096);
+    assert.strictEqual(s.offsetHz, 767500);
 });
 
 // ── Long-lived request ────────────────────────────────────────────────

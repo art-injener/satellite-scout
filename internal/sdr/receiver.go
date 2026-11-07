@@ -1,6 +1,9 @@
 package sdr
 
-import "context"
+import (
+	"context"
+	"math"
+)
 
 // DefaultBlockSize — количество IQ-отсчётов в одном фрейме по умолчанию.
 // При 2.4 MSPS даёт ~6.8 мс на фрейм — баланс между latency и overhead.
@@ -41,6 +44,18 @@ type Capabilities struct {
 	SampleRateRanges []SampleRateRange
 	// RecommendedSampleRate — частота, если в конфиге тракта не задана.
 	RecommendedSampleRate uint32
+	// UsableFraction — доля окна по центру, которую показывают и где ставят канал: у краёв
+	// фильтр приёмника заваливает полосу и туда же складываются зеркала из-за Найквиста.
+	// 0 — годно всё окно.
+	UsableFraction float64
+}
+
+// UsableBandHz — ширина годной середины окна при частоте дискретизации rate.
+func (c Capabilities) UsableBandHz(rate uint32) uint32 {
+	if c.UsableFraction <= 0 || c.UsableFraction >= 1 {
+		return rate
+	}
+	return uint32(math.Round(float64(rate) * c.UsableFraction))
 }
 
 // ReceiverStatus — текущее состояние приёмника (для GET /api/sdr/status).

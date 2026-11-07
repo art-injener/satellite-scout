@@ -309,6 +309,16 @@ func TestSDRHandler_GetStatus_SampleRateAndChoicesWithoutStream(t *testing.T) {
 	}
 }
 
+// The operator picks a sample rate but sees only its usable middle: the status names both.
+func TestSDRHandler_GetStatus_SpansAreUsableBands(t *testing.T) {
+	hub := sdr.NewReceiverHub()
+	hub.Register("p", sdr.PathConfig{}, func() (sdr.Receiver, error) { return &fakeReceiver{usable: 0.5}, nil })
+	st := getStatus(t, NewSDRHandler(sdr.NewService(), hub), "p")
+	if !slices.Equal(st.SampleRates, []uint32{48_000}) || !slices.Equal(st.SpansHz, []uint32{24_000}) {
+		t.Errorf("sample_rates=%v spans_hz=%v, want [48000] and [24000]", st.SampleRates, st.SpansHz)
+	}
+}
+
 func TestSDRHandler_SetReceiver_RateRejections(t *testing.T) {
 	t.Run("rate outside choices", func(t *testing.T) {
 		hub, pathID := testHubWithImitator(t)

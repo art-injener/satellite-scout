@@ -16,7 +16,11 @@ const (
 	// DefaultFrequencyHz — частота до первой перестройки: середина любительского участка 70 см.
 	DefaultFrequencyHz = 436_500_000
 	// RecommendedSampleRate — частота дискретизации, если в конфиге тракта не задана.
-	RecommendedSampleRate = 2_048_000
+	// С запасом над видимыми 2,048 МГц: края окна отрезаются (usableFraction).
+	RecommendedSampleRate = 2_560_000
+	// usableFraction — годная середина окна. На краях завал от фильтра ПЧ тюнера и цифрового
+	// ФНЧ демодулятора, туда же складываются зеркала из-за Найквиста.
+	usableFraction = 0.8
 
 	bulkEndpoint uint8 = 0x81
 	// streamBuffers — запросов в очереди ядра: 16 буферов по блоку, при 2 МГц около 130 мс запаса.
@@ -48,8 +52,10 @@ type bulkStream interface {
 type Options struct {
 	// Serial — серийный номер; пусто — по пути или первый найденный.
 	Serial string
-	// DevicePath — узел /dev/bus/usb/BBB/DDD, если серийного номера нет.
+	// DevicePath — узел /dev/bus/usb/BBB/DDD: различает донглы с одинаковым серийным номером.
 	DevicePath string
+	// PPM — поправка частоты кварца в миллионных долях, как ключ -p у rtl_sdr.
+	PPM int
 
 	open func(Options) (usbDevice, error)
 }
@@ -89,7 +95,13 @@ func (r *Receiver) Capabilities() sdr.Capabilities {
 			{MinHz: gapHigh + 1, MaxHz: maxSampleRate},
 		},
 		RecommendedSampleRate: RecommendedSampleRate,
+		UsableFraction:        usableFraction,
 	}
+}
+
+// usableBand — ширина годной середины окна при частоте дискретизации rate.
+func usableBand(rate uint32) uint32 {
+	return sdr.Capabilities{UsableFraction: usableFraction}.UsableBandHz(rate)
 }
 
 func (r *Receiver) Tune(frequencyHz uint64) error {
@@ -153,6 +165,7 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 		return nil, err
 	}
 	c := newChip(dev)
+	c.ppm = r.opts.PPM
 	tuner, rate, err := bringUp(c, cfg.SampleRate, r.centerHz, r.gainDB)
 	if err != nil {
 		_ = c.powerOff()
@@ -199,6 +212,15 @@ func bringUp(c *chip, rate uint32, centerHz uint64, gainDB float32) (*r820t, uin
 	}
 	actual, err := c.setSampleRate(rate)
 	if err != nil {
+		return nil, 0, err
+	}
+	// Фильтр ПЧ драйвера RTL-SDR Blog вокруг 6 МГц, затем демодулятор на эту ПЧ
+	// и только после этого гетеродин: он считает LO как частота плюс эта ПЧ.
+	ifHz, err := t.setBandwidth(ifBandwidthForRate(actual))
+	if err != nil {
+		return nil, 0, err
+	}
+	if err := c.setIFFreq(ifHz); err != nil {
 		return nil, 0, err
 	}
 	if err := t.setFreq(uint32(centerHz)); err != nil {

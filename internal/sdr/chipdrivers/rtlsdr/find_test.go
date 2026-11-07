@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
 func writeSysfsDevice(t *testing.T, root, name string, attrs map[string]string) {
@@ -54,8 +56,30 @@ func TestFindDongle(t *testing.T) {
 	}
 
 	for _, o := range []Options{{Serial: "missing"}, {DevicePath: "/dev/bus/usb/001/002"}} {
-		if _, err := findDongle(root, o); !errors.Is(err, ErrNotFound) {
-			t.Errorf("%+v: err = %v, want ErrNotFound", o, err)
+		if _, err := findDongle(root, o); !errors.Is(err, sdr.ErrDeviceNotFound) {
+			t.Errorf("%+v: err = %v, want ErrDeviceNotFound", o, err)
 		}
+	}
+}
+
+func TestFindDongle_TwinSerials(t *testing.T) {
+	root := t.TempDir()
+	for name, devnum := range map[string]string{"3-5": "13", "3-6": "14"} {
+		writeSysfsDevice(t, root, name, map[string]string{
+			"idVendor": "0bda", "idProduct": "2838", "busnum": "3", "devnum": devnum, "serial": "00000001",
+		})
+	}
+
+	d, err := findDongle(root, Options{Serial: "00000001", DevicePath: "/dev/bus/usb/003/014"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if d.Path() != "/dev/bus/usb/003/014" {
+		t.Errorf("opened %s, want the saved path /dev/bus/usb/003/014", d.Path())
+	}
+
+	_, err = findDongle(root, Options{Serial: "00000001", DevicePath: "/dev/bus/usb/003/099"})
+	if !errors.Is(err, sdr.ErrDeviceAmbiguous) {
+		t.Errorf("stale path with twin serials: err = %v, want ErrDeviceAmbiguous", err)
 	}
 }

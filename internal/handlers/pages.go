@@ -90,6 +90,7 @@ type PageData struct {
 var allowedThemes = map[string]bool{
 	"classic": true, "default": true, "stsplus": true, "light": true,
 	"breeze": true, "breeze-steel": true, "breeze-dark": true,
+	"signal": true,
 }
 
 // normalizeTheme подменяет устаревшие имена тем (breeze-light → light).

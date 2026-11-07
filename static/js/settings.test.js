@@ -103,6 +103,52 @@ console.log('TEST: receiver selection drops calibration when driver changes');
 }
 console.log('  OK');
 
+console.log('TEST: receiver selection keeps ppm correction for the same driver only');
+{
+    const same = receiverModal({ driver: 'rtlsdr', serial: '0001', freq_correction_ppm: -12 });
+    same._applyReceiverSelection(0, 'rtlsdr|0002|');
+    assert.strictEqual(same._workingConfig.station.radio_paths[0].receiver.freq_correction_ppm, -12);
+
+    const other = receiverModal({ driver: 'simulated', freq_correction_ppm: 30 });
+    other._applyReceiverSelection(0, 'rtlsdr|0002|');
+    assert.strictEqual(other._workingConfig.station.radio_paths[0].receiver.freq_correction_ppm, undefined);
+}
+console.log('  OK');
+
+console.log('TEST: saved dongle is matched like the server opens it');
+{
+    const devs = [
+        { driver: 'rtlsdr', serial: '00000001', device_path: '/dev/bus/usb/003/013' },
+        { driver: 'rtlsdr', serial: '00000001', device_path: '/dev/bus/usb/003/014' },
+        { driver: 'rtlsdr', serial: '00000002', device_path: '/dev/bus/usb/003/015' },
+    ];
+    const match = (serial, path) => settings.matchReceiverDevice(devs, { driver: 'rtlsdr', serial: serial, device_path: path });
+    assert.strictEqual(match('00000001', '/dev/bus/usb/003/014'), 1, 'path tells twins apart');
+    assert.strictEqual(match('00000002', '/dev/bus/usb/003/099'), 2, 'unique serial survives a stale path');
+    assert.strictEqual(match('00000001', '/dev/bus/usb/003/099'), -1, 'twins with a stale path stay unmatched');
+    assert.strictEqual(match('', '/dev/bus/usb/003/014'), 1, 'path without serial');
+    assert.strictEqual(match('missing', ''), -1);
+    assert.strictEqual(settings.matchReceiverDevice(devs, { driver: 'airspy', serial: '00000002' }), -1, 'other driver');
+}
+console.log('  OK');
+
+console.log('TEST: replugged dongle with a unique serial is shown as connected');
+{
+    const modal = receiverModal({ driver: 'rtlsdr', serial: '0002', device_path: '/dev/bus/usb/003/013' });
+    modal._sdrDevices = [{ driver: 'rtlsdr', serial: '0002', device_path: '/dev/bus/usb/003/020', label: 'RTL-SDR v4' }];
+    const options = [];
+    const sel = {
+        value: '',
+        set innerHTML(_) { options.length = 0; },
+        appendChild: (o) => options.push(o),
+    };
+    global.document.createElement = () => ({});
+    modal._fillReceiverSelect(sel, modal._workingConfig.station.radio_paths[0].receiver);
+    assert.strictEqual(sel.value, 'rtlsdr|0002|/dev/bus/usb/003/020');
+    assert.ok(!options.some((o) => o.className === 'settings-receiver-option--offline'), 'no offline duplicate');
+}
+console.log('  OK');
+
 console.log('TEST: reselecting the imitator keeps its signals section');
 {
     const imitator = { noise_dbfs: -60, signals: [{ kind: 'carrier', freq_hz: 436500000, level_dbfs: -40 }] };

@@ -49,6 +49,9 @@ type ConcurrentPassGroup struct {
 	Satellites []PassInfo
 	// PrimarySatID — NORAD ID активного (primary) спутника.
 	PrimarySatID int
+	// Upcoming — пролёты на DefaultGroupPassHorizon вперёд для ленты пролётов.
+	// На состав группы, primary и сопровождение не влияет.
+	Upcoming []PassInfo
 }
 
 // FindConcurrentPasses фильтрует кешированный список пролётов по скользящему окну.

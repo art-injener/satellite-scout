@@ -2,9 +2,13 @@
 //
 // Окно приёмника (центр и «Полоса») и канал демодулятора — разные вещи:
 // канал задаётся сдвигом от центра приёмника и шириной. Заливка с чертой
-// центра и ручками краёв лежит над графиками; щелчок ставит центр канала,
-// перетаскивание заливки двигает канал, ручки меняют ширину симметрично.
+// центра лежит над графиками; щелчок ставит центр канала, перетаскивание
+// заливки двигает канал. Ширину задаёт список «Полоса канала».
 // Приёмник при этом не перестраивается. Канал за краем окна — стрелка у края.
+// Сервер сдвигает канал на Доплер. У SSB и CW полоса шире предела профиля не слышна,
+// и заливка всегда показывает то, что слышно.
+// Перетаскивание по пустому месту графика сообщает сдвиг в герцах.
+// На всей полосе это перестройка приёмника, при масштабе — сдвиг окна.
 
 'use strict';
 
@@ -14,32 +18,35 @@
 
     /**
      * Положение канала на графике в пикселях хоста.
-     * @param {{centerHz: number, spanHz: number}} band — окно приёмника
-     * @param {{offsetHz: number, bandwidthHz: number}} ch
+     * @param {{spanHz: number, offsetHz?: number}} band — что видно на графике: ширина
+     *   и центр от центра приёмника (без offsetHz — окно приёмника целиком)
+     * @param {{offsetHz: number, bandwidthHz: number}} ch — заливка вокруг offsetHz
      * @param {{left: number, width: number}} plot — область графика без полей
      * @returns {?{left: number, width: number, centerX: number, outside: ?string}}
-     *   outside — 'left' / 'right', если канал целиком за краем окна; null — нет окна
+     *   centerX — черта центра; outside — 'left' / 'right', если канал целиком за краем окна;
+     *   null — нет окна
      */
     function channelBox(band, ch, plot) {
         if (!band || !(band.spanHz > 0) || !plot || !(plot.width > 0)) { return null; }
         const pxPerHz = plot.width / band.spanHz;
-        const centerX = plot.left + plot.width / 2 + ch.offsetHz * pxPerHz;
+        const zeroX = plot.left + plot.width / 2 - (band.offsetHz || 0) * pxPerHz;
+        const fillX = zeroX + ch.offsetHz * pxPerHz;
         const half = ch.bandwidthHz / 2 * pxPerHz;
-        const lo = Math.max(plot.left, centerX - half);
-        const hi = Math.min(plot.left + plot.width, centerX + half);
+        const lo = Math.max(plot.left, fillX - half);
+        const hi = Math.min(plot.left + plot.width, fillX + half);
         let outside = null;
-        if (hi <= lo) { outside = centerX < plot.left ? 'left' : 'right'; }
+        if (hi <= lo) { outside = fillX < plot.left ? 'left' : 'right'; }
         return {
             left: outside ? 0 : lo,
             width: outside ? 0 : hi - lo,
-            centerX: centerX,
+            centerX: fillX,
             outside: outside,
         };
     }
 
     /** Сдвиг канала от центра приёмника для точки графика, с точностью до 10 Гц. */
     function offsetFromX(x, band, plot) {
-        const hz = (x - plot.left - plot.width / 2) * band.spanHz / plot.width;
+        const hz = (band.offsetHz || 0) + (x - plot.left - plot.width / 2) * band.spanHz / plot.width;
         return Math.round(hz / 10) * 10 || 0;
     }
 
@@ -47,21 +54,6 @@
     function clampOffset(offsetHz, bandwidthHz, spanHz) {
         const limit = Math.max(0, spanHz / 2 - bandwidthHz / 2);
         return Math.max(-limit, Math.min(limit, offsetHz));
-    }
-
-    /** Ширина канала по положению ручки: края симметричны относительно центра. */
-    function widthFromX(x, centerX, band, plot) {
-        return Math.round(2 * Math.abs(x - centerX) * band.spanHz / plot.width);
-    }
-
-    /** Ближайшая ширина из предложенных в панели; без списка — как есть. */
-    function snapBandwidth(hz, options) {
-        if (!options || !options.length) { return hz; }
-        let best = options[0];
-        for (let i = 1; i < options.length; i++) {
-            if (Math.abs(options[i] - hz) < Math.abs(best - hz)) { best = options[i]; }
-        }
-        return best;
     }
 
     /** Абсолютные края канала текстом: «436.1780 – 436.1980 МГц». */
@@ -87,22 +79,26 @@
      * @param {HTMLCanvasElement[]} [opts.clickTargets] — графики, щелчок по которым ставит центр
      * @param {number} opts.marginLeft
      * @param {number} opts.marginRight
-     * @param {function(): number[]} [opts.bandwidthOptions] — допустимые ширины, Гц
      * @param {function(number, number)} opts.onChange — (сдвиг, ширина) после жеста
+     * @param {function(number)} [opts.onPan] — перетаскивание по графику: на сколько Гц
+     *   сдвинуть видимую часть
      */
     function ChannelOverlay(host, opts) {
         this._host = host;
         this._opts = opts || {};
         this._band = null;
+        this._view = null;
         this._ch = { offsetHz: 0, bandwidthHz: 15000 };
+        // Сдвиг Доплера от сервера поверх настройки
+        this._shift = { dopplerHz: 0 };
+        // Предел ширины профиля, Гц; 0 — без предела
+        this._maxWidthHz = 0;
         this._shown = true;
         this._drag = null;
         if (!host || typeof document === 'undefined') { return; }
         this._root = makeEl('ml-chan', host);
         this._fill = makeEl('ml-chan__fill', this._root);
         this._center = makeEl('ml-chan__center', this._root);
-        this._handleL = makeEl('ml-chan__handle ml-chan__handle--l', this._root);
-        this._handleR = makeEl('ml-chan__handle ml-chan__handle--r', this._root);
         this._label = makeEl('ml-chan__label', this._root);
         this._arrow = makeEl('ml-chan-arrow', host);
         this._root.hidden = true;
@@ -128,12 +124,53 @@
         this.render();
     };
 
+    /** Видимая часть окна приёмника: центр от центра приёмника и ширина; без ширины — всё окно. */
+    ChannelOverlay.prototype.setView = function(offsetHz, spanHz) {
+        const v = spanHz > 0 ? { offsetHz: Number(offsetHz) || 0, spanHz: spanHz } : null;
+        const same = v && this._view
+            ? v.offsetHz === this._view.offsetHz && v.spanHz === this._view.spanHz
+            : v === this._view;
+        if (same) { return; }
+        this._view = v;
+        this.render();
+    };
+
+    /** Что видно на графике, для перевода пикселей в герцы. */
+    ChannelOverlay.prototype._window = function() {
+        if (!this._band) { return null; }
+        return this._view || { offsetHz: 0, spanHz: this._band.spanHz };
+    };
+
     /** Канал из полей панели или статуса сервера; во время жеста не трогаем. */
     ChannelOverlay.prototype.setChannel = function(offsetHz, bandwidthHz) {
         if (this._drag) { return; }
         if (!isFinite(offsetHz) || !(bandwidthHz > 0)) { return; }
-        this._ch = { offsetHz: offsetHz, bandwidthHz: bandwidthHz };
+        this._ch = { offsetHz: offsetHz, bandwidthHz: this._limitWidth(bandwidthHz) };
         this.render();
+    };
+
+    /** Сдвиг Доплера из статуса демодулятора, Гц. */
+    ChannelOverlay.prototype.setShift = function(dopplerHz) {
+        const d = isFinite(dopplerHz) ? Number(dopplerHz) : 0;
+        if (d === this._shift.dopplerHz) { return; }
+        this._shift = { dopplerHz: d };
+        this.render();
+    };
+
+    /** Самая широкая полоса, которую слышно у профиля, Гц; 0 — без предела. */
+    ChannelOverlay.prototype.setMaxWidth = function(hz) {
+        this._maxWidthHz = hz > 0 ? Number(hz) : 0;
+        this._ch.bandwidthHz = this._limitWidth(this._ch.bandwidthHz);
+        this.render();
+    };
+
+    ChannelOverlay.prototype._limitWidth = function(hz) {
+        return this._maxWidthHz > 0 ? Math.min(hz, this._maxWidthHz) : hz;
+    };
+
+    /** Канал для рисования: по центру сдвиг с Доплером. */
+    ChannelOverlay.prototype._drawnChannel = function() {
+        return { offsetHz: this._ch.offsetHz + this._shift.dopplerHz, bandwidthHz: this._ch.bandwidthHz };
     };
 
     /**
@@ -160,7 +197,7 @@
             this._arrow.hidden = true;
             return;
         }
-        const box = channelBox(this._band, this._ch, this._plot());
+        const box = channelBox(this._window(), this._drawnChannel(), this._plot());
         if (!box) {
             this._root.hidden = true;
             this._arrow.hidden = true;
@@ -186,7 +223,8 @@
         const self = this;
         const start = function(mode) {
             return function(e) {
-                if (!self._shown) { return; }
+                // Скрытый канал не двигается, но график по-прежнему сдвигается
+                if (!self._shown && mode !== 'click') { return; }
                 if (e.button !== undefined && e.button !== 0) { return; }
                 const plot = self._plot();
                 if (!plot || !self._band) { return; }
@@ -195,6 +233,7 @@
                 self._drag = {
                     mode: mode,
                     x0: e.clientX,
+                    xLast: e.clientX,
                     moved: false,
                     offset0: self._ch.offsetHz,
                     target: e.currentTarget,
@@ -204,8 +243,6 @@
         };
         this._fill.addEventListener('pointerdown', start('move'));
         this._center.addEventListener('pointerdown', start('move'));
-        this._handleL.addEventListener('pointerdown', start('width'));
-        this._handleR.addEventListener('pointerdown', start('width'));
         (this._opts.clickTargets || []).forEach(function(c) {
             if (c) { c.addEventListener('pointerdown', start('click')); }
         });
@@ -220,18 +257,20 @@
         const d = this._drag;
         if (!d) { return; }
         if (Math.abs(e.clientX - d.x0) >= CLICK_SLOP_PX) { d.moved = true; }
-        if (!d.moved || d.mode === 'click') { return; }
+        if (!d.moved) { return; }
         const plot = this._plot();
-        const band = this._band;
-        const x = e.clientX - plot.hostLeft;
-        if (d.mode === 'move') {
-            const dHz = (e.clientX - d.x0) * band.spanHz / plot.width;
-            const off = Math.round((d.offset0 + dHz) / 10) * 10;
-            this._ch.offsetHz = clampOffset(off, this._ch.bandwidthHz, band.spanHz);
-        } else {
-            const centerX = plot.left + plot.width / 2 + this._ch.offsetHz * plot.width / band.spanHz;
-            this._ch.bandwidthHz = Math.max(100, widthFromX(x, centerX, band, plot));
+        const win = this._window();
+        if (d.mode === 'click') {
+            // Содержимое графика идёт за указателем
+            const dx = e.clientX - d.xLast;
+            d.xLast = e.clientX;
+            if (dx && this._opts.onPan) { this._opts.onPan(-dx * win.spanHz / plot.width); }
+            return;
         }
+        if (d.mode !== 'move') { return; }
+        const dHz = (e.clientX - d.x0) * win.spanHz / plot.width;
+        const off = Math.round((d.offset0 + dHz) / 10) * 10;
+        this._ch.offsetHz = clampOffset(off, this._ch.bandwidthHz, this._band.spanHz);
         this.render();
     };
 
@@ -245,16 +284,13 @@
         const band = this._band;
         const plot = this._plot();
         if (!band || !plot) { return; }
-        if (!d.moved && d.mode !== 'width') {
-            // Щелчок по графику или по заливке ставит центр канала в эту точку
-            const off = offsetFromX(e.clientX - plot.hostLeft, band, plot);
+        // Перетаскивание по графику только сдвигало видимую часть
+        if (d.mode === 'click' && (d.moved || !this._shown)) { return; }
+        if (!d.moved) {
+            // Щелчок по графику или по заливке ставит центр канала в эту точку;
+            // в настройку уходит сдвиг без Доплера, его сервер добавит сам
+            const off = offsetFromX(e.clientX - plot.hostLeft, this._window(), plot) - Math.round(this._shift.dopplerHz / 10) * 10;
             this._ch.offsetHz = clampOffset(off, this._ch.bandwidthHz, band.spanHz);
-        } else if (d.mode === 'width') {
-            const opts = this._opts.bandwidthOptions ? this._opts.bandwidthOptions() : [];
-            this._ch.bandwidthHz = snapBandwidth(this._ch.bandwidthHz, opts);
-            this._ch.offsetHz = clampOffset(this._ch.offsetHz, this._ch.bandwidthHz, band.spanHz);
-        } else if (!d.moved) {
-            return;
         }
         this.render();
         if (this._opts.onChange) { this._opts.onChange(this._ch.offsetHz, this._ch.bandwidthHz); }
@@ -272,8 +308,6 @@
     ChannelOverlay.channelBox = channelBox;
     ChannelOverlay.offsetFromX = offsetFromX;
     ChannelOverlay.clampOffset = clampOffset;
-    ChannelOverlay.widthFromX = widthFromX;
-    ChannelOverlay.snapBandwidth = snapBandwidth;
     ChannelOverlay.edgesText = edgesText;
 
     if (typeof window !== 'undefined') {
@@ -286,8 +320,6 @@
             channelBox: channelBox,
             offsetFromX: offsetFromX,
             clampOffset: clampOffset,
-            widthFromX: widthFromX,
-            snapBandwidth: snapBandwidth,
             edgesText: edgesText,
         };
     }

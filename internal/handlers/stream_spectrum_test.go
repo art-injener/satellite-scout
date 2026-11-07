@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"bytes"
 	"context"
 	"encoding/binary"
 	"errors"
@@ -22,6 +23,7 @@ import (
 type fakeReceiver struct {
 	frames    []sdr.IQFrame
 	streamCfg sdr.StreamConfig // последний запрошенный поток
+	usable    float64          // доля окна без краёв; 0 — всё окно
 }
 
 func (f *fakeReceiver) Name() string { return "fake" }
@@ -29,6 +31,7 @@ func (f *fakeReceiver) Capabilities() sdr.Capabilities {
 	return sdr.Capabilities{
 		SampleRateRanges:      []sdr.SampleRateRange{{MinHz: 48_000, MaxHz: 2_400_000}},
 		RecommendedSampleRate: 48_000,
+		UsableFraction:        f.usable,
 	}
 }
 func (f *fakeReceiver) Tune(uint64) error          { return nil }
@@ -156,6 +159,55 @@ func TestSpectrum_ProducesValidSSTMFrames(t *testing.T) {
 	totalFrameSize := dsp.HeaderSize + int(payloadLen)
 	if len(body) < totalFrameSize {
 		t.Fatalf("body=%d bytes, need at least %d for one frame", len(body), totalFrameSize)
+	}
+}
+
+// A receiver with unusable window edges gets only the middle of the spectrum: fewer bins,
+// a narrower span, and a tone still on its own frequency.
+func TestSpectrum_CropsEdgesToUsableBand(t *testing.T) {
+	const (
+		bins       = 128
+		sampleRate = 48000.0
+		toneHz     = 6000.0 // 16 bins of 375 Hz right of the center
+	)
+	hub := sdr.NewReceiverHub()
+	receiver := &fakeReceiver{frames: makeToneFrames(5, bins, toneHz, sampleRate), usable: 0.5}
+	hub.Register("p", sdr.PathConfig{}, func() (sdr.Receiver, error) { return receiver, nil })
+	req := httptest.NewRequest(http.MethodGet, "/api/stream/v1/spectrum?radio_path=p&bins=128&fps=30", nil)
+	rec := httptest.NewRecorder()
+	NewStreamHandler(hub).Spectrum(rec, req)
+
+	f := readModeFrame(t, bytes.NewReader(rec.Body.Bytes()), dsp.ModeAvg)
+	if len(f.dbfs) != bins/2 || f.spanHz != 24_000 {
+		t.Fatalf("got %d bins over %d Hz, want %d bins over 24000 Hz", len(f.dbfs), f.spanHz, bins/2)
+	}
+	if got := peakBin(f.dbfs); got != bins/4+16 {
+		t.Errorf("tone at bin %d, want %d", got, bins/4+16)
+	}
+}
+
+func TestCropBand(t *testing.T) {
+	cases := []struct {
+		name         string
+		bins         int
+		rate, usable uint32
+		start, keep  int
+		spanHz       int64
+	}{
+		{"rtl-sdr 2.56 MS/s keeps 2.048 MHz", 4096, 2_560_000, 2_048_000, 410, 3276, 2_047_500},
+		{"whole window usable", 1024, 2_048_000, 2_048_000, 0, 1024, 2_048_000},
+		{"no usable band given", 1024, 2_048_000, 0, 0, 1024, 2_048_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, keep, span := cropBand(tc.bins, tc.rate, tc.usable)
+			if start != tc.start || keep != tc.keep || span != tc.spanHz {
+				t.Errorf("cropBand = %d, %d, %d; want %d, %d, %d", start, keep, span, tc.start, tc.keep, tc.spanHz)
+			}
+			if tc.bins/2-start != keep/2 {
+				t.Errorf("center bin moved: start %d, keep %d of %d", start, keep, tc.bins)
+			}
+		})
 	}
 }
 

@@ -20,6 +20,27 @@ const (
 	fineTaps = 255
 	// squelchHold — сколько порог остаётся открытым после сигнала, чтобы не срезать хвост кадра.
 	squelchHold = 300 * time.Millisecond
+
+	// AudioRate — частота отсчётов звука на выходе цепочки: голос до 3 кГц и тона SSTV с запасом.
+	AudioRate = 12_000
+	// voiceDeviationHz — девиация, в которую ложится звук ±1; у голоса узкополосной ЧМ до 5 кГц.
+	voiceDeviationHz = 5000
+	// voiceDeemphasisTau — деэмфазис узкополосной ЧМ любительских станций, излом около 300 Гц.
+	voiceDeemphasisTau = 530e-6
+	// wfmDeviationHz — девиация вещательной ЧМ: звук ±1 это ±75 кГц.
+	wfmDeviationHz = 75_000
+	// wfmDeemphasisTau — деэмфазис вещания (Европа и Россия), 50 мкс.
+	wfmDeemphasisTau = 50e-6
+	// wfmMidHz — частота после грубого фильтра широкополосной ЧМ. 0,15 от неё
+	// шире половины канала 200 кГц, точный фильтр ещё прореживает до дискриминатора.
+	wfmMidHz = 1_024_000
+	// ssbLowHz — нижний край звука боковой полосы: подавленная несущая стоит на столько
+	// за краем выделенной полосы.
+	ssbLowHz = 200
+	// cwToneHz — тон биений CW: несущая в середине полосы звучит этой нотой.
+	cwToneHz = 700
+	// cwFineTaps — точный фильтр CW: переход около 250 Гц, чтобы полоса 500 Гц была узкой.
+	cwFineTaps = 1023
 )
 
 // lineDemod переводит IQ канала в уровни линии перед выделением кадров.
@@ -54,17 +75,51 @@ type syncCounter interface {
 type pictureRx interface {
 	Push(iq []complex64) []sstv.Event
 	Done() int
+	// Audio — звук последнего Push с частотой AudioRate.
+	Audio() []float32
+}
+
+// audioRx переводит IQ канала в звук с частотой AudioRate.
+type audioRx interface {
+	Demodulate(dst []float32, iq []complex64) []float32
 }
 
 // profile — реализованный демодулятор: прореживание точного фильтра после midRateHz,
 // сборка демодулятора на частоте его выхода и выделитель кадров. Профиль картинок
 // (newPictures) вместо кадров даёт картинки и слушает канал без порога: развёртка
-// идёт по часам, и пропуск звука сдвинул бы строки.
+// идёт по часам, и пропуск звука сдвинул бы строки. Профиль звука (newAudio) даёт
+// только звук. Точный фильтр у всех профилей стоит по центру канала; newAudio получает
+// частоту, на которой середина полосы звучит в звуке: у SSB (sideband ±1) несущая
+// за краем полосы, у CW — тон биений toneHz. maxWidthHz ограничивает полосу тем,
+// что слышно; fineTaps — длина точного фильтра, 0 — fineTaps.
+// midHz — желаемая частота после грубого фильтра; 0 — midRateHz.
 type profile struct {
 	fineDecim   int
+	fineTaps    int
+	midHz       float64
 	newDemod    func(rate float64) lineDemod
 	newDeframer func() deframer
 	newPictures func(rate float64) pictureRx
+	newAudio    func(rate, beatHz float64) audioRx
+	sideband    float64
+	toneHz      float64
+	maxWidthHz  float64
+}
+
+func newVoiceFM(rate, _ float64) audioRx {
+	return modem.NewFMAudioDemod(modem.FMAudioConfig{
+		SampleRate: rate, DeviationHz: voiceDeviationHz, AudioRate: AudioRate, DeemphasisTau: voiceDeemphasisTau,
+	})
+}
+
+func newWideFM(rate, _ float64) audioRx {
+	return modem.NewFMAudioDemod(modem.FMAudioConfig{
+		SampleRate: rate, DeviationHz: wfmDeviationHz, AudioRate: AudioRate, DeemphasisTau: wfmDeemphasisTau,
+	})
+}
+
+func newSSB(rate, beatHz float64) audioRx {
+	return modem.NewSSBDemod(modem.SSBConfig{SampleRate: rate, AudioRate: AudioRate, ShiftHz: beatHz})
 }
 
 func newHDLCDeframer() deframer { return &ax25.Deframer{} }
@@ -91,6 +146,19 @@ var profiles = map[string]profile{
 		}},
 	// ЧМ с девиацией до 5 кГц и звуком до 2,3 кГц укладывается в 32 кГц.
 	DemodSSTV: {fineDecim: 2, newPictures: newSSTVRx},
+	// Голос: ЧМ и однополосная. 32 кГц не дают наложений даже при самой широкой полосе канала.
+	"fm": {fineDecim: 2, newAudio: newVoiceFM},
+	// Вещательная ЧМ: канал 200 кГц не проходит через 64 кГц, поэтому грубый фильтр шире.
+	"wfm": {fineDecim: 4, midHz: wfmMidHz, newAudio: newWideFM},
+	"usb": {fineDecim: 2, newAudio: newSSB, sideband: 1, maxWidthHz: maxWidth("usb")},
+	"lsb": {fineDecim: 2, newAudio: newSSB, sideband: -1, maxWidthHz: maxWidth("lsb")},
+	// CW слушается как SSB с тоном биений; полосе до 1 кГц хватает 16 кГц.
+	"cw": {fineDecim: 4, fineTaps: cwFineTaps, newAudio: newSSB, toneHz: cwToneHz, maxWidthHz: maxWidth("cw")},
+}
+
+// maxWidth — самая широкая слышимая полоса профиля; шире настройку отклоняет sdr.ChannelSettings.Validate.
+func maxWidth(demod string) float64 {
+	return float64(sdr.DemodMaxBandwidthHz[demod])
 }
 
 // g3ruhDemod — FSK с дескремблером G3RUH; NRZI снимает уже выделитель кадров.
@@ -138,6 +206,13 @@ type Status struct {
 
 	// Picture — картинка, которая сейчас проявляется; nil — её нет. Не меняется после выдачи.
 	Picture *PictureProgress
+
+	// DopplerHz — сдвиг Доплера, на который канал ушёл от сдвига; nil — канал за Доплером
+	// не следует. Ставит сервис: цепочка орбит не знает.
+	DopplerHz *float64
+	// PassbandHz — ширина полосы, которую цепочка пропускает на деле: у SSB и CW она уже
+	// «Полосы канала», если та не помещается в звук.
+	PassbandHz float64
 }
 
 // PictureProgress — ход картинки в приёме.
@@ -173,6 +248,11 @@ type Chain struct {
 	picRx    pictureRx
 	pictures []sstv.Event
 	centerHz uint64 // настройка приёмника, на которой идёт картинка
+
+	audioRx audioRx
+	audio   []float32
+
+	dopplerHz float64
 }
 
 // NewChain создаёт цепочку; фильтры строятся по первому блоку.
@@ -183,6 +263,7 @@ func NewChain() *Chain {
 // Process принимает блок IQ хаба с текущими настройками канала и возвращает принятые кадры.
 func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	c.status.Demod = s.Demod
+	c.audio = c.audio[:0]
 	p, ok := profiles[s.Demod]
 	c.status.Supported = ok
 	if !ok || f.SampleRate == 0 {
@@ -202,21 +283,16 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 		s.Demod != c.demodName {
 		c.build(f.SampleRate, s.OffsetHz, s.BandwidthHz, s.Demod, p)
 	}
+	// Доплер сдвигает канал без пересборки фильтров: фаза не рвётся, картинка не бросается.
+	c.coarse.SetShift(float64(s.OffsetHz) + c.dopplerHz)
 
 	c.squelch.ThresholdDBFS = s.SquelchDBFS
 	ch := c.fine.Process(c.coarse.Process(f.Samples))
 	c.status.SquelchOpen = c.squelch.Open(ch)
 	c.status.LevelDBFS = c.squelch.LevelDBFS()
 	c.pictures = c.pictures[:0]
-	if c.picRx != nil {
-		c.pictures = c.picRx.Push(ch)
-		c.status.Good = c.picRx.Done()
-		for _, e := range c.pictures {
-			c.status.Picture = nil
-			if e.Kind != sstv.EventDone {
-				c.status.Picture = &PictureProgress{Mode: e.Mode.ID, ModeName: e.Mode.Name, Lines: e.Lines, Height: e.Mode.Height}
-			}
-		}
+	if c.picRx != nil || c.audioRx != nil {
+		c.listen(ch)
 		if float64(c.status.LevelDBFS) >= s.SquelchDBFS {
 			c.measure(ch)
 		}
@@ -252,9 +328,51 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	return out
 }
 
+// listen ведёт профили, слушающие канал без порога: картинки и звук.
+func (c *Chain) listen(ch []complex64) {
+	if c.audioRx != nil {
+		c.audio = c.gate(c.audioRx.Demodulate(c.audio, ch))
+		return
+	}
+	c.pictures = c.picRx.Push(ch)
+	c.status.Good = c.picRx.Done()
+	for _, e := range c.pictures {
+		c.status.Picture = nil
+		if e.Kind != sstv.EventDone {
+			c.status.Picture = &PictureProgress{
+				Mode:     e.Mode.ID,
+				ModeName: e.Mode.Name,
+				Lines:    e.Lines,
+				Height:   e.Mode.Height,
+			}
+		}
+	}
+	c.audio = c.gate(append(c.audio, c.picRx.Audio()...))
+}
+
+// SetDopplerHz задаёт сдвиг Доплера для следующих блоков: канал встаёт на сдвиг плюс Доплер.
+func (c *Chain) SetDopplerHz(hz float64) {
+	c.dopplerHz = hz
+}
+
 // Pictures — события картинок последнего блока; срез действителен до следующего Process.
 func (c *Chain) Pictures() []sstv.Event {
 	return c.pictures
+}
+
+// Audio — звук последнего блока с частотой AudioRate; срез действителен до следующего Process.
+// Пусто — профиль без звука. Под закрытым порогом идёт тишина той же длины, чтобы
+// проигрывание держало темп потока.
+func (c *Chain) Audio() []float32 {
+	return c.audio
+}
+
+// gate глушит звук блока, пока порог закрыт.
+func (c *Chain) gate(audio []float32) []float32 {
+	if !c.status.SquelchOpen {
+		clear(audio)
+	}
+	return audio
 }
 
 // Status — состояние после последнего блока.
@@ -302,7 +420,11 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 	c.rate, c.offsetHz, c.bandwidth, c.demodName = rate, offsetHz, bandwidth, demod
 
 	fs := float64(rate)
-	mid := midRate(fs)
+	target := float64(midRateHz)
+	if p.midHz > 0 {
+		target = p.midHz
+	}
+	mid := fs / float64(max(1, int(math.Round(fs/target))))
 	decim := int(math.Round(fs / mid))
 	transition := 0.25 * mid
 	// Окно Блэкмана-Харриса: половина главного лепестка — 4 отсчёта спектра, то есть 4·fs/N.
@@ -311,10 +433,26 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 		dsp.DesignLowpass(0.4*mid, fs, coarseTaps, dsp.WindowBlackmanHarris))
 
 	cutoff := min(float64(bandwidth)/2, 0.15*mid)
-	c.fine = dsp.NewXlatingFIR(0, mid, p.fineDecim, dsp.DesignLowpass(cutoff, mid, fineTaps, dsp.WindowBlackmanHarris))
+	if p.maxWidthHz > 0 {
+		cutoff = min(cutoff, p.maxWidthHz/2)
+	}
+	taps := fineTaps
+	if p.fineTaps > 0 {
+		taps = p.fineTaps
+	}
+	c.fine = dsp.NewXlatingFIR(0, mid, p.fineDecim,
+		dsp.DesignLowpass(cutoff, mid, taps, dsp.WindowBlackmanHarris))
+	beatHz := p.toneHz + p.sideband*(ssbLowHz+cutoff)
 
 	c.outRate = mid / float64(p.fineDecim)
-	if p.newPictures != nil {
+	c.audioRx = nil
+	switch {
+	case p.newAudio != nil:
+		c.picRx, c.status.Picture = nil, nil
+		c.demod, c.deframer = nil, nil
+		c.audioRx = p.newAudio(c.outRate, beatHz)
+		c.status.Good, c.status.Bad = 0, 0
+	case p.newPictures != nil:
 		// Картинка в приёме переживает смену полосы канала; новый сдвиг — другой передатчик,
 		// и заголовок VIS ищется заново.
 		if c.picRx == nil || newProfile || newRate || newOffset {
@@ -323,7 +461,7 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 		}
 		c.demod, c.deframer = nil, nil
 		c.status.Bad = 0
-	} else {
+	default:
 		c.picRx, c.status.Picture = nil, nil
 		c.demod = p.newDemod(c.outRate)
 		if c.deframer == nil || newProfile {
@@ -333,6 +471,7 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 	c.squelch.HoldSamples = int(squelchHold.Seconds() * c.outRate)
 	c.prevCh = 0
 	m := &c.status
+	m.PassbandHz = 2 * cutoff
 	m.Measured, m.CarrierHz, m.DeviationHz, m.ClockJitter = false, 0, 0, 0
 	m.SyncCounted, m.SyncWords, m.SyncBitErrors = false, 0, 0
 }

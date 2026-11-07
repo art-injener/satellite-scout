@@ -7,6 +7,7 @@ import (
 
 	"github.com/art-injener/satellite-scout/internal/access"
 	"github.com/art-injener/satellite-scout/internal/config"
+	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
@@ -26,6 +27,7 @@ type routeDeps struct {
 	SDR         *sdr.Service
 	ReceiverHub *sdr.ReceiverHub
 	Products    *products.Store
+	Audio       *demod.AudioHub
 
 	Exclude   handlers.ExclusionAdder
 	PassCache handlers.PassCacheInvalidator
@@ -103,8 +105,9 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 
 	// Бинарные chunked-стримы (ADR-002)
 	if deps.ReceiverHub != nil {
-		streamHandler := handlers.NewStreamHandler(deps.ReceiverHub)
+		streamHandler := handlers.NewStreamHandler(deps.ReceiverHub).WithAudio(deps.Audio)
 		mux.HandleFunc("GET /api/stream/v1/spectrum", streamHandler.Spectrum)
+		mux.HandleFunc("GET /api/stream/v1/audio", streamHandler.Audio)
 	}
 }
 

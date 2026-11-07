@@ -314,6 +314,67 @@ test('SSTV diagnosis follows the picture, also under a closed squelch', () => {
         { state: 'ok', text: 'Приём завершён; принято картинок: 2' });
 });
 
+test('demodLabel names the voice profiles', () => {
+    assert.strictEqual(demodLabel('fm'), 'FM');
+    assert.strictEqual(demodLabel('wfm'), 'FM эфир');
+    assert.strictEqual(demodLabel('usb'), 'USB');
+    assert.strictEqual(demodLabel('lsb'), 'LSB');
+    assert.strictEqual(demodLabel('cw'), 'CW');
+});
+
+const voiceStatus = {
+    radio_path: 'radio_path_0', active: true, demod: 'fm', supported: true,
+    level_dbfs: -60, squelch_dbfs: -90, squelch_open: true, frames_good: 0, frames_bad: 0,
+    bandwidth_hz: 15000, reception: { carrier_hz: 300, clock_jitter: 0 },
+};
+
+test('voice stages: sound instead of clock, no sync and frames, FM keeps the carrier', () => {
+    const s = stagesFromStatus(voiceStatus, null);
+    assert.strictEqual(s.carrier.value, '+300 Гц');
+    assert.deepStrictEqual(s.clock, { state: 'ok', value: 'идёт', sub: 'порог открыт', name: 'Звук' });
+    assert.strictEqual(s.sync.hidden, true);
+    assert.strictEqual(s.frames.hidden, true);
+    const closed = stagesFromStatus(Object.assign({}, voiceStatus, { squelch_open: false }), null);
+    assert.deepStrictEqual(closed.clock, { state: 'idle', value: 'тишина', sub: 'порог закрыт', name: 'Звук' });
+});
+
+test('CW sounds like voice and shows its carrier', () => {
+    const s = stagesFromStatus(Object.assign({}, voiceStatus, { demod: 'cw', bandwidth_hz: 500,
+        reception: { carrier_hz: 40, clock_jitter: 0 } }), null);
+    assert.strictEqual(s.carrier.value, '+40 Гц');
+    assert.strictEqual(s.clock.name, 'Звук');
+    assert.strictEqual(s.frames.hidden, true);
+});
+
+test('SSB has no carrier to show', () => {
+    const s = stagesFromStatus(Object.assign({}, voiceStatus, { demod: 'usb' }), null);
+    assert.deepStrictEqual(s.carrier, { state: 'idle', value: '—', sub: 'подавлена' });
+});
+
+test('voice diagnosis: sound or silence, not frames', () => {
+    const d = (patch) => {
+        const st = Object.assign({}, voiceStatus, patch);
+        return diagnose(st, stagesFromStatus(st, null), 0);
+    };
+    assert.deepStrictEqual(d({}), { state: 'ok', text: 'Канал открыт, идёт звук' });
+    assert.deepStrictEqual(d({ demod: 'lsb', squelch_open: false }), { state: 'idle', text: 'Нет сигнала выше порога' });
+    assert.strictEqual(d({ reception: { carrier_hz: 5000, clock_jitter: 0 } }).state, 'warn', 'FM carrier off the channel');
+});
+
+test('voice profile hides the sync and frames rows and the strip', () => {
+    const panel = new DemodPanel();
+    panel.setLive(true);
+    panel.applyStatus(voiceStatus, null);
+    assert.strictEqual(nodes.get('manual-st-clock-name').textContent, 'Звук');
+    assert.strictEqual(nodes.get('manual-st-sync').hidden, true);
+    assert.strictEqual(nodes.get('manual-st-frames').hidden, true);
+    assert.strictEqual(nodes.get('manual-dm-strip-box').hidden, true);
+    panel.applyStatus(status, null);
+    assert.strictEqual(nodes.get('manual-st-sync').hidden, false);
+    assert.strictEqual(nodes.get('manual-dm-strip-box').hidden, false);
+    panel.destroy();
+});
+
 test('stage names, frames row and strip switch with the profile', () => {
     const panel = new DemodPanel();
     panel.setLive(true);

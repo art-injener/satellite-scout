@@ -395,6 +395,41 @@
         if (ml > 10) { this._drawTimeAxis(); }
     };
 
+    /**
+     * Смена масштаба: накопленные строки растягиваются или сжимаются под новую
+     * шкалу частот (центр и полоса уже выставлены), история не теряется.
+     * @param {number} oldMinMHz — левый край графика до смены
+     * @param {number} oldMaxMHz — правый край графика до смены
+     */
+    WaterfallView.prototype.remap = function(oldMinMHz, oldMaxMHz) {
+        if (!this._syncSize(true) || !this._imageData || typeof document === 'undefined') { return; }
+        const w = this._canvas.width;
+        const h = this._canvas.height;
+        let ml = this._marginLeft;
+        let mr = this._marginRight;
+        let plotW = w - ml - mr;
+        if (plotW < 2) { plotW = w; ml = 0; mr = 0; }
+        const tmp = document.createElement('canvas');
+        tmp.width = w;
+        tmp.height = h;
+        tmp.getContext('2d').putImageData(this._imageData, 0, 0);
+        const newMin = this._freqCenterMHz - this._freqSpanMHz / 2;
+        const pxPerMHz = plotW / this._freqSpanMHz;
+        const x0 = ml + (oldMinMHz - newMin) * pxPerMHz;
+        const x1 = ml + (oldMaxMHz - newMin) * pxPerMHz;
+        const ctx = this._ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(ml, 0, plotW, h);
+        ctx.clip();
+        ctx.fillStyle = cssVar('--waterfall-cold-bg', '#000000');
+        ctx.fillRect(ml, 0, plotW, h);
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(tmp, ml, 0, plotW, h, x0, 0, x1 - x0, h);
+        ctx.restore();
+        this._imageData = ctx.getImageData(0, 0, w, h);
+    };
+
     // Шкала времени слева от водопада: верх = 0s (сейчас), низ = самая старая строка
     WaterfallView.prototype._drawTimeAxis = function() {
         const ctx = this._ctx;

@@ -14,6 +14,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/sstv"
+	"github.com/art-injener/satellite-scout/internal/tracker"
 )
 
 // События SSE демодулятора.
@@ -35,6 +36,12 @@ type ChannelSource interface {
 // Sink — получатель событий (рассылка SSE).
 type Sink func(eventType string, data []byte)
 
+// DopplerSource — радиальная скорость КА относительно станции в момент t, км/с
+// (сервис сопровождения); false — орбита КА неизвестна.
+type DopplerSource interface {
+	RangeRateKmps(noradID int, t time.Time) (float64, bool)
+}
+
 // Service принимает потоки трактов попутно со зрителями и рассылает принятые кадры
 // и состояние демодулятора.
 type Service struct {
@@ -42,6 +49,10 @@ type Service struct {
 	emit     Sink
 	now      func() time.Time
 	products *products.Store
+	audio    *AudioHub
+	doppler  DopplerSource
+	// transmitters — ожидаемые передатчики для маркеров на спектре; nil — маркеров нет.
+	transmitters TransmitterSource
 }
 
 // NewService создаёт сервис демодуляции.
@@ -53,6 +64,41 @@ func NewService(channels ChannelSource, emit Sink) *Service {
 func (s *Service) WithProducts(store *products.Store) *Service {
 	s.products = store
 	return s
+}
+
+// WithAudio включает раздачу звука профилей голоса и SSTV слушателям.
+func (s *Service) WithAudio(hub *AudioHub) *Service {
+	s.audio = hub
+	return s
+}
+
+// WithDoppler даёт орбиты КА: канал с doppler_norad следует за Доплером этого КА.
+func (s *Service) WithDoppler(src DopplerSource) *Service {
+	s.doppler = src
+	return s
+}
+
+// followDoppler ставит канал цепочки на Доплер КА norad для частоты freq сейчас и возвращает
+// этот сдвиг; nil — канал за Доплером не следует или орбита КА неизвестна, канал стоит на сдвиге.
+func (s *Service) followDoppler(chain *Chain, norad int, freq uint64) *float64 {
+	chain.SetDopplerHz(0)
+	if norad == 0 || s.doppler == nil {
+		return nil
+	}
+	rr, ok := s.doppler.RangeRateKmps(norad, s.now())
+	if !ok {
+		return nil
+	}
+	hz := tracker.DopplerShiftHz(float64(freq), rr)
+	chain.SetDopplerHz(hz)
+	return &hz
+}
+
+// publishAudio отдаёт звук блока слушателям, если раздача включена и профиль даёт звук.
+func (s *Service) publishAudio(pathID string, timestampMs, freq uint64, audio []float32) {
+	if s.audio != nil && len(audio) > 0 {
+		s.audio.Publish(pathID, timestampMs, freq, audio)
+	}
 }
 
 // TelemetryEvent — принятый кадр для таблицы телеметрии.
@@ -96,12 +142,20 @@ type StatusEvent struct {
 	DemodOff    bool   `json:"demod_off,omitempty"`
 	BandwidthHz uint32 `json:"bandwidth_hz"`
 	OffsetHz    int64  `json:"offset_hz"` // по сдвигу, полосе, порогу и профилю клиенты следуют за каналом
+	// DopplerAuto — режим «Авто». DopplerNorad — КА, за которым следует канал.
+	// DopplerHz — его сдвиг сейчас. Нет поля: орбита неизвестна.
+	// Канал на спектре стоит на offset_hz плюс doppler_hz.
+	DopplerAuto  bool     `json:"doppler_auto"`
+	DopplerNorad int      `json:"doppler_norad,omitempty"`
+	DopplerHz    *float64 `json:"doppler_hz,omitempty"`
 	// GainDB — усиление приёмника, отрицательное при АРУ; нет, если приёмник его не сообщил.
 	GainDB *float32 `json:"gain_db,omitempty"`
 	// Reception — меры хода приёма; нет, пока уровень в канале не поднимался выше порога.
 	Reception *ReceptionStages `json:"reception,omitempty"`
 	// Picture — картинка в приёме (профиль SSTV); frames_good у него — число картинок.
 	Picture *PictureProgress `json:"picture,omitempty"`
+	// TxMarkers — передатчики КА группы в окне приёмника, частота с Доплером; нет — поток не идёт.
+	TxMarkers []TxMarker `json:"tx_markers,omitempty"`
 }
 
 // ReceptionStages — по одной мере на этап приёма: несущая, такты, синхрослова.
@@ -128,6 +182,7 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 		lastStatus time.Time
 		picture    pictureState
 		demodOff   bool
+		st         Status // состояние после последнего принятого блока
 	)
 	for f := range frames {
 		var err error
@@ -145,30 +200,34 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 				}
 				chain = NewChain()
 				demodOff = true
-				s.sendStatus(pathID, true, freq, cs, Status{})
+				s.sendStatus(pathID, true, freq, cs, Status{}, s.bandMarkers(f.CenterHz, f.SampleRate))
 				lastStatus = s.now()
 			} else if now := s.now(); now.Sub(lastStatus) >= statusInterval {
-				s.sendStatus(pathID, true, freq, cs, Status{})
+				s.sendStatus(pathID, true, freq, cs, Status{}, s.bandMarkers(f.CenterHz, f.SampleRate))
 				lastStatus = now
 			}
 			continue
 		}
 		demodOff = false
+		doppler := s.followDoppler(chain, cs.DopplerNorad, freq)
 		for _, p := range chain.Process(f, cs) {
 			s.send(EventTelemetry, telemetryEvent(pathID, cs.Demod, p))
 		}
+		s.publishAudio(pathID, f.TimestampMs, freq, chain.Audio())
 		s.publishPictures(pathID, freq, f.TimestampMs, chain.Pictures(), &picture)
 		if picture.id != "" && chain.Status().Picture == nil {
 			// Цепочка бросила картинку (перестройка, другой профиль): сохраняется принятая часть.
 			s.finishPicture(picture.id, nil)
 			picture.id = ""
 		}
+		st = chain.Status()
+		st.DopplerHz = doppler
 		if now := s.now(); lastStatus.IsZero() || now.Sub(lastStatus) >= statusInterval {
-			s.sendStatus(pathID, true, freq, cs, chain.Status())
+			s.sendStatus(pathID, true, freq, cs, st, s.bandMarkers(f.CenterHz, f.SampleRate))
 			lastStatus = now
 		}
 	}
-	s.sendStatus(pathID, false, freq, cs, chain.Status())
+	s.sendStatus(pathID, false, freq, cs, st, nil)
 	if picture.id != "" {
 		// Поток закрылся посреди картинки: сохраняется то, что успело проявиться.
 		s.finishPicture(picture.id, nil)
@@ -267,9 +326,11 @@ func geoscanParams(f ax25.Frame) []TelemetryParam {
 	return out
 }
 
-// sendStatus рассылает состояние демодулятора вместе с усилением приёмника.
-func (s *Service) sendStatus(pathID string, active bool, freq uint64, cs sdr.ChannelSettings, st Status) {
+// sendStatus рассылает состояние демодулятора вместе с усилением приёмника и маркерами передатчиков.
+func (s *Service) sendStatus(pathID string, active bool, freq uint64, cs sdr.ChannelSettings, st Status,
+	markers []TxMarker) {
 	ev := statusEvent(pathID, active, freq, cs, st)
+	ev.TxMarkers = markers
 	if g, err := s.channels.GainDB(pathID); err == nil {
 		ev.GainDB = &g
 	}
@@ -299,6 +360,9 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		LastPacketMs: st.LastPacketMs,
 		BandwidthHz:  cs.BandwidthHz,
 		OffsetHz:     cs.OffsetHz,
+		DopplerAuto:  cs.DopplerAuto,
+		DopplerNorad: cs.DopplerNorad,
+		DopplerHz:    st.DopplerHz,
 		Picture:      st.Picture,
 	}
 	if st.Measured {

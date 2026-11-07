@@ -96,14 +96,14 @@ func (h *ReceiverHub) GainDB(pathID string) (float32, error) {
 	return r.Status().GainDB, nil
 }
 
-// SetChannel проверяет настройки демодулятора по полосе приёмника и сохраняет их.
+// SetChannel проверяет настройки демодулятора по годной полосе приёмника и сохраняет их.
 // Неподходящие не сохраняются, у тракта остаются прежние.
 func (h *ReceiverHub) SetChannel(pathID string, c ChannelSettings) error {
-	rate, err := h.SampleRate(pathID)
+	band, err := h.UsableBand(pathID)
 	if err != nil {
 		return err
 	}
-	if err := c.Validate(rate); err != nil {
+	if err := c.Validate(band); err != nil {
 		return err
 	}
 	h.mu.Lock()
@@ -133,6 +133,15 @@ func (h *ReceiverHub) SampleRate(pathID string) (uint32, error) {
 		return 0, err
 	}
 	return entry.currentRate(base), nil
+}
+
+// UsableBand возвращает ширину годной середины окна тракта при текущей частоте дискретизации.
+func (h *ReceiverHub) UsableBand(pathID string) (uint32, error) {
+	r, entry, base, err := h.baseRate(pathID)
+	if err != nil {
+		return 0, err
+	}
+	return r.Capabilities().UsableBandHz(entry.currentRate(base)), nil
 }
 
 // SampleRateChoices возвращает частоты, на которые оператор может переключить тракт.

@@ -167,6 +167,21 @@ func SelectPrimary(transmitters []Transmitter) *TransmitterSummary {
 	return summary(candidates[0])
 }
 
+// ActiveDownlinks — живые активные передатчики с downlink по возрастанию частоты.
+// Тот же фильтр, что у SelectPrimary, но без выбора одного: для ленты передатчиков.
+func ActiveDownlinks(transmitters []Transmitter) []TransmitterSummary {
+	out := make([]TransmitterSummary, 0, len(transmitters))
+	for i := range transmitters {
+		t := &transmitters[i]
+		if !t.IsActive() || !t.HasDownlink() {
+			continue
+		}
+		out = append(out, *summary(t))
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].FreqHz < out[j].FreqHz })
+	return out
+}
+
 // formatMHz переводит частоту в Hz в строку MHz с точностью до кГц.
 // Примеры: 145825000 → "145.825", 437800000 → "437.800", 2400500000 → "2400.500".
 func formatMHz(hz int64) string {

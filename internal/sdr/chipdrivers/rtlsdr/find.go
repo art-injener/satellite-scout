@@ -1,14 +1,11 @@
 package rtlsdr
 
 import (
-	"errors"
 	"fmt"
 
+	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/usbdrivers"
 )
-
-// ErrNotFound — подходящий донгл не подключён.
-var ErrNotFound = errors.New("rtlsdr: dongle not found")
 
 // dongleIDs — vendor:product донглов на RTL2832U.
 var dongleIDs = [][2]uint16{
@@ -25,42 +22,24 @@ func isDongle(d usbdrivers.DeviceInfo) bool {
 	return false
 }
 
-// findDongle ищет донгл в sysfs: по серийному номеру, иначе по пути, иначе первый.
-// Путь после переподключения меняется, поэтому серийный номер важнее.
+// findDongle ищет донгл в sysfs при каждом открытии по правилу sdr.MatchDevice: путь из конфига
+// после переподключения устаревает, а серийный номер у донглов бывает одинаковым.
 func findDongle(root string, o Options) (usbdrivers.DeviceInfo, error) {
 	devs, err := usbdrivers.List(root)
 	if err != nil {
 		return usbdrivers.DeviceInfo{}, fmt.Errorf("rtlsdr: list USB: %w", err)
 	}
-	var first *usbdrivers.DeviceInfo
-	for i := range devs {
-		d := devs[i]
-		if !isDongle(d) {
-			continue
-		}
-		switch {
-		case o.Serial != "":
-			if d.Serial == o.Serial {
-				return d, nil
-			}
-		case o.DevicePath != "":
-			if d.Path() == o.DevicePath {
-				return d, nil
-			}
-		default:
-			if first == nil {
-				first = &devs[i]
-			}
+	var dongles []usbdrivers.DeviceInfo
+	var candidates []sdr.Device
+	for _, d := range devs {
+		if isDongle(d) {
+			dongles = append(dongles, d)
+			candidates = append(candidates, sdr.Device{Serial: d.Serial, DevicePath: d.Path()})
 		}
 	}
-	if first != nil {
-		return *first, nil
+	i, err := sdr.MatchDevice(candidates, o.Serial, o.DevicePath)
+	if err != nil {
+		return usbdrivers.DeviceInfo{}, fmt.Errorf("rtlsdr: %w", err)
 	}
-	switch {
-	case o.Serial != "":
-		return usbdrivers.DeviceInfo{}, fmt.Errorf("%w: serial %q", ErrNotFound, o.Serial)
-	case o.DevicePath != "":
-		return usbdrivers.DeviceInfo{}, fmt.Errorf("%w: %s", ErrNotFound, o.DevicePath)
-	}
-	return usbdrivers.DeviceInfo{}, ErrNotFound
+	return dongles[i], nil
 }

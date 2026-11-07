@@ -668,15 +668,8 @@
         ];
         const spans = opts.spans || defaultSpans;
 
-        // Mock-список передатчиков для разработки
-        const defaultTx = [
-            { freqMHz: 145.825, label: 'ISS-VOICE', modulation: 'FM', active: true, chipColor: '#00ffc8', noradId: 25544 },
-            { freqMHz: 437.800, label: 'ISS-FSK', modulation: 'FSK 1k2', active: true, chipColor: '#d070ff', noradId: 25544 },
-            { freqMHz: 435.250, label: 'AO-91 BPSK', modulation: 'BPSK31', active: true, chipColor: '#ffaa22', noradId: 43017 },
-            { freqMHz: 145.920, label: 'RS-44 CW', modulation: 'CW', active: false, chipColor: '#8fa8bc', noradId: 44909 },
-            { freqMHz: 437.100, label: 'NOAA 18 APT', modulation: 'APT', active: false, chipColor: '#8fa8bc', noradId: 28654 },
-        ];
-        this._transmitters = opts.transmitters || defaultTx;
+        // Список приходит из группы КА (setTransmitters); до неё лента пуста
+        this._transmitters = opts.transmitters || [];
 
         // Canvas FFT
         this._canvas = opts.canvas || document.getElementById('manual-panorama-fft');
@@ -817,13 +810,24 @@
             const isFollowed = this._isFollowed(tx.freqMHz);
             row.className += isFollowed ? ' ml-tx-row--followed' : '';
 
-            const hint = !tx.active ? 'Молчит' : (isFollowed ? 'Настроен' : 'Настроить');
-            row.setAttribute('title', hint);
+            const hintParts = [];
+            if (!tx.active) { hintParts.push('Молчит'); }
+            else if (isFollowed) { hintParts.push('Настроен'); }
+            else { hintParts.push('Настроить'); }
+            if (tx.description) { hintParts.push(tx.description); }
+            row.setAttribute('title', hintParts.join('\n'));
 
             // В одну строку: LED, имя, частота, модуляция
             const led = document.createElement('span');
             led.className = 'ml-tx-row__led';
-            led.classList.add(tx.active ? 'ml-tx-row__led--' + this._ledClass(tx.chipColor) : 'ml-tx-row__led--grey');
+            if (!tx.active) {
+                led.classList.add('ml-tx-row__led--grey');
+            } else if (tx.chipColor) {
+                // Палитра КА — произвольный hex; фиксированные классы cyan/purple не покрывают
+                led.style.background = tx.chipColor;
+            } else {
+                led.classList.add('ml-tx-row__led--cyan');
+            }
             row.appendChild(led);
             const name = document.createElement('span');
             name.className = 'ml-tx-row__name';
@@ -891,16 +895,6 @@
                 detail: { noradId: tx.noradId || null, freqMHz: tx.freqMHz, tx: tx },
             }));
         }
-    };
-
-    /** Определяет CSS-класс LED по цвету чипа. */
-    ManualPanorama.prototype._ledClass = function(chipColor) {
-        if (!chipColor) { return 'cyan'; }
-        const c = String(chipColor).toLowerCase();
-        if (c.indexOf('d070') >= 0 || c.indexOf('a855') >= 0 || c.indexOf('55f7') >= 0) { return 'purple'; }
-        if (c.indexOf('ffaa') >= 0 || c.indexOf('ffb3') >= 0 || c.indexOf('b347') >= 0) { return 'amber'; }
-        if (c.indexOf('00ff') >= 0 || c.indexOf('00d4') >= 0 || c.indexOf('ffc8') >= 0) { return 'cyan'; }
-        return 'grey';
     };
 
     ManualPanorama.prototype._setHighlight = function(freqMHz) {

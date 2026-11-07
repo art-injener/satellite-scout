@@ -1,7 +1,7 @@
 {
   "_version": 1,
   "server": {
-    "port": "8083",
+    "port": "8080",
     "master_password": ""
   },
   "ui": {

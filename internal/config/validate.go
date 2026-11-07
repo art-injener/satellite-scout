@@ -146,6 +146,13 @@ func (c *Config) Validate() error {
 						*cal, CalibrationMinDB, CalibrationMaxDB),
 				})
 			}
+			if ppm := rp.Receiver.FreqCorrectionPPM; ppm < -FreqCorrectionMaxPPM || ppm > FreqCorrectionMaxPPM {
+				errs = append(errs, ValidationError{
+					Field: prefix + ".receiver.freq_correction_ppm",
+					Message: fmt.Sprintf("поправка %d ppm вне диапазона [%d; %d]",
+						ppm, -FreqCorrectionMaxPPM, FreqCorrectionMaxPPM),
+				})
+			}
 		}
 	}
 

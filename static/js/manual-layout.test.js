@@ -171,6 +171,7 @@ function makeMockWidget() {
     Widget.prototype.start = function() { this.calls.push(['start']); };
     Widget.prototype.clear = function() { this.calls.push(['clear']); };
     Widget.prototype.pushLine = function(buf) { this.calls.push(['pushLine', buf]); };
+    Widget.prototype.remap = function(a, b) { this.calls.push(['remap', a, b]); };
     return Widget;
 }
 
@@ -196,8 +197,12 @@ MockStream.dbfsToUnit = realStream.dbfsToUnit;
 MockStream.AutoRange = realStream.AutoRange;
 MockStream.DisplaySmooth = realStream.DisplaySmooth;
 MockStream.markerReadout = realStream.markerReadout;
+MockStream.cursorSample = realStream.cursorSample;
 MockStream.dbmOffset = realStream.dbmOffset;
 MockStream.shiftLevels = realStream.shiftLevels;
+MockStream.zoomView = realStream.zoomView;
+MockStream.panView = realStream.panView;
+MockStream.viewSlice = realStream.viewSlice;
 global.window.SpectrumStream = MockStream;
 
 // ChannelOverlay mock: geometry is tested in channel-overlay.test.js; here — wiring
@@ -207,7 +212,7 @@ function MockChannelOverlay(host, opts) {
     this.calls = [];
     MockChannelOverlay.last = this;
 }
-['setBand', 'setChannel', 'setStatus', 'setVisible', 'render', 'destroy'].forEach((name) => {
+['setBand', 'setView', 'setChannel', 'setShift', 'setMaxWidth', 'setStatus', 'setVisible', 'render', 'destroy'].forEach((name) => {
     MockChannelOverlay.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
 });
 MockChannelOverlay.prototype.lastCall = function(name) {
@@ -215,6 +220,18 @@ MockChannelOverlay.prototype.lastCall = function(name) {
     return c.length ? c[c.length - 1] : null;
 };
 global.window.ChannelOverlay = MockChannelOverlay;
+
+// TxMarkers mock: geometry is tested in tx-markers.test.js; here — wiring
+function MockTxMarkers(host, opts) {
+    this.opts = opts;
+    this.calls = [];
+    MockTxMarkers.last = this;
+}
+['setBand', 'setView', 'setMarkers', 'render', 'destroy'].forEach((name) => {
+    MockTxMarkers.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
+});
+MockTxMarkers.markersWithLabels = require('./tx-markers.js').markersWithLabels;
+global.window.TxMarkers = MockTxMarkers;
 
 /** FFT frame as SpectrumStream hands it over. */
 function fftFrame(centerHz, values, spanHz) {
@@ -286,6 +303,7 @@ MockPanorama.prototype.deactivate = function() { this.calls.push(['deactivate'])
 MockPanorama.prototype.isActive = function() { return false; };
 MockPanorama.prototype.getSelectedTx = function() { return this._selected || null; };
 MockPanorama.prototype.refreshAfterThemeChange = function() { this.calls.push(['refreshAfterThemeChange']); };
+MockPanorama.prototype.setTransmitters = function(l) { this.calls.push(['setTransmitters', l]); };
 MockPanorama.prototype.destroy = function() { this.calls.push(['destroy']); };
 global.window.ManualPanorama = MockPanorama;
 
@@ -303,9 +321,10 @@ function MockPassTimeline() {
     this.calls = [];
 }
 MockPassTimeline.prototype.draw = function() { this.calls.push(['draw']); };
-MockPassTimeline.prototype.setPasses = function(l) { this.calls.push(['setPasses', l]); };
+MockPassTimeline.prototype.setPasses = function(l, w) { this.calls.push(['setPasses', l, w]); };
 MockPassTimeline.prototype.setTrackingId = function(id) { this.calls.push(['setTrackingId', id]); };
 MockPassTimeline.prototype.refreshAfterThemeChange = function() { this.calls.push(['refreshAfterThemeChange']); };
+MockPassTimeline.passesFromGroup = require('./pass-timeline.js').passesFromGroup;
 global.window.PassTimelineView = MockPassTimeline;
 
 // Omni views: real gain model, canvas views mocked
@@ -394,6 +413,7 @@ _domNodes.set('manual-spec-mode', makeDomElement('manual-spec-mode', {
     querySelectorAll: () => Object.values(specModeBtns),
 }));
 _domNodes.set('manual-spec-reset', makeDomElement('manual-spec-reset'));
+_domNodes.set('manual-spec-zoom-reset', makeDomElement('manual-spec-zoom-reset', { disabled: false }));
 const specAvgN = makeDomElement('manual-spec-avg-n', { value: '10', hidden: false });
 _domNodes.set('manual-spec-avg-n', specAvgN);
 // Тот же переключатель над компактным спектром «Антенны»
@@ -512,7 +532,34 @@ const filterBwSel = makeSelect('manual-rx-filter-bw', ['2.8 кГц', '6 кГц',
 filterBwSel._listeners = {};
 filterBwSel.addEventListener = pipelineSel.addEventListener;
 filterBwSel.removeEventListener = pipelineSel.removeEventListener;
+const dopplerSel = makeSelect('manual-rx-doppler-mode', ['Фикс.', 'Авто'], 1);
+['off', 'auto'].forEach((v, i) => { dopplerSel.options[i].value = v; });
+dopplerSel._listeners = {};
+dopplerSel.addEventListener = pipelineSel.addEventListener;
+dopplerSel.removeEventListener = pipelineSel.removeEventListener;
+_domNodes.set('manual-rx-doppler-mode', dopplerSel);
+_domNodes.set('manual-rx-doppler-now', makeDomElement('manual-rx-doppler-now'));
+_domNodes.set('manual-rx-audio', makeDomElement('manual-rx-audio', { _attrs: { 'aria-pressed': 'false' } }));
+_domNodes.set('manual-rx-volume', makeDomElement('manual-rx-volume', { value: '80' }));
+// AudioPlayer mock: what the layout asks the player to do
+function MockAudioPlayer() {
+    this.calls = [];
+    this.path = null;
+    MockAudioPlayer.last = this;
+}
+MockAudioPlayer.prototype.start = function(p) { this.path = p; this.calls.push(['start', p]); };
+MockAudioPlayer.prototype.stop = function() { this.path = null; this.calls.push(['stop']); };
+MockAudioPlayer.prototype.isPlaying = function() { return this.path !== null; };
+MockAudioPlayer.prototype.setVolume = function(v) { this.volume = v; };
+global.window.AudioPlayer = MockAudioPlayer;
 _domNodes.set('manual-spectrum', makeDomElement('manual-spectrum'));
+_domNodes.get('manual-spectrum').getBoundingClientRect = function() {
+    return { left: 0, top: 0, width: 200, height: 400 };
+};
+_domNodes.set('manual-spec-cursor', makeDomElement('manual-spec-cursor', { hidden: true }));
+_domNodes.set('manual-spec-cursor-line', makeDomElement('manual-spec-cursor-line'));
+_domNodes.set('manual-spec-cursor-mark', makeDomElement('manual-spec-cursor-mark', { hidden: true }));
+_domNodes.set('manual-spec-cursor-tag', makeDomElement('manual-spec-cursor-tag'));
 // «Полоса»: пункты перестраиваются по sample_rates статуса
 const spanSel = { id: 'manual-rx-span', selectedIndex: 0, options: [] };
 spanSel.add = function(opt) { this.options.push(opt); };
@@ -532,6 +579,7 @@ global.window.StateEventType = {
     POSITION: 'position',
     TRACKING_CHANGE: 'tracking_change',
     SELECTED_CHANGE: 'selected_change',
+    SATELLITE_GROUP_UPDATE: 'satellite_group_update',
 };
 
 // ── Minimal StateManager for tests ────────────────────────────
@@ -1061,11 +1109,40 @@ test('activate draws the pass timeline', () => {
 test('tracking change forwards the norad id to the timeline', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
+    m._passTimeline.calls = [];
     sm._trackingId = 25544;
     sm.emit('tracking_change', {});
     const calls = m._passTimeline.calls.filter((c) => c[0] === 'setTrackingId');
     assert.strictEqual(calls.length, 1);
     assert.strictEqual(calls[0][1], 25544);
+    m.destroy();
+});
+
+test('group update feeds the timeline with the group passes and window', () => {
+    const sm = makeStateManager();
+    const m = new ManualLayout(sm);
+    m._passTimeline.calls = [];
+    sm._trackingId = 25544;
+    sm.getSatelliteGroup = () => ({
+        satellites: [{ norad_id: 25544, sat_alias: 'ISS', aos: 1000, los: 9000, tca: 4000, tca_el: 60 }],
+        time_window: { start: 1000, end: 9000 },
+    });
+    sm.emit('satellite_group_update', {});
+    const set = m._passTimeline.calls.find((c) => c[0] === 'setPasses');
+    assert.ok(set, 'setPasses called');
+    assert.deepStrictEqual(set[1], [{ noradId: 25544, name: 'ISS', aosMs: 1000, losMs: 9000, tcaMs: 4000, maxEl: 60 }]);
+    assert.deepStrictEqual(set[2], { startMs: 1000, endMs: 9000 });
+    assert.ok(m._passTimeline.calls.some((c) => c[0] === 'setTrackingId' && c[1] === 25544),
+        'tracked satellite is highlighted right away');
+    m.destroy();
+});
+
+test('without a group the timeline is empty', () => {
+    const sm = makeStateManager();
+    const m = new ManualLayout(sm);
+    const set = m._passTimeline.calls.find((c) => c[0] === 'setPasses');
+    assert.ok(set, 'schedule is set on start');
+    assert.deepStrictEqual(set[1], []);
     m.destroy();
 });
 
@@ -1083,6 +1160,66 @@ test('destroy nullifies the pass timeline', () => {
     const m = new ManualLayout(sm);
     m.destroy();
     assert.strictEqual(m._passTimeline, null);
+});
+
+console.log('\n— ManualLayout: transmitter ribbon —');
+
+test('transmittersFromGroup lists every SatNOGS downlink of the group', () => {
+    const list = ManualLayout.transmittersFromGroup({ satellites: [
+        { norad_id: 25544, sat_name: 'ISS', sat_alias: 'ZARYA', is_visible: true, transmitters: [
+            { uuid: 'tx-voice', freq_hz: 145800000, mode: 'FM', modulation: 'FM', description: 'Voice' },
+            { uuid: 'tx-aprs', freq_hz: 145825000, mode: 'AFSK', modulation: 'AFSK 1200', baud: 1200 },
+        ] },
+        { norad_id: 7530, sat_name: 'OSCAR 7', is_visible: false, transmitters: [
+            { uuid: 'tx-ao7', freq_hz: 145975000, mode: 'CW', modulation: 'CW' },
+        ] },
+    ] });
+    assert.deepStrictEqual(list, [
+        { uuid: 'tx-voice', noradId: 25544, freqMHz: 145.8, modulation: 'FM', baud: 0,
+            label: 'ISS', description: 'Voice', active: true },
+        { uuid: 'tx-aprs', noradId: 25544, freqMHz: 145.825, modulation: 'AFSK 1200', baud: 1200,
+            label: 'ISS', description: '', active: true },
+        { uuid: 'tx-ao7', noradId: 7530, freqMHz: 145.975, modulation: 'CW', baud: 0,
+            label: 'OSCAR 7', description: '', active: false },
+    ]);
+});
+
+test('transmittersFromGroup prefers sat_name over the long alias', () => {
+    const list = ManualLayout.transmittersFromGroup({ satellites: [{
+        norad_id: 1, sat_name: 'RS-44', sat_alias: 'BREEZE-KM R/B', is_visible: true,
+        transmitters: [{ uuid: 'tx', freq_hz: 435600000, mode: 'CW', modulation: 'CW' }],
+    }] });
+    assert.strictEqual(list[0].label, 'RS-44');
+});
+
+test('transmittersFromGroup keeps SatNOGS description out of the ribbon label', () => {
+    const list = ManualLayout.transmittersFromGroup({ satellites: [{
+        norad_id: 1, sat_name: 'RS51S', sat_alias: 'GEOSCAN', is_visible: true, transmitters: [{
+            uuid: 'tx', freq_hz: 436200000, mode: 'GFSK', modulation: 'GFSK 9600',
+            description: 'Mode U - GFSK9k6 - AX.25 Beacon and Telemetry (Geoscan framing)',
+        }],
+    }] });
+    assert.strictEqual(list[0].label, 'RS51S');
+    assert.ok(list[0].description.indexOf('AX.25') >= 0, 'full text stays for the tooltip');
+});
+
+test('transmittersFromGroup invents nothing without SatNOGS data', () => {
+    assert.deepStrictEqual(ManualLayout.transmittersFromGroup(null), []);
+    assert.deepStrictEqual(ManualLayout.transmittersFromGroup({ satellites: [
+        { norad_id: 1, sat_name: 'A', freq_mhz: '145.800', modulation: 'FM' },
+    ] }), [], 'the primary freq_mhz alone is not a ribbon entry');
+});
+
+test('group update without transmitters empties the ribbon', () => {
+    const sm = makeStateManager();
+    sm.getSatelliteGroup = () => ({ satellites: [{ norad_id: 1, sat_name: 'A', aos: 1, los: 2 }] });
+    const m = new ManualLayout(sm);
+    m._panorama.calls = [];
+    sm.emit('satellite_group_update', {});
+    const set = m._panorama.calls.find((c) => c[0] === 'setTransmitters');
+    assert.ok(set, 'ribbon is refreshed');
+    assert.deepStrictEqual(set[1], []);
+    m.destroy();
 });
 
 console.log('\n— ManualLayout: IQ recorder —');
@@ -1969,6 +2106,29 @@ function peakFrame(bin, dbfs, timestampMs) {
     return f;
 }
 
+test('spectrum resolution: RBW from the band and bins of the frame', () => {
+    _domNodes.set('manual-spec-rbw', makeDomElement('manual-spec-rbw'));
+    try {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            const rbw = _domNodes.get('manual-spec-rbw');
+            // Blackman-Harris widens a pure tone to about two bins
+            MockStream.last().opts.onFrame(peakFrame(10, -50, 1000));
+            assert.strictEqual(rbw.textContent, 'RBW 4 кГц', '2.048 MHz over 1024 bins');
+            MockStream.last().opts.onFrame(fftFrame(436500000, new Array(4096).fill(-90), 2048000));
+            assert.strictEqual(rbw.textContent, 'RBW 1 кГц');
+            MockStream.last().opts.onFrame(fftFrame(436500000, new Array(4096).fill(-90), 1024000));
+            assert.strictEqual(rbw.textContent, 'RBW 500 Гц');
+            MockStream.last().opts.onFrame(fftFrame(436500000, new Array(4096).fill(-90), 2400000));
+            assert.strictEqual(rbw.textContent, 'RBW 1,2 кГц');
+            m.destroy();
+        });
+    } finally {
+        _domNodes.delete('manual-spec-rbw');
+    }
+});
+
 test('stream frame shows the peak marker: frequency and amplitude with bar', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
@@ -2136,6 +2296,208 @@ test('retune seen in the stream clears the waterfall, steady frames do not', () 
         s.opts.onFrame(fftFrame(437800000));
         assert.ok(m._wf.calls.some((c) => c[0] === 'clear'), 'old lines belong to another frequency');
         assert.strictEqual(m._freqDial.getHz(), 437800000, 'another operator retuned: dial follows');
+        m.destroy();
+    });
+});
+
+// ── Spectrum zoom: 64 bins over 64 kHz, 1 kHz per bin; plot is 200 px wide ──
+
+/** Wheel over the spectrum block; returns whether the page scroll was prevented. */
+function wheelSpectrum(deltaY, clientX, deltaX) {
+    let prevented = false;
+    const host = _domNodes.get('manual-spectrum');
+    const arr = (host._listeners && host._listeners.wheel) || [];
+    for (const fn of arr.slice()) {
+        fn({
+            type: 'wheel', deltaY: deltaY, deltaX: deltaX || 0, deltaMode: 0, clientX: clientX,
+            preventDefault() { prevented = true; },
+        });
+    }
+    return prevented;
+}
+
+/** Distinct level per bin, so the slice is easy to recognise. */
+function rampValues() {
+    return Array.from({ length: 64 }, (_, i) => -100 + i);
+}
+
+test('wheel over the spectrum zooms in around the pointer: FFT and waterfall get the visible bins', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        const values = rampValues();
+        s.opts.onFrame(fftFrame(436500000, values, 64000));
+        // strong wheel: the window narrows to the minimum, 32 bins around the pointer at 3/4
+        assert.ok(wheelSpectrum(-10000, 150), 'page does not scroll');
+        m._fft.calls = [];
+        m._wf.calls = [];
+        s.opts.onFrame(fftFrame(436500000, values, 64000));
+        assert.strictEqual(m._fft.freqCenterMHz, 436.508);
+        assert.strictEqual(m._fft.freqSpanMHz, 0.032);
+        assert.strictEqual(m._wf._freqCenterMHz, 436.508);
+        assert.strictEqual(m._wf._freqSpanMHz, 0.032);
+        const want = Array.from(realStream.dbfsToUnit(new Float32Array(values.slice(24, 57)), m._fft._dbMin, m._fft._dbMax));
+        const draw = m._fft.calls.find((c) => c[0] === 'draw');
+        assert.deepStrictEqual(Array.from(draw[1]), want);
+        const line = m._wf.calls.find((c) => c[0] === 'pushLine');
+        assert.deepStrictEqual(Array.from(line[1]), want);
+        assert.deepStrictEqual(MockChannelOverlay.last.lastCall('setView'), ['setView', 8000, 32000]);
+        assert.strictEqual(m._antFft.freqSpanMHz, 0.064, 'Antenna keeps the whole band');
+        m.destroy();
+    });
+});
+
+test('pointer over the spectrum reads frequency and power and leaves the peak marker', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const values = new Array(5).fill(-90);
+        values[1] = -40;
+        const s = MockStream.last();
+        s.opts.onFrame(fftFrame(436500000, values, 4000000));
+        const peak = markerText().slice();
+        m._onSpecPointer({ clientX: 50, clientY: 40 });
+        const tag = _domNodes.get('manual-spec-cursor-tag');
+        const root = _domNodes.get('manual-spec-cursor');
+        assert.strictEqual(root.hidden, false);
+        assert.strictEqual(tag.textContent, '435.500 МГц  −40.0 dBFS');
+        assert.strictEqual(_domNodes.get('manual-spec-cursor-line').style.left, '50px');
+        assert.deepStrictEqual(markerText(), peak);
+        assert.strictEqual(tuneCalls().length, 0);
+        values[1] = -20;
+        s.opts.onFrame(fftFrame(436500000, values, 4000000));
+        assert.strictEqual(tag.textContent, '435.500 МГц  −33.0 dBFS', 'a new frame refreshes the line');
+        m._onSpecPointerLeave();
+        assert.strictEqual(root.hidden, true);
+        m._onSpecPointer({ clientX: -10, clientY: 40 });
+        assert.strictEqual(root.hidden, true, 'the dB labels are not the plot');
+        m.destroy();
+    });
+});
+
+test('cursor reads the zoomed window under the same pixel', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        s.opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        wheelSpectrum(-10000, 150);
+        s.opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        m._onSpecPointer({ clientX: 150, clientY: 40 });
+        const tag = _domNodes.get('manual-spec-cursor-tag').textContent;
+        assert.strictEqual(tag, '436.516 МГц  −52.0 dBFS');
+        m.destroy();
+    });
+});
+
+test('marker reads the peak inside the zoomed window', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        const values = new Array(64).fill(-90);
+        values[2] = -10;
+        values[40] = -40;
+        s.opts.onFrame(fftFrame(436500000, values, 64000));
+        wheelSpectrum(-10000, 150);
+        s.opts.onFrame(fftFrame(436500000, values, 64000));
+        assert.strictEqual(markerText()[0], '436.508', 'the stronger peak is out of sight');
+        m.destroy();
+    });
+});
+
+test('zoom keeps the waterfall history: old lines are remapped to the new scale', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        m._wf.calls = [];
+        wheelSpectrum(100, 150);
+        assert.ok(!m._wf.calls.some((c) => c[0] === 'remap'), 'the whole band cannot zoom out');
+        wheelSpectrum(-10000, 150);
+        assert.deepStrictEqual(m._wf.calls.find((c) => c[0] === 'remap'), ['remap', 436.468, 436.532]);
+        assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'));
+        m.destroy();
+    });
+});
+
+test('drag on the spectrum and the horizontal wheel pan the zoomed window', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        wheelSpectrum(-10000, 150);
+        MockChannelOverlay.last.opts.onPan(-4000);
+        assert.strictEqual(m._fft.freqCenterMHz, 436.504);
+        assert.strictEqual(tuneCalls().length, 0, 'zoomed drag pans the window and does not retune');
+        // 50 px of 200 is a quarter of the 32 kHz window
+        wheelSpectrum(0, 150, 50);
+        assert.strictEqual(m._fft.freqCenterMHz, 436.512);
+        assert.strictEqual(m._fft.freqSpanMHz, 0.032);
+        m.destroy();
+    });
+});
+
+test('drag on the full-span spectrum retunes the receiver and the dial follows', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        MockChannelOverlay.last.opts.onPan(-4000);
+        MockChannelOverlay.last.opts.onPan(-1000);
+        assert.strictEqual(m._freqDial.getHz(), 436495000);
+        assert.strictEqual(m._rxFreqMHz, 436.495);
+        // One request is in flight; the later target waits and is not sent yet.
+        assert.deepStrictEqual(tuneCalls().map((c) => c.body.center_hz), [436496000]);
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        assert.strictEqual(m._freqDial.getHz(), 436495000, 'old center must not undo the drag');
+        m.destroy();
+    });
+});
+
+test('viewer drag on the spectrum does not tune', () => {
+    const ac = makeAccess(false);
+    withStation({ access: ac }, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        MockChannelOverlay.last.opts.onPan(-4000);
+        assert.strictEqual(tuneCalls().length, 0);
+        assert.strictEqual(m._freqDial.getHz(), 436500000);
+        assert.ok(ac.notices.some((t) => /приёмник можно только в режиме «Контроль»/.test(t)), ac.notices.join(' | '));
+        m.destroy();
+    });
+});
+
+test('1:1 shows the whole band again, retune drops the zoom', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        const btn = _domNodes.get('manual-spec-zoom-reset');
+        s.opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        assert.strictEqual(btn.disabled, true, 'whole band: nothing to reset');
+        wheelSpectrum(-10000, 150);
+        assert.strictEqual(btn.disabled, false);
+        fire(btn, 'click');
+        assert.strictEqual(m._fft.freqCenterMHz, 436.5);
+        assert.strictEqual(m._fft.freqSpanMHz, 0.064);
+        assert.strictEqual(btn.disabled, true);
+        wheelSpectrum(-10000, 150);
+        s.opts.onFrame(fftFrame(436600000, rampValues(), 64000));
+        assert.strictEqual(m._fft.freqCenterMHz, 436.6);
+        assert.strictEqual(m._fft.freqSpanMHz, 0.064);
+        assert.strictEqual(btn.disabled, true);
         m.destroy();
     });
 });
@@ -2424,8 +2786,157 @@ test('demodulator «Установить» sends only the channel', () => {
             squelch_dbfs: -75,
             demod: 'afsk1200',
             demod_off: false,
+            doppler_norad: 0,
+            doppler_auto: true,
         });
         m.destroy();
+    });
+});
+
+const TUNE_TX = { freqMHz: 436.55, label: 'CAS-5A FM', modulation: 'FM', noradId: 54684, active: true };
+
+test('Doppler Auto sends the NORAD of the tuned transmitter, Fix sends 0', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        assert.strictEqual(dopplerSel.selectedIndex, 1, 'Doppler starts on Auto');
+        dopplerSel.selectedIndex = 0;
+        tuneTo(TUNE_TX.freqMHz, TUNE_TX);
+        assert.strictEqual(channelCalls().length, 0, 'with Fix a tune does not touch the channel');
+        dopplerSel.selectedIndex = 1;
+        fire(_domNodes.get('manual-demod-apply'), 'click');
+        assert.strictEqual(channelCalls()[0].body.doppler_norad, 54684);
+        assert.strictEqual(channelCalls()[0].body.doppler_auto, true);
+
+        tuneTo(TUNE_TX.freqMHz, Object.assign({}, TUNE_TX, { noradId: 43017 }));
+        assert.strictEqual(channelCalls().length, 2, 'with Auto a new satellite goes to the server at once');
+        assert.strictEqual(channelCalls()[1].body.doppler_norad, 43017);
+
+        dopplerSel.selectedIndex = 0;
+        fire(_domNodes.get('manual-demod-apply'), 'click');
+        assert.strictEqual(channelCalls()[2].body.doppler_norad, 0);
+        assert.strictEqual(channelCalls()[2].body.doppler_auto, false);
+        m.destroy();
+    });
+});
+
+test('Doppler from the server: mode, shown shift and the channel moved on the spectrum', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        dopplerSel.selectedIndex = 0;
+        const ov = MockChannelOverlay.last;
+        const st = { radio_path: 'radio_path_1', active: true, demod: 'fsk1200',
+            offset_hz: 0, bandwidth_hz: 2800, squelch_dbfs: -90,
+            doppler_norad: 54684, doppler_auto: true, doppler_hz: -3210 };
+        emit('demod_status', st);
+        assert.strictEqual(dopplerSel.selectedIndex, 1, 'another operator switched Doppler on');
+        assert.deepStrictEqual(ov.lastCall('setShift'), ['setShift', -3210]);
+        assert.strictEqual(_domNodes.get('manual-rx-doppler-now').textContent, '−3.21 кГц');
+
+        fire(_domNodes.get('manual-demod-apply'), 'click');
+        assert.strictEqual(channelCalls()[0].body.doppler_norad, 54684, 'server satellite kept without a tune');
+
+        emit('demod_status', { radio_path: 'radio_path_1', active: true, demod: 'fsk1200',
+            offset_hz: 0, bandwidth_hz: 2800, squelch_dbfs: -90, doppler_auto: false });
+        assert.strictEqual(dopplerSel.selectedIndex, 0);
+        assert.deepStrictEqual(ov.lastCall('setShift'), ['setShift', 0]);
+        assert.strictEqual(_domNodes.get('manual-rx-doppler-now').textContent, '');
+        m.destroy();
+    }));
+});
+
+console.log('\n— ManualLayout: transmitter markers —');
+
+const MARK_GROUP = { satellites: [{ norad_id: 54684, sat_alias: 'CAS-5A', is_visible: true, transmitters: [
+    { uuid: 'tx-cas', freq_hz: 436550000, mode: 'FM', modulation: 'FM' },
+] }] };
+
+test('server markers reach the spectrum with ribbon labels and follow the band', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const sm = makeStateManager();
+        sm.getSatelliteGroup = () => MARK_GROUP;
+        const m = new ManualLayout(sm);
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const tm = MockTxMarkers.last;
+        MockStream.last().opts.onFrame(fftFrame(436500000, [-100, -50, 0], 2048000));
+        assert.deepStrictEqual(tm.calls.filter((c) => c[0] === 'setBand').pop(), ['setBand', 436500000, 2048000]);
+        emit('demod_status', { radio_path: 'radio_path_1', active: true, offset_hz: 0, bandwidth_hz: 15000,
+            tx_markers: [{ norad_id: 54684, uuid: 'tx-cas', freq_hz: 436553000, doppler_hz: 3000 }] });
+        const set = tm.calls.filter((c) => c[0] === 'setMarkers').pop();
+        assert.strictEqual(set[1].length, 1);
+        assert.strictEqual(set[1][0].label, 'CAS-5A · FM');
+        assert.strictEqual(set[1][0].nominalHz, 436550000);
+        m.destroy();
+        assert.ok(tm.calls.some((c) => c[0] === 'destroy'));
+    }));
+});
+
+test('picking a marker puts the channel on the nominal and turns Doppler Auto on for its satellite', () => {
+    withStation({}, () => {
+        const sm = makeStateManager();
+        sm.getSatelliteGroup = () => MARK_GROUP;
+        const m = new ManualLayout(sm);
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        dopplerSel.selectedIndex = 0;
+        MockStream.last().opts.onFrame(fftFrame(436500000, [-100, -50, 0], 2048000));
+        const tx = m._txList[0];
+        MockTxMarkers.last.opts.onPick({ noradId: 54684, uuid: 'tx-cas', freqHz: 436553000, nominalHz: 436550000,
+            label: 'CAS-5A · FM', tx: tx });
+        assert.strictEqual(dopplerSel.selectedIndex, 1, 'Doppler switched to Auto');
+        const body = channelCalls().pop().body;
+        assert.strictEqual(body.offset_hz, 50000, 'nominal minus the receiver centre');
+        assert.strictEqual(body.doppler_norad, 54684);
+        assert.strictEqual(fetchMock.calls.filter((c) => c.url === '/api/sdr/tune').length, 0,
+            'the receiver is not retuned');
+        m.destroy();
+    });
+});
+
+console.log('\n— ManualLayout: listening —');
+
+test('Слушать plays the selected tract; volume goes to the player; leaving Manual stops it', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        const p = MockAudioPlayer.last;
+        const btn = _domNodes.get('manual-rx-audio');
+        assert.strictEqual(p.volume, 0.8);
+        fire(btn, 'click');
+        assert.deepStrictEqual(p.calls, [['start', 'radio_path_1']]);
+        assert.strictEqual(btn.getAttribute('aria-pressed'), 'true');
+        _domNodes.get('manual-rx-volume').value = '25';
+        fire(_domNodes.get('manual-rx-volume'), 'input');
+        assert.strictEqual(p.volume, 0.25);
+        fire(btn, 'click');
+        assert.strictEqual(p.path, null);
+        assert.strictEqual(btn.getAttribute('aria-pressed'), 'false');
+
+        fire(btn, 'click');
+        m.deactivate();
+        assert.strictEqual(p.path, null, 'no sound outside Manual');
+        assert.strictEqual(btn.getAttribute('aria-pressed'), 'false');
+        m.destroy();
+        _domNodes.get('manual-rx-volume').value = '80';
+    });
+});
+
+test('switching the tract while listening moves the sound to the new tract', () => {
+    const mm = hybridModeManager();
+    mm.getRadioPathId = () => mm.id;
+    withStation({ mm: mm }, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        const p = MockAudioPlayer.last;
+        fire(_domNodes.get('manual-rx-audio'), 'click');
+        mm.setRadioPath(2);
+        assert.strictEqual(p.path, 'radio_path_2');
+        m.destroy();
+        assert.strictEqual(p.path, null, 'destroy stops the sound');
     });
 });
 
@@ -2533,13 +3044,100 @@ test('channel bandwidth select moves the overlay before «Установить»
     });
 });
 
+test('choosing SSB or CW narrows a wide channel and greys out widths not heard', () => {
+    const extraPipelines = [['lsb', 'LSB (SSB)'], ['cw', 'CW'], ['fm', 'FM (голос)']];
+    extraPipelines.forEach(([value, text]) => { pipelineSel.options.push({ value: value, text: text }); });
+    filterBwSel.options.push({ value: '500', text: '500 Гц' });
+    try {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            const ov = MockChannelOverlay.last;
+            const pick = (value) => {
+                pipelineSel.selectedIndex = pipelineSel.options.findIndex((o) => o.value === value);
+                fire(pipelineSel, 'change');
+            };
+            const bw = () => filterBwSel.options[filterBwSel.selectedIndex].value;
+
+            const disabled = () => filterBwSel.options.filter((o) => o.disabled).map((o) => o.value);
+
+            fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+            pick('fm');
+            assert.strictEqual(bw(), '15000', 'FM keeps the wide channel');
+            assert.deepStrictEqual(disabled(), []);
+            assert.deepStrictEqual(ov.lastCall('setMaxWidth'), ['setMaxWidth', 0]);
+            pick('lsb');
+            assert.strictEqual(bw(), '2800', 'the widest width heard');
+            assert.deepStrictEqual(disabled(), ['6000', '15000', '18000']);
+            assert.ok(filterBwSel.options[2].title, 'a greyed width says why');
+            assert.deepStrictEqual(ov.lastCall('setMaxWidth'), ['setMaxWidth', 4000]);
+            assert.deepStrictEqual(
+                filterBwSel.options.filter((o) => !o.disabled).map((o) => Number(o.value)),
+                [2800, 500],
+                'only the heard widths stay available');
+            assert.deepStrictEqual(ov.lastCall('setChannel'), ['setChannel', 0, 2800], 'the overlay follows at once');
+            pick('cw');
+            assert.strictEqual(bw(), '500');
+            assert.deepStrictEqual(disabled(), ['2800', '6000', '15000', '18000']);
+
+            selectByValueForTest(filterBwSel, '500');
+            pick('lsb');
+            assert.strictEqual(bw(), '500', 'a narrower channel is kept');
+            pick('fm');
+            assert.deepStrictEqual(disabled(), [], 'FM frees all widths again');
+            assert.strictEqual(channelCalls().length, 0, 'only a preview, nothing sent');
+            m.destroy();
+        });
+    } finally {
+        pipelineSel.options.splice(pipelineSel.options.length - extraPipelines.length);
+        filterBwSel.options.pop();
+        filterBwSel.options.forEach((o) => { o.disabled = false; o.title = ''; });
+        pipelineSel.selectedIndex = 0;
+        filterBwSel.selectedIndex = 2;
+    }
+});
+
+test('broadcast FM selects the 200 kHz channel and hides the narrow widths', () => {
+    pipelineSel.options.push({ value: 'wfm', text: 'FM (эфир)' });
+    filterBwSel.options.push({ value: '200000', text: '200 кГц' });
+    try {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            const ov = MockChannelOverlay.last;
+            pipelineSel.selectedIndex = pipelineSel.options.findIndex((o) => o.value === 'wfm');
+            fire(pipelineSel, 'change');
+            assert.strictEqual(filterBwSel.options[filterBwSel.selectedIndex].value, '200000');
+            assert.deepStrictEqual(
+                filterBwSel.options.filter((o) => o.disabled).map((o) => o.value),
+                ['2800', '6000', '15000', '18000']);
+            assert.deepStrictEqual(ov.lastCall('setChannel'), ['setChannel', 0, 200000]);
+            assert.deepStrictEqual(ov.lastCall('setMaxWidth'), ['setMaxWidth', 200000]);
+            pipelineSel.selectedIndex = 0;
+            fire(pipelineSel, 'change');
+            assert.ok(filterBwSel.options.find((o) => o.value === '200000').disabled,
+                'narrow profiles cannot take the broadcast width');
+            m.destroy();
+        });
+    } finally {
+        pipelineSel.options.pop();
+        filterBwSel.options.pop();
+        filterBwSel.options.forEach((o) => { o.disabled = false; o.title = ''; });
+        pipelineSel.selectedIndex = 0;
+        filterBwSel.selectedIndex = 2;
+    }
+});
+
+function selectByValueForTest(sel, value) {
+    sel.selectedIndex = sel.options.findIndex((o) => o.value === value);
+}
+
 test('gesture on the channel fills the fields and sends the settings at once', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
         fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -75, demodIndex: 1 });
         const ov = MockChannelOverlay.last;
-        assert.deepStrictEqual(ov.opts.bandwidthOptions(), [2800, 6000, 15000, 18000]);
         ov.opts.onChange(2500, 18000);
         assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '2500');
         assert.strictEqual(filterBwSel.options[filterBwSel.selectedIndex].value, '18000');
@@ -2617,6 +3215,37 @@ testAsync('tune refused with 403 reverts the dial to the receiver and re-reads t
     assert.ok(ac.notices.some((t) => /Режим «Контроль» отключён/.test(t)), ac.notices.join(' | '));
     delete global.window._accessControl;
     m.destroy();
+});
+
+testAsync('a drag queues one follow-up tune and the dial stays until the stream arrives', async () => {
+    const ac = makeAccess(true);
+    let m;
+    withStation({ access: ac }, () => {
+        m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        MockChannelOverlay.last.opts.onPan(-4000);
+        MockChannelOverlay.last.opts.onPan(-1000);
+    });
+    // The tune response arrives after withStation restores globals, so put the tract back
+    // before the follow-up request looks up its radio path.
+    global.window._modeManager = TRACT_1;
+    global.window._accessControl = ac;
+    try {
+        await flush();
+        await flush();
+        assert.deepStrictEqual(tuneCalls().map((c) => c.body.center_hz), [436496000, 436495000]);
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        assert.strictEqual(m._freqDial.getHz(), 436495000, 'stale center must not undo the drag after the request');
+        MockStream.last().opts.onFrame(fftFrame(436495000, rampValues(), 64000));
+        MockStream.last().opts.onFrame(fftFrame(437000000, rampValues(), 64000));
+        assert.strictEqual(m._freqDial.getHz(), 437000000, 'once caught up, another retune moves the dial');
+    } finally {
+        delete global.window._modeManager;
+        delete global.window._accessControl;
+        m.destroy();
+    }
 });
 
 testAsync('stream frames do not move the dial back while a tune is in flight', async () => {
@@ -2729,6 +3358,18 @@ testAsync('receiver status builds span choices and selects the device rate', asy
     assert.deepStrictEqual(spanSel.options.map((o) => [o.value, o.text]),
         [['2400000', '2.4 МГц'], ['1200000', '1.2 МГц'], ['300000', '300 кГц']]);
     assert.strictEqual(spanValue(), '1200000');
+    m.destroy();
+    resetSpanOptions();
+});
+
+testAsync('span choices are labelled with the visible width, valued with the sample rate', async () => {
+    const m = await openWithStatus(TRACT_1, {
+        gain_db: 20, sample_rate: 2560000, sample_rates: [2560000, 1280000], spans_hz: [2048000, 1024000],
+        channel: CHANNEL_FSK,
+    });
+    assert.deepStrictEqual(spanSel.options.map((o) => [o.value, o.text]),
+        [['2560000', '2.048 МГц'], ['1280000', '1.024 МГц']]);
+    assert.strictEqual(spanValue(), '2560000');
     m.destroy();
     resetSpanOptions();
 });

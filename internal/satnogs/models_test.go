@@ -107,6 +107,34 @@ func TestSelectPrimary_FilterInactive(t *testing.T) {
 	}
 }
 
+func TestActiveDownlinks_FiltersAndSortsByFrequency(t *testing.T) {
+	transmitters := []Transmitter{
+		{UUID: "uhf", Alive: true, Status: "active", DownlinkLow: ptrInt64(437_800_000), Mode: "FSK", Baud: ptrFloat64(9600)},
+		{UUID: "dead", Alive: false, Status: "active", DownlinkLow: ptrInt64(145_800_000), Mode: "FM"},
+		{UUID: "uplink-only", Alive: true, Status: "active", Mode: "FM"},
+		{UUID: "vhf", Alive: true, Status: "active", DownlinkLow: ptrInt64(145_825_000), Mode: "AFSK", Description: "APRS"},
+	}
+	got := ActiveDownlinks(transmitters)
+	if len(got) != 2 {
+		t.Fatalf("ActiveDownlinks() returned %d, want 2: %+v", len(got), got)
+	}
+	if got[0].UUID != "vhf" || got[1].UUID != "uhf" {
+		t.Errorf("order = %s, %s; want vhf, uhf", got[0].UUID, got[1].UUID)
+	}
+	if got[0].FreqHz != 145_825_000 || got[0].Description != "APRS" {
+		t.Errorf("vhf summary = %+v", got[0])
+	}
+	if got[1].Modulation != "FSK 9600" || got[1].Baud != 9600 {
+		t.Errorf("uhf modulation = %q baud = %v, want \"FSK 9600\" 9600", got[1].Modulation, got[1].Baud)
+	}
+}
+
+func TestActiveDownlinks_NoneLeft(t *testing.T) {
+	if got := ActiveDownlinks([]Transmitter{{UUID: "dead", DownlinkLow: ptrInt64(145_800_000)}}); len(got) != 0 {
+		t.Errorf("ActiveDownlinks() = %+v, want empty", got)
+	}
+}
+
 func TestSelectPrimary_PrefersAmateurOverHighBand(t *testing.T) {
 	transmitters := []Transmitter{
 		{UUID: "s-band", Alive: true, Status: "active", DownlinkLow: ptrInt64(2_400_500_000), Mode: "BPSK"},

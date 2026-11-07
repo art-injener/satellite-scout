@@ -10,6 +10,7 @@
     const THEMES = [
         { id: 'classic', label: 'Classic' },
         { id: 'default', label: 'Operations Center' },
+        { id: 'signal', label: 'Сигнал' },
         { id: 'stsplus', label: 'STSPLUS' },
         { id: 'light', label: 'Светлая' },
         { id: 'breeze', label: 'Breeze' },
@@ -63,16 +64,17 @@
         if (window.skyView && typeof window.skyView.draw === 'function') {
             window.skyView.draw();
         }
-        if (window._manualLayout && typeof window._manualLayout.refreshAfterThemeChange === 'function') {
-            window._manualLayout.refreshAfterThemeChange();
-        }
         try {
             const tid = parseThemeFromHref(document.getElementById('theme-colorsheet').href);
             window.dispatchEvent(new CustomEvent('satwatch-theme-applied', { detail: { fileTheme: tid } }));
+            // Сначала палитра трасс, потом перерисовка лент/рисок с новыми цветами
             if (window._stateManager && typeof window._stateManager.reassignTrackColorsForTheme === 'function') {
                 window._stateManager.reassignTrackColorsForTheme();
             }
         } catch (_e) { /* ignore */ }
+        if (window._manualLayout && typeof window._manualLayout.refreshAfterThemeChange === 'function') {
+            window._manualLayout.refreshAfterThemeChange();
+        }
     }
 
     /**

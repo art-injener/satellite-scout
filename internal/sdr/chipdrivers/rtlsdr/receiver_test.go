@@ -197,8 +197,18 @@ func TestReceiver_BringUpThenFIFOResetBeforeStream(t *testing.T) {
 			t.Errorf("tuner not initialised: reg 0x%02x = 0x%02x", 5+i, d.regs[5+i])
 		}
 	}
-	if d.regs[0x14] != 0x0c {
+	// 0x44 is the nint word for 436.5 MHz at the 6 MHz IF.
+	if d.regs[0x14] != 0x44 {
 		t.Errorf("tuner not at 436.5 MHz: reg 0x14 = 0x%02x", d.regs[0x14])
+	}
+	ifHz := map[uint16]byte{}
+	for _, c := range d.f.writes() {
+		if isDemodWrite(c, 1, 0x19) || isDemodWrite(c, 1, 0x1a) || isDemodWrite(c, 1, 0x1b) {
+			ifHz[c.value>>8] = c.data[0]
+		}
+	}
+	if ifHz[0x19] != 0x32 || ifHz[0x1a] != 0xaa || ifHz[0x1b] != 0xab {
+		t.Errorf("demod IF = %x, want 6 MHz", ifHz)
 	}
 	if st := r.Status(); !st.Running || st.SampleRate != 2_048_000 || st.GainDB >= 0 {
 		t.Errorf("status %+v: want running at 2.048 MS/s with AGC", st)
@@ -221,7 +231,7 @@ func TestReceiver_TuneIsKeptUntilStartAndAppliedLive(t *testing.T) {
 	if err := r.Tune(436_500_000); err != nil {
 		t.Fatal(err)
 	}
-	if d.regs[0x14] == at145 || d.regs[0x14] != 0x0c {
+	if d.regs[0x14] == at145 || d.regs[0x14] != 0x44 {
 		t.Errorf("live tune did not reach the tuner: reg 0x14 = 0x%02x", d.regs[0x14])
 	}
 	d.stream.chunks <- []byte{1, 2}
@@ -230,6 +240,22 @@ func TestReceiver_TuneIsKeptUntilStartAndAppliedLive(t *testing.T) {
 	}
 	if err := r.Tune(10_000_000); err == nil {
 		t.Error("10 MHz accepted")
+	}
+}
+
+func TestReceiver_PPMFromOptionsReachesChip(t *testing.T) {
+	d := newFakeDongle()
+	r := New(Options{PPM: 50, open: func(Options) (usbDevice, error) { return d, nil }})
+	startStream(t, r, 2_048_000, 0)
+
+	var corr []ctrlCall
+	for _, w := range d.f.writes() {
+		if isDemodWrite(w, 1, 0x3f) {
+			corr = append(corr, w)
+		}
+	}
+	if len(corr) == 0 || corr[len(corr)-1].data[0] != 0xba {
+		t.Errorf("sample clock correction %+v, want 0xba for +50 ppm", corr)
 	}
 }
 
@@ -344,8 +370,11 @@ func TestProbe_ReadsSamplesAndReleases(t *testing.T) {
 
 func TestReceiver_CapabilitiesSkipResamplerGap(t *testing.T) {
 	caps := New(Options{}).Capabilities()
+	if got := caps.UsableBandHz(caps.RecommendedSampleRate); got != 2_048_000 {
+		t.Errorf("usable band %d at the recommended rate, want 2048000", got)
+	}
 	choices := sdr.SampleRateChoices(caps, caps.RecommendedSampleRate)
-	want := []uint32{2_048_000, 1_024_000, 256_000}
+	want := []uint32{2_560_000, 1_280_000, 256_000} // 640 kHz in the gap, 320 kHz above the low range
 	if len(choices) != len(want) {
 		t.Fatalf("choices %v, want %v", choices, want)
 	}

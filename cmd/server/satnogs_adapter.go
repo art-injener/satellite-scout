@@ -45,6 +45,26 @@ func (a *satnogsTransmitterAdapter) GetPrimaryTransmitter(noradID int) *services
 	}
 }
 
+// GetTransmitters — реализация интерфейса services.TransmitterProvider:
+// активные downlink-передатчики КА из кеша SatNOGS по возрастанию частоты.
+func (a *satnogsTransmitterAdapter) GetTransmitters(noradID int) []services.TransmitterInfo {
+	if a == nil || a.svc == nil {
+		return nil
+	}
+	list := satnogs.ActiveDownlinks(a.svc.GetAllTransmitters(noradID))
+	if len(list) == 0 {
+		return nil
+	}
+	out := make([]services.TransmitterInfo, len(list))
+	for i, tx := range list {
+		out[i] = services.TransmitterInfo{
+			UUID: tx.UUID, FreqMHz: tx.FreqMHz, Modulation: tx.Modulation, Count: len(list),
+			FreqHz: tx.FreqHz, Mode: tx.Mode, Baud: tx.Baud, Description: tx.Description,
+		}
+	}
+	return out
+}
+
 // RequestFetch — реализация интерфейса services.TransmitterProvider.
 func (a *satnogsTransmitterAdapter) RequestFetch(noradIDs []int) {
 	if a == nil || a.svc == nil {

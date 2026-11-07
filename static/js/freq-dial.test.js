@@ -7,9 +7,11 @@
  *   - formatHz grouping and 11-digit padding
  *   - digit stepping with carry, cursor moves, clamping to [min, max]
  *   - manual typing: digits only, cursor advances, other keys ignored
- *   - click / wheel target a digit position
- *   - edits stay on the display until SET/Enter, Esc restores the applied value
- *   - setHz/setMHz are silent, only SET notifies via onChange
+ *   - click targets a digit position, including a segment inside the digit
+ *   - button and keyboard edits stay on the display until SET/Enter
+ *   - wheel steps the clicked digit, ignores the pointer, and notifies onChange
+ *   - Esc restores the applied value
+ *   - setHz/setMHz are silent, only SET and wheel notify via onChange
  *   - destroy detaches listeners
  */
 
@@ -359,6 +361,13 @@ test('click on a digit moves the cursor there and focuses the strip', () => {
     assert.ok(strip(root)._focused, 'strip must take focus for keyboard tuning');
 });
 
+test('click on a segment moves the cursor to that digit', () => {
+    const { root } = makeDial();
+    const cell = digits(root)[4];
+    fire(strip(root), 'click', { target: cell._segs.a });
+    assert.strictEqual(cursorPos(root), 4);
+});
+
 test('click on a separator leaves the cursor alone', () => {
     const { root } = makeDial();
     const sep = walk(root).find((n) => n.className === 'fdial__sep');
@@ -452,17 +461,46 @@ test('Backspace at the leftmost digit is a no-op', () => {
 
 console.log('\n— FreqDial: wheel —');
 
-test('wheel up over a digit steps that digit and moves the cursor', () => {
-    const { root, dial } = makeDial();
+test('wheel over another digit keeps the cursor and tunes the selected one', () => {
+    const { root, dial, changes } = makeDial();
     fire(strip(root), 'wheel', { target: digits(root)[2], deltaY: -1 });
-    assert.strictEqual(cursorPos(root), 2);
-    assert.strictEqual(dial.getHz(), 537800000);
+    assert.strictEqual(cursorPos(root), 7);
+    assert.strictEqual(dial.getHz(), 437801000);
+    assert.deepStrictEqual(changes, [437801000]);
+    assert.ok(!editing(root), 'wheel commits, so the cursor must not stay in edit mode');
 });
 
-test('wheel down over the strip steps the current digit', () => {
-    const { root, dial } = makeDial();
+test('wheel down over the strip steps the current digit and tunes at once', () => {
+    const { root, dial, changes } = makeDial();
     fire(strip(root), 'wheel', { deltaY: 1 });
     assert.strictEqual(dial.getHz(), 437799000);
+    assert.deepStrictEqual(changes, [437799000]);
+});
+
+test('each wheel notch tunes again', () => {
+    const { root, changes } = makeDial();
+    fire(strip(root), 'wheel', { deltaY: -1 });
+    fire(strip(root), 'wheel', { deltaY: -1 });
+    assert.deepStrictEqual(changes, [437801000, 437802000]);
+});
+
+test('click chooses the digit, wheel over another segment does not move it', () => {
+    const { root, dial, changes } = makeDial();
+    fire(strip(root), 'click', { target: digits(root)[6] });
+    const cell = digits(root)[5];
+    fire(strip(root), 'wheel', { target: cell._segs.g, deltaY: -1 });
+    assert.strictEqual(cursorPos(root), 6);
+    assert.strictEqual(dial.getHz(), 437810000);
+    assert.deepStrictEqual(changes, [437810000]);
+});
+
+test('wheel at the bound does not tune', () => {
+    const { root, dial, changes } = makeDial({ hz: 0 });
+    dial.setCursor(0);
+    fire(strip(root), 'wheel', { deltaY: 1 });
+    assert.strictEqual(dial.getHz(), 0);
+    assert.deepStrictEqual(changes, []);
+    assert.ok(!editing(root));
 });
 
 test('zero-delta wheel does nothing', () => {
@@ -479,7 +517,6 @@ test('any touch of the dial enters edit mode', () => {
         (root) => fire(btn(root, 'inc'), 'click'),
         (root) => fire(btn(root, 'right'), 'click'),
         (root) => fire(strip(root), 'click', { target: digits(root)[3] }),
-        (root) => fire(strip(root), 'wheel', { deltaY: -1 }),
         (root) => key(root, 'Home'),
         (root) => key(root, '5'),
     ]) {
@@ -602,7 +639,7 @@ test('read-only dial ignores buttons, keys, clicks and wheel', () => {
     key(root, 'ArrowUp');
     key(root, '5');
     fire(digits(root)[2], 'click');
-    fire(digits(root)[2], 'wheel', { deltaY: -1 });
+    fire(strip(root), 'wheel', { target: digits(root)[2], deltaY: -1 });
     fire(btn(root, 'set'), 'click');
     assert.strictEqual(dial.getHz(), 437800000);
     assert.strictEqual(editing(root), false);

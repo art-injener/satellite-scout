@@ -1,6 +1,7 @@
 package sdr
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -94,35 +95,31 @@ func testSimulated() TestResponse {
 }
 
 func (s *Service) testUSBDevice(req TestRequest) TestResponse {
-	devices := s.discover()
-	var match *Device
-	for i := range devices {
-		d := &devices[i]
-		if d.Driver != req.Driver {
-			continue
-		}
-		if req.Serial != "" && d.Serial == req.Serial {
-			match = d
-			break
-		}
-		if req.DevicePath != "" && d.DevicePath == req.DevicePath {
-			match = d
-			break
+	var devices []Device
+	for _, d := range s.discover() {
+		if d.Driver == req.Driver {
+			devices = append(devices, d)
 		}
 	}
 
 	lines := []string{
 		fmt.Sprintf("Драйвер:     %s", req.Driver),
 	}
-	if match == nil {
+	i, err := MatchDevice(devices, req.Serial, req.DevicePath)
+	if err != nil {
+		verdict := "Итог: устройство не найдено — проверьте подключение и нажмите «Обновить»"
+		if errors.Is(err, ErrDeviceAmbiguous) {
+			verdict = "Итог: несколько устройств с этим серийным номером, а путь устарел — выберите приёмник в списке заново"
+		}
 		lines = append(lines,
 			"Serial:      "+emptyDash(req.Serial),
 			"Путь:        "+emptyDash(req.DevicePath),
 			"",
-			"Итог: устройство не найдено — проверьте подключение и нажмите «Обновить»",
+			verdict,
 		)
 		return TestResponse{OK: false, Lines: lines}
 	}
+	match := &devices[i]
 
 	lines = append(lines,
 		fmt.Sprintf("Модель:      %s", match.Label),
