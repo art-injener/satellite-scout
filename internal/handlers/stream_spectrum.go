@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"log/slog"
+	"math"
 	"net/http"
 	"strconv"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/dsp"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
@@ -35,7 +37,8 @@ const (
 
 // StreamHandler обслуживает бинарные chunked-стримы (Спектр, Панорама и т.д.).
 type StreamHandler struct {
-	hub *sdr.ReceiverHub
+	hub   *sdr.ReceiverHub
+	audio *demod.AudioHub
 }
 
 // NewStreamHandler создаёт обработчик бинарных потоков.
@@ -79,6 +82,11 @@ func (h *StreamHandler) Spectrum(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer unsubscribe()
+	receiver, err := h.hub.Get(radioPath)
+	if err != nil {
+		http.Error(w, "receiver not available: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	fftSize := nextPow2(bins) // FFT — степень двойки >= bins
 	bins = fftSize            // клиент получает ровно столько бинов, сколько FFT
@@ -102,6 +110,7 @@ func (h *StreamHandler) Spectrum(w http.ResponseWriter, r *http.Request) {
 		fps:       fps,
 		mode:      mode,
 		avgFrames: frames,
+		caps:      receiver.Capabilities(),
 	})
 }
 
@@ -110,7 +119,8 @@ type spectrumParams struct {
 	bins      int
 	fps       int
 	mode      dsp.DisplayMode
-	avgFrames int // окно ModeAvg в кадрах UI
+	avgFrames int              // окно ModeAvg в кадрах UI
+	caps      sdr.Capabilities // годная середина окна: края клиенту не уходят
 }
 
 // serveSpectrumLoop — основной цикл: IQ → DSP → SSTM → HTTP.
@@ -152,7 +162,7 @@ func serveSpectrumLoop(
 			}
 			center, rate = frame.CenterHz, frame.SampleRate
 			sw.lastCenter = int64(frame.CenterHz)
-			sw.lastSpan = int64(frame.SampleRate)
+			sw.cropStart, sw.cropKeep, sw.lastSpan = cropBand(p.bins, rate, p.caps.UsableBandHz(rate))
 			chunker.feed(frame.Samples, pipeline.Push)
 
 		case <-ticker.C:
@@ -209,6 +219,21 @@ type spectrumWriter struct {
 	lastCenter int64
 	lastSpan   int64
 	lastWrite  time.Time
+	// cropStart, cropKeep — какие бины кадра уходят клиенту; cropKeep 0 — все.
+	cropStart, cropKeep int
+}
+
+// cropBand — какие бины спектра окна rate уходят клиенту: середина шириной usableHz.
+// Число бинов чётное, чтобы центр окна остался на бине bins/2. Возвращает первый бин,
+// их число и ширину оставленного участка; usableHz 0 или не меньше rate — всё окно.
+func cropBand(bins int, rate, usableHz uint32) (start, keep int, spanHz int64) {
+	if usableHz == 0 || usableHz >= rate {
+		return 0, bins, int64(rate)
+	}
+	keep = 2 * int(math.Round(float64(bins)*float64(usableHz)/float64(rate)/2))
+	start = bins/2 - keep/2
+	spanHz = int64(math.Round(float64(keep) * float64(rate) / float64(bins)))
+	return start, keep, spanHz
 }
 
 // flushPipeline сбрасывает pipeline в HTTP. Возвращает true, если записан фрейм.
@@ -229,6 +254,9 @@ func (sw *spectrumWriter) flushPipeline(p *dsp.SpectrumPipeline) bool {
 }
 
 func (sw *spectrumWriter) writeFrame(dbfs []float32, mode dsp.DisplayMode) bool {
+	if sw.cropKeep > 0 && sw.cropStart+sw.cropKeep <= len(dbfs) {
+		dbfs = dbfs[sw.cropStart : sw.cropStart+sw.cropKeep]
+	}
 	payload := dsp.Float32ToBytes(dbfs)
 	dsp.EncodeHeader(sw.hdr, dsp.FrameHeader{
 		DataType:    dsp.DataTypeFFTDB,

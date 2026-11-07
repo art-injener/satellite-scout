@@ -66,6 +66,50 @@ func TestChip_SampleRateProgramsResampler(t *testing.T) {
 	}
 }
 
+func TestChip_SampleRateWritesPPMCorrection(t *testing.T) {
+	cases := []struct {
+		ppm     int
+		hi, low byte
+	}{
+		{0, 0x00, 0x00},
+		// −50·2^24/10^6 = −838 = 0xfcba: 6 high bits to 0x3e, low byte to 0x3f.
+		{50, 0x3c, 0xba},
+		{-50, 0x03, 0x46},
+	}
+	for _, tc := range cases {
+		f := &fakeCtrl{}
+		c := newChip(f)
+		c.ppm = tc.ppm
+		if _, err := c.setSampleRate(2_048_000); err != nil {
+			t.Fatal(err)
+		}
+		var got []ctrlCall
+		for _, w := range f.writes() {
+			if isDemodWrite(w, 1, 0x3f) || isDemodWrite(w, 1, 0x3e) {
+				got = append(got, w)
+			}
+		}
+		want := []ctrlCall{demodWrite(1, 0x3f, tc.low), demodWrite(1, 0x3e, tc.hi)}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("ppm %d: correction writes %+v, want %+v", tc.ppm, got, want)
+		}
+	}
+}
+
+func TestChip_IFFrequencyUsesCorrectedXtal(t *testing.T) {
+	f := &fakeCtrl{}
+	c := newChip(f)
+	c.ppm = 100
+	if err := c.setIFFreq(3_570_000); err != nil {
+		t.Fatal(err)
+	}
+	// 3.57 MHz·2^22 / 28.80288 MHz = 519866, negated.
+	want := []ctrlCall{demodWrite(1, 0x19, 0x38), demodWrite(1, 0x1a, 0x11), demodWrite(1, 0x1b, 0x46)}
+	if got := f.writes(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("writes = %+v, want %+v", got, want)
+	}
+}
+
 func TestChip_SampleRateRejectsGapAndRange(t *testing.T) {
 	for _, rate := range []uint32{225_000, 300_001, 600_000, 900_000, 3_200_001} {
 		f := &fakeCtrl{}

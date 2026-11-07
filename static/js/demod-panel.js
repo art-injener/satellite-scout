@@ -41,7 +41,16 @@
         fsk9600_g3ruh: 'FSK 9600 G3RUH',
         fsk9600_geoscan: 'FSK 9600 GEOSCAN',
         sstv: 'SSTV',
+        fm: 'FM',
+        wfm: 'FM эфир',
+        usb: 'USB',
+        lsb: 'LSB',
+        cw: 'CW',
     };
+
+    // Профили, у которых итог приёма — звук: тактов, синхрослов и кадров у них нет.
+    const VOICE_DEMODS = { fm: true, wfm: true, usb: true, lsb: true, cw: true };
+    const SSB_DEMODS = { usb: true, lsb: true };
 
     /** Подпись демодулятора по идентификатору сервера; неизвестный — как есть. */
     function demodLabel(id) {
@@ -98,6 +107,19 @@
         return out;
     }
 
+    /** Этапы голоса после несущей: идёт ли звук. Несущая SSB подавлена, мерить нечего. */
+    function voiceStages(st, out) {
+        if (SSB_DEMODS[st.demod]) { out.carrier = stage('idle', '—', 'подавлена'); }
+        out.clock = named('Звук', st.active && st.squelch_open
+            ? stage('ok', 'идёт', 'порог открыт')
+            : stage('idle', 'тишина', 'порог закрыт'));
+        out.sync = stage('idle', '—');
+        out.sync.hidden = true;
+        out.frames = stage('idle', '—');
+        out.frames.hidden = true;
+        return out;
+    }
+
     /**
      * Этапы приёма из `demod_status`. Меры несущей, тактов и синхрослов сервер снимает
      * только с сигнала выше порога: при закрытом пороге они остаются от последнего сигнала
@@ -144,6 +166,7 @@
         }
 
         if (st.demod === 'sstv') { return sstvStages(st, out); }
+        if (VOICE_DEMODS[st.demod]) { return voiceStages(st, out); }
 
         const good = st.frames_good;
         const bad = st.frames_bad;
@@ -174,6 +197,7 @@
         if (stages.carrier.state === 'warn') {
             return { state: 'warn', text: 'Несущая ушла на ' + stages.carrier.value + ' от центра канала: поправьте сдвиг' };
         }
+        if (VOICE_DEMODS[st.demod]) { return { state: 'ok', text: 'Канал открыт, идёт звук' }; }
         if (stages.clock.state === 'bad') {
             return { state: 'bad', text: 'Нет захвата тактов: проверьте профиль и полосу' };
         }
@@ -321,8 +345,8 @@
 
         const stages = stagesFromStatus(st, levelOffset);
         this._render(stages, diagnose(st, stages, now));
-        // Лента кадров у SSTV пуста: картинка идёт минуты, её ход виден в этапах.
-        if (this._els.stripBox) { this._els.stripBox.hidden = st.demod === 'sstv'; }
+        // Лента кадров у SSTV и голоса пуста: картинка идёт минуты, звук кадров не даёт.
+        if (this._els.stripBox) { this._els.stripBox.hidden = st.demod === 'sstv' || !!VOICE_DEMODS[st.demod]; }
         this._renderStrip();
     };
 

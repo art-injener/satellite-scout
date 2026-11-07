@@ -154,6 +154,25 @@ func TestR820T_TunedLOMatchesRequest(t *testing.T) {
 	}
 }
 
+func TestR820T_PPMCorrectionKeepsLOOnFrequency(t *testing.T) {
+	for _, ppm := range []int{50, -50} {
+		s, tu := newSimTuner(t)
+		tu.chip.ppm = ppm
+		if err := tu.setFreq(436_500_000); err != nil {
+			t.Fatal(err)
+		}
+		// The crystal really runs ppm off; the synthesizer must aim with that crystal.
+		xtal := xtalHz * (1 + float64(ppm)/1e6)
+		v := s.regs[0x14]
+		nint := 13 + 4*float64(v&0x3f) + float64(v>>6)
+		sdm := float64(uint16(s.regs[0x16])<<8 | uint16(s.regs[0x15]))
+		got := 2 * xtal * (nint + sdm/65536) / 8
+		if want := float64(436_500_000 + r820tIFHz); math.Abs(got-want) > 1000 {
+			t.Errorf("ppm %d: LO %.0f Hz, want %.0f Hz", ppm, got, want)
+		}
+	}
+}
+
 func TestR820T_TuneOutsideRangeFails(t *testing.T) {
 	_, tu := newSimTuner(t)
 	for _, f := range []uint32{r820tMinHz - 1, r820tMaxHz + 1} {
@@ -238,6 +257,56 @@ func TestR820T_UnchangedRegisterIsNotRewritten(t *testing.T) {
 	}
 	if tunerWrites != 1 {
 		t.Errorf("%d tuner writes, want 1 (VGA only)", tunerWrites)
+	}
+}
+
+func TestR820T_BandwidthFollowsSampleRate(t *testing.T) {
+	// Corners sit where a signal beyond them would fold into the usable middle: fs − usable/2 = 0.6·fs.
+	if got := ifBandwidthForRate(2_560_000); got != 3_072_000 {
+		t.Fatalf("bandwidth request %d, want 3072000", got)
+	}
+	// Register bytes are the RTL-SDR Blog r82xx_set_if_filter result for corners symmetric
+	// around a 6 MHz IF, merged with the init value of the bits the write does not touch.
+	cases := []struct {
+		bw           uint32
+		reg0a, reg0b byte
+	}{
+		{3_072_000, 0xd7, 0x21},
+		{1_536_000, 0xd2, 0x60},
+	}
+	for _, tc := range cases {
+		s, tu := newSimTuner(t)
+		got, err := tu.setBandwidth(tc.bw)
+		if err != nil {
+			t.Fatalf("%d: %v", tc.bw, err)
+		}
+		if got != r820tBlogIFHz {
+			t.Errorf("%d Hz: IF %d, want %d", tc.bw, got, r820tBlogIFHz)
+		}
+		if s.regs[0x0a] != tc.reg0a || s.regs[0x0b] != tc.reg0b {
+			t.Errorf("%d Hz: regs 0x0a=0x%02x 0x0b=0x%02x, want 0x%02x 0x%02x",
+				tc.bw, s.regs[0x0a], s.regs[0x0b], tc.reg0a, tc.reg0b)
+		}
+		w := s.f.writes()
+		if last := w[len(w)-1]; !isDemodWrite(last, 1, 0x01) || last.data[0] != 0x10 {
+			t.Errorf("%d Hz: last write %+v, want I2C repeater off", tc.bw, last)
+		}
+
+		if err := tu.setFreq(436_500_000); err != nil {
+			t.Fatalf("%d: tune: %v", tc.bw, err)
+		}
+		v := s.regs[0x14]
+		nint := 13 + 4*float64(v&0x3f) + float64(v>>6)
+		sdm := float64(uint16(s.regs[0x16])<<8 | uint16(s.regs[0x15]))
+		mixDiv := 2.0
+		lo := float64(436_500_000 + r820tBlogIFHz)
+		for lo*mixDiv < r820tVCOMin {
+			mixDiv *= 2
+		}
+		gotLO := 2 * xtalHz * (nint + sdm/65536) / mixDiv
+		if math.Abs(gotLO-lo) > 1000 {
+			t.Errorf("%d Hz: LO %.0f, want %.0f", tc.bw, gotLO, lo)
+		}
 	}
 }
 

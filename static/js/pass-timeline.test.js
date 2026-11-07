@@ -32,7 +32,7 @@ function makeCtx() {
         lineTo: (...a) => ops.push(['lineTo', ...a]),
         closePath: () => ops.push(['closePath']),
         fill: () => ops.push(['fill', ctx.fillStyle, ctx.globalAlpha]),
-        stroke: () => ops.push(['stroke', ctx.strokeStyle]),
+        stroke: () => ops.push(['stroke', ctx.strokeStyle, ctx.lineWidth]),
         save: () => ops.push(['save']),
         restore: () => ops.push(['restore']),
         measureText: (t) => ({ width: String(t).length * 6 }),
@@ -47,6 +47,8 @@ function makeCanvas(w, h) {
         height: 0,
         getContext: () => ctx,
         getBoundingClientRect: () => ({ width: w, height: h }),
+        addEventListener: () => {},
+        removeEventListener: () => {},
     };
     ctx.canvas = canvas;
     return canvas;
@@ -56,7 +58,7 @@ global.window = {
     cssVar: (name, fallback) => fallback || name,
 };
 
-const { PassTimelineView, elevationAt } = require('./pass-timeline.js');
+const { PassTimelineView, elevationAt, passesFromGroup, tickStepMin, elCeil, peakEl, inSession } = require('./pass-timeline.js');
 
 let passed = 0;
 let failed = 0;
@@ -97,6 +99,72 @@ test('is zero outside the pass window', () => {
     assert.strictEqual(elevationAt(p, 200), 0);
 });
 
+test('peaks at TCA when the pass is asymmetric', () => {
+    const p = { aosMs: 0, losMs: 1000, tcaMs: 300, maxEl: 60 };
+    assert.ok(Math.abs(elevationAt(p, 300) - 60) < 1e-9, 'maxEl exactly at TCA');
+    assert.ok(elevationAt(p, 500) < 60, 'midpoint is past the peak');
+    assert.ok(elevationAt(p, 150) < elevationAt(p, 300));
+    assert.ok(elevationAt(p, 650) < elevationAt(p, 300));
+});
+
+test('ignores a TCA outside the pass and falls back to the midpoint', () => {
+    const p = { aosMs: 0, losMs: 1000, tcaMs: 5000, maxEl: 30 };
+    assert.ok(Math.abs(elevationAt(p, 500) - 30) < 1e-9);
+});
+
+console.log('\n— passesFromGroup —');
+
+test('maps satellite_group_update into timeline passes', () => {
+    const r = passesFromGroup({
+        satellites: [
+            { norad_id: 25544, sat_name: 'ISS', sat_alias: 'ZARYA', aos: 1000, los: 9000, tca: 4000, tca_el: 63.2 },
+            { norad_id: 7530, sat_name: 'OSCAR 7', aos: 2000, los: 8000, tca: 5000, tca_el: 21 },
+        ],
+        time_window: { start: 1000, end: 9000 },
+    });
+    assert.deepStrictEqual(r.passes[0], {
+        noradId: 25544, name: 'ISS', aosMs: 1000, losMs: 9000, tcaMs: 4000, maxEl: 63.2,
+    });
+    assert.strictEqual(r.passes[1].name, 'OSCAR 7');
+    assert.deepStrictEqual(r.window, { startMs: 1000, endMs: 9000 });
+});
+
+test('skips satellites without a valid pass', () => {
+    const r = passesFromGroup({
+        satellites: [
+            { norad_id: 1, sat_name: 'A', aos: 0, los: 0, tca_el: 10 },
+            { norad_id: 2, sat_name: 'B', aos: 5000, los: 4000, tca_el: 10 },
+            { norad_id: 3, sat_name: 'C', aos: 1000, los: 2000, tca_el: 10 },
+        ],
+    });
+    assert.deepStrictEqual(r.passes.map((p) => p.noradId), [3]);
+    assert.strictEqual(r.window, null, 'no time_window in the event');
+});
+
+test('prefers the hour-ahead timeline over the session plan satellites', () => {
+    const r = passesFromGroup({
+        satellites: [{ norad_id: 1, sat_name: 'NOW', aos: 1000, los: 2000, tca_el: 30 }],
+        timeline: [
+            { norad_id: 1, sat_name: 'NOW', aos: 1000, los: 2000, tca: 1500, tca_el: 30 },
+            { norad_id: 2, sat_name: 'LATER', sat_alias: 'L', aos: 5000, los: 6000, tca: 5500, tca_el: 12 },
+        ],
+    });
+    assert.deepStrictEqual(r.passes.map((p) => p.name), ['NOW', 'LATER'], 'sat_name over alias');
+});
+
+test('empty or missing group gives an empty schedule', () => {
+    assert.deepStrictEqual(passesFromGroup(null), { passes: [], window: null });
+    assert.deepStrictEqual(passesFromGroup({ satellites: [] }).passes, []);
+});
+
+console.log('\n— tickStepMin —');
+
+test('picks a time tick step that keeps the axis readable', () => {
+    assert.strictEqual(tickStepMin(15), 2);
+    assert.strictEqual(tickStepMin(60), 10);
+    assert.strictEqual(tickStepMin(240), 30);
+});
+
 console.log('\n— PassTimelineView: construction —');
 
 test('constructor without canvas does not crash', () => {
@@ -105,15 +173,12 @@ test('constructor without canvas does not crash', () => {
     assert.ok(v);
 });
 
-test('uses mock passes when none supplied', () => {
+test('starts with an empty schedule, no made-up passes', () => {
     const v = new PassTimelineView(makeCanvas(800, 148));
-    assert.ok(Array.isArray(v._passes));
-    assert.ok(v._passes.length >= 6, 'mock schedule must be dense enough to overlap');
-    for (const p of v._passes) {
-        assert.strictEqual(typeof p.name, 'string');
-        assert.ok(p.losMs > p.aosMs, `${p.name}: LOS must follow AOS`);
-        assert.ok(p.maxEl > 0 && p.maxEl <= 90);
-    }
+    assert.deepStrictEqual(v._passes, []);
+    v.draw();
+    const ops = v._canvas.getContext().ops;
+    assert.strictEqual(ops.filter((o) => o[0] === 'closePath').length, 0);
 });
 
 test('window defaults to four hours', () => {
@@ -142,7 +207,7 @@ test('collapsed layout box falls back to default dimensions', () => {
     const v = new PassTimelineView(canvas);
     v.draw();
     assert.strictEqual(canvas.width, 400);
-    assert.strictEqual(canvas.height, 88);
+    assert.strictEqual(canvas.height, 100);
 });
 
 test('draw bails out when the plot area is too narrow', () => {
@@ -179,6 +244,30 @@ test('Y-axis is labelled in elevation degrees', () => {
         .map((o) => o[1]);
     assert.ok(texts.indexOf('0°') >= 0, `missing 0°, got ${texts.join('|')}`);
     assert.ok(texts.indexOf('90°') >= 0, `missing 90°, got ${texts.join('|')}`);
+});
+
+test('elevation ceiling follows the highest pass with headroom', () => {
+    assert.strictEqual(elCeil(0), 90, 'empty chart keeps the full sky');
+    assert.strictEqual(elCeil(5), 20, 'a tiny pass is not blown up to the full height');
+    assert.strictEqual(elCeil(25), 30);
+    assert.strictEqual(elCeil(30), 45, 'a peak never touches the top edge');
+    assert.strictEqual(elCeil(50), 60);
+    assert.strictEqual(elCeil(70), 90);
+});
+
+test('low passes stretch the Y-axis instead of hugging the floor', () => {
+    const now = Date.now();
+    const canvas = makeCanvas(900, 160);
+    const v = new PassTimelineView(canvas);
+    v.setPasses([{ noradId: 1, name: 'LOW', aosMs: now, losMs: now + 600000, tcaMs: now + 300000, maxEl: 12 }]);
+    const texts = canvas.getContext().ops.filter((o) => o[0] === 'fillText');
+    const ticks = texts.map((o) => o[1]);
+    assert.ok(ticks.indexOf('20°') >= 0, `axis tops at 20°, got ${ticks.join('|')}`);
+    assert.ok(ticks.indexOf('90°') < 0, 'no 90° tick for a 12° pass');
+    const label = texts.filter((o) => o[1] === 'LOW')[0];
+    const plotTop = 12;
+    const plotH = 160 - 12 - 12;
+    assert.ok(label[3] < plotTop + plotH / 2, `peak label y=${label[3]} sits in the upper half`);
 });
 
 test('satellite names are drawn on the plot, not in a left column', () => {
@@ -257,22 +346,133 @@ test('setPasses replaces the schedule and redraws', () => {
     assert.ok(texts.indexOf('DELTA') >= 0, 'redraw must use the new schedule');
 });
 
+test('time axis left edge stays at now − PAST; right edge follows aheadMin', () => {
+    const now = Date.now();
+    const v = new PassTimelineView(makeCanvas(900, 160));
+    // Длинное окно группы больше не раздувает ось — масштаб задаёт пользователь
+    v.setPasses([], { startMs: now - 600000, endMs: now + 7 * 3600000 });
+    const span = v._timeSpan(now);
+    assert.strictEqual(span.t0, now - 3 * 60000, 'left edge fixed at now − 3 min');
+    assert.strictEqual(span.t1, now + 60 * 60000, 'default one hour ahead');
+});
+
+test('mouse wheel zooms the horizon with the left edge fixed', () => {
+    const now = Date.now();
+    const v = new PassTimelineView(makeCanvas(900, 160));
+    assert.strictEqual(v._aheadMin, 60);
+    v.zoomWheel(-100); // вверх — крупнее
+    assert.strictEqual(v._aheadMin, 45);
+    assert.strictEqual(v._timeSpan(now).t0, now - 3 * 60000);
+    assert.strictEqual(v._timeSpan(now).t1, now + 45 * 60000);
+    v.zoomWheel(100); // вниз — обратно
+    v.zoomWheel(100);
+    assert.strictEqual(v._aheadMin, 90);
+    // Упоры шкалы
+    v._aheadMin = 15;
+    v.zoomWheel(-100);
+    assert.strictEqual(v._aheadMin, 15);
+    v._aheadMin = 360;
+    v.zoomWheel(100);
+    assert.strictEqual(v._aheadMin, 360);
+});
+
+test('hill label sits above TCA, not the pass midpoint', () => {
+    const now = Date.now();
+    const canvas = makeCanvas(900, 160);
+    const v = new PassTimelineView(canvas);
+    v.setPasses([{ noradId: 1, name: 'TCA', aosMs: now, losMs: now + 600000, tcaMs: now + 120000, maxEl: 50 }],
+        { startMs: now, endMs: now + 600000 });
+    const span = v._timeSpan(now);
+    const label = canvas.getContext().ops.filter((o) => o[0] === 'fillText' && o[1] === 'TCA')[0];
+    assert.ok(label, 'label drawn');
+    const plotW = 900 - 24 - 4;
+    const xTca = 24 + (now + 120000 - span.t0) / (span.t1 - span.t0) * plotW;
+    assert.ok(Math.abs(label[2] - xTca) < 1, `label x=${label[2]}, TCA x=${xTca}`);
+});
+
 test('setPasses ignores a non-array argument', () => {
     const v = new PassTimelineView(makeCanvas(900, 160), { passes: samplePasses() });
     v.setPasses(null);
     assert.strictEqual(v._passes.length, 3);
 });
 
-test('setTrackingId uses a distinct stroke for the tracked hill', () => {
+test('setTrackingId thickens the stroke of the tracked hill', () => {
     const canvas = makeCanvas(900, 160);
     const v = new PassTimelineView(canvas, { passes: samplePasses() });
-    v.draw();
-    const before = canvas.getContext().ops.filter((o) => o[0] === 'stroke').map((o) => o[1]);
-    canvas.getContext().ops.length = 0;
     v.setTrackingId(1);
-    const after = canvas.getContext().ops.filter((o) => o[0] === 'stroke').map((o) => o[1]);
-    assert.strictEqual(v._trackingId, 1);
-    assert.notDeepStrictEqual(after, before, 'tracked pass must change at least one stroke colour');
+    const strokes = canvas.getContext().ops.filter((o) => o[0] === 'stroke');
+    assert.ok(strokes.some((o) => o[2] >= 2), 'tracked hill stroke is thicker');
+});
+
+test('focused hill is drawn last so it sits in the foreground', () => {
+    const now = Date.now();
+    const canvas = makeCanvas(900, 160);
+    const v = new PassTimelineView(canvas, {
+        passes: [
+            { noradId: 1, name: 'LOW', aosMs: now, losMs: now + 600000, maxEl: 20 },
+            { noradId: 2, name: 'FOCUS', aosMs: now, losMs: now + 600000, maxEl: 10 },
+            { noradId: 3, name: 'HIGH', aosMs: now, losMs: now + 600000, maxEl: 50 },
+        ],
+    });
+    v.setSelectedId(2);
+    const labels = canvas.getContext().ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
+    const focusAt = labels.lastIndexOf('FOCUS');
+    const highAt = labels.lastIndexOf('HIGH');
+    const lowAt = labels.lastIndexOf('LOW');
+    assert.ok(focusAt > highAt && focusAt > lowAt, 'FOCUS label is painted after the others');
+});
+
+test('inSession matches the one-minute sliding window', () => {
+    const now = 1_000_000;
+    assert.ok(inSession({ aosMs: now - 1000, losMs: now + 10000 }, now));
+    assert.ok(inSession({ aosMs: now + 30_000, losMs: now + 90_000 }, now), 'AOS within a minute');
+    assert.ok(!inSession({ aosMs: now + 120_000, losMs: now + 200_000 }, now), 'AOS too far');
+    assert.ok(!inSession({ aosMs: now - 200_000, losMs: now - 1000 }, now), 'already finished');
+});
+
+test('hills recolor when the pass enters the session window', () => {
+    const now = Date.now();
+    const canvas = makeCanvas(900, 160);
+    const pass = { noradId: 1, name: 'SOON', aosMs: now + 90_000, losMs: now + 400_000, maxEl: 40 };
+    const v = new PassTimelineView(canvas, {
+        passes: [pass],
+        satColors: { 1: '#ff4488' },
+    });
+    v.draw();
+    let strokes = canvas.getContext().ops.filter((o) => o[0] === 'stroke').map((o) => o[1]);
+    assert.ok(strokes.indexOf('#00d4aa') >= 0, 'still green before the window');
+    assert.ok(strokes.indexOf('#ff4488') < 0);
+
+    // Сдвигаем AOS в окно сеанса без смены палитры — только время
+    pass.aosMs = now + 20_000;
+    canvas.getContext().ops.length = 0;
+    v.draw();
+    strokes = canvas.getContext().ops.filter((o) => o[0] === 'stroke').map((o) => o[1]);
+    assert.ok(strokes.indexOf('#ff4488') >= 0, 'palette color once inside the window');
+});
+
+test('Y-scale follows the session peak, not a taller pass outside the session', () => {
+    const now = Date.now();
+    assert.strictEqual(peakEl([
+        { noradId: 1, maxEl: 12, aosMs: now - 1000, losMs: now + 60_000 },
+        { noradId: 2, maxEl: 80, aosMs: now + 120_000, losMs: now + 300_000 },
+    ], now), 12);
+    assert.strictEqual(peakEl([
+        { noradId: 2, maxEl: 80, aosMs: now + 120_000, losMs: now + 300_000 },
+    ], now), 80, 'no session pass: fall back to all');
+
+    const canvas = makeCanvas(900, 160);
+    const v = new PassTimelineView(canvas, {
+        passes: [
+            { noradId: 1, name: 'LOW', aosMs: now - 1000, losMs: now + 600000, tcaMs: now + 300000, maxEl: 12 },
+            { noradId: 2, name: 'HIGH', aosMs: now + 300000, losMs: now + 700000, tcaMs: now + 500000, maxEl: 80 },
+        ],
+        satColors: { 1: '#ff4488', 2: '#44aaff' },
+    });
+    v.draw();
+    const ticks = canvas.getContext().ops.filter((o) => o[0] === 'fillText').map((o) => o[1]);
+    assert.ok(ticks.indexOf('20°') >= 0, `session at 12° → ceiling 20°, got ${ticks.join('|')}`);
+    assert.ok(ticks.indexOf('90°') < 0, 'tall outsider must not force the full sky');
 });
 
 test('refreshAfterThemeChange redraws', () => {

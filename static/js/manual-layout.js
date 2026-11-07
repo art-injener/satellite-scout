@@ -64,6 +64,10 @@
      * здесь только сглаживание картинки, чтобы не дёргать canvas на каждом FFT.
      */
     const DISPLAY_SMOOTH_ALPHA = 0.35;
+    /** Масштаб спектра: самое узкое окно в бинах кадра (уже — одни ступеньки). */
+    const MIN_ZOOM_BINS = 32;
+    /** Масштаб на пиксель прокрутки колеса: щелчок колеса (100) даёт примерно ×1,2. */
+    const WHEEL_ZOOM_RATE = 0.002;
     const MARKER_EMPTY = '—';
     /** Допуск наведения: сверх него рассогласование подсвечивается, градусы. */
     const POINTING_TOLERANCE_DEG = 2;
@@ -209,6 +213,15 @@
         this._streamCenterHz = null;
         /** Полоса обзора из последнего кадра, Гц. */
         this._streamSpanHz = null;
+        /** Масштаб спектра «Спектра» (окно SpectrumStream.zoomView); null — вся полоса. */
+        this._zoom = null;
+        /** Видимый сглаженный кадр для линии под курсором. */
+        this._cursorTrace = null;
+        this._cursorClientX = null;
+        this._cursorClientY = null;
+        /** Бинов в последнем кадре: по ним режется окно масштаба. */
+        this._lastBins = 0;
+        this._zoomBtn = null;
         /** Шкала dB по данным потока, общая для спектров и водопада. */
         this._streamRange = null;
         /** Накопление спектра (SPEC_MODES), его кнопки и N для «Накопления». */
@@ -230,6 +243,15 @@
         this._levelPath = null;
         /** Запросы перестройки в пути: пока они есть, кадры не двигают регулятор. */
         this._tunePending = 0;
+        /** Идёт запрос перестройки: следующий ждёт и уходит последним, без очереди. */
+        this._tuneFlight = false;
+        /** Последняя запрошенная частота, МГц. Пока запрос в пути, сюда пишется более новая. */
+        this._tuneQueuedMHz = null;
+        /**
+         * Куда перемотка спектра уже поставила регулятор, Гц.
+         * Пока кадр потока не догнал это значение, старый центр регулятор не возвращает.
+         */
+        this._scrubHz = null;
         this._offAccess = null;
         this._accessPanel = null;
         this._panorama = null;
@@ -295,6 +317,9 @@
         this._stepRepeated = false;
         /** Канал демодулятора поверх спектра и водопада. */
         this._chanOverlay = null;
+        /** Риски передатчиков на «Спектре» и лента, по которой они подписываются. */
+        this._txMarkers = null;
+        this._txList = [];
 
         this._layoutRoot = document.getElementById('layout-manual');
         this._azCanvas = document.getElementById('manual-azimuth-view');
@@ -664,43 +689,55 @@
     };
 
     /**
-     * Mock-передатчики привязываем к реальным КА текущей группы: иначе «Следить»
-     * ведёт КА без позиции — антенна не движется, AOS/LOS пусты. Частота и модуляция
-     * остаются шаблонными (до TX-DB-001). Primary-КА получает два передатчика,
-     * чтобы был виден кейс «тот же КА, другая частота».
+     * Передатчики ленты — downlink из SatNOGS у КА группы (поле transmitters
+     * в satellite_group_update). Нет данных — список пуст. Передатчик КА,
+     * который ещё не поднялся над горизонтом, показан молчащим.
+     * @param {?Object} group
+     * @returns {Array<Object>}
+     */
+    function transmittersFromGroup(group) {
+        const list = [];
+        if (!group || !Array.isArray(group.satellites)) { return list; }
+        for (let i = 0; i < group.satellites.length; i++) {
+            const sat = group.satellites[i];
+            const txs = Array.isArray(sat.transmitters) ? sat.transmitters : [];
+            // Основное имя из TLE (ISS, RS-44), не alias из скобок (ZARYA, BREEZE-KM R/B)
+            const name = sat.sat_name || sat.sat_alias || ('NORAD ' + sat.norad_id);
+            for (let j = 0; j < txs.length; j++) {
+                const tx = txs[j];
+                if (!(tx.freq_hz > 0)) { continue; }
+                // В ленте только имя КА: частота и модуляция — соседние колонки.
+                // Длинный description SatNOGS («Mode U - … AX.25…») уходит в подсказку.
+                list.push({
+                    uuid: tx.uuid,
+                    noradId: sat.norad_id,
+                    freqMHz: tx.freq_hz / 1e6,
+                    modulation: tx.modulation || tx.mode || '',
+                    baud: tx.baud || 0,
+                    label: name,
+                    description: tx.description || '',
+                    active: sat.is_visible === true,
+                });
+            }
+        }
+        return list;
+    }
+
+    /**
+     * Лента передатчиков по группе: КА из Плана сеансов, поэтому «Следить»
+     * ведёт КА с позицией и пролётом.
      */
     ManualLayout.prototype._buildTransmittersFromGroup = function() {
         if (!this._panorama || typeof this._panorama.setTransmitters !== 'function') { return; }
         if (!this._sm || typeof this._sm.getSatelliteGroup !== 'function') { return; }
-        const group = this._sm.getSatelliteGroup();
-        if (!group || !Array.isArray(group.satellites) || group.satellites.length === 0) { return; }
-
-        const templates = [
-            { freqMHz: 145.825, modulation: 'FM', chipColor: '#00ffc8', active: true, suffix: 'VOICE' },
-            { freqMHz: 437.800, modulation: 'FSK 1k2', chipColor: '#d070ff', active: true, suffix: 'FSK' },
-            { freqMHz: 435.250, modulation: 'BPSK31', chipColor: '#ffaa22', active: true, suffix: 'BPSK' },
-            { freqMHz: 145.920, modulation: 'CW', chipColor: '#8fa8bc', active: false, suffix: 'CW' },
-            { freqMHz: 437.100, modulation: 'APT', chipColor: '#8fa8bc', active: false, suffix: 'APT' },
-        ];
-        const sats = group.satellites.slice();
-        const list = [];
-        let ti = 0;
-        for (let i = 0; i < sats.length && ti < templates.length; i++) {
-            const sat = sats[i];
-            const name = sat.sat_alias || sat.sat_name || ('NORAD ' + sat.norad_id);
-            // Первый КА группы — два передатчика (кейс «тот же КА, другая частота»),
-            // остальные по одному.
-            const count = (i === 0 && templates.length >= 2) ? 2 : 1;
-            for (let c = 0; c < count && ti < templates.length; c++) {
-                const t = templates[ti++];
-                list.push({
-                    freqMHz: t.freqMHz, modulation: t.modulation, chipColor: t.chipColor,
-                    active: t.active, noradId: sat.norad_id,
-                    label: name + ' · ' + t.suffix,
-                });
+        this._txList = transmittersFromGroup(this._sm.getSatelliteGroup());
+        const sm = this._sm;
+        if (sm && typeof sm.getMarkerColor === 'function') {
+            for (let i = 0; i < this._txList.length; i++) {
+                this._txList[i].chipColor = sm.getMarkerColor(this._txList[i].noradId) || null;
             }
         }
-        if (list.length) { this._panorama.setTransmitters(list); }
+        this._panorama.setTransmitters(this._txList);
     };
 
     /** true, если План сеансов держит КА под сопровождением. */
@@ -1060,13 +1097,16 @@
             bandwidth: document.getElementById('manual-rx-filter-bw'),
             squelch: this._squelchInput,
             demod: this._rxPipelineSelect,
+            doppler: document.getElementById('manual-rx-doppler-mode'),
             apply: document.getElementById('manual-rx-apply'),
             applyDemod: document.getElementById('manual-demod-apply'),
         };
+        this._dopplerNow = document.getElementById('manual-rx-doppler-now');
         const self = this;
         const agc = this._rxFields.agc;
 
         this._initFreqDial();
+        this._initAudio();
         this._showMarker(null);
 
         this._bindNumericFields();
@@ -1074,6 +1114,7 @@
             self._setAgc(agc.getAttribute('aria-pressed') !== 'true');
         });
         this._on(this._rxPipelineSelect, 'change', function() {
+            self._applyBandwidthLimit();
             self._syncEyeFromPipeline();
         });
         this._on(this._rxFields.apply, 'click', function() {
@@ -1090,8 +1131,57 @@
         this._on(this._rxFields.bandwidth, 'change', preview);
 
         this._syncEyeFromPipeline();
-        this._syncChannelOverlay();
+        this._applyBandwidthLimit();
     };
+
+    /**
+     * «Слушать» и громкость: звук канала включается сразу, без «Установить»,
+     * и права «Контроль» не требует — канал он не меняет.
+     */
+    ManualLayout.prototype._initAudio = function() {
+        const btn = document.getElementById('manual-rx-audio');
+        if (!btn || typeof window.AudioPlayer !== 'function') { return; }
+        this._audioBtn = btn;
+        this._audio = new window.AudioPlayer();
+        const self = this;
+        const vol = document.getElementById('manual-rx-volume');
+        if (vol) {
+            this._audio.setVolume(Number(vol.value) / 100);
+            this._on(vol, 'input', function() { self._audio.setVolume(Number(vol.value) / 100); });
+        }
+        this._on(btn, 'click', function() {
+            self._setListening(btn.getAttribute('aria-pressed') !== 'true');
+        });
+    };
+
+    /** Звук канала выбранного тракта; без тракта слушать нечего. */
+    ManualLayout.prototype._setListening = function(on) {
+        if (!this._audio) { return; }
+        const path = on ? this._radioPathName() : null;
+        if (path) { this._audio.start(path); } else { this._audio.stop(); }
+        if (this._audioBtn) { this._audioBtn.setAttribute('aria-pressed', path ? 'true' : 'false'); }
+    };
+
+    /**
+     * Спутник, за Доплером которого идёт канал: «Авто» — настроенный передатчик,
+     * а до настройки — тот, что уже задан на сервере; «Фикс.» — 0.
+     */
+    ManualLayout.prototype._dopplerNorad = function() {
+        const f = this._rxFields;
+        if (!f || selectedValue(f.doppler) !== 'auto') { return 0; }
+        return this._chanNorad || this._serverDopplerNorad || 0;
+    };
+
+    /** Сдвиг Доплера из статуса: подпись у «Доплер» и канал на спектре. */
+    ManualLayout.prototype._showDoppler = function(st) {
+        const hz = typeof st.doppler_hz === 'number' && isFinite(st.doppler_hz) ? st.doppler_hz : null;
+        if (this._chanOverlay) { this._chanOverlay.setShift(hz || 0); }
+        if (this._dopplerNow) { this._dopplerNow.textContent = hz === null ? '' : formatDopplerKHz(hz); }
+    };
+
+    function formatDopplerKHz(hz) {
+        return (hz < 0 ? '−' : '+') + (Math.abs(hz) / 1000).toFixed(2) + ' кГц';
+    }
 
     /** Поля усиления, сдвига и порога: только цифры и кнопки −/+. */
     ManualLayout.prototype._bindNumericFields = function() {
@@ -1222,18 +1312,21 @@
             : Number((hz / 1e3).toFixed(1)) + ' кГц';
     }
 
-    /** Пункты «Полосы» по списку частот устройства; тот же список не перестраивается. */
-    function fillSpanOptions(sel, rates) {
+    /**
+     * Пункты «Полосы» по списку частот устройства; тот же список не перестраивается.
+     * Значение — частота дискретизации, подпись — видимая ширина из spans (края окна сервер отрезает).
+     */
+    function fillSpanOptions(sel, rates, spans) {
         if (!sel || !sel.options) { return; }
         const same = sel.options.length === rates.length && rates.every(function(hz, j) {
             return String(sel.options[j].value) === String(hz);
         });
         if (same) { return; }
         while (sel.options.length) { sel.remove(0); }
-        rates.forEach(function(hz) {
+        rates.forEach(function(hz, j) {
             const opt = document.createElement('option');
             opt.value = String(hz);
-            opt.text = rateLabel(hz);
+            opt.text = rateLabel(Array.isArray(spans) && spans[j] > 0 ? spans[j] : hz);
             sel.add(opt);
         });
     }
@@ -1332,6 +1425,8 @@
             squelch_dbfs: Number(squelch.toFixed(1)),
             demod: selectedValue(f.demod),
             demod_off: !demodChecked(),
+            doppler_norad: this._dopplerNorad(),
+            doppler_auto: selectedValue(f.doppler) === 'auto',
         }, 'Настройки демодулятора не применены', function(b) {
             if (b && b.status && self._radioPathName() === path) {
                 self._applyReceiverStatus(path, cal, b.status, 'demod');
@@ -1411,7 +1506,8 @@
         if (typeof st.offset_hz !== 'number') { return; }
         const ch = {
             offset_hz: st.offset_hz, bandwidth_hz: st.bandwidth_hz, squelch_dbfs: st.squelch_dbfs,
-            demod: st.demod, demod_off: !!st.demod_off,
+            demod: st.demod, demod_off: !!st.demod_off, doppler_norad: st.doppler_norad || 0,
+            doppler_auto: typeof st.doppler_auto === 'boolean' ? st.doppler_auto : null,
         };
         if (typeof st.gain_db === 'number' && st.gain_db !== this._serverGain) {
             // Порог в dBm зависит от усиления, поэтому канал заполняется заново вместе с ним.
@@ -1423,7 +1519,8 @@
     };
 
     function channelKey(ch) {
-        return [ch.offset_hz, ch.bandwidth_hz, ch.squelch_dbfs, ch.demod, ch.demod_off ? 1 : 0].join('|');
+        return [ch.offset_hz, ch.bandwidth_hz, ch.squelch_dbfs, ch.demod, ch.demod_off ? 1 : 0,
+            ch.doppler_norad || 0, ch.doppler_auto === true ? 1 : ch.doppler_auto === false ? 0 : ''].join('|');
     }
 
     /** Галочка в заголовке «Демодулятор»: включена, пока сервер не сказал обратное. */
@@ -1441,7 +1538,7 @@
         if (!f) { return; }
         if (part !== 'demod') {
             if (Array.isArray(st.sample_rates) && st.sample_rates.length) {
-                fillSpanOptions(f.span, st.sample_rates);
+                fillSpanOptions(f.span, st.sample_rates, st.spans_hz);
             }
             if (typeof st.sample_rate === 'number') { selectByValue(f.span, st.sample_rate); }
             if (typeof st.gain_db === 'number') {
@@ -1460,6 +1557,15 @@
             f.squelch.value = String(Number((ch.squelch_dbfs + (this._levelOffset || 0)).toFixed(1)));
         }
         if (ch.demod && selectByValue(f.demod, ch.demod)) { this._syncEyeFromPipeline(); }
+        this._applyBandwidthLimit();
+        this._serverDopplerNorad = ch.doppler_norad || 0;
+        // Явный doppler_auto с сервера задаёт режим. Старый статус без поля режим не трогает:
+        // панель открывается на «Авто», а «Фикс.» оператора не сбрасывается каждым кадром.
+        if (ch.doppler_auto === true || ch.doppler_auto === false) {
+            selectByValue(f.doppler, ch.doppler_auto ? 'auto' : 'off');
+        } else if (this._serverDopplerNorad) {
+            selectByValue(f.doppler, 'auto');
+        }
         const mark = document.getElementById('manual-rx-channel-show');
         if (mark) {
             mark.checked = !ch.demod_off;
@@ -1488,8 +1594,8 @@
     };
 
     /**
-     * Ручная перестройка оператором (SET на регуляторе). Спектр и водопад
-     * сдвинутся, когда придут кадры с новым центром.
+     * Ручная перестройка оператором (SET или колесо на регуляторе). Спектр и
+     * водопад сдвинутся, когда придут кадры с новым центром.
      * @param {number} freqMHz
      */
     ManualLayout.prototype._onOperatorRetune = function(freqMHz) {
@@ -1512,27 +1618,44 @@
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
         if (ac && !ac.canControl()) {
             ac.setNotice('Перестраивать приёмник можно только в режиме «Контроль».');
+            this._tuneQueuedMHz = null;
             this._revertDial();
             return;
         }
         const path = this._radioPathName();
-        if (!path || typeof fetch !== 'function') { return; }
+        if (!path || typeof fetch !== 'function' || typeof freqMHz !== 'number' || !isFinite(freqMHz)) { return; }
+        // Перемотка шлёт сдвиг на каждое движение указателя. В пути один запрос,
+        // более новая частота уходит следом, промежуточные не копятся.
+        this._tuneQueuedMHz = freqMHz;
+        if (this._tuneFlight) { return; }
+        this._dispatchTune();
+    };
+
+    /** Отправляет последнюю запрошенную частоту. По ответу догоняет, если за время запроса цель сменилась. */
+    ManualLayout.prototype._dispatchTune = function() {
+        const path = this._radioPathName();
+        const freqMHz = this._tuneQueuedMHz;
+        if (!path || typeof fetch !== 'function' || typeof freqMHz !== 'number' || !isFinite(freqMHz)) { return; }
+        const sentHz = Math.round(freqMHz * 1e6);
         const self = this;
+        const ac = (typeof window !== 'undefined') ? window._accessControl : null;
         const notice = function(text) { if (ac) { ac.setNotice(text); } };
+        this._tuneFlight = true;
         this._tunePending++;
         fetch('/api/sdr/tune', {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ radio_path: path, center_hz: Math.round(freqMHz * 1e6) }),
+            body: JSON.stringify({ radio_path: path, center_hz: sentHz }),
         })
             .then(function(r) {
-                if (r.ok) { notice(''); return null; }
+                if (r.ok) { notice(''); return; }
+                self._tuneQueuedMHz = null;
                 self._revertDial();
                 if (r.status === 403) {
                     notice('Режим «Контроль» отключён, приёмник не перестроен.');
                     if (ac) { ac.refresh(); }
-                    return null;
+                    return;
                 }
                 return r.json().then(function(b) {
                     notice('Приёмник не перестроен: ' + ((b && b.error) || ('HTTP ' + r.status)));
@@ -1541,14 +1664,24 @@
                 });
             })
             .catch(function(err) {
+                self._tuneQueuedMHz = null;
                 self._revertDial();
                 notice('Приёмник не перестроен: ' + err.message);
             })
-            .then(function() { self._tunePending--; });
+            .then(function() {
+                self._tunePending--;
+                self._tuneFlight = false;
+                const queued = self._tuneQueuedMHz;
+                if (typeof queued === 'number' && Math.round(queued * 1e6) !== sentHz) {
+                    self._dispatchTune();
+                }
+            });
     };
 
     /** Регулятор на частоту приёмника из потока, если она уже известна. */
     ManualLayout.prototype._revertDial = function() {
+        this._scrubHz = null;
+        this._tuneQueuedMHz = null;
         if (this._streamCenterHz === null) { return; }
         this._rxFreqMHz = this._streamCenterHz / 1e6;
         if (this._freqDial) { this._freqDial.setHz(this._streamCenterHz); }
@@ -1791,7 +1924,9 @@
      */
     ManualLayout.prototype._onStreamFrame = function(frame) {
         const h = frame.header;
+        if (frame.values && frame.values.length > 1) { this._lastBins = frame.values.length; }
         this._applyStreamBand(h.centerHz, h.spanHz);
+        this._showRbw(h.spanHz, this._lastBins);
         if (!frame.values || !this._active || !this._streamRange) { return; }
         // В «Пике» сервер шлёт удержание и следом мгновенный: удержание только копим
         if (this._specMode === 'maxhold' && h.displayMode === FRAME_MODE_MAXHOLD) {
@@ -1833,20 +1968,282 @@
         const toUnit = window.SpectrumStream.dbfsToUnit;
         const line = toUnit(values, range.min, range.max);
         const heldLine = held ? toUnit(held, range.min, range.max) : null;
-        const drawOn = function(view) {
-            if (heldLine) { view.draw(line, heldLine); } else { view.draw(line); }
+        // «Спектр» и водопад показывают окно масштаба, «Антенна» — всю полосу
+        const win = this._specWindow();
+        const sl = win && win.slice && win.slice.start + win.slice.count <= values.length ? win.slice : null;
+        const cut = function(a) {
+            if (!sl || !a) { return a; }
+            return a.subarray ? a.subarray(sl.start, sl.start + sl.count) : a.slice(sl.start, sl.start + sl.count);
         };
-        if (this._fft) { drawOn(this._fft); }
-        if (this._wf) { this._wf.pushLine(line); }
+        const shownDb = cut(values);
+        this._cursorTrace = win && win.spanHz > 0
+            ? { values: shownDb, centerHz: win.centerHz, spanHz: win.spanHz }
+            : null;
+        if (this._fft) {
+            if (heldLine) { this._fft.draw(cut(line), cut(heldLine)); } else { this._fft.draw(cut(line)); }
+        }
+        if (this._wf) { this._wf.pushLine(cut(line)); }
+        if (this._cursorClientX !== null) { this._paintCursor(); }
         if (this._antFft && this._activeTab === 'antenna') {
-            drawOn(this._antFft);
+            if (heldLine) { this._antFft.draw(line, heldLine); } else { this._antFft.draw(line); }
             this._drawExpectedFreq(this._antFft, this._expectedFreqMHz());
         }
         const ts = h.timestampMs;
         if (this._markerShownMs === null || !(ts - this._markerShownMs < MARKER_REFRESH_MS)) {
             this._markerShownMs = typeof ts === 'number' ? ts : null;
-            this._showMarker(window.SpectrumStream.markerReadout(raw, h.centerHz, h.spanHz));
+            let mk;
+            if (sl) {
+                // Пик ищем в видимой части; markerReadout считает частоту от левого края
+                const binHz = h.spanHz / raw.length;
+                const leftHz = h.centerHz - h.spanHz / 2 + sl.start * binHz;
+                mk = window.SpectrumStream.markerReadout(cut(raw), leftHz + sl.count * binHz / 2, sl.count * binHz);
+            } else {
+                mk = window.SpectrumStream.markerReadout(raw, h.centerHz, h.spanHz);
+            }
+            this._showMarker(mk);
         }
+    };
+
+    /**
+     * Что видно на «Спектре»: центр и полоса графика, срез бинов кадра и центр
+     * окна от центра приёмника. Без масштаба — вся полоса приёмника.
+     * @returns {?{centerHz: number, spanHz: number, offsetHz: number, slice: ?Object}}
+     */
+    ManualLayout.prototype._specWindow = function() {
+        const c = this._streamCenterHz;
+        const s = this._streamSpanHz;
+        if (!c) { return null; }
+        const full = { centerHz: c, spanHz: s > 0 ? s : 0, offsetHz: 0, slice: null };
+        if (!this._zoom || !(s > 0) || !(this._lastBins > 1)) { return full; }
+        const sl = window.SpectrumStream.viewSlice(this._lastBins, s, this._zoom);
+        return { centerHz: c + sl.offsetHz, spanHz: sl.spanHz, offsetHz: sl.offsetHz, slice: sl };
+    };
+
+    /** Центр и полоса «Спектра», водопада и канала — по окну масштаба. */
+    ManualLayout.prototype._applySpecView = function() {
+        const win = this._specWindow();
+        if (!win) { return; }
+        const centerMHz = win.centerHz / 1e6;
+        const spanMHz = win.spanHz > 0 ? win.spanHz / 1e6 : null;
+        if (this._fft) {
+            this._fft.freqCenterMHz = centerMHz;
+            if (spanMHz) { this._fft.freqSpanMHz = spanMHz; }
+        }
+        if (this._wf) {
+            this._wf._freqCenterMHz = centerMHz;
+            if (spanMHz) { this._wf._freqSpanMHz = spanMHz; }
+        }
+        if (this._chanOverlay && typeof this._chanOverlay.setView === 'function') {
+            this._chanOverlay.setView(win.offsetHz, win.slice ? win.spanHz : 0);
+        }
+        if (this._txMarkers) { this._txMarkers.setView(win.offsetHz, win.slice ? win.spanHz : 0); }
+    };
+
+    /**
+     * Новое окно масштаба. Водопад переносит накопленные строки под новую шкалу,
+     * поэтому история при прокрутке колеса не пропадает.
+     * @param {?{offsetHz: number, spanHz: number}} view — null: вся полоса
+     */
+    ManualLayout.prototype._setZoom = function(view) {
+        const before = this._specWindow();
+        this._zoom = view;
+        this._showZoom();
+        const after = this._specWindow();
+        if (!before || !after || (before.centerHz === after.centerHz && before.spanHz === after.spanHz)) { return; }
+        this._applySpecView();
+        if (this._wf && before.spanHz > 0 && typeof this._wf.remap === 'function') {
+            this._wf.remap((before.centerHz - before.spanHz / 2) / 1e6, (before.centerHz + before.spanHz / 2) / 1e6);
+        }
+    };
+
+    /** «1:1» доступна, только пока спектр увеличен. */
+    ManualLayout.prototype._showZoom = function() {
+        if (this._zoomBtn) { this._zoomBtn.disabled = !this._zoom; }
+    };
+
+    /**
+     * Колесо над спектром и водопадом: вертикальная прокрутка меняет масштаб вокруг
+     * указателя, горизонтальная (тачпад) сдвигает окно.
+     */
+    ManualLayout.prototype._onSpecWheel = function(e) {
+        const full = this._streamSpanHz;
+        const win = this._specWindow();
+        if (!win || !(full > 0) || !(this._lastBins > 1) || !this._fftCanvas || !this._fft) { return; }
+        e.preventDefault();
+        const rect = this._fftCanvas.getBoundingClientRect();
+        const ml = this._fft._marginLeft || 0;
+        const mr = this._fft._marginRight || 0;
+        const plotW = rect.width - ml - mr;
+        if (!(plotW > 0)) { return; }
+        // Строки и страницы прокрутки переводим в пиксели
+        const unit = e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? plotW : 1);
+        const SS = window.SpectrumStream;
+        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+            this._setZoom(SS.panView(this._zoom, full, e.deltaX * unit * win.spanHz / plotW));
+            return;
+        }
+        if (!e.deltaY) { return; }
+        const frac = Math.max(0, Math.min(1, (e.clientX - (rect.left || 0) - ml) / plotW));
+        const atHz = win.offsetHz + (frac - 0.5) * win.spanHz;
+        const factor = Math.exp(-e.deltaY * unit * WHEEL_ZOOM_RATE);
+        const minSpanHz = MIN_ZOOM_BINS * full / this._lastBins;
+        this._setZoom(SS.zoomView(this._zoom, full, factor, atHz, minSpanHz));
+    };
+
+    /** Масштаб «Спектра»: колесо, перетаскивание по графику и кнопка «1:1». */
+    ManualLayout.prototype._initSpecZoom = function(host) {
+        const self = this;
+        this._zoomBtn = document.getElementById('manual-spec-zoom-reset');
+        this._on(this._zoomBtn, 'click', function() { self._setZoom(null); });
+        this._showZoom();
+        if (!host || typeof window.SpectrumStream !== 'function' ||
+            typeof window.SpectrumStream.zoomView !== 'function') {
+            return;
+        }
+        const onWheel = function(e) { self._onSpecWheel(e); };
+        // passive: false, иначе preventDefault не удержит страницу от прокрутки
+        host.addEventListener('wheel', onWheel, { passive: false });
+        this._handlers.push([host, 'wheel', onWheel]);
+    };
+
+    /**
+     * Шумовая полоса окна Блэкмана-Харриса в бинах: чистый тон на спектре сервера
+     * занимает примерно столько, как полоса разрешения у анализатора.
+     */
+    const SPECTRUM_ENBW_BINS = 2;
+
+    /** Подпись «RBW» над спектром: от полосы и числа бинов кадра, масштаб её не меняет. */
+    ManualLayout.prototype._showRbw = function(spanHz, bins) {
+        const el = document.getElementById('manual-spec-rbw');
+        if (!el || !(spanHz > 0) || !(bins > 0)) { return; }
+        const hz = spanHz / bins * SPECTRUM_ENBW_BINS;
+        const text = 'RBW ' + (hz < 1000
+            ? Math.round(hz) + ' Гц'
+            : String(Math.round(hz / 100) / 10).replace('.', ',') + ' кГц');
+        if (el.textContent !== text) { el.textContent = text; }
+    };
+
+    /** Линия под курсором: частота и уровень точки, на которую смотрит указатель. */
+    ManualLayout.prototype._initSpecCursor = function(host) {
+        this._cursorRoot = document.getElementById('manual-spec-cursor');
+        this._cursorLine = document.getElementById('manual-spec-cursor-line');
+        this._cursorMark = document.getElementById('manual-spec-cursor-mark');
+        this._cursorTag = document.getElementById('manual-spec-cursor-tag');
+        if (!host || !this._cursorRoot) { return; }
+        this._cursorRoot.hidden = true;
+        const self = this;
+        this._on(host, 'pointermove', function(e) { self._onSpecPointer(e); });
+        this._on(host, 'pointerleave', function() { self._onSpecPointerLeave(); });
+    };
+
+    ManualLayout.prototype._onSpecPointer = function(e) {
+        if (!e || typeof e.clientX !== 'number') { return; }
+        this._cursorClientX = e.clientX;
+        this._cursorClientY = typeof e.clientY === 'number' ? e.clientY : null;
+        this._paintCursor();
+    };
+
+    ManualLayout.prototype._onSpecPointerLeave = function() {
+        this._cursorClientX = null;
+        this._cursorClientY = null;
+        this._hideCursor();
+    };
+
+    ManualLayout.prototype._hideCursor = function() {
+        if (this._cursorRoot) { this._cursorRoot.hidden = true; }
+    };
+
+    /**
+     * Рисует линию, если указатель над графиком, а не над подписями дБ слева.
+     * Частота — точка оси под указателем, уровень — ближайший бин линии.
+     */
+    ManualLayout.prototype._paintCursor = function() {
+        const root = this._cursorRoot;
+        const canvas = this._fftCanvas;
+        const fft = this._fft;
+        const trace = this._cursorTrace;
+        const host = document.getElementById('manual-spectrum');
+        if (!root || !canvas || !fft || !trace || !host || this._cursorClientX === null) {
+            this._hideCursor();
+            return;
+        }
+        const plot = canvas.getBoundingClientRect();
+        const box = host.getBoundingClientRect();
+        const ml = fft._marginLeft || 0;
+        const mr = fft._marginRight || 0;
+        const plotW = plot.width - ml - mr;
+        if (!(plotW > 0) || !(box.width > 0)) { this._hideCursor(); return; }
+        const plotLeft = plot.left || 0;
+        const boxLeft = box.left || 0;
+        const plotTop = plot.top || 0;
+        const boxTop = box.top || 0;
+        const frac = (this._cursorClientX - plotLeft - ml) / plotW;
+        const sampleFn = window.SpectrumStream && window.SpectrumStream.cursorSample;
+        const sample = sampleFn ? sampleFn(trace.values, trace.centerHz, trace.spanHz, frac) : null;
+        if (!sample) { this._hideCursor(); return; }
+        const x = this._cursorClientX - boxLeft;
+        if (this._cursorLine) { this._cursorLine.style.left = x + 'px'; }
+        const dbMin = typeof fft._dbMin === 'number' ? fft._dbMin : -120;
+        const dbMax = typeof fft._dbMax === 'number' ? fft._dbMax : 0;
+        const mt = fft._marginTop || 0;
+        const mb = fft._marginBottom || 0;
+        const plotH = plot.height - mt - mb;
+        if (this._cursorMark && plotH > 0 && dbMax > dbMin) {
+            const v = Math.max(0, Math.min(1, (sample.dbfs - dbMin) / (dbMax - dbMin)));
+            const y = (plotTop - boxTop) + mt + plotH * (1 - v);
+            this._cursorMark.style.left = x + 'px';
+            this._cursorMark.style.top = y + 'px';
+            this._cursorMark.hidden = false;
+        }
+        if (this._cursorTag) {
+            const unitEl = document.getElementById('manual-rx-marker-unit');
+            const unit = unitEl && unitEl.textContent ? unitEl.textContent : 'dBFS';
+            const level = sample.dbfs.toFixed(1).replace('-', '−');
+            this._cursorTag.textContent = (sample.freqHz / 1e6).toFixed(3) + ' МГц  ' + level + ' ' + unit;
+            const flip = x > box.width - 150;
+            this._cursorTag.style.left = x + 'px';
+            this._cursorTag.style.transform = flip ? 'translateX(calc(-100% - 8px))' : 'translateX(8px)';
+            let top = this._cursorClientY === null ? 8 : this._cursorClientY - boxTop - 22;
+            if (top < 4) { top = 4; }
+            if (top > box.height - 22) { top = box.height - 22; }
+            this._cursorTag.style.top = top + 'px';
+        }
+        root.hidden = false;
+    };
+
+    /**
+     * Перетаскивание по графику. Содержимое идёт за указателем: вправо — частота ниже.
+     * На всей полосе это перестройка приёмника. При увеличении окно остаётся внутри
+     * текущей полосы и только сдвигается.
+     */
+    ManualLayout.prototype._panSpec = function(dHz) {
+        if (!(this._streamSpanHz > 0) || typeof dHz !== 'number' || !isFinite(dHz) || dHz === 0) { return; }
+        if (this._zoom) {
+            this._setZoom(window.SpectrumStream.panView(this._zoom, this._streamSpanHz, dHz));
+            return;
+        }
+        this._scrubTune(dHz);
+    };
+
+    /**
+     * Перемотка приёмника на dHz от уже намеченной частоты. Регулятор сразу
+     * показывает цель, запрос уходит без ожидания SET.
+     * @param {number} dHz
+     */
+    ManualLayout.prototype._scrubTune = function(dHz) {
+        const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+        if (ac && !ac.canControl()) {
+            ac.setNotice('Перестраивать приёмник можно только в режиме «Контроль».');
+            return;
+        }
+        if (this._scrubHz === null && this._streamCenterHz === null) { return; }
+        const base = this._scrubHz !== null ? this._scrubHz : this._streamCenterHz;
+        const next = Math.round(base + dHz);
+        if (!(next > 0) || next === base) { return; }
+        this._scrubHz = next;
+        this._rxFreqMHz = next / 1e6;
+        if (this._freqDial) { this._freqDial.setHz(next); }
+        this._requestTune(this._rxFreqMHz);
     };
 
     /**
@@ -1862,42 +2259,46 @@
         // «Полоса» следует только за сменой в потоке, чтобы не сбить выбор до «Установить»
         const spanChanged = spanHz > 0 && spanHz !== this._streamSpanHz;
         const centerMHz = centerHz / 1e6;
-        const spanMHz = spanHz > 0 ? spanHz / 1e6 : null;
-        const views = [this._fft, this._antFft];
-        for (let i = 0; i < views.length; i++) {
-            if (!views[i]) { continue; }
-            views[i].freqCenterMHz = centerMHz;
-            if (spanMHz) { views[i].freqSpanMHz = spanMHz; }
-        }
-        if (this._wf) {
-            this._wf._freqCenterMHz = centerMHz;
-            if (spanMHz) { this._wf._freqSpanMHz = spanMHz; }
-            if (changed || spanChanged) {
-                if (first) {
-                    // Шкала нарисована по заглушке. Первый кадр водопад не чистит,
-                    // поэтому подписи частот перерисовываем отдельно.
-                    this._wf.refresh();
-                } else {
-                    this._wf.clear();
-                    if (this._active) { this._wf.start(); }
-                }
-            }
-        }
-        if ((changed || spanChanged) && !first && this._displaySmooth) {
-            this._displaySmooth.reset();
+        if (this._antFft) {
+            this._antFft.freqCenterMHz = centerMHz;
+            if (spanHz > 0) { this._antFft.freqSpanMHz = spanHz / 1e6; }
         }
         this._streamCenterHz = centerHz;
         if (spanChanged) {
             this._streamSpanHz = spanHz;
             if (this._rxFields) { selectByValue(this._rxFields.span, spanHz); }
         }
+        // Масштаб привязан к окну приёмника: после перестройки видна вся полоса
+        if ((changed || spanChanged) && !first && this._zoom) {
+            this._zoom = null;
+            this._showZoom();
+        }
+        this._applySpecView();
+        if (this._wf && (changed || spanChanged)) {
+            if (first) {
+                // Шкала нарисована по заглушке. Первый кадр водопад не чистит,
+                // поэтому подписи частот перерисовываем отдельно.
+                this._wf.refresh();
+            } else {
+                this._wf.clear();
+                if (this._active) { this._wf.start(); }
+            }
+        }
+        if ((changed || spanChanged) && !first && this._displaySmooth) {
+            this._displaySmooth.reset();
+        }
         if (this._chanOverlay && this._streamSpanHz) {
             this._chanOverlay.setBand(centerHz, this._streamSpanHz);
         }
+        if (this._txMarkers && this._streamSpanHz) {
+            this._txMarkers.setBand(centerHz, this._streamSpanHz);
+        }
         if (changed) { this._syncChannelOverlay(); }
+        if (this._scrubHz !== null && centerHz === this._scrubHz) { this._scrubHz = null; }
         const editing = this._freqDial && typeof this._freqDial.isEditing === 'function' &&
             this._freqDial.isEditing();
-        if (changed && this._tunePending === 0 && !editing) {
+        // Перемотка уже показала новую частоту: кадр со старым центром её не затирает.
+        if (changed && this._tunePending === 0 && !editing && this._scrubHz === null) {
             this._rxFreqMHz = centerMHz;
             if (this._freqDial) { this._freqDial.setHz(centerHz); }
         }
@@ -2089,18 +2490,70 @@
                 clickTargets: [this._fftCanvas, this._wfCanvas],
                 marginLeft: this._fft ? this._fft._marginLeft : 32,
                 marginRight: this._fft ? this._fft._marginRight : 4,
-                bandwidthOptions: function() { return self._bandwidthOptions(); },
                 onChange: function(offsetHz, bandwidthHz) { self._onChannelGesture(offsetHz, bandwidthHz); },
+                onPan: function(dHz) { self._panSpec(dHz); },
             });
         }
+        if (specWrap && typeof window.TxMarkers === 'function') {
+            this._txMarkers = new window.TxMarkers(specWrap, {
+                plotCanvas: this._fftCanvas,
+                marginLeft: this._fft ? this._fft._marginLeft : 32,
+                marginRight: this._fft ? this._fft._marginRight : 4,
+                onPick: function(m) { self._pickTxMarker(m); },
+                colorOf: function(noradId) {
+                    return self._sm && typeof self._sm.getMarkerColor === 'function'
+                        ? self._sm.getMarkerColor(noradId) : null;
+                },
+            });
+        }
+        this._initSpecZoom(specWrap);
+        this._initSpecCursor(specWrap);
         this._initChannelMark();
         if (specWrap) {
             this._observeRaw(specWrap, function() {
                 if (self._fft) { self._fft._resize(); }
                 if (self._wf) { self._wf.refresh(); }
                 if (self._chanOverlay) { self._chanOverlay.render(); }
+                if (self._txMarkers) { self._txMarkers.render(); }
             });
         }
+    };
+
+    /** Риски передатчиков из статуса демодулятора: подписи по ленте и группе. */
+    ManualLayout.prototype._showTxMarkers = function(st) {
+        if (!this._txMarkers || !window.TxMarkers) { return; }
+        const group = this._sm && typeof this._sm.getSatelliteGroup === 'function' ? this._sm.getSatelliteGroup() : null;
+        this._txMarkers.setMarkers(window.TxMarkers.markersWithLabels(st.tx_markers, this._txList, group));
+    };
+
+    /**
+     * Щелчок по риске: канал на номинал передатчика, Доплер «Авто» за его КА —
+     * сервер сам сдвинет канал туда, где риска. Приёмник не перестраивается.
+     * @param {{noradId: number, nominalHz: number, label: string, tx: ?Object}} m
+     */
+    ManualLayout.prototype._pickTxMarker = function(m) {
+        const f = this._rxFields;
+        if (!f || !m || !this._streamCenterHz) { return; }
+        const bw = Number(selectedValue(f.bandwidth)) || 0;
+        let offset = Math.round(m.nominalHz - this._streamCenterHz);
+        if (window.ChannelOverlay && typeof window.ChannelOverlay.clampOffset === 'function' && this._streamSpanHz) {
+            offset = window.ChannelOverlay.clampOffset(offset, bw, this._streamSpanHz);
+        }
+        if (f.offset) { f.offset.value = String(offset); }
+        selectByValue(f.doppler, 'auto');
+        const freqMHz = m.nominalHz / 1e6;
+        if (m.tx) {
+            if (this._demodPanel) { this._demodPanel.setChannel(m.tx); }
+            this._setRxPipeline(m.tx.modulation);
+            this._applyBandwidthLimit();
+        }
+        if (this._tmiTable) { this._tmiTable.setChannel(m.label, freqMHz); }
+        this._chanLabel = m.label;
+        this._chanFreqMHz = freqMHz;
+        this._chanNorad = m.noradId;
+        this._syncEyeFromPipeline();
+        this._syncChannelOverlay();
+        this._applyDemodSettings();
     };
 
     /** Переключатель в заголовке «Демодулятор»: выключает приём и линии канала, спектр остаётся. */
@@ -2158,16 +2611,47 @@
             });
     };
 
-    /** Ширины канала, которые предлагает панель, Гц. */
-    ManualLayout.prototype._bandwidthOptions = function() {
+    /**
+     * Самая широкая слышимая полоса у профилей, которые переносят полосу в звук напрямую
+     * (как sdr.DemodMaxBandwidthHz на сервере): у SSB тон отсчитывается от края полосы,
+     * у CW — 700 Гц от середины. Шире сервер настройку не примет.
+     */
+    const WIDE_FM_BW = 200000;
+    const PROFILE_MAX_BW = { usb: 4000, lsb: 4000, cw: 1000, wfm: WIDE_FM_BW };
+    const WIDTH_NOT_HEARD = 'У этого профиля шире не слышно';
+    const WIDTH_BROADCAST = 'У этого профиля полоса 200 кГц';
+
+    /** Предел ширины выбранного профиля, Гц; 0 — без предела. */
+    ManualLayout.prototype._profileMaxWidth = function() {
+        return PROFILE_MAX_BW[selectedValue(this._rxPipelineSelect)] || 0;
+    };
+
+    /** Ширины больше слышимой у профиля серые; выбранная такая сужается до самой широкой из слышимых. */
+    ManualLayout.prototype._applyBandwidthLimit = function() {
         const sel = this._rxFields ? this._rxFields.bandwidth : null;
-        if (!sel || !sel.options) { return []; }
-        const out = [];
+        if (!sel || !sel.options) { return; }
+        const max = this._profileMaxWidth();
+        const wideFM = selectedValue(this._rxPipelineSelect) === 'wfm';
+        let hasWide = false;
         for (let i = 0; i < sel.options.length; i++) {
-            const v = Number(sel.options[i].value);
-            if (v > 0) { out.push(v); }
+            if (Number(sel.options[i].value) === WIDE_FM_BW) { hasWide = true; }
         }
-        return out;
+        let widest = null;
+        for (let i = 0; i < sel.options.length; i++) {
+            const opt = sel.options[i];
+            const hz = Number(opt.value);
+            const tooWide = max > 0 && hz > max;
+            const broadcastOnly = hz === WIDE_FM_BW && !wideFM;
+            const notBroadcast = wideFM && hasWide && hz !== WIDE_FM_BW;
+            opt.disabled = tooWide || broadcastOnly || notBroadcast;
+            opt.title = '';
+            if (opt.disabled) { opt.title = notBroadcast ? WIDTH_BROADCAST : WIDTH_NOT_HEARD; }
+            if (!opt.disabled && (!widest || hz > Number(widest.value))) { widest = opt; }
+        }
+        if (widest && sel.options[sel.selectedIndex] && sel.options[sel.selectedIndex].disabled) {
+            selectByValue(sel, widest.value);
+        }
+        this._syncChannelOverlay();
     };
 
     /** Канал на спектре — по полям «Сдвиг канала» и «Полоса канала». */
@@ -2176,7 +2660,10 @@
         if (!f) { return; }
         const offset = Number(f.offset ? f.offset.value : 0);
         const bw = Number(selectedValue(f.bandwidth));
-        if (this._chanOverlay) { this._chanOverlay.setChannel(offset, bw); }
+        if (this._chanOverlay) {
+            this._chanOverlay.setMaxWidth(this._profileMaxWidth());
+            this._chanOverlay.setChannel(offset, bw);
+        }
     };
 
     /** Жест на спектре: поля панели следуют за каналом, настройки уходят сразу. */
@@ -2236,6 +2723,7 @@
         const canvas = document.getElementById('manual-pass-timeline');
         if (!canvas) { return; }
         this._passTimeline = new window.PassTimelineView(canvas);
+        canvas.title = 'Колесо мыши: масштаб по времени (лево у NOW, горизонт вправо)';
         const self = this;
         if (typeof ResizeObserver !== 'undefined') {
             const ro = new ResizeObserver(function() {
@@ -2294,6 +2782,8 @@
                 self._followServerChannel(d.data);
                 if (self._demodPanel) { self._demodPanel.applyStatus(d.data, self._levelOffset); }
                 self._showChannelStatus(d.data);
+                self._showDoppler(d.data);
+                self._showTxMarkers(d.data);
             }
         });
     };
@@ -2341,6 +2831,7 @@
 
         if (tx && tx.modulation) {
             this._setRxPipeline(tx.modulation);
+            this._applyBandwidthLimit();
         }
 
         const label = tx ? (tx.label || 'Unknown') : 'Unknown';
@@ -2349,9 +2840,14 @@
         }
         this._chanLabel = label;
         this._chanFreqMHz = freqMHz;
+        const prevNorad = this._chanNorad;
         this._chanNorad = tx && tx.noradId ? tx.noradId : null;
 
         this._syncEyeFromPipeline();
+        // Канал на «Авто» идёт за Доплером нового спутника сразу, без «Установить»
+        if (this._chanNorad && this._chanNorad !== prevNorad && this._dopplerNorad()) {
+            this._applyDemodSettings();
+        }
 
         // Настройка на канал переводит SDR в приём и открывает «Спектр» (§4.6)
         this._setView('spectrum');
@@ -2381,13 +2877,56 @@
         }));
         this._unsubscribers.push(this._sm.subscribe(SE.SELECTED_CHANGE, function() {
             self._updateIndicators();
+            if (self._passTimeline && typeof self._passTimeline.setSelectedId === 'function') {
+                self._passTimeline.setSelectedId(self._sm.getSelectedSatelliteId());
+            }
         }));
         if (SE.SATELLITE_GROUP_UPDATE) {
             this._unsubscribers.push(this._sm.subscribe(SE.SATELLITE_GROUP_UPDATE, function() {
                 self._buildTransmittersFromGroup();
+                self._syncPassTimeline();
             }));
         }
         this._buildTransmittersFromGroup();
+        this._syncPassTimeline();
+    };
+
+    /** Горки пролётов и окно времени — по группе Плана сеансов, подсветка — сопровождаемый КА. */
+    ManualLayout.prototype._syncPassTimeline = function() {
+        if (!this._passTimeline || !this._sm) { return; }
+        const PTV = window.PassTimelineView;
+        const sm = this._sm;
+        const group = typeof sm.getSatelliteGroup === 'function' ? sm.getSatelliteGroup() : null;
+        if (PTV && typeof PTV.passesFromGroup === 'function') {
+            const r = PTV.passesFromGroup(group);
+            this._passTimeline.setPasses(r.passes, r.window);
+        }
+        // Палитра всех КА ленты; цветная горка — только пока пролёт в окне сеанса (считается при draw)
+        const colors = {};
+        if (group && typeof sm.getMarkerColor === 'function') {
+            const add = function(list) {
+                if (!Array.isArray(list)) { return; }
+                for (let i = 0; i < list.length; i++) {
+                    const nid = list[i].norad_id;
+                    const c = sm.getMarkerColor(nid);
+                    if (c) { colors[nid] = c; }
+                }
+            };
+            add(group.satellites);
+            add(group.timeline);
+        }
+        if (typeof this._passTimeline.setSatColors === 'function') {
+            this._passTimeline.setSatColors(colors);
+        } else if (typeof this._passTimeline.setSessionColors === 'function') {
+            this._passTimeline.setSessionColors(colors);
+        }
+        if (typeof sm.getTrackingSatelliteId === 'function') {
+            this._passTimeline.setTrackingId(sm.getTrackingSatelliteId());
+        }
+        if (typeof sm.getSelectedSatelliteId === 'function' &&
+            typeof this._passTimeline.setSelectedId === 'function') {
+            this._passTimeline.setSelectedId(sm.getSelectedSatelliteId());
+        }
     };
 
     // ── Az/El: обновление по приоритету tracking → selected ───────────────
@@ -2577,6 +3116,7 @@
             self._applyRadioPath();
             self._refreshActiveTab();
             if (self._stream) { self._startStream(); }
+            if (self._audio && self._audio.isPlaying()) { self._setListening(true); }
         });
         this._unsubscribers.push(this._offRadioPath);
     };
@@ -2595,6 +3135,7 @@
         this._active = false;
         this._stopSpectrumTimer();
         this._stopStream();
+        this._setListening(false);
         if (this._panorama) { this._panorama.deactivate(); }
         if (this._tmiTable) { this._tmiTable.deactivate(); }
         if (this._eyeView) { this._eyeView.deactivate(); }
@@ -2632,6 +3173,9 @@
         if (this._passProfile) { this._passProfile.refreshAfterThemeChange(); }
         if (this._passTimeline) { this._passTimeline.refreshAfterThemeChange(); }
         if (this._eyeView) { this._eyeView.refreshAfterThemeChange(); }
+        // Палитра трасс уже переназначена: обновить LED ленты и риски на «Спектре»
+        this._buildTransmittersFromGroup();
+        if (this._txMarkers) { this._txMarkers.render(); }
         this.refresh();
     };
 
@@ -2659,8 +3203,9 @@
         }
 
         // Ленте пролётов хватает минутного разрешения — перерисовываем реже
+        // ~1 с: линия NOW и перекраска горок при входе/выходе из окна сеанса
         this._tlTickCount = (this._tlTickCount || 0) + 1;
-        if (this._passTimeline && this._tlTickCount >= 60) {
+        if (this._passTimeline && this._tlTickCount >= 12) {
             this._tlTickCount = 0;
             this._passTimeline.draw();
         }
@@ -2726,9 +3271,14 @@
         this._stopStepRepeat();
         this._stopSpectrumTimer();
         this._stopStream();
+        this._setListening(false);
         if (this._chanOverlay) {
             this._chanOverlay.destroy();
             this._chanOverlay = null;
+        }
+        if (this._txMarkers) {
+            this._txMarkers.destroy();
+            this._txMarkers = null;
         }
         if (this._accessPanel) {
             this._accessPanel.destroy();
@@ -2774,6 +3324,9 @@
         this._onPanoramaTune = null;
         this._onPanoramaFollow = null;
         this._passProfile = null;
+        if (this._passTimeline && typeof this._passTimeline.destroy === 'function') {
+            this._passTimeline.destroy();
+        }
         this._passTimeline = null;
         if (this._tmiTable) {
             this._tmiTable.destroy();
@@ -2799,6 +3352,7 @@
     // ── Экспорт ──────────────────────────────────────────────────────────
 
     ManualLayout.makeRecordingName = makeRecordingName;
+    ManualLayout.transmittersFromGroup = transmittersFromGroup;
     ManualLayout.filterNumericText = filterNumericText;
     ManualLayout.stepNumericText = stepNumericText;
 

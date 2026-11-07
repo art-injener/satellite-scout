@@ -5,13 +5,9 @@ import (
 	"github.com/art-injener/satellite-scout/internal/sstv"
 )
 
-const (
-	// sstvAudioRate — частота звука для декодера SSTV: тона до 2,3 кГц с запасом.
-	sstvAudioRate = 12_000
-	// sstvDeviationHz — девиация, в которую ложится звук ±1; уровень звука декодеру
-	// не важен, он мерит частоту.
-	sstvDeviationHz = 5000
-)
+// sstvDeviationHz — девиация, в которую ложится звук ±1; уровень звука декодеру
+// не важен, он мерит частоту.
+const sstvDeviationHz = 5000
 
 // sstvRx — приём SSTV: звук из ЧМ канала и декодер картинок.
 type sstvRx struct {
@@ -24,9 +20,9 @@ type sstvRx struct {
 func newSSTVRx(rate float64) pictureRx {
 	return &sstvRx{
 		fm: modem.NewFMAudioDemod(modem.FMAudioConfig{
-			SampleRate: rate, DeviationHz: sstvDeviationHz, AudioRate: sstvAudioRate,
+			SampleRate: rate, DeviationHz: sstvDeviationHz, AudioRate: AudioRate,
 		}),
-		dec: sstv.NewDecoder(sstvAudioRate),
+		dec: sstv.NewDecoder(AudioRate),
 	}
 }
 
@@ -43,3 +39,6 @@ func (r *sstvRx) Push(iq []complex64) []sstv.Event {
 
 // Done — сколько картинок принято до конца.
 func (r *sstvRx) Done() int { return r.done }
+
+// Audio — звук последнего Push: те же тона, что слышит декодер.
+func (r *sstvRx) Audio() []float32 { return r.audio }

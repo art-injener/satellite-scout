@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -179,6 +180,31 @@ func TestUntrackSatellite(t *testing.T) {
 
 	if svc.TrackedCount() != 0 {
 		t.Errorf("expected 0 tracked satellites after untrack, got %d", svc.TrackedCount())
+	}
+}
+
+// The demodulator channel follows the Doppler of the satellite from the same orbit as the map.
+func TestRangeRateKmps_MatchesPosition(t *testing.T) {
+	svc, cancel := setupTrackingService(t)
+	defer cancel()
+	if err := svc.TrackSatellite(issNoradID); err != nil {
+		t.Fatalf("failed to track ISS: %v", err)
+	}
+	now := time.Date(2024, 1, 1, 12, 0, 0, 0, time.UTC)
+	pos, err := svc.computePosition(svc.tracked[issNoradID], now)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	rr, ok := svc.RangeRateKmps(issNoradID, now)
+	if !ok {
+		t.Fatal("no range rate for a tracked satellite")
+	}
+	if math.Abs(rr*1000-pos.RangeRate) > 0.1 {
+		t.Errorf("range rate %.4f km/s, want %.1f m/s as in the position", rr, pos.RangeRate)
+	}
+	if _, ok := svc.RangeRateKmps(99999, now); ok {
+		t.Error("range rate for a satellite that is not tracked")
 	}
 }
 
@@ -699,4 +725,94 @@ func (l *lockedRecorder) body() string {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	return l.rec.Body.String()
+}
+
+// stubPassProvider returns a fixed pass list; the list can be swapped between updateGroup calls.
+type stubPassProvider struct {
+	mu     sync.Mutex
+	passes []*tracker.Pass
+}
+
+func (p *stubPassProvider) GetAllGroupsPasses(int, float64) ([]*tracker.Pass, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.passes, nil
+}
+
+func (p *stubPassProvider) set(passes ...*tracker.Pass) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.passes = passes
+}
+
+func stubPass(norad int, name string, now time.Time, aos, los time.Duration, maxEl float64) *tracker.Pass {
+	return &tracker.Pass{
+		NoradID: norad, SatName: name,
+		AOS: now.Add(aos).UnixMilli(), LOS: now.Add(los).UnixMilli(),
+		TCA: now.Add((aos + los) / 2).UnixMilli(), TCAEl: maxEl,
+		Duration: (los - aos).Seconds(),
+	}
+}
+
+// waitTimeline polls the hub cache until the timeline has want entries.
+func waitTimeline(t *testing.T, hub *handlers.SSEHub, want int) satelliteGroupUpdate {
+	t.Helper()
+	deadline := time.Now().Add(2 * time.Second)
+	var ev satelliteGroupUpdate
+	for time.Now().Before(deadline) {
+		ev = cachedGroupUpdate(t, hub)
+		if len(ev.Timeline) == want {
+			return ev
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("timeline has %d passes, want %d: %+v", len(ev.Timeline), want, ev.Timeline)
+	return ev
+}
+
+func TestUpdateGroup_TimelineListsPassesForTheNextHour(t *testing.T) {
+	hub := handlers.NewSSEHub()
+	go hub.Run(t.Context())
+
+	svc := NewSatelliteTrackingService(hub, setupTLEStore(t), tracker.NewObserver(47.315813, 39.788243, 0.070))
+	now := time.Now().UTC()
+	provider := &stubPassProvider{}
+	provider.set(
+		stubPass(issNoradID, "ISS", now, -2*time.Minute, 8*time.Minute, 40),
+		stubPass(99901, "LATER", now, 30*time.Minute, 40*time.Minute, 12.5),
+	)
+	svc.SetPassProvider(provider)
+
+	svc.updateGroup()
+
+	ev := waitTimeline(t, hub, 2)
+	if len(ev.Satellites) != 1 || ev.Satellites[0].NoradID != issNoradID {
+		t.Errorf("session plan must keep the 1-minute window, got %+v", ev.Satellites)
+	}
+	later := ev.Timeline[1]
+	if later.NoradID != 99901 || later.SatName != "LATER" || later.TCAEl != 12.5 || later.TCA == 0 {
+		t.Errorf("timeline pass = %+v, want LATER with TCA and max elevation", later)
+	}
+}
+
+func TestUpdateGroup_RebroadcastsWhenOnlyTheHourAheadChanges(t *testing.T) {
+	hub := handlers.NewSSEHub()
+	go hub.Run(t.Context())
+
+	svc := NewSatelliteTrackingService(hub, setupTLEStore(t), tracker.NewObserver(47.315813, 39.788243, 0.070))
+	now := time.Now().UTC()
+	iss := stubPass(issNoradID, "ISS", now, -2*time.Minute, 8*time.Minute, 40)
+	provider := &stubPassProvider{}
+	provider.set(iss)
+	svc.SetPassProvider(provider)
+	svc.updateGroup()
+	waitTimeline(t, hub, 1)
+
+	provider.set(iss, stubPass(99902, "NEW", now, 50*time.Minute, 58*time.Minute, 20))
+	svc.updateGroup()
+
+	ev := waitTimeline(t, hub, 2)
+	if ev.Timeline[1].NoradID != 99902 {
+		t.Errorf("new pass in the hour ahead not delivered: %+v", ev.Timeline)
+	}
 }

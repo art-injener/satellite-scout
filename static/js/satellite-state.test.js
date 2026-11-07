@@ -1272,6 +1272,43 @@ test('setSatelliteGroup keeps stable color for existing satellite', () => {
     assert.strictEqual(m.getMarkerColor(60001), colorA);
 });
 
+test('setSatelliteGroup assigns colors to hour-ahead timeline satellites too', () => {
+    const m = new SatelliteStateManager();
+    m.setSatelliteGroup({
+        satellites: [{ norad_id: 1, sat_name: 'NOW' }],
+        primary_id: 1,
+        timeline: [
+            { norad_id: 1, sat_name: 'NOW', aos: 1, los: 2, tca_el: 10 },
+            { norad_id: 99, sat_name: 'LATER', aos: 3, los: 4, tca_el: 20 },
+        ],
+    });
+    assert.ok(m.getMarkerColor(1), 'session-plan sat has a color');
+    assert.ok(m.getMarkerColor(99), 'timeline-only sat has a color');
+    assert.notStrictEqual(m.getMarkerColor(1), m.getMarkerColor(99));
+});
+
+test('setSatelliteGroup keeps color while a sat is only on the timeline', () => {
+    const m = new SatelliteStateManager();
+    m.setSatelliteGroup({
+        satellites: [{ norad_id: 7, sat_name: 'A' }, { norad_id: 8, sat_name: 'B' }],
+        primary_id: 7,
+        timeline: [
+            { norad_id: 7, aos: 1, los: 2 },
+            { norad_id: 8, aos: 3, los: 4 },
+        ],
+    });
+    const colorB = m.getMarkerColor(8);
+    m.setSatelliteGroup({
+        satellites: [{ norad_id: 7, sat_name: 'A' }],
+        primary_id: 7,
+        timeline: [
+            { norad_id: 7, aos: 1, los: 2 },
+            { norad_id: 8, aos: 3, los: 4 },
+        ],
+    });
+    assert.strictEqual(m.getMarkerColor(8), colorB, 'still in timeline: color stays');
+});
+
 // ── Итоги ─────────────────────────────────────────────────
 
 console.log(`\n${'═'.repeat(50)}`);

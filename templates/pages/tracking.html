@@ -212,7 +212,7 @@
     <!-- Таймлайн пролётов: угол места по времени, общий для всех вкладок -->
     <section class="ml-panel ml-timeline">
         <div class="ml-panel__body ml-timeline__body">
-            <canvas id="manual-pass-timeline" class="ml-canvas" role="img" aria-label="График пролётов: угол места по времени на ближайшие 4 часа"></canvas>
+            <canvas id="manual-pass-timeline" class="ml-canvas" role="img" aria-label="График пролётов группы: угол места по времени"></canvas>
         </div>
     </section>
 
@@ -418,6 +418,8 @@
                     <canvas id="manual-fft" class="ml-canvas" role="img" aria-label="БПФ-спектр узкой полосы активного канала"></canvas>
                     <!-- Накопление спектра считает сервер; смена режима и «Сброс» переоткрывают поток -->
                     <div class="ml-spec-mode" role="group" aria-label="Накопление спектра">
+                        <span class="ml-spec-mode__rbw" id="manual-spec-rbw"
+                              title="Разрешение спектра: чистый тон на графике не уже этой полосы. Масштаб колесом его не меняет, сигнал может быть уже пика"></span>
                         <div class="ml-spec-mode__seg" id="manual-spec-mode">
                             <button type="button" class="ml-spec-mode__btn" data-spec-mode="current" aria-pressed="false"
                                     title="Мгновенный спектр: последний БПФ цикла">Мгн.</button>
@@ -435,6 +437,8 @@
                         </select>
                         <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-reset"
                                 title="Начать накопление заново">Сброс</button>
+                        <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-zoom-reset" disabled
+                                title="Вся полоса приёмника. Масштаб — колесом над спектром. На всей полосе перетаскивание меняет частоту, при увеличении сдвигает окно">1:1</button>
                     </div>
                 </div>
                 <div class="ml-spectrum__scale-wrap">
@@ -442,6 +446,11 @@
                 </div>
                 <div class="ml-spectrum__wf">
                     <canvas id="manual-wf" class="ml-canvas" role="img" aria-label="Спектрограмма (водопад) активного канала"></canvas>
+                </div>
+                <div class="ml-cursor" id="manual-spec-cursor" hidden>
+                    <div class="ml-cursor__line" id="manual-spec-cursor-line"></div>
+                    <div class="ml-cursor__mark" id="manual-spec-cursor-mark" hidden></div>
+                    <div class="ml-cursor__tag" id="manual-spec-cursor-tag"></div>
                 </div>
             </section>
             <div class="ml-demod__body" id="manual-demod-grid">
@@ -615,7 +624,10 @@
                         <option value="bpsk9600">BPSK 9k6</option>
                         <option value="qpsk_ccsds">QPSK (CCSDS)</option>
                         <option value="cw">CW</option>
-                        <option value="fm">FM</option>
+                        <option value="fm">FM (голос)</option>
+                        <option value="wfm">FM (эфир)</option>
+                        <option value="usb">USB (SSB)</option>
+                        <option value="lsb">LSB (SSB)</option>
                         <option value="ook">OOK</option>
                         <option value="sstv">SSTV</option>
                     </select>
@@ -635,10 +647,12 @@
                 <label class="ml-rx-panel__field">
                     <span class="ml-rx-panel__label">Полоса канала</span>
                     <select class="ml-rx-panel__sel" id="manual-rx-filter-bw">
+                        <option value="500">500 Гц</option>
                         <option value="2800">2.8 кГц</option>
                         <option value="6000">6 кГц</option>
                         <option value="15000" selected>15 кГц</option>
                         <option value="18000">18 кГц</option>
+                        <option value="200000">200 кГц</option>
                     </select>
                 </label>
                 <label class="ml-rx-panel__field">
@@ -653,13 +667,26 @@
                         <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit">dBFS</span>
                     </span>
                 </label>
-                <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label">Доплер</span>
-                    <select class="ml-rx-panel__sel" id="manual-rx-doppler-mode">
-                        <option>Авто</option>
-                        <option>Фикс.</option>
-                    </select>
-                </label>
+                <div class="ml-rx-panel__field">
+                    <label class="ml-rx-panel__label" for="manual-rx-doppler-mode"
+                           title="Авто — канал идёт за сдвигом Доплера настроенного спутника по его орбите">Доплер</label>
+                    <div class="ml-rx-panel__controls">
+                        <select class="ml-rx-panel__sel" id="manual-rx-doppler-mode">
+                            <option value="off">Фикс.</option>
+                            <option value="auto" selected>Авто</option>
+                        </select>
+                        <span class="ml-rx-panel__unit" id="manual-rx-doppler-now" title="Текущий сдвиг Доплера канала"></span>
+                    </div>
+                </div>
+                <div class="ml-rx-panel__field">
+                    <label class="ml-rx-panel__label" for="manual-rx-volume"
+                           title="Звук канала: голос FM и SSB, тоны SSTV. Включается сразу, без «Установить»">Звук</label>
+                    <div class="ml-rx-panel__controls">
+                        <input class="ml-rx-panel__range" id="manual-rx-volume" type="range" min="0" max="100" value="80"
+                               aria-label="Громкость">
+                        <button type="button" class="ml-rx-panel__pill" id="manual-rx-audio" aria-pressed="false">Слушать</button>
+                    </div>
+                </div>
                 <button class="ml-rx-panel__btn-apply" type="button" id="manual-demod-apply">Установить</button>
             </div>
 
@@ -694,8 +721,8 @@
             </div>
 
             <!-- Запись IQ: папка правится, пока не пишем; имя файла (канал + время
-                 UTC, SigMF) появляется в поле при старте. Прослушивание — отдельной
-                 панелью позже. -->
+                 UTC, SigMF) появляется в поле при старте. Прослушивание канала —
+                 в секции «Демодулятор». -->
             <div class="ml-ctl__section">
                 <span class="ml-ctl__section-title">Данные</span>
                 <label class="ml-rx-panel__field">

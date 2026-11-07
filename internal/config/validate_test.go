@@ -360,6 +360,54 @@ func TestValidate_CalibrationRange(t *testing.T) {
 	}
 }
 
+func TestValidate_FreqCorrectionRange(t *testing.T) {
+	const field = "station.radio_paths[0].receiver.freq_correction_ppm"
+	cases := []struct {
+		ppm     int
+		wantErr bool
+	}{
+		{ppm: 0, wantErr: false},
+		{ppm: -37, wantErr: false},
+		{ppm: FreqCorrectionMaxPPM, wantErr: false},
+		{ppm: -FreqCorrectionMaxPPM, wantErr: false},
+		{ppm: FreqCorrectionMaxPPM + 1, wantErr: true},
+		{ppm: -FreqCorrectionMaxPPM - 1, wantErr: true},
+	}
+	for _, c := range cases {
+		rp := sampleRadioPath(1)
+		rp.Receiver.FreqCorrectionPPM = c.ppm
+		cfg := DefaultConfig()
+		cfg.Station.RadioPaths = []RadioPath{rp}
+		err := cfg.Validate()
+		if !c.wantErr {
+			if err != nil {
+				t.Errorf("ppm %d rejected: %v", c.ppm, err)
+			}
+			continue
+		}
+		if verrs := mustValidationErrors(t, err); !hasField(verrs, field) {
+			t.Errorf("ppm %d: expected error on %s, got %v", c.ppm, field, verrs)
+		}
+	}
+}
+
+func TestReceiverConfig_FreqCorrectionJSON(t *testing.T) {
+	var rc ReceiverConfig
+	if err := json.Unmarshal([]byte(`{"driver":"rtlsdr","freq_correction_ppm":-12}`), &rc); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if rc.FreqCorrectionPPM != -12 {
+		t.Errorf("freq_correction_ppm=%d, want -12", rc.FreqCorrectionPPM)
+	}
+	out, err := json.Marshal(ReceiverConfig{Driver: "rtlsdr"})
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if strings.Contains(string(out), "freq_correction_ppm") {
+		t.Errorf("zero correction must not be written: %s", out)
+	}
+}
+
 func TestReceiverConfig_CalibrationJSON(t *testing.T) {
 	var rc ReceiverConfig
 	if err := json.Unmarshal([]byte(`{"driver":"rtlsdr","calibration_db":-23.5}`), &rc); err != nil {

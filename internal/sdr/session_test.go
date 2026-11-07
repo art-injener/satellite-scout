@@ -508,6 +508,32 @@ func TestHub_SetSampleRateSameRateKeepsStream(t *testing.T) {
 	}
 }
 
+// edgeCropStub is a receiver whose window edges are unusable, like an RTL-SDR.
+type edgeCropStub struct{ streamStub }
+
+func (s *edgeCropStub) Capabilities() Capabilities {
+	caps := rtlLikeCaps()
+	caps.UsableFraction = 0.8
+	return caps
+}
+
+func TestHub_SetChannelLimitedToUsableBand(t *testing.T) {
+	hub := NewReceiverHub()
+	hub.Register("p", PathConfig{}, func() (Receiver, error) { return &edgeCropStub{}, nil })
+	if band, err := hub.UsableBand("p"); err != nil || band != 1_638_400 {
+		t.Fatalf("usable band %d (%v), want 1638400 of 2048000", band, err)
+	}
+	c := DefaultChannelSettings()
+	c.OffsetHz = 900_000 // inside the 2.048 MHz window, beyond the usable ±819.2 kHz
+	if err := hub.SetChannel("p", c); !errors.Is(err, ErrInvalidChannel) {
+		t.Errorf("offset 900 kHz: err=%v, want ErrInvalidChannel", err)
+	}
+	c.OffsetHz = 800_000
+	if err := hub.SetChannel("p", c); err != nil {
+		t.Errorf("offset 800 kHz: err=%v, want accepted", err)
+	}
+}
+
 func TestHub_SetChannelValidatedBySelectedRate(t *testing.T) {
 	hub, _ := hubWithStub(PathConfig{})
 	if err := hub.SetSampleRate("p", 256_000); err != nil {

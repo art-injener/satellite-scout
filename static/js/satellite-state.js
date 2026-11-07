@@ -932,9 +932,15 @@ class SatelliteStateManager {
      */
     _syncGroupTracks(data) {
         if (!data || !Array.isArray(data.satellites)) { return; }
+        // Цвета и для пролётов ленты на час: иначе далёкий КА без цвета на горках и рисках
         const groupIds = new Set();
         for (const sat of data.satellites) {
             groupIds.add(sat.norad_id);
+        }
+        if (Array.isArray(data.timeline)) {
+            for (let i = 0; i < data.timeline.length; i++) {
+                groupIds.add(data.timeline[i].norad_id);
+            }
         }
 
         // Удалить ушедших из colorMap, visibleTrackIds и hiddenInShowAll.
@@ -950,8 +956,7 @@ class SatelliteStateManager {
 
         // Назначить цвета новым КА: greedy по дистанции от уже занятых.
         const palette = getTrackColorPalette();
-        for (const sat of data.satellites) {
-            const nid = sat.norad_id;
+        for (const nid of groupIds) {
             if (!this._colorMap.has(nid)) {
                 const color = pickTrackColorFromPalette(this._colorMap.values(), palette);
                 this._colorMap.set(nid, color);

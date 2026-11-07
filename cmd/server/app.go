@@ -54,6 +54,7 @@ type app struct {
 	sdrService  *sdr.Service     // обнаружение и проверка SDR-приёмников
 	receiverHub *sdr.ReceiverHub // приёмники по радиотрактам из конфига
 	products    *products.Store  // картинки, принятые демодулятором; nil — каталог недоступен
+	audio       *demod.AudioHub  // звук демодулятора для потока /audio
 
 	satnogs        *satnogs.Service           // интеграция с SatNOGS
 	satnogsAdapter *satnogsTransmitterAdapter // адаптер SatNOGS → services
@@ -162,15 +163,19 @@ func NewApp(configStore *config.Store) *app {
 				}
 				return imitator.New(opts), nil
 			case "rtlsdr":
-				return rtlsdr.New(rtlsdr.Options{Serial: rc.Serial, DevicePath: rc.DevicePath}), nil
+				return rtlsdr.New(rtlsdr.Options{
+					Serial: rc.Serial, DevicePath: rc.DevicePath, PPM: rc.FreqCorrectionPPM,
+				}), nil
 			default:
 				return nil, fmt.Errorf("%w: %q", sdr.ErrDriverNotImplemented, rc.Driver)
 			}
 		})
 	}
 	// Демодулятор принимает телеметрию попутно со зрителями потока тракта и сам поток не держит:
-	// приём идёт, пока открыт «Спектр». Картинки SSTV складываются в productsDir.
-	demodService := demod.NewService(receiverHub, sseHub.Broadcast)
+	// приём идёт, пока открыт «Спектр» или звук. Картинки SSTV складываются в productsDir.
+	audioHub := demod.NewAudioHub()
+	demodService := demod.NewService(receiverHub, sseHub.Broadcast).WithAudio(audioHub).WithDoppler(trackingService).
+		WithTransmitters(demodTransmitters{tracking: trackingService})
 	productStore, err := products.NewStore(productsDir)
 	if err != nil {
 		slog.Error("products disabled", slogKeyError, err)
@@ -193,6 +198,7 @@ func NewApp(configStore *config.Store) *app {
 		sdrService:  sdr.NewService().WithProbe("rtlsdr", rtlsdr.Probe),
 		receiverHub: receiverHub,
 		products:    productStore,
+		audio:       audioHub,
 	}
 }
 
@@ -375,6 +381,7 @@ func (a *app) routeDeps() *routeDeps {
 		SDR:         a.sdrService,
 		ReceiverHub: a.receiverHub,
 		Products:    a.products,
+		Audio:       a.audio,
 		Exclude:     a.exclude,
 		PassCache:   a.pass,
 		Group:       a.tracking,

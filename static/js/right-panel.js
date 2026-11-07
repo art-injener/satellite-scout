@@ -73,6 +73,8 @@
         this._serverSkewMs = 0;
         /** Временная подсветка связки с auto-link (hover). */
         this._linkHoverNorad = null;
+        /** Выбранный в спиннере передатчик: noradId → uuid (или индекс, если uuid пуст). */
+        this._txPick = Object.create(null);
 
         this._trackBtn = document.getElementById('rp-track');
         this._resetBtn = document.getElementById('rp-reset');
@@ -264,9 +266,7 @@
         }
         this._syncThTrackEye();
         this._fitTxModFonts();
-        // Выпадашку ставим только после проверки реального списка SatNOGS
-        // (SSE tx_count часто завышен — ложные ▾ при одном TX).
-        this._syncTxDropdowns();
+        this._bindTxMoreButtons();
     };
 
     /**
@@ -309,162 +309,150 @@
     };
 
     /**
-     * Ячейка частоты/модуляции primary-передатчика.
-     * Выпадашку не рисуем здесь — см. _syncTxDropdowns (по факту из API).
+     * Список downlink КА для ячейки: из transmitters[] группы (как на спектре),
+     * иначе один primary из freq_mhz / modulation.
+     * @param {Object} sat
+     * @returns {Array<{uuid:string,freqMHz:string,modulation:string,description:string}>}
+     */
+    RightPanelTable.prototype._txListFromSat = function(sat) {
+        const out = [];
+        if (!sat) { return out; }
+        const txs = Array.isArray(sat.transmitters) ? sat.transmitters : [];
+        for (let i = 0; i < txs.length; i++) {
+            const tx = txs[i];
+            if (!(tx.freq_hz > 0)) { continue; }
+            out.push({
+                uuid: tx.uuid || '',
+                freqMHz: this._fmtFreqMHz(tx.freq_hz / 1e6),
+                modulation: (tx.modulation || tx.mode || '').trim() || '\u2014',
+                description: tx.description || '',
+            });
+        }
+        if (out.length) { return out; }
+        const freq = this._fmtFreqMHz(sat.freq_mhz);
+        const mod = sat.modulation ? String(sat.modulation).trim() : '';
+        if (freq || mod) {
+            out.push({
+                uuid: sat.tx_uuid || '',
+                freqMHz: freq || '\u2014',
+                modulation: mod || '\u2014',
+                description: '',
+            });
+        }
+        return out;
+    };
+
+    /**
+     * Индекс выбранного передатчика: сохранённый uuid, иначе 0 (первый).
+     * @param {number} noradId
+     * @param {Array} list
+     * @returns {number}
+     */
+    RightPanelTable.prototype._txPickIndex = function(noradId, list) {
+        if (!list || !list.length) { return 0; }
+        const key = this._txPick[noradId];
+        if (key == null || key === '') { return 0; }
+        for (let i = 0; i < list.length; i++) {
+            if (list[i].uuid && list[i].uuid === key) { return i; }
+            if (String(i) === String(key)) { return i; }
+        }
+        return 0;
+    };
+
+    /**
+     * Ячейка частоты/модуляции — всегда две строки как у одного TX.
+     * Несколько downlink: снизу стрелка ▾, выбор из списка (по умолчанию первый).
      * @returns {{ body: string, titleAttr: string, cellClass: string }}
      */
     RightPanelTable.prototype._renderTxCellHtml = function(sat) {
-        const freqRaw = sat && sat.freq_mhz ? String(sat.freq_mhz).trim() : '';
-        const freq = this._fmtFreqMHz(freqRaw);
-        const mod = sat && sat.modulation ? String(sat.modulation).trim() : '';
-        if (!freq && !mod) {
+        const list = this._txListFromSat(sat);
+        if (!list.length) {
             return {
                 body: '<div class="pc-tx-freq">-/-</div>',
                 titleAttr: ' title="Нет данных о передатчике"',
                 cellClass: '',
             };
         }
-        // Единица «МГц» — в заголовке колонки; в ячейке только число.
-        const freqLine = freq || '\u2014';
-        const modLine = mod || '\u2014';
-        const hint = (freq ? freq + ' МГц' : 'частота н/д') +
-            (mod ? '; ' + mod : '');
+        const norad = sat.norad_id;
+        const idx = this._txPickIndex(norad, list);
+        const cur = list[idx];
+        const hint = (cur.freqMHz !== '\u2014' ? cur.freqMHz + ' МГц' : 'частота н/д') +
+            (cur.modulation && cur.modulation !== '\u2014' ? '; ' + cur.modulation : '') +
+            (cur.description ? '\n' + cur.description : '');
+
+        let body = '<div class="pc-tx-main">' +
+            '<div class="pc-tx-freq">' + this._escapeHtml(cur.freqMHz) + '</div>' +
+            '<div class="pc-tx-mod">' + this._escapeHtml(cur.modulation) + '</div>' +
+            '</div>';
+        let cellClass = '';
+        if (list.length > 1) {
+            cellClass = ' pc-tx-cell--multi';
+            body += '<button type="button" class="pc-tx-more" data-norad="' + norad + '"' +
+                ' data-tx-count="' + list.length + '"' +
+                ' aria-haspopup="listbox"' +
+                ' aria-label="Выбор из ' + list.length + ' передатчиков"' +
+                ' title="Передатчики (' + list.length + ')">\u25BE</button>';
+        }
         return {
-            body: '<div class="pc-tx-main">' +
-                '<div class="pc-tx-freq">' + this._escapeHtml(freqLine) + '</div>' +
-                '<div class="pc-tx-mod">' + this._escapeHtml(modLine) + '</div>' +
-                '</div>',
+            body: body,
             titleAttr: hint ? ' title="' + this._escapeHtml(hint) + '"' : '',
-            cellClass: '',
+            cellClass: cellClass,
         };
     };
 
-    /** Число различных downlink-частот (дубликаты SatNOGS не считаем). */
-    RightPanelTable.prototype._countDistinctTxFreqs = function(list) {
-        const seen = Object.create(null);
-        let n = 0;
-        for (let i = 0; i < (list || []).length; i++) {
-            const key = String(list[i].freqMHz || '');
-            if (!key || seen[key]) { continue; }
-            seen[key] = true;
-            n++;
-        }
-        return n;
-    };
-
-    /**
-     * Для ячеек с частотой: fetch SatNOGS → ▾ только если разных частот > 1.
-     */
-    RightPanelTable.prototype._syncTxDropdowns = function() {
+    /** Стрелка ▾: меню выбора передатчика, без выбора строки таблицы. */
+    RightPanelTable.prototype._bindTxMoreButtons = function() {
         if (!this._tbody) { return; }
         const self = this;
-        const token = (this._txSyncToken = (this._txSyncToken || 0) + 1);
-        const rows = this._tbody.querySelectorAll('.pc-row');
-        for (let i = 0; i < rows.length; i++) {
-            (function(row) {
-                const noradId = parseInt(row.getAttribute('data-norad'), 10);
-                const cell = row.querySelector('.pc-tx-cell');
-                if (!noradId || !cell) { return; }
-                const freqEl = cell.querySelector('.pc-tx-freq');
-                if (!freqEl || freqEl.textContent === '-/-') { return; }
-
-                self._fetchTransmitters(noradId).then(function(list) {
-                    if (token !== self._txSyncToken || !cell.parentNode) { return; }
-                    const distinct = self._countDistinctTxFreqs(list);
-                    const btn = cell.querySelector('.pc-tx-more');
-                    if (distinct <= 1) {
-                        if (btn) { btn.parentNode.removeChild(btn); }
-                        cell.classList.remove('pc-tx-cell--multi');
-                        return;
-                    }
-                    if (btn) {
-                        btn.setAttribute('data-tx-count', String(distinct));
-                        btn.title = 'Список передатчиков (' + distinct + ')';
-                        return;
-                    }
-                    cell.classList.add('pc-tx-cell--multi');
-                    const more = document.createElement('button');
-                    more.type = 'button';
-                    more.className = 'pc-tx-more';
-                    more.setAttribute('data-tx-menu', String(noradId));
-                    more.setAttribute('data-tx-count', String(distinct));
-                    more.setAttribute('aria-haspopup', 'listbox');
-                    more.setAttribute('aria-label', 'Список из ' + distinct + ' передатчиков');
-                    more.title = 'Список передатчиков (' + distinct + ')';
-                    more.textContent = '\u25BE';
-                    more.addEventListener('click', function(e) {
-                        e.stopPropagation();
-                        e.preventDefault();
-                        self._showTxMenu(more, noradId);
-                    });
-                    cell.appendChild(more);
+        const buttons = this._tbody.querySelectorAll('.pc-tx-more');
+        for (let i = 0; i < buttons.length; i++) {
+            (function(btn) {
+                btn.addEventListener('mousedown', function(e) { e.stopPropagation(); });
+                btn.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    e.preventDefault();
+                    const noradId = parseInt(btn.getAttribute('data-norad'), 10);
+                    if (noradId) { self._showTxMenu(btn, noradId); }
                 });
-            })(rows[i]);
+            })(buttons[i]);
         }
     };
 
-    /** Нормализация строки передатчика из ответа SatNOGS API. */
-    RightPanelTable.prototype._txRowFromApi = function(t) {
-        if (!t || !t.alive) { return null; }
-        if (t.status && String(t.status).toLowerCase() !== 'active') { return null; }
-        const dl = Number(t.downlink_low) || 0;
-        if (dl <= 0) { return null; }
-        const mhz = this._fmtFreqMHz(dl / 1e6);
-        const mode = t.mode || '';
-        let baud = '';
-        if (typeof t.baud === 'number' && isFinite(t.baud) && t.baud > 0) {
-            baud = t.baud >= 1000
-                ? (Math.round(t.baud / 100) / 10) + 'k'
-                : String(Math.round(t.baud));
+    RightPanelTable.prototype._satByNorad = function(noradId) {
+        const sats = this._group && this._group.satellites;
+        if (!sats) { return null; }
+        for (let i = 0; i < sats.length; i++) {
+            if (sats[i].norad_id === noradId) { return sats[i]; }
         }
-        const mod = baud ? (mode + ' ' + baud).trim() : mode;
-        return {
-            freqMHz: mhz,
-            modulation: mod || '\u2014',
-            description: t.description || '',
-        };
+        return null;
     };
 
-    RightPanelTable.prototype._fetchTransmitters = function(noradId) {
-        if (!this._txCache) { this._txCache = {}; }
-        if (this._txCache[noradId]) { return this._txCache[noradId]; }
-        const self = this;
-        const p = fetch('/api/satnogs/transmitters/' + noradId, {
-            headers: { 'Accept': 'application/json' },
-            credentials: 'same-origin',
-        }).then(function(resp) {
-            if (!resp.ok) { return []; }
-            return resp.json();
-        }).then(function(data) {
-            if (!data || !Array.isArray(data.transmitters)) {
-                delete self._txCache[noradId];
-                return [];
-            }
-            const out = [];
-            for (let i = 0; i < data.transmitters.length; i++) {
-                const row = self._txRowFromApi(data.transmitters[i]);
-                if (row) { out.push(row); }
-            }
-            // Пустой ответ не кешируем — ждём прогрев SatNOGS.
-            if (out.length === 0) {
-                delete self._txCache[noradId];
-            }
-            return out;
-        }).catch(function() {
-            delete self._txCache[noradId];
-            return [];
-        });
-        this._txCache[noradId] = p;
-        return p;
-    };
-
+    /** Меню downlink: щелчок ставит выбор в ячейку (частота + модуляция). */
     RightPanelTable.prototype._showTxMenu = function(anchorEl, noradId) {
         const self = this;
         this._hideTxMenu();
+        const sat = this._satByNorad(noradId);
+        const list = this._txListFromSat(sat || { norad_id: noradId });
+        if (list.length <= 1) { return; }
+
         const menu = document.createElement('div');
         menu.className = 'pc-tx-menu';
-        menu.setAttribute('role', 'menu');
-        menu.innerHTML = '<div class="pc-tx-menu__loading">Загрузка\u2026</div>';
+        menu.setAttribute('role', 'listbox');
+        const curIdx = this._txPickIndex(noradId, list);
+        let html = '';
+        for (let i = 0; i < list.length; i++) {
+            const t = list[i];
+            const desc = t.description
+                ? '<div class="pc-tx-menu__desc">' + self._escapeHtml(t.description) + '</div>'
+                : '';
+            const on = i === curIdx ? ' pc-tx-menu__item--on' : '';
+            html += '<button type="button" class="pc-tx-menu__item' + on + '" role="option"' +
+                ' data-tx-idx="' + i + '">' +
+                '<div class="pc-tx-menu__freq">' + self._escapeHtml(t.freqMHz) + ' МГц' +
+                ' <span class="pc-tx-menu__mod">' + self._escapeHtml(t.modulation) +
+                '</span></div>' + desc + '</button>';
+        }
+        menu.innerHTML = html;
         document.body.appendChild(menu);
         this._txMenu = menu;
 
@@ -483,6 +471,20 @@
         };
         place();
 
+        menu.addEventListener('click', function(ev) {
+            const item = ev.target && ev.target.closest
+                ? ev.target.closest('.pc-tx-menu__item')
+                : null;
+            if (!item) { return; }
+            ev.stopPropagation();
+            const pick = parseInt(item.getAttribute('data-tx-idx'), 10);
+            const tx = list[pick];
+            if (!tx) { return; }
+            self._txPick[noradId] = tx.uuid || String(pick);
+            self._hideTxMenu();
+            self._render();
+        });
+
         this._txMenuDismiss = function(ev) {
             if (ev.type === 'keydown' && ev.key !== 'Escape') { return; }
             if (ev.type === 'mousedown' && menu.contains(ev.target)) { return; }
@@ -493,37 +495,6 @@
             document.addEventListener('mousedown', self._txMenuDismiss, true);
             document.addEventListener('keydown', self._txMenuDismiss, true);
         }, 0);
-
-        this._fetchTransmitters(noradId).then(function(list) {
-            if (!self._txMenu) { return; }
-            // Одна downlink-частота — выпадашка не нужна.
-            if (self._countDistinctTxFreqs(list) <= 1) {
-                self._hideTxMenu();
-                if (anchorEl && anchorEl.parentNode) {
-                    const cell = anchorEl.parentNode;
-                    cell.removeChild(anchorEl);
-                    cell.classList.remove('pc-tx-cell--multi');
-                }
-                return;
-            }
-            let html = '';
-            for (let i = 0; i < list.length; i++) {
-                const t = list[i];
-                const desc = t.description
-                    ? '<div class="pc-tx-menu__desc">' + self._escapeHtml(t.description) + '</div>'
-                    : '';
-                html += '<div class="pc-tx-menu__item" role="menuitem">' +
-                    '<div class="pc-tx-menu__freq">' + self._escapeHtml(t.freqMHz) + ' МГц' +
-                    ' <span class="pc-tx-menu__mod">' + self._escapeHtml(t.modulation) +
-                    '</span></div>' + desc + '</div>';
-            }
-            menu.innerHTML = html;
-            if (anchorEl) {
-                anchorEl.setAttribute('data-tx-count', String(list.length));
-                anchorEl.title = 'Список передатчиков (' + list.length + ')';
-            }
-            place();
-        });
     };
 
     RightPanelTable.prototype._hideTxMenu = function() {

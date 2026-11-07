@@ -1,6 +1,11 @@
 package services
 
 import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,6 +18,7 @@ import (
 type fakeTransmitterProvider struct {
 	mu                 sync.Mutex
 	primaryByID        map[int]*TransmitterInfo
+	allByID            map[int][]TransmitterInfo
 	requestedNoradIDs  []int
 	requestFetchCalled int
 }
@@ -21,6 +27,12 @@ func (f *fakeTransmitterProvider) GetPrimaryTransmitter(noradID int) *Transmitte
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.primaryByID[noradID]
+}
+
+func (f *fakeTransmitterProvider) GetTransmitters(noradID int) []TransmitterInfo {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.allByID[noradID]
 }
 
 func (f *fakeTransmitterProvider) RequestFetch(noradIDs []int) {
@@ -82,6 +94,120 @@ func TestBroadcastGroupUpdate_IncludesFreqAndModulation(t *testing.T) {
 	}
 	if len(provider.requestedNoradIDs) != 1 || provider.requestedNoradIDs[0] != issNoradID {
 		t.Errorf("requested NORAD = %v, want [%d]", provider.requestedNoradIDs, issNoradID)
+	}
+}
+
+// cachedGroupUpdate reads the last satellite_group_update from the hub cache.
+func cachedGroupUpdate(t *testing.T, hub *handlers.SSEHub) satelliteGroupUpdate {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodGet, "/api/sse", nil)
+	rec := &lockedRecorder{rec: httptest.NewRecorder()}
+	go hub.ServeHTTP(rec, req)
+
+	const prefix = "event: satellite_group_update\ndata: "
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		body := rec.body()
+		if i := strings.Index(body, prefix); i >= 0 {
+			rest := body[i+len(prefix):]
+			if j := strings.Index(rest, "\n"); j >= 0 {
+				var ev satelliteGroupUpdate
+				if err := json.Unmarshal([]byte(rest[:j]), &ev); err != nil {
+					t.Fatalf("decode satellite_group_update: %v", err)
+				}
+				return ev
+			}
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	t.Fatalf("satellite_group_update not received; body=%q", rec.body())
+	return satelliteGroupUpdate{}
+}
+
+func TestBroadcastGroupUpdate_ListsAllActiveTransmitters(t *testing.T) {
+	ctx := t.Context()
+
+	hub := handlers.NewSSEHub()
+	go hub.Run(ctx)
+
+	store := setupTLEStore(t)
+	svc := NewSatelliteTrackingService(hub, store, tracker.NewObserver(47.315813, 39.788243, 0.070))
+	svc.SetTransmitterProvider(&fakeTransmitterProvider{
+		primaryByID: map[int]*TransmitterInfo{
+			issNoradID: {UUID: "tx-aprs", FreqMHz: "145.825", Modulation: "AFSK 1200", Count: 2},
+		},
+		allByID: map[int][]TransmitterInfo{
+			issNoradID: {
+				{UUID: "tx-voice", FreqHz: 145_800_000, Mode: "FM", Modulation: "FM", Description: "Voice"},
+				{UUID: "tx-aprs", FreqHz: 145_825_000, Mode: "AFSK", Modulation: "AFSK 1200", Baud: 1200, Description: "APRS"},
+			},
+		},
+	})
+
+	now := time.Now().UTC()
+	svc.broadcastGroupUpdate(ConcurrentPassGroup{
+		Satellites: []PassInfo{{NoradID: issNoradID, SatName: "ISS", Pass: tracker.Pass{
+			NoradID: issNoradID, SatName: "ISS",
+			AOS: now.UnixMilli(), LOS: now.Add(10 * time.Minute).UnixMilli(), Duration: 600,
+		}}},
+		PrimarySatID: issNoradID,
+	}, now, 0)
+
+	got := cachedGroupUpdate(t, hub).Satellites[0].Transmitters
+	want := []groupTxInfo{
+		{UUID: "tx-voice", FreqHz: 145_800_000, Mode: "FM", Modulation: "FM", Description: "Voice"},
+		{UUID: "tx-aprs", FreqHz: 145_825_000, Mode: "AFSK", Modulation: "AFSK 1200", Baud: 1200, Description: "APRS"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("transmitters = %+v, want %+v", got, want)
+	}
+}
+
+func TestBroadcastGroupUpdate_NoTransmittersMeansEmptyList(t *testing.T) {
+	ctx := t.Context()
+
+	hub := handlers.NewSSEHub()
+	go hub.Run(ctx)
+
+	store := setupTLEStore(t)
+	svc := NewSatelliteTrackingService(hub, store, tracker.NewObserver(47.315813, 39.788243, 0.070))
+	svc.SetTransmitterProvider(&fakeTransmitterProvider{})
+
+	now := time.Now().UTC()
+	svc.broadcastGroupUpdate(ConcurrentPassGroup{
+		Satellites: []PassInfo{{NoradID: issNoradID, SatName: "ISS", Pass: tracker.Pass{
+			NoradID: issNoradID, SatName: "ISS",
+			AOS: now.UnixMilli(), LOS: now.Add(10 * time.Minute).UnixMilli(), Duration: 600,
+		}}},
+		PrimarySatID: issNoradID,
+	}, now, 0)
+
+	if got := cachedGroupUpdate(t, hub).Satellites[0].Transmitters; len(got) != 0 {
+		t.Errorf("transmitters = %+v, want none", got)
+	}
+}
+
+func TestGroupTransmitters_ListsDownlinksOfTheGroup(t *testing.T) {
+	svc := NewSatelliteTrackingService(handlers.NewSSEHub(), setupTLEStore(t),
+		tracker.NewObserver(47.315813, 39.788243, 0.070))
+	if got := svc.GroupTransmitters(); got != nil {
+		t.Errorf("without SatNOGS: %+v, want none", got)
+	}
+	svc.SetTransmitterProvider(&fakeTransmitterProvider{allByID: map[int][]TransmitterInfo{
+		issNoradID: {{UUID: "tx-voice", FreqHz: 145_800_000}, {UUID: "tx-aprs", FreqHz: 145_825_000}},
+		1:          {{UUID: "not-in-group", FreqHz: 437_000_000}},
+	}})
+	svc.mu.Lock()
+	svc.currentGroupEntries = []GroupEntry{{NoradID: issNoradID, IsVisible: true}}
+	svc.mu.Unlock()
+
+	got := svc.GroupTransmitters()
+	want := []GroupTransmitter{
+		{NoradID: issNoradID, TransmitterInfo: TransmitterInfo{UUID: "tx-voice", FreqHz: 145_800_000}},
+		{NoradID: issNoradID, TransmitterInfo: TransmitterInfo{UUID: "tx-aprs", FreqHz: 145_825_000}},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("GroupTransmitters() = %+v, want %+v", got, want)
 	}
 }
 

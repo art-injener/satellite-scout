@@ -7,8 +7,9 @@
  *   - channel box on the plot: position, clipping at plot edges, outside marker
  *   - click position to channel offset, rounding
  *   - offset clamping so the channel stays inside the receiver band
- *   - edge drag to bandwidth, snapping to the offered widths
+ *   - dragging the fill moves the channel and keeps the width
  *   - absolute channel edges as text
+ *   - doppler shift of the whole channel, SSB passband beside the carrier
  */
 
 'use strict';
@@ -17,7 +18,7 @@ const assert = require('assert');
 
 global.window = {};
 const {
-    channelBox, offsetFromX, clampOffset, widthFromX, snapBandwidth, edgesText,
+    channelBox, offsetFromX, clampOffset, edgesText,
 } = require('./channel-overlay.js');
 
 let passed = 0;
@@ -97,25 +98,6 @@ test('channel edge is held at the band edge', () => {
     assert.strictEqual(clampOffset(-600_000, 20_000, 1_000_000), -490_000);
 });
 
-console.log('widthFromX / snapBandwidth');
-
-test('edge drag gives symmetric width', () => {
-    // handle 15 px right of center at 1 kHz/px: half 15 kHz, width 30 kHz
-    assert.strictEqual(widthFromX(547, 532, BAND, PLOT), 30_000);
-    assert.strictEqual(widthFromX(517, 532, BAND, PLOT), 30_000, 'left handle works the same');
-});
-
-test('width snaps to the nearest offered value', () => {
-    const opts = [2800, 6000, 15000, 30000, 50000];
-    assert.strictEqual(snapBandwidth(26_000, opts), 30_000);
-    assert.strictEqual(snapBandwidth(1, opts), 2800);
-    assert.strictEqual(snapBandwidth(90_000, opts), 50_000);
-});
-
-test('no offered values keeps the width', () => {
-    assert.strictEqual(snapBandwidth(12_345, []), 12_345);
-});
-
 console.log('edgesText');
 
 test('edges in MHz around receiver plus offset', () => {
@@ -160,6 +142,162 @@ test('hidden channel mark removes the lines and the label', () => {
     assert.strictEqual(ov._arrow.hidden, true);
     ov.setVisible(true);
     assert.strictEqual(ov._root.hidden, false);
+    ov.destroy();
+});
+
+console.log('doppler and width limit');
+
+function makeOverlay(onChange) {
+    global.document = {
+        createElement: () => fakeEl(),
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    const host = fakeEl();
+    host.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1100, height: 200 });
+    const plot = fakeEl();
+    plot.getBoundingClientRect = () => ({ left: 32, top: 0, width: 1000, height: 80 });
+    const { ChannelOverlay } = require('./channel-overlay.js');
+    const ov = new ChannelOverlay(host, { plotCanvas: plot, marginLeft: 0, marginRight: 0, onChange });
+    ov.setBand(BAND.centerHz, BAND.spanHz);
+    return ov;
+}
+
+test('doppler moves the whole channel, the center line stays in the middle of the fill', () => {
+    const ov = makeOverlay();
+    ov.setChannel(0, 2_000);
+    ov.setShift(5_000);
+    const left = parseFloat(ov._root.style.left);
+    assert.ok(Math.abs(left - 536) < 1e-9, 'fill around offset + doppler: ' + left);
+    const mark = left + parseFloat(ov._center.style.left);
+    assert.ok(Math.abs(mark - 537) < 1e-9, 'center line at offset + doppler: ' + mark);
+    ov.destroy();
+});
+
+test('the fill follows the chosen width at once, wider too', () => {
+    const ov = makeOverlay();
+    ov.setChannel(0, 2_000);
+    ov.setChannel(0, 15_000);
+    assert.ok(Math.abs(parseFloat(ov._root.style.width) - 15) < 1e-9);
+    ov.destroy();
+});
+
+test('dragging the fill moves the channel and keeps its width', () => {
+    let got = null;
+    const ov = makeOverlay((off, bw) => { got = [off, bw]; });
+    ov.setChannel(0, 15_000);
+    ov._drag = { mode: 'move', x0: 532, xLast: 532, moved: false, offset0: 0 };
+    ov._dragMove({ clientX: 542 });
+    ov._dragEnd({ clientX: 542 });
+    assert.strictEqual(ov._ch.bandwidthHz, 15_000);
+    assert.deepStrictEqual(got, [10_000, 15_000]);
+    ov.destroy();
+});
+
+test('a lower limit narrows the channel already drawn', () => {
+    const ov = makeOverlay();
+    ov.setChannel(0, 15_000);
+    ov.setMaxWidth(1_000);
+    assert.ok(Math.abs(parseFloat(ov._root.style.width) - 1) < 1e-9);
+    ov.destroy();
+});
+
+test('click puts the channel center under the pointer, the setting stays without doppler', () => {
+    let got = null;
+    const ov = makeOverlay((off, bw) => { got = [off, bw]; });
+    ov.setChannel(0, 2_000);
+    ov.setShift(5_000);
+    ov._drag = { mode: 'click', x0: 632, moved: false, offset0: 0 };
+    ov._dragEnd({ clientX: 632 });
+    assert.deepStrictEqual(got, [95_000, 2_000]);
+    ov.destroy();
+});
+
+test('setShift with bad values keeps the channel unshifted', () => {
+    const ov = makeOverlay();
+    ov.setChannel(0, 2_000);
+    ov.setShift(undefined, NaN);
+    assert.ok(Math.abs(parseFloat(ov._root.style.left) - 531) < 1e-9);
+    ov.destroy();
+});
+
+console.log('zoomed window');
+
+// 100 kHz window centered 50 kHz above the receiver
+const WIN = { spanHz: 100_000, offsetHz: 50_000 };
+
+test('channel at the window center sits in the middle of the plot', () => {
+    const box = channelBox(WIN, { offsetHz: 50_000, bandwidthHz: 10_000 }, PLOT);
+    assert.strictEqual(box.left, 482);
+    assert.strictEqual(box.width, 100);
+    assert.strictEqual(box.centerX, 532);
+});
+
+test('channel outside the zoomed window is reported as outside', () => {
+    const box = channelBox(WIN, { offsetHz: -20_000, bandwidthHz: 10_000 }, PLOT);
+    assert.strictEqual(box.outside, 'left');
+});
+
+test('click offset counts from the window center', () => {
+    assert.strictEqual(offsetFromX(PLOT.left + PLOT.width, WIN, PLOT), 100_000);
+});
+
+test('setView zooms the channel box', () => {
+    const ov = makeOverlay();
+    ov.setView(200_000, 100_000);
+    ov.setChannel(200_000, 10_000);
+    assert.strictEqual(parseFloat(ov._root.style.left), 482);
+    assert.strictEqual(parseFloat(ov._root.style.width), 100);
+    ov.destroy();
+});
+
+test('drag on the plot pans the window and does not move the channel', () => {
+    let changed = 0;
+    const pans = [];
+    const ov = makeOverlay(() => { changed++; });
+    ov._opts.onPan = (dHz) => { pans.push(dHz); };
+    ov.setView(0, 100_000);
+    ov.setChannel(0, 2_000);
+    ov._drag = { mode: 'click', x0: 500, xLast: 500, moved: false, offset0: 0 };
+    ov._dragMove({ clientX: 600 });
+    ov._dragMove({ clientX: 650 });
+    ov._dragEnd({ clientX: 650 });
+    // content follows the pointer: dragging right shows lower frequencies
+    assert.deepStrictEqual(pans, [-10_000, -5_000]);
+    assert.strictEqual(changed, 0, 'no channel settings sent');
+    ov.destroy();
+});
+
+test('hidden channel: drag on the plot still pans, click does not move the channel', () => {
+    let changed = 0;
+    const pans = [];
+    const listeners = {};
+    global.document = {
+        createElement: () => fakeEl(),
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    const host = fakeEl();
+    host.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1100, height: 200 });
+    const plot = fakeEl();
+    plot.getBoundingClientRect = () => ({ left: 32, top: 0, width: 1000, height: 80 });
+    plot.addEventListener = (type, fn) => { listeners[type] = fn; };
+    const { ChannelOverlay } = require('./channel-overlay.js');
+    const ov = new ChannelOverlay(host, {
+        plotCanvas: plot, clickTargets: [plot], marginLeft: 0, marginRight: 0,
+        onChange: () => { changed++; }, onPan: (dHz) => { pans.push(dHz); },
+    });
+    ov.setBand(BAND.centerHz, BAND.spanHz);
+    ov.setView(0, 100_000);
+    ov.setVisible(false);
+    const ev = (x) => ({ clientX: x, button: 0, preventDefault() {}, stopPropagation() {}, currentTarget: plot });
+    listeners.pointerdown(ev(500));
+    ov._dragMove(ev(520));
+    ov._dragEnd(ev(520));
+    assert.deepStrictEqual(pans, [-2_000]);
+    listeners.pointerdown(ev(500));
+    ov._dragEnd(ev(500));
+    assert.strictEqual(changed, 0);
     ov.destroy();
 });
 

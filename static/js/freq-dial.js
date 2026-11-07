@@ -14,16 +14,19 @@
  * 11 разрядов покрывают 1 Гц … 10 ГГц. Значение хранится в целых герцах —
  * никакой плавающей точки, чтобы шаг 1 Гц оставался точным на 10 ГГц.
  *
- * Набранная частота уходит приёмнику (onChange) только по SET или Enter.
- * До этого индикатор в режиме перестройки: курсор мигает, приёмник стоит
- * на прежней частоте. Esc возвращает последнюю установленную.
+ * Колесо сразу отдаёт частоту приёмнику: шаг разряда под курсором и onChange
+ * в одном событии. Курсор ставится кликом, колесо его не переносит.
+ * Кнопки, стрелки и набор цифр только правят индикатор.
+ * Приёмник получает их по SET или Enter. Пока набор не установлен, курсор
+ * мигает, приёмник стоит на прежней частоте. Esc возвращает последнюю
+ * установленную.
  *
  * Управление:
  *   ‹/›        сдвиг курсора по разрядам
  *   −/+        инкремент/декремент разряда под курсором (с переносом), рядом с SET
  *   SET        установить только набранную частоту
  *   клик       поставить курсор на разряд
- *   колесо     шаг разряда под указателем
+ *   колесо     шаг разряда под курсором и немедленная установка
  *   ←/→ ↑/↓    то же с клавиатуры, Home/End — крайние разряды
  *   0…9        ручной ввод в позицию курсора со сдвигом вправо
  *   Backspace  обнулить разряд слева, Delete — текущий
@@ -441,14 +444,24 @@
         if (handled && typeof e.preventDefault === 'function') { e.preventDefault(); }
     };
 
-    /** Возвращает позицию разряда по элементу события или null. */
+    /**
+     * Позиция разряда по элементу события. Указатель часто попадает в сегмент
+     * внутри SVG, а data-pos висит на обёртке разряда, поэтому поднимаемся
+     * к ней. Вне полосы цифр — null.
+     */
     FreqDial.prototype._posFromEvent = function(e) {
-        const target = e ? e.target : null;
-        if (!target || typeof target.getAttribute !== 'function') { return null; }
-        const raw = target.getAttribute('data-pos');
-        if (raw === null) { return null; }
-        const pos = parseInt(raw, 10);
-        return isFinite(pos) ? clamp(pos, 0, DIGIT_COUNT - 1) : null;
+        let node = e ? e.target : null;
+        while (node && node !== this._strip && node !== this._root) {
+            if (typeof node.getAttribute === 'function') {
+                const raw = node.getAttribute('data-pos');
+                if (raw !== null) {
+                    const pos = parseInt(raw, 10);
+                    return isFinite(pos) ? clamp(pos, 0, DIGIT_COUNT - 1) : null;
+                }
+            }
+            node = node.parentElement;
+        }
+        return null;
     };
 
     FreqDial.prototype._onDigitClick = function(e) {
@@ -462,9 +475,9 @@
     FreqDial.prototype._onWheel = function(e) {
         if (this._readOnly || !e || typeof e.deltaY !== 'number' || e.deltaY === 0) { return; }
         if (typeof e.preventDefault === 'function') { e.preventDefault(); }
-        const pos = this._posFromEvent(e);
-        if (pos !== null && pos !== this._pos) { this._pos = pos; }
         this._step(e.deltaY < 0 ? 1 : -1);
+        // Щелчок колеса — уже команда приёмнику, отдельный SET не нужен.
+        this._apply();
     };
 
     // ── Публичный API ────────────────────────────────────────────────────

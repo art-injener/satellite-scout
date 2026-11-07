@@ -18,6 +18,9 @@ func TestDefaultChannelSettings_ValidAndAFSK(t *testing.T) {
 	if !c.DemodOff {
 		t.Error("demodulator must start off")
 	}
+	if !c.DopplerAuto {
+		t.Error("Doppler starts in auto")
+	}
 	if !slices.Contains(Demods, c.Demod) {
 		t.Errorf("default demod %q not in Demods", c.Demod)
 	}
@@ -46,6 +49,19 @@ func TestChannelSettings_Validate(t *testing.T) {
 		{"squelch -Inf", func(c *ChannelSettings) { c.SquelchDBFS = math.Inf(-1) }, true},
 		{"empty demod", func(c *ChannelSettings) { c.Demod = "" }, true},
 		{"unknown demod", func(c *ChannelSettings) { c.Demod = "lora" }, true},
+		{"voice FM", func(c *ChannelSettings) { c.Demod = "fm" }, false},
+		{"voice FM wider than the narrow chain", func(c *ChannelSettings) { c.Demod = "fm"; c.BandwidthHz = WFMBandwidthHz }, true},
+		{"broadcast FM", func(c *ChannelSettings) { c.Demod = "wfm"; c.BandwidthHz = WFMBandwidthHz }, false},
+		{"broadcast FM wider than a channel", func(c *ChannelSettings) { c.Demod = "wfm"; c.BandwidthHz = WFMBandwidthHz + 1 }, true},
+		{"narrow demod at the broadcast width", func(c *ChannelSettings) { c.BandwidthHz = WFMBandwidthHz }, true},
+		{"upper sideband", func(c *ChannelSettings) { c.Demod = "usb"; c.BandwidthHz = 2_800 }, false},
+		{"lower sideband", func(c *ChannelSettings) { c.Demod = "lsb"; c.BandwidthHz = 2_800 }, false},
+		{"widest sideband heard", func(c *ChannelSettings) { c.Demod = "usb"; c.BandwidthHz = 4_000 }, false},
+		{"sideband wider than heard", func(c *ChannelSettings) { c.Demod = "lsb"; c.BandwidthHz = 6_000 }, true},
+		{"widest CW heard", func(c *ChannelSettings) { c.Demod = "cw"; c.BandwidthHz = 1_000 }, false},
+		{"CW wider than heard", func(c *ChannelSettings) { c.Demod = "cw"; c.BandwidthHz = 2_800 }, true},
+		{"Doppler of a satellite", func(c *ChannelSettings) { c.DopplerNorad = 25544 }, false},
+		{"Doppler of a negative NORAD", func(c *ChannelSettings) { c.DopplerNorad = -1 }, true},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

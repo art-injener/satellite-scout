@@ -101,9 +101,11 @@ var errPLLNoDivider = errors.New("r820t: no mixer divider puts the VCO in range"
 type r820t struct {
 	chip *chip
 	regs [32]byte
+	// ifHz — промежуточная частота текущего фильтра. Пока фильтр заводской, это 3,57 МГц.
+	ifHz uint32
 }
 
-func newR820T(c *chip) *r820t { return &r820t{chip: c} }
+func newR820T(c *chip) *r820t { return &r820t{chip: c, ifHz: r820tIFHz} }
 
 // detectR820T проверяет, что за мостом I2C отвечает R820T.
 func detectR820T(c *chip) bool {
@@ -166,7 +168,7 @@ func (t *r820t) setFreq(hz uint32) error {
 	if hz < r820tMinHz || hz > r820tMaxHz {
 		return fmt.Errorf("r820t: %d Hz outside %d–%d Hz", hz, r820tMinHz, r820tMaxHz)
 	}
-	lo := hz + r820tIFHz
+	lo := hz + t.ifHz
 	return t.chip.withRepeater(func() error {
 		if err := t.setMux(lo); err != nil {
 			return fmt.Errorf("r820t mux: %w", err)
@@ -176,6 +178,99 @@ func (t *r820t) setFreq(hz uint32) error {
 		}
 		return nil
 	})
+}
+
+// r820tBlogIFHz — ПЧ, вокруг которой драйвер RTL-SDR Blog строит фильтр.
+// На 3,57 МГц таблица углов уже не попадает в калиброванные ступени, и полоса
+// либо дырявая, либо пропускает соседа за Найквистом.
+const r820tBlogIFHz = 6_000_000
+
+// setBandwidth ставит фильтр ПЧ шириной bw симметрично вокруг 6 МГц и запоминает эту ПЧ.
+// Вызывающий переводит на неё демодулятор до перестройки гетеродина.
+// Верхний угол делится на 1000, а не на 1100 как у Blog: с 1100 угол ФНЧ уходит внутрь
+// окна, и нижняя по частоте половина спектра проваливается.
+func (t *r820t) setBandwidth(bw uint32) (uint32, error) {
+	half := int(bw / 2)
+	hpf := max(0, (r820tBlogIFHz-half)/1000)
+	lpf := (r820tBlogIFHz + half) / 1000
+	if err := t.setIFFilter(r820tBlogIFHz, hpf, lpf); err != nil {
+		return 0, err
+	}
+	return r820tBlogIFHz, nil
+}
+
+// setIFFilter ставит углы фильтра ПЧ hpf и lpf в кГц и запоминает ПЧ ifHz для гетеродина.
+func (t *r820t) setIFFilter(ifHz uint32, hpf, lpf int) error {
+	reg0a, reg0b := r820tIFFilter(hpf, lpf)
+	err := t.chip.withRepeater(func() error {
+		if err := t.writeMask(0x0a, reg0a, 0x1f); err != nil {
+			return err
+		}
+		return t.writeMask(0x0b, reg0b, 0xef)
+	})
+	if err != nil {
+		return fmt.Errorf("r820t bandwidth: %w", err)
+	}
+	t.ifHz = ifHz
+	return nil
+}
+
+// r820tIFFilter повторяет r82xx_set_if_filter из драйвера RTL-SDR Blog: углы ПЧ в кГц
+// переводит в ступень ФВЧ и код настройки ФНЧ.
+func r820tIFFilter(hpf, lpf int) (reg0a, reg0b byte) {
+	var hpCor, cal int
+	switch {
+	case lpf <= 2500:
+		hpCor, cal = 0xe0, 16*(2500-lpf)/(2500-2000)
+	case lpf <= 3100:
+		hpCor, cal = 0xa0, 16*(3100-lpf)/(3100-2200)
+	case lpf <= 3900:
+		hpCor, cal = 0x80, 16*(3900-lpf)/(3900-2600)
+	case lpf <= 7100:
+		hpCor, cal = 0x60, 16*(7100-lpf)/(7100-5300)
+	case lpf <= 8700:
+		hpCor, cal = 0x20, 16*(8700-lpf)/(8700-6300)
+	default:
+		hpCor, cal = 0x00, 16*(11000-lpf)/(11000-7500)
+	}
+	switch {
+	case hpf >= 4700:
+	case hpf >= 3800:
+		hpCor |= 0x01
+	case hpf >= 3000:
+		hpCor |= 0x02
+	case hpf >= 2800:
+		hpCor |= 0x03
+	case hpf >= 2600:
+		hpCor |= 0x04
+	case hpf >= 2400:
+		hpCor |= 0x05
+	case hpf >= 2200:
+		hpCor |= 0x06
+	case hpf >= 2000:
+		hpCor |= 0x07
+	case hpf >= 1800:
+		hpCor |= 0x08
+	case hpf >= 1600:
+		hpCor |= 0x09
+	case hpf >= 1400:
+		hpCor |= 0x0a
+	default:
+		hpCor |= 0x0b
+	}
+	if cal < 0 {
+		cal = 0
+	} else if cal > 15 {
+		cal = 15
+	}
+	return byte(0x10 | cal), byte(hpCor)
+}
+
+// ifBandwidthForRate — полоса фильтра ПЧ при частоте дискретизации rate. Углы стоят на fs − годная/2
+// от центра: сигнал ближе к краю складывается через Найквиста только в отрезанные края окна,
+// а дальше его уже режет фильтр. Шире нельзя: зеркала попадут в годную середину; уже — завал в ней.
+func ifBandwidthForRate(rate uint32) uint32 {
+	return 2*rate - usableBand(rate)
 }
 
 // setMux выбирает вход и следящий фильтр по частоте гетеродина.
@@ -211,7 +306,8 @@ func (t *r820t) setMux(lo uint32) error {
 func (t *r820t) setPLL(lo uint32) error {
 	const vcoPowerRef = 2
 	loKHz := (lo + 500) / 1000
-	const refKHz = (xtalHz + 500) / 1000
+	xtal := uint64(t.chip.xtal())
+	refKHz := uint32((xtal + 500) / 1000)
 
 	if err := t.writeMask(0x10, 0x00, 0x10); err != nil {
 		return err
@@ -250,8 +346,8 @@ func (t *r820t) setPLL(lo uint32) error {
 	}
 
 	vco := uint64(lo) * uint64(mixDiv)
-	nint := uint32(vco / (2 * xtalHz))
-	fraKHz := uint32((vco - 2*xtalHz*uint64(nint)) / 1000)
+	nint := uint32(vco / (2 * xtal))
+	fraKHz := uint32((vco - 2*xtal*uint64(nint)) / 1000)
 	if nint > 128/vcoPowerRef-1 {
 		return fmt.Errorf("r820t: nint %d out of range", nint)
 	}

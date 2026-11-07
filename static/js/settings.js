@@ -28,6 +28,9 @@
     const ANTENNA_KIND_DEFAULT = 'qfh';
     const RECEIVER_NONE = '';
     const RECEIVER_SIMULATED = 'simulated';
+    const RECEIVER_RTLSDR = 'rtlsdr';
+    // Предел поправки кварца по модулю, как config.FreqCorrectionMaxPPM.
+    const PPM_MAX = 200;
     const STATUS_RESET_DELAY_MS = 6000;
     // Курируемый список городов (Россия + СНГ + столицы) для быстрого
     // выбора точки наблюдения. Подгружается один раз и кешируется.
@@ -79,6 +82,28 @@
             return [['', 'Не указана']].concat(ANTENNA_KINDS);
         }
         return ANTENNA_KINDS.slice();
+    }
+
+    /**
+     * Индекс подключённого устройства, которое сервер откроет для сохранённого приёмника, или -1.
+     * Правило то же, что у сервера: путь различает донглы с одинаковым серийным номером,
+     * а устаревший после переподключения путь не мешает единственному донглу с этим номером.
+     */
+    function matchReceiverDevice(devices, receiver) {
+        if (!receiver || !receiver.driver) {return -1;}
+        const serial = receiver.serial || '';
+        const path = receiver.device_path || '';
+        const candidates = [];
+        (devices || []).forEach((d, i) => {
+            if (d && d.driver === receiver.driver && (!serial || d.serial === serial)) {candidates.push(i);}
+        });
+        if (path) {
+            const exact = candidates.find((i) => devices[i].device_path === path);
+            if (exact !== undefined) {return exact;}
+            if (!serial) {return -1;}
+        }
+        if (candidates.length === 0 || (serial && candidates.length > 1)) {return -1;}
+        return candidates[0];
     }
 
     function deepClone(v) {
@@ -555,6 +580,7 @@
         this._fillReceiverSelect(rxSelect, rp.receiver || {});
         rxSelect.addEventListener('change', () => {
             self._applyReceiverSelection(idx, rxSelect.value);
+            self._renderRadioPaths();
         });
         rxRow.appendChild(rxSelect);
 
@@ -565,6 +591,10 @@
         refreshBtn.addEventListener('click', () => self._refreshSdrDevices(true));
         rxRow.appendChild(refreshBtn);
         wrap.appendChild(rxRow);
+
+        if (rp.receiver && rp.receiver.driver === RECEIVER_RTLSDR) {
+            wrap.appendChild(this._radioPPMField(idx, rp.receiver.freq_correction_ppm));
+        }
 
         const testBtn = document.createElement('button');
         testBtn.type = 'button';
@@ -746,13 +776,19 @@
             sel.appendChild(opt);
         });
 
-        const savedKey = this._receiverDeviceKey(receiver);
+        let savedKey = this._receiverDeviceKey(receiver);
         if (savedKey && savedKey !== RECEIVER_NONE && savedKey !== RECEIVER_SIMULATED && !seen[savedKey]) {
-            const offline = document.createElement('option');
-            offline.value = savedKey;
-            offline.textContent = this._formatReceiverOptionLabel(receiver, true);
-            offline.className = 'settings-receiver-option--offline';
-            sel.appendChild(offline);
+            // После переподключения путь другой, но сервер всё равно откроет этот донгл.
+            const i = matchReceiverDevice(this._sdrDevices, receiver);
+            if (i >= 0) {
+                savedKey = this._receiverDeviceKey(this._sdrDevices[i]);
+            } else {
+                const offline = document.createElement('option');
+                offline.value = savedKey;
+                offline.textContent = this._formatReceiverOptionLabel(receiver, true);
+                offline.className = 'settings-receiver-option--offline';
+                sel.appendChild(offline);
+            }
         }
 
         if (savedKey && savedKey !== RECEIVER_NONE) {
@@ -785,6 +821,11 @@
         if (target.receiver && typeof target.receiver.calibration_db === 'number' &&
             target.receiver.driver === parsed.driver) {
             parsed.calibration_db = target.receiver.calibration_db;
+        }
+        // Уход кварца — свойство донгла; поле видно у RTL-SDR, при смене драйвера сбрасывается.
+        if (target.receiver && typeof target.receiver.freq_correction_ppm === 'number' &&
+            target.receiver.driver === parsed.driver) {
+            parsed.freq_correction_ppm = target.receiver.freq_correction_ppm;
         }
         // Эфир имитатора задаётся только в config.json: повторный выбор имитатора его не стирает.
         if (target.receiver && target.receiver.imitator && parsed.driver === RECEIVER_SIMULATED) {
@@ -843,6 +884,39 @@
             self._setRadioPathValue(idx, subPath, type === 'number' ? parseFloat(input.value) : input.value);
             if (subPath === 'name') {
                 self._setDirty(true);
+            }
+        });
+        input.addEventListener('change', () => self._setDirty(true));
+        return lbl;
+    };
+
+    /** Поправка кварца донгла в ppm: целое, пусто или 0 — без поправки. */
+    SettingsModal.prototype._radioPPMField = function(idx, value) {
+        const self = this;
+        const lbl = document.createElement('label');
+        lbl.className = 'settings-field';
+        lbl.title = 'Уход кварца донгла, как ключ -p у rtl_sdr. Положительная, если без поправки ' +
+            'сигнал виден ниже настоящей частоты: на 437 МГц около 437 Гц на каждый ppm.';
+        const span = document.createElement('span');
+        span.className = 'settings-field__label';
+        span.textContent = 'Поправка частоты, ppm';
+        const input = document.createElement('input');
+        input.type = 'number';
+        input.step = '1';
+        input.min = String(-PPM_MAX);
+        input.max = String(PPM_MAX);
+        input.className = 'settings-field__input';
+        input.value = value ? String(value) : '';
+        lbl.appendChild(span);
+        lbl.appendChild(input);
+        input.addEventListener('input', () => {
+            const target = self._workingConfig.station.radio_paths[idx];
+            if (!target || !target.receiver) {return;}
+            const v = parseInt(input.value.trim(), 10);
+            if (Number.isFinite(v) && v !== 0) {
+                target.receiver.freq_correction_ppm = v;
+            } else {
+                delete target.receiver.freq_correction_ppm;
             }
         });
         input.addEventListener('change', () => self._setDirty(true));
@@ -1156,7 +1230,8 @@
             SettingsModal: SettingsModal,
             getByPath: getByPath,
             setByPath: setByPath,
-            antennaKindOptions: antennaKindOptions
+            antennaKindOptions: antennaKindOptions,
+            matchReceiverDevice: matchReceiverDevice
         };
     } else {
         window.SettingsModalClass = SettingsModal;

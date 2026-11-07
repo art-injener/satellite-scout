@@ -48,7 +48,20 @@ type satelliteGroupUpdate struct {
 	PrimaryID  int            `json:"primary_id"`
 	TrackingID int            `json:"tracking_id"` // NORAD ID спутника под наблюдением (0 = нет).
 	TimeWindow groupTimeWin   `json:"time_window"`
-	TS         int64          `json:"ts"`
+	// Timeline — пролёты на час вперёд для ленты пролётов; План сеансов — по Satellites.
+	Timeline []timelinePass `json:"timeline,omitempty"`
+	TS       int64          `json:"ts"`
+}
+
+// timelinePass — пролёт на ленте пролётов: горка угла места от AOS до LOS.
+type timelinePass struct {
+	NoradID  int     `json:"norad_id"`
+	SatName  string  `json:"sat_name"`
+	SatAlias string  `json:"sat_alias,omitempty"`
+	AOS      int64   `json:"aos"`
+	LOS      int64   `json:"los"`
+	TCA      int64   `json:"tca,omitempty"`
+	TCAEl    float64 `json:"tca_el"`
 }
 
 // groupSatInfo — данные одного спутника внутри события satellite_group_update.
@@ -74,12 +87,25 @@ type groupSatInfo struct {
 	TxUUID string `json:"tx_uuid,omitempty"`
 	// TxCount — число активных downlink-передатчиков.
 	TxCount int `json:"tx_count,omitempty"`
+	// Transmitters — все активные downlink-передатчики КА из SatNOGS, по возрастанию частоты.
+	// Пусто, если данных нет: лента передатчиков не выдумывает их.
+	Transmitters []groupTxInfo `json:"transmitters,omitempty"`
 	// TCA — момент максимальной элевации, Unix ms.
 	TCA int64 `json:"tca,omitempty"`
 	// TCAEl — максимальный угол места пролёта (градусы).
 	TCAEl float64 `json:"tca_el"`
 	// OrbitAltKm — средняя высота орбиты по TLE (апогей+перигей)/2, км.
 	OrbitAltKm float64 `json:"orbit_alt_km"`
+}
+
+// groupTxInfo — передатчик КА внутри события satellite_group_update.
+type groupTxInfo struct {
+	UUID        string  `json:"uuid"`
+	FreqHz      int64   `json:"freq_hz"` // нижний край downlink
+	Mode        string  `json:"mode,omitempty"`
+	Modulation  string  `json:"modulation,omitempty"` // режим со скоростью: "AFSK 1200"
+	Baud        float64 `json:"baud,omitempty"`
+	Description string  `json:"description,omitempty"`
 }
 
 // groupTimeWin — временное окно группы для SSE-события.
@@ -133,12 +159,19 @@ type TransmitterInfo struct {
 	Modulation string
 	// Count — число активных downlink-передатчиков у КА (0 если неизвестно).
 	Count int
+	// Поля ленты передатчиков: частота в Гц, режим, скорость и описание из SatNOGS.
+	FreqHz      int64
+	Mode        string
+	Baud        float64
+	Description string
 }
 
 // TransmitterProvider — источник данных о передатчиках (SatNOGS или мок в тестах).
 // Интерфейс намеренно узкий, чтобы не тащить пакет satnogs в services.
 type TransmitterProvider interface {
 	GetPrimaryTransmitter(noradID int) *TransmitterInfo
+	// GetTransmitters — активные downlink-передатчики КА по возрастанию частоты; nil — данных нет.
+	GetTransmitters(noradID int) []TransmitterInfo
 	RequestFetch(noradIDs []int)
 }
 
@@ -227,6 +260,8 @@ type SatelliteTrackingService struct {
 	// Состояние текущей группы для change detection.
 	currentGroupIDs     []int        // Отсортированные NORAD ID текущей группы (legacy).
 	currentGroupEntries []GroupEntry // (NoradID, IsVisible, AOS, LOS) для полного change detection.
+	// Пролёты ленты на час вперёд: новый пролёт в горизонте требует рассылки и без смены группы.
+	currentUpcomingEntries []GroupEntry
 
 	// pendingManualBroadcast — флаг форсированной рассылки group_update при следующем updateGroup.
 	pendingManualBroadcast bool
@@ -455,6 +490,23 @@ func (s *SatelliteTrackingService) UntrackSatellite(noradID int) {
 	slog.Info("untracked satellite", "norad_id", noradID)
 }
 
+// RangeRateKmps возвращает радиальную скорость спутника относительно наблюдателя в момент t, км/с,
+// по той же орбите, что у карты. false — спутник не отслеживается или орбита не рассчиталась.
+// Потокобезопасен: зовётся из демодулятора на каждый блок IQ.
+func (s *SatelliteTrackingService) RangeRateKmps(noradID int, t time.Time) (float64, bool) {
+	s.mu.RLock()
+	sat := s.tracked[noradID]
+	s.mu.RUnlock()
+	if sat == nil {
+		return 0, false
+	}
+	eci, err := sat.propagator.Propagate(t)
+	if err != nil {
+		return 0, false
+	}
+	return tracker.RangeRateKmps(eci, s.observer.Load()), true
+}
+
 // TrackedIDs возвращает список NORAD ID отслеживаемых спутников.
 func (s *SatelliteTrackingService) TrackedIDs() []int {
 	s.mu.RLock()
@@ -498,6 +550,31 @@ func (s *SatelliteTrackingService) GroupNoradIDs() []int {
 	return ids
 }
 
+// GroupTransmitter — передатчик КА активной группы.
+type GroupTransmitter struct {
+	NoradID int
+	TransmitterInfo
+}
+
+// GroupTransmitters возвращает активные downlink-передатчики КА группы скользящего окна
+// (тот же состав, что у Плана сеансов); nil — группы или данных SatNOGS нет.
+// Потокобезопасен: зовётся из демодулятора для маркеров на спектре.
+func (s *SatelliteTrackingService) GroupTransmitters() []GroupTransmitter {
+	s.mu.RLock()
+	provider := s.transmitterProvider
+	s.mu.RUnlock()
+	if provider == nil {
+		return nil
+	}
+	var out []GroupTransmitter
+	for _, id := range s.GroupNoradIDs() {
+		for _, tx := range provider.GetTransmitters(id) {
+			out = append(out, GroupTransmitter{NoradID: id, TransmitterInfo: tx})
+		}
+	}
+	return out
+}
+
 // updateGroup обновляет группу спутников скользящего окна.
 //
 // Алгоритм:
@@ -527,7 +604,20 @@ func (s *SatelliteTrackingService) updateGroup() {
 	groupChanged := GroupEntriesChanged(snap.oldGroupEntries, newGroupEntries)
 	primaryChanged := newPrimaryID != snap.currentID
 
+	upcoming := FindConcurrentPasses(passes, now, DefaultGroupPassHorizon)
+	upcomingEntries := GroupEntries(upcoming)
+	s.mu.Lock()
+	upcomingChanged := GroupEntriesChanged(s.currentUpcomingEntries, upcomingEntries)
+	s.currentUpcomingEntries = upcomingEntries
+	s.mu.Unlock()
+
 	if !groupChanged && !primaryChanged && !snap.forceBroadcast && !trackingExpired {
+		// Группа прежняя, но в горизонт ленты вошёл или ушёл пролёт: обновляем только событие
+		if upcomingChanged {
+			group := BuildConcurrentPassGroup(satellites, newPrimaryID)
+			group.Upcoming = upcoming
+			s.broadcastGroupUpdate(group, now, trackingIDOf(manualSel))
+		}
 		return
 	}
 
@@ -541,11 +631,8 @@ func (s *SatelliteTrackingService) updateGroup() {
 	)
 
 	group := BuildConcurrentPassGroup(satellites, newPrimaryID)
-	trackingID := 0
-	if manualSel != nil {
-		trackingID = *manualSel
-	}
-	s.broadcastGroupUpdate(group, now, trackingID)
+	group.Upcoming = upcoming
+	s.broadcastGroupUpdate(group, now, trackingIDOf(manualSel))
 
 	s.sendPostGroupNotifications(
 		snap, manualSel, trackingExpired, groupChanged, primaryChanged,
@@ -553,6 +640,14 @@ func (s *SatelliteTrackingService) updateGroup() {
 	)
 
 	s.computeAndBroadcastState(true)
+}
+
+// trackingIDOf — NORAD КА под наблюдением для события группы (0 = нет).
+func trackingIDOf(manualSel *int) int {
+	if manualSel == nil {
+		return 0
+	}
+	return *manualSel
 }
 
 // groupSnapshot — снимок состояния, необходимый для одного цикла updateGroup.
@@ -816,6 +911,12 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 				info.TxUUID = tx.UUID
 				info.TxCount = tx.Count
 			}
+			for _, tx := range txProvider.GetTransmitters(sat.NoradID) {
+				info.Transmitters = append(info.Transmitters, groupTxInfo{
+					UUID: tx.UUID, FreqHz: tx.FreqHz, Mode: tx.Mode, Modulation: tx.Modulation,
+					Baud: tx.Baud, Description: tx.Description,
+				})
+			}
 		}
 		sats[i] = info
 	}
@@ -828,7 +929,8 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 			Start: group.TimeWindow.Start,
 			End:   group.TimeWindow.End,
 		},
-		TS: now.UnixMilli(),
+		Timeline: timelineOf(group.Upcoming),
+		TS:       now.UnixMilli(),
 	}
 
 	data, err := json.Marshal(event)
@@ -838,6 +940,26 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 	}
 
 	s.hub.Broadcast("satellite_group_update", data)
+}
+
+// timelineOf — пролёты ленты для события группы.
+func timelineOf(upcoming []PassInfo) []timelinePass {
+	if len(upcoming) == 0 {
+		return nil
+	}
+	out := make([]timelinePass, len(upcoming))
+	for i, u := range upcoming {
+		out[i] = timelinePass{
+			NoradID:  u.NoradID,
+			SatName:  u.SatName,
+			SatAlias: u.Pass.SatAlias,
+			AOS:      u.Pass.AOS,
+			LOS:      u.Pass.LOS,
+			TCA:      u.Pass.TCA,
+			TCAEl:    roundTo(u.Pass.TCAEl, 1),
+		}
+	}
+	return out
 }
 
 // sendClientStateRestore отправляет per-client событие client_state_restore.

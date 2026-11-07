@@ -1,11 +1,10 @@
 /* ===== Ручной режим — внутренняя сетка #layout-manual =====
    Видимость #layout-manual — main.css по body.mode-manual.
 
-   Сверху сквозной таймлайн пролётов на всю ширину. Под ним лента передатчиков
-   и область вкладок; вкладки — узкая рейка слева от графиков, подписи
-   вертикально. Вкладка и есть режим SDR: «Панорама» — обзор, «Спектр» и
-   «Антенна» — приём (ADR-004 §4.3). План сеансов и SkyView живут в правой
-   панели, которую Ручной сворачивает (app.js).
+   Сверху таймлайн пролётов в ширину спектра (рейка + графики). Колонка
+   «Приёмник» на «Спектре»/«Антенне» начинается от верхнего ряда и идёт до низа.
+   Вкладки — узкая рейка слева; «Панорама» — обзор, «Спектр» и «Антенна» — приём
+   (ADR-004 §4.3). План сеансов и SkyView — правая панель (сворачивается в Ручном).
 
    Высоты — clamp() от vh, остаток забирает главный прибор вкладки. */
 
@@ -20,8 +19,10 @@
     padding: 4px;
     gap: 4px;
     grid-template-columns: var(--ml-tab-rail) minmax(0, 1fr);
+    /* Таймлайн: горки El×время; 8vh/104px сплющивали пролёты на широком экране */
+    --ml-timeline-h: clamp(100px, 14vh, 180px);
     grid-template-rows:
-        clamp(60px, 8vh, 104px)
+        var(--ml-timeline-h)
         auto
         minmax(0, 1fr);
     grid-template-areas:
@@ -239,30 +240,6 @@
     cursor: grab;
 }
 
-/* Ручки краёв: широкая невидимая зона захвата, видимая метка сверху */
-.ml-chan__handle {
-    position: absolute;
-    top: 0;
-    bottom: 0;
-    width: 9px;
-    pointer-events: auto;
-    cursor: ew-resize;
-}
-
-.ml-chan__handle::after {
-    content: '';
-    position: absolute;
-    top: 14px;
-    left: 3px;
-    width: 3px;
-    height: 16px;
-    border-radius: 2px;
-    background: var(--ml-chan-color);
-}
-
-.ml-chan__handle--l { left: -5px; }
-.ml-chan__handle--r { right: -5px; }
-
 .ml-chan__label {
     position: absolute;
     top: 0;
@@ -279,6 +256,46 @@
 
 .ml-chan__label:empty {
     display: none;
+}
+
+/* Ожидаемые передатчики на «Спектре»: пунктир и подпись, приглушённо — энергия не проверяется */
+.ml-txmark {
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+}
+
+.ml-txmark__line {
+    position: absolute;
+    width: 0;
+    /* Цвет КА задаёт JS через --ml-txmark-color; иначе акцент темы */
+    border-left: 1.5px dashed color-mix(in srgb, var(--ml-txmark-color, var(--accent-primary)) 88%, transparent);
+}
+
+.ml-txmark__label {
+    position: absolute;
+    max-width: 140px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    line-height: 14px;
+    white-space: nowrap;
+    color: var(--ml-txmark-color, var(--text-primary));
+    background: color-mix(in srgb, var(--ml-txmark-color, var(--accent-primary)) 28%, var(--bg-primary));
+    border: 1px solid color-mix(in srgb, var(--ml-txmark-color, var(--accent-primary)) 65%, transparent);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    pointer-events: auto;
+}
+
+.ml-txmark__label:hover,
+.ml-txmark__label:focus-visible {
+    color: var(--text-primary);
+    border-color: var(--ml-txmark-color, var(--accent-primary));
+    background: color-mix(in srgb, var(--ml-txmark-color, var(--accent-primary)) 40%, var(--bg-primary));
 }
 
 /* Канал за краем окна приёмника */
@@ -350,6 +367,28 @@
     border-radius: var(--radius-sm);
 }
 
+/* «1:1» без масштаба: сбрасывать нечего */
+.ml-spec-mode__btn:disabled,
+.ml-spec-mode__btn:disabled:hover {
+    color: var(--text-muted);
+    opacity: 0.5;
+    cursor: default;
+}
+
+/* Полоса разрешения спектра: справка, не кнопка */
+.ml-spec-mode__rbw {
+    align-self: center;
+    padding: 0 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: help;
+}
+
+.ml-spec-mode__rbw:empty {
+    display: none;
+}
+
 .ml-spec-mode__n {
     background: var(--bg-elevated, var(--bg-primary));
     border: 1px solid var(--border-color);
@@ -372,6 +411,45 @@
     flex: 4 1 0;
     min-height: 0;
     overflow: hidden;
+}
+
+/* Линия измерителя под курсором. События пропускает: перетаскивание спектра живёт на канвасе */
+.ml-cursor {
+    position: absolute;
+    inset: 0;
+    z-index: 3;
+    pointer-events: none;
+    overflow: hidden;
+}
+.ml-cursor[hidden] { display: none; }
+.ml-cursor__line {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: var(--spectrum-axis-text);
+    opacity: 0.85;
+}
+.ml-cursor__mark {
+    position: absolute;
+    width: 7px;
+    height: 7px;
+    margin: -4px 0 0 -4px;
+    border: 1px solid var(--spectrum-axis-text);
+    border-radius: 50%;
+    background: var(--spectrum-plot-bg);
+}
+.ml-cursor__tag {
+    position: absolute;
+    padding: 1px 6px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--spectrum-plot-bg) 88%, transparent);
+    color: var(--spectrum-axis-text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    line-height: 1.4;
 }
 
 /* ───────────── Лента передатчиков (над вкладками) ─────────────
@@ -716,8 +794,9 @@
 /* ── Индикатор-регулятор частоты (freq-dial.js) ───────────────────────────
    Стилизован под газоразрядный индикатор: тёмное «окно лампы», светящиеся
    цифры, приглушённые незначащие нули. Он же орган управления: рамка
-   курсора показывает разряд, который меняют кнопки −/+, а SET отдаёт
-   набранную частоту приёмнику.
+   курсора показывает разряд. Его ставят кликом; кнопки −/+ и колесо меняют
+   именно его. Колесо сразу отдаёт частоту приёмнику, SET — частоту,
+   набранную кнопками и цифрами.
    Разметку строит JS, поэтому здесь только .fdial*. */
 /* Два ряда: разряды во всю ширину сверху, широкие клавиши под ними —
    так и цифры крупные, и по кнопкам легко попадать мышью.
@@ -1224,6 +1303,11 @@
     border-color: var(--accent-primary);
 }
 
+/* Ширина, которую у профиля не слышно: видна, но не выбирается */
+.ml-rx-panel__sel option:disabled {
+    color: var(--text-muted);
+}
+
 .ml-rx-panel__unit {
     font-family: var(--font-mono);
     font-size: var(--ml-fs-label, 13px);
@@ -1249,6 +1333,12 @@
 .ml-rx-panel__pill.is-on {
     border-color: var(--accent-primary);
     color: var(--accent-primary);
+}
+
+.ml-rx-panel__range {
+    flex: 1 1 auto;
+    min-width: 0;
+    accent-color: var(--accent-primary);
 }
 
 .ml-rx-panel__hr {
@@ -1388,19 +1478,18 @@
 }
 
 /* ───────────── Вкладка «Спектр»: спектр и результат | колонка приёмника ─────────────
-   Колонка приёмника встаёт вровень с лентой передатчиков и идёт до низа:
-   иначе на 1366×768 ей не хватает высоты. Для этого обёртки панелей
-   растворяются, и блоки вкладки раскладываются прямо по сетке #layout-manual. */
+   Приёмник от верхнего ряда (рядом с таймлайном) до низа; таймлайн только
+   над спектром, не под колонкой. Обёртки панелей растворяются в сетку. */
 
 #layout-manual[data-tab="spectrum"] {
     grid-template-columns: var(--ml-tab-rail) minmax(0, 1fr) var(--ml-side-width);
     grid-template-rows:
-        clamp(60px, 8vh, 104px)
+        var(--ml-timeline-h)
         auto
         minmax(0, 4fr)
         minmax(0, 2fr);
     grid-template-areas:
-        "timeline timeline timeline"
+        "timeline timeline ctl"
         "tabbar   txlist   ctl"
         "tabbar   spectrum ctl"
         "tabbar   result   ctl";
@@ -1421,14 +1510,14 @@
     display: none;
 }
 
-/* На «Антенне» ленты нет: колонка приёмника начинается сразу под таймлайном */
+/* На «Антенне» ленты нет: приёмник от верха, таймлайн в ширину приборов */
 #layout-manual[data-tab="antenna"] {
     grid-template-columns: var(--ml-tab-rail) minmax(0, 1fr) var(--ml-side-width);
     grid-template-rows:
-        clamp(60px, 8vh, 104px)
+        var(--ml-timeline-h)
         minmax(0, 1fr);
     grid-template-areas:
-        "timeline timeline timeline"
+        "timeline timeline ctl"
         "tabbar   panes    ctl";
 }
 

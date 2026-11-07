@@ -9,6 +9,7 @@ package rtlsdr
 
 import (
 	"fmt"
+	"math"
 	"time"
 )
 
@@ -65,9 +66,16 @@ var firDefault = [16]int{
 type chip struct {
 	c        controller
 	repeater bool
+	// ppm — уход кварца в миллионных долях: на столько он быстрее номинала.
+	ppm int
 }
 
 func newChip(c controller) *chip { return &chip{c: c} }
+
+// xtal — частота кварца с поправкой ppm: от неё считаются ПЧ демодулятора и синтезатор тюнера.
+func (c *chip) xtal() uint32 {
+	return uint32(math.Round(xtalHz * (1 + float64(c.ppm)/1e6)))
+}
 
 // validSampleRate — частота, на которую резамплер настраивается без артефактов.
 func validSampleRate(hz uint32) bool {
@@ -237,11 +245,13 @@ func (c *chip) setSampleRate(hz uint32) (uint32, error) {
 	if err := c.writeDemod(1, 0xa1, uint16(ratio), 2); err != nil {
 		return 0, err
 	}
-	// Поправка частоты отсчётов в ppm: пока ноль.
-	if err := c.writeDemod(1, 0x3f, 0x00, 1); err != nil {
+	// Поправка частоты отсчётов: −ppm·2^24/10^6, 14 бит со знаком; делитель выше считается
+	// от номинального кварца, уход исправляет этот регистр.
+	offs := int32(-int64(c.ppm) * (1 << 24) / 1_000_000)
+	if err := c.writeDemod(1, 0x3f, uint16(offs)&0xff, 1); err != nil {
 		return 0, err
 	}
-	if err := c.writeDemod(1, 0x3e, 0x00, 1); err != nil {
+	if err := c.writeDemod(1, 0x3e, uint16(offs>>8)&0x3f, 1); err != nil {
 		return 0, err
 	}
 	if err := c.writeDemod(1, 0x01, 0x14, 1); err != nil {
@@ -255,7 +265,7 @@ func (c *chip) setSampleRate(hz uint32) (uint32, error) {
 
 // setIFFreq задаёт ПЧ тюнера: демодулятор переносит её в ноль, 22 бита со знаком минус.
 func (c *chip) setIFFreq(hz uint32) error {
-	v := -int32(uint64(hz) << 22 / xtalHz)
+	v := -int32(uint64(hz) << 22 / uint64(c.xtal()))
 	if err := c.writeDemod(1, 0x19, uint16(v>>16)&0x3f, 1); err != nil {
 		return err
 	}

@@ -8,7 +8,8 @@
 //   0 magic 'SSTM' | 4 версия | 5 тип данных | 6 режим отображения | 7 резерв
 //   8 timestamp_ms (u64) | 16 центр, Гц (i64) | 24 полоса, Гц (i64)
 //   32 длина полезной нагрузки (u32) | 36 номер кадра (u32)
-// Полезная нагрузка FFT — float32 dBFS; у heartbeat её нет.
+// Полезная нагрузка FFT — float32 dBFS; звука (/audio) — int16, отдаётся в долях
+// полной шкалы, центр — частота канала, полоса — частота отсчётов звука; у heartbeat её нет.
 
 'use strict';
 
@@ -16,6 +17,7 @@
     const HEADER_SIZE = 40;
     const MAGIC = 0x4D545353;
     const DATA_TYPE_FFT_DB = 0x01;
+    const DATA_TYPE_PCM_I16 = 0x03;
     const TWO_32 = 0x100000000;
     const RECONNECT_MIN_MS = 1000;
     const RECONNECT_MAX_MS = 15000;
@@ -53,7 +55,7 @@
 
     /**
      * @param {Uint8Array} chunk
-     * @returns {Array<{header: Object, values: ?Float32Array}>}
+     * @returns {Array<{header: Object, values: ?Float32Array}>} values — бины FFT или звук
      * @throws {Error} если поток рассинхронизирован (нет magic в начале кадра)
      */
     FrameReader.prototype.push = function(chunk) {
@@ -70,11 +72,15 @@
             const end = off + HEADER_SIZE + header.payloadLen;
             if (end > this._len) { break; }
             let values = null;
+            const base = off + HEADER_SIZE;
             if (header.dataType === DATA_TYPE_FFT_DB) {
                 const n = header.payloadLen >> 2;
                 values = new Float32Array(n);
-                const base = off + HEADER_SIZE;
                 for (let i = 0; i < n; i++) { values[i] = dv.getFloat32(base + i * 4, true); }
+            } else if (header.dataType === DATA_TYPE_PCM_I16) {
+                const n = header.payloadLen >> 1;
+                values = new Float32Array(n);
+                for (let i = 0; i < n; i++) { values[i] = dv.getInt16(base + i * 2, true) / 32768; }
             }
             frames.push({ header: header, values: values });
             off = end;
@@ -225,6 +231,29 @@
     };
 
     /**
+     * Измеритель под курсором. Доля frac — положение указателя на графике, 0 у левого края.
+     * Частота — точка оси под указателем. Уровень — ближайший бин линии (бин i на доле i / (n - 1)).
+     * @param {?Float32Array} dbfs — видимые бины, уже в единицах экрана
+     * @param {number} centerHz
+     * @param {number} spanHz
+     * @param {number} frac
+     * @returns {?{freqHz: number, dbfs: number, index: number}}
+     */
+    function cursorSample(dbfs, centerHz, spanHz, frac) {
+        if (!dbfs || dbfs.length < 2 || !(spanHz > 0)) { return null; }
+        if (typeof frac !== 'number' || !isFinite(frac) || frac < 0 || frac > 1) { return null; }
+        const last = dbfs.length - 1;
+        let idx = Math.round(frac * last);
+        if (idx < 0) { idx = 0; }
+        if (idx > last) { idx = last; }
+        return {
+            freqHz: centerHz - spanHz / 2 + frac * spanHz,
+            dbfs: dbfs[idx],
+            index: idx,
+        };
+    }
+
+    /**
      * Маркер на пике кадра. Частота бина — как у перекрестья на спектре (от левого края полосы),
      * шумовая полка — медиана кадра, как у AutoRange. С/Ш — пик над полкой в одном бине БПФ.
      * @param {?Float32Array} dbfs
@@ -245,6 +274,54 @@
             dbfs: dbfs[idx],
             floorDbfs: floor,
             snrDb: dbfs[idx] - floor,
+        };
+    }
+
+    // Окно масштаба спектра: {offsetHz, spanHz} — центр видимой части от центра
+    // приёмника и её ширина; null — видна вся полоса.
+
+    /** Окно целиком внутри полосы приёмника. */
+    function clampView(offsetHz, spanHz, fullSpanHz) {
+        const limit = Math.max(0, (fullSpanHz - spanHz) / 2);
+        return { offsetHz: Math.max(-limit, Math.min(limit, offsetHz)), spanHz: spanHz };
+    }
+
+    /**
+     * Масштаб в factor раз (больше 1 — крупнее) вокруг частоты atHz от центра приёмника:
+     * точка под указателем остаётся на месте.
+     * @returns {?{offsetHz: number, spanHz: number}} null, если окно дошло до всей полосы
+     */
+    function zoomView(view, fullSpanHz, factor, atHz, minSpanHz) {
+        const cur = view || { offsetHz: 0, spanHz: fullSpanHz };
+        let span = cur.spanHz / factor;
+        if (!(span < fullSpanHz)) { return null; }
+        span = Math.max(span, Math.min(minSpanHz, fullSpanHz));
+        const offset = atHz - (atHz - cur.offsetHz) * span / cur.spanHz;
+        return clampView(offset, span, fullSpanHz);
+    }
+
+    /** Сдвиг окна на dHz; вся полоса не сдвигается. */
+    function panView(view, fullSpanHz, dHz) {
+        if (!view) { return null; }
+        return clampView(view.offsetHz + dHz, view.spanHz, fullSpanHz);
+    }
+
+    /**
+     * Бины кадра, попавшие в окно. Центр и ширина пересчитаны по сетке бинов:
+     * крайние бины ложатся ровно на края графика.
+     * @param {number} nBins — бинов в кадре на всю полосу
+     * @returns {{start: number, count: number, offsetHz: number, spanHz: number}}
+     */
+    function viewSlice(nBins, fullSpanHz, view) {
+        const binHz = fullSpanHz / nBins;
+        const count = Math.min(nBins, Math.max(2, Math.round(view.spanHz / binHz) + 1));
+        const first = Math.round((view.offsetHz - view.spanHz / 2 + fullSpanHz / 2) / binHz);
+        const start = Math.max(0, Math.min(nBins - count, first));
+        return {
+            start: start,
+            count: count,
+            offsetHz: -fullSpanHz / 2 + (start + (count - 1) / 2) * binHz,
+            spanHz: (count - 1) * binHz,
         };
     }
 
@@ -355,8 +432,12 @@
     SpectrumStream.AutoRange = AutoRange;
     SpectrumStream.DisplaySmooth = DisplaySmooth;
     SpectrumStream.markerReadout = markerReadout;
+    SpectrumStream.cursorSample = cursorSample;
     SpectrumStream.dbmOffset = dbmOffset;
     SpectrumStream.shiftLevels = shiftLevels;
+    SpectrumStream.zoomView = zoomView;
+    SpectrumStream.panView = panView;
+    SpectrumStream.viewSlice = viewSlice;
 
     if (typeof window !== 'undefined') {
         window.SpectrumStream = SpectrumStream;
@@ -371,8 +452,12 @@
             AutoRange: AutoRange,
             DisplaySmooth: DisplaySmooth,
             markerReadout: markerReadout,
+            cursorSample: cursorSample,
             dbmOffset: dbmOffset,
             shiftLevels: shiftLevels,
+            zoomView: zoomView,
+            panView: panView,
+            viewSlice: viewSlice,
         };
     }
 })();

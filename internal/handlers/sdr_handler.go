@@ -51,10 +51,12 @@ type TuneRequest struct {
 }
 
 // StatusResponse — состояние приёмника тракта вместе с настройками демодулятора.
-// sample_rate — частота тракта из хаба (известна и без потока), sample_rates — варианты «Полосы».
+// sample_rate — частота тракта из хаба (известна и без потока), sample_rates — варианты «Полосы»,
+// spans_hz — видимая ширина спектра для каждого из них: края окна сервер отрезает.
 type StatusResponse struct {
 	sdr.ReceiverStatus
 	SampleRates []uint32            `json:"sample_rates"`
+	SpansHz     []uint32            `json:"spans_hz"`
 	Channel     sdr.ChannelSettings `json:"channel"`
 }
 
@@ -99,9 +101,14 @@ func (h *SDRHandler) status(pathID string, receiver sdr.Receiver) (StatusRespons
 	if err != nil {
 		return StatusResponse{}, err
 	}
+	caps := receiver.Capabilities()
+	spans := make([]uint32, len(rates))
+	for i, r := range rates {
+		spans[i] = caps.UsableBandHz(r)
+	}
 	st := receiver.Status()
 	st.SampleRate = rate
-	return StatusResponse{ReceiverStatus: st, SampleRates: rates, Channel: ch}, nil
+	return StatusResponse{ReceiverStatus: st, SampleRates: rates, SpansHz: spans, Channel: ch}, nil
 }
 
 // Tune перестраивает приёмник на новую частоту (и опционально меняет усиление).
@@ -219,7 +226,7 @@ func (h *SDRHandler) SetReceiver(w http.ResponseWriter, r *http.Request) {
 			ErrorResponse{Error: "receiver not available: " + err.Error()})
 		return
 	}
-	if err := channel.Validate(req.SampleRateHz); err != nil {
+	if err := channel.Validate(receiver.Capabilities().UsableBandHz(req.SampleRateHz)); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
@@ -285,13 +292,13 @@ func (h *SDRHandler) SetChannel(w http.ResponseWriter, r *http.Request) {
 			ErrorResponse{Error: "receiver not available: " + err.Error()})
 		return
 	}
-	rate, err := h.hub.SampleRate(req.RadioPath)
+	band, err := h.hub.UsableBand(req.RadioPath)
 	if err != nil {
 		writeJSON(w, http.StatusBadRequest,
 			ErrorResponse{Error: "receiver not available: " + err.Error()})
 		return
 	}
-	if err := req.ChannelSettings.Validate(rate); err != nil {
+	if err := req.ChannelSettings.Validate(band); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
