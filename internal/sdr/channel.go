@@ -32,7 +32,9 @@ const WFMBandwidthHz = 200_000
 var DemodMaxBandwidthHz = map[string]uint32{"usb": 4_000, "lsb": 4_000, "cw": 1_000}
 
 // ChannelSettings — что демодулятор вырезает из полосы приёмника и как принимает:
-// сдвиг от центра настройки, ширина «Полосы канала», порог и демодулятор.
+// ширина «Полосы канала», порог и демодулятор. Панель держит сдвиг от центра в нуле:
+// слушают частоту приёмника, поправка только Доплером. Поле сдвига остаётся, чтобы
+// разбор записи мог вырезать несущую не из середины файла.
 // Хранятся в памяти хаба на тракт и после перезапуска сервера возвращаются к значениям по умолчанию.
 type ChannelSettings struct {
 	OffsetHz    int64  `json:"offset_hz"`
@@ -46,9 +48,11 @@ type ChannelSettings struct {
 	DemodOff bool `json:"demod_off,omitempty"`
 	// DopplerNorad — КА, за Доплером которого канал следует по его орбите; 0 — спутника ещё нет.
 	DopplerNorad int `json:"doppler_norad,omitempty"`
-	// DopplerAuto — канал следует за Доплером настроенного КА. Ложь — сдвиг фиксированный.
-	// Поле без omitempty: ложь должна дойти до панели, иначе «Фикс.» не отличить от значения по умолчанию.
+	// DopplerAuto — канал следует за Доплером настроенного КА. Ложь — поправка DopplerManualHz.
+	// Поле без omitempty: ложь должна дойти до панели, иначе «Вручную» не отличить от значения по умолчанию.
 	DopplerAuto bool `json:"doppler_auto"`
+	// DopplerManualHz — поправка оператора, Гц. В режиме «Авто» не применяется: сдвиг считает орбита.
+	DopplerManualHz int64 `json:"doppler_manual_hz"`
 }
 
 // DefaultChannelSettings — настройки до первого включения: AFSK 1200, как у маяка имитатора.
@@ -71,13 +75,18 @@ func (c ChannelSettings) Validate(sampleRate uint32) error {
 			min(sampleRate, limit))
 	}
 	half := int64(sampleRate) / 2
-	edge := c.OffsetHz
+	// В «Авто» орбита двигает канал сама. Вручную к сдвигу прибавляется поправка оператора.
+	shift := c.OffsetHz
+	if !c.DopplerAuto {
+		shift += c.DopplerManualHz
+	}
+	edge := shift
 	if edge < 0 {
 		edge = -edge
 	}
 	if 2*edge+int64(c.BandwidthHz) > 2*half {
 		return fmt.Errorf("%w: channel %d±%d Hz outside band ±%d Hz",
-			ErrInvalidChannel, c.OffsetHz, c.BandwidthHz/2, half)
+			ErrInvalidChannel, shift, c.BandwidthHz/2, half)
 	}
 	if math.IsNaN(c.SquelchDBFS) || math.IsInf(c.SquelchDBFS, 0) || c.SquelchDBFS > 0 {
 		return fmt.Errorf("%w: squelch %v dBFS must be finite and not above 0", ErrInvalidChannel, c.SquelchDBFS)

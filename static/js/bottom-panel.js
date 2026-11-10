@@ -148,6 +148,17 @@
         return niceSteps[niceSteps.length - 1];
     }
 
+    /**
+     * Подпись середины спектра: чем уже окно, тем больше знаков после запятой.
+     * @param {number} centerMHz
+     * @param {number} spanMHz
+     * @returns {string}
+     */
+    function centerFreqLabel(centerMHz, spanMHz) {
+        const digits = spanMHz >= 1 ? 3 : (spanMHz >= 0.1 ? 4 : 5);
+        return centerMHz.toFixed(digits);
+    }
+
     // cssVar() определена глобально в css-vars.js
 
     // ════════════════════════════════════════════════════════════════════════
@@ -285,14 +296,52 @@
         if (w < 10) { w = this._canvas.offsetWidth || 300; }
         if (h < 10) { h = this._canvas.offsetHeight || 150; }
         if (w < 2 || h < 2) { return false; }
-        const resized = this._canvas.width !== w || this._canvas.height !== h;
+        // Дрожание вёрстки на пиксель не трогает буфер: иначе история гаснет сама.
+        const dw = Math.abs(this._canvas.width - w);
+        const dh = Math.abs(this._canvas.height - h);
+        const sized = this._canvas.width >= 2 && this._canvas.height >= 2;
+        if (sized && dw <= 1 && dh <= 1) {
+            if (forceScale) { this._drawFreqScale(this._canvas.width); }
+            return true;
+        }
+        const resized = dw !== 0 || dh !== 0;
         if (resized) {
+            const prev = this._imageData;
             this._canvas.width = w;
             this._canvas.height = h;
-            this._imageData = null;
+            // Настоящая смена размера переносит уже нарисованные строки, а не начинает с пустого.
+            this._imageData = prev && prev.width > 1 && prev.height > 1
+                ? this._carryImage(prev, w, h) : null;
         }
         if (resized || forceScale) { this._drawFreqScale(w); }
         return true;
+    };
+
+    /**
+     * Старая картинка в новый размер: верх (сейчас) остаётся наверху, лишние края — фон.
+     * @param {ImageData} prev
+     * @param {number} w
+     * @param {number} h
+     * @returns {ImageData}
+     */
+    WaterfallView.prototype._carryImage = function(prev, w, h) {
+        const next = this._ctx.createImageData(w, h);
+        const d = next.data;
+        const cold = cssVarRgbHex('--waterfall-cold-bg', '#000000');
+        for (let i = 0; i < d.length; i += 4) {
+            d[i] = cold[0];
+            d[i + 1] = cold[1];
+            d[i + 2] = cold[2];
+            d[i + 3] = 255;
+        }
+        const copyW = Math.min(prev.width, w);
+        const copyH = Math.min(prev.height, h);
+        const src = prev.data;
+        for (let y = 0; y < copyH; y++) {
+            const from = y * prev.width * 4;
+            d.set(src.subarray(from, from + copyW * 4), y * w * 4);
+        }
+        return next;
     };
 
     // Шкала частот на отдельном canvas (над водопадом «Сопровождение»)
@@ -321,14 +370,26 @@
         ctx.textAlign = 'center';
         ctx.textBaseline = 'top';
         const decimals = stepMHz >= 1 ? 1 : (stepMHz >= 0.1 ? 2 : 3);
+        const centerX = ml + plotW / 2;
+        const centerText = centerFreqLabel(this._freqCenterMHz, this._freqSpanMHz);
+        ctx.font = 'bold 11px monospace';
+        const centerHalf = ctx.measureText(centerText).width / 2 + 8;
+        ctx.font = '10px monospace';
         for (let f = Math.ceil(freqMin / stepMHz) * stepMHz; f <= freqMax; f += stepMHz) {
             const x = ml + ((f - freqMin) / (freqMax - freqMin)) * plotW;
             ctx.beginPath();
             ctx.moveTo(x, 0);
             ctx.lineTo(x, 6);
             ctx.stroke();
+            if (Math.abs(x - centerX) < centerHalf) { continue; }
             ctx.fillText(f.toFixed(decimals), x, 8);
         }
+        // Середина окна — частота приёмника. Линию центра рисует панель, и только
+        // пока демодулятор выключен: включённый показывает её своей чертой.
+        ctx.font = 'bold 11px monospace';
+        ctx.fillStyle = cssVar('--text-primary', '#fff');
+        ctx.textBaseline = 'middle';
+        ctx.fillText(centerText, centerX, 9);
         if (this._headerFreqId) {
             const el = document.getElementById(this._headerFreqId);
             if (el) { el.textContent = freqMin.toFixed(3) + ' \u2013 ' + freqMax.toFixed(3) + ' MHz'; }

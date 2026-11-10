@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('assert');
-const { markerX, labelRows, markersWithLabels } = require('./tx-markers.js');
+const { markerX, labelRows, markersWithLabels, satNames } = require('./tx-markers.js');
 
 let passed = 0;
 let failed = 0;
@@ -91,6 +91,17 @@ test('labels markers from the ribbon by uuid, satellite · modulation', () => {
     assert.strictEqual(out[1].label, 'OSCAR 7', 'no ribbon entry: satellite name only');
     assert.strictEqual(out[1].nominalHz, 436400500);
     assert.strictEqual(out[1].tx, null);
+});
+
+console.log('\n— satNames —');
+
+test('names by NORAD from satellites and timeline, satellites first, alias when no name', () => {
+    const names = satNames({
+        satellites: [{ norad_id: 25544, sat_name: 'ISS' }, { norad_id: 43017, sat_alias: 'AO-91' }],
+        timeline: [{ norad_id: 25544, sat_name: 'ZARYA' }, { norad_id: 7530, sat_name: 'OSCAR 7' }],
+    });
+    assert.deepStrictEqual(names, { 25544: 'ISS', 43017: 'AO-91', 7530: 'OSCAR 7' });
+    assert.deepStrictEqual(satNames(null), {});
 });
 
 test('ignores malformed markers', () => {

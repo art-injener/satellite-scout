@@ -56,6 +56,7 @@ func (d dopplerStub) RangeRateKmps(norad int, _ time.Time) (float64, bool) {
 func TestService_ReportsDopplerOfTheSatellite(t *testing.T) {
 	const norad = 25544
 	s := voiceSettings("fm", 15_000, -90)
+	s.DopplerAuto = true
 	s.DopplerNorad = norad
 	frames := toFrames(fmToneAir(0.3), testRate, sdr.DefaultBlockSize, 0)
 
@@ -93,5 +94,34 @@ func TestService_ReportsDopplerOfTheSatellite(t *testing.T) {
 				t.Errorf("doppler_hz=%v, want %.0f", got, want)
 			}
 		})
+	}
+}
+
+// Manual correction is the channel shift. A satellite number on the same settings does not replace it.
+func TestService_ManualDopplerIsTheCorrection(t *testing.T) {
+	const manual = 2500.0
+	s := voiceSettings("fm", 15_000, -90)
+	s.DopplerAuto = false
+	s.DopplerManualHz = int64(manual)
+	s.DopplerNorad = 25544
+	frames := toFrames(fmToneAir(0.3), testRate, sdr.DefaultBlockSize, 0)
+
+	sink := &sinkStub{}
+	svc := NewService(&channelsStub{s: s}, sink.emit).WithDoppler(dopplerStub{norad: 25544, rr: -5})
+	ch := make(chan sdr.IQFrame, len(frames))
+	for _, f := range frames {
+		ch <- f
+	}
+	close(ch)
+	svc.Run("radio_path_0", ch)
+
+	last := sink.ofType(EventStatus)
+	got := last[len(last)-1]["doppler_hz"]
+	g, ok := got.(float64)
+	if !ok || math.Abs(g-manual) > 1 {
+		t.Errorf("doppler_hz=%v, want %.0f from the operator, not the orbit", got, manual)
+	}
+	if last[len(last)-1]["doppler_manual_hz"] != manual {
+		t.Errorf("doppler_manual_hz=%v, want %.0f", last[len(last)-1]["doppler_manual_hz"], manual)
 	}
 }

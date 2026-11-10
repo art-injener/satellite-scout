@@ -7,7 +7,7 @@
  *   - channel box on the plot: position, clipping at plot edges, outside marker
  *   - click position to channel offset, rounding
  *   - offset clamping so the channel stays inside the receiver band
- *   - dragging the fill moves the channel and keeps the width
+ *   - click reports the frequency under the pointer; drag pans the picture
  *   - absolute channel edges as text
  *   - doppler shift of the whole channel, SSB passband beside the carrier
  */
@@ -140,8 +140,11 @@ test('hidden channel mark removes the lines and the label', () => {
     ov.setVisible(false);
     assert.strictEqual(ov._root.hidden, true, 'lines and the label are hidden');
     assert.strictEqual(ov._arrow.hidden, true);
+    assert.strictEqual(ov._guide.hidden, false, 'the centre guide shows while the demodulator is off');
+    assert.strictEqual(ov._guide.style.left, '532px');
     ov.setVisible(true);
     assert.strictEqual(ov._root.hidden, false);
+    assert.strictEqual(ov._guide.hidden, true, 'the demodulator stripe is the centre');
     ov.destroy();
 });
 
@@ -182,15 +185,28 @@ test('the fill follows the chosen width at once, wider too', () => {
     ov.destroy();
 });
 
-test('dragging the fill moves the channel and keeps its width', () => {
-    let got = null;
-    const ov = makeOverlay((off, bw) => { got = [off, bw]; });
-    ov.setChannel(0, 15_000);
-    ov._drag = { mode: 'move', x0: 532, xLast: 532, moved: false, offset0: 0 };
-    ov._dragMove({ clientX: 542 });
-    ov._dragEnd({ clientX: 542 });
-    assert.strictEqual(ov._ch.bandwidthHz, 15_000);
-    assert.deepStrictEqual(got, [10_000, 15_000]);
+test('click reports the frequency under the pointer and does not move the channel', () => {
+    let tuned = null;
+    const ov = makeOverlay();
+    ov._opts.onTune = (hz) => { tuned = hz; };
+    ov.setChannel(0, 2_000);
+    ov.setShift(5_000);
+    ov._drag = { mode: 'click', x0: 632, moved: false, offset0: 0, target: null };
+    ov._dragEnd({ clientX: 632 });
+    assert.strictEqual(ov._ch.offsetHz, 0);
+    assert.strictEqual(tuned, 436_300_000);
+    ov.destroy();
+});
+
+test('USB fills the right half of the column, LSB the left', () => {
+    const ov = makeOverlay();
+    ov.setSide('usb');
+    assert.strictEqual(ov._side.hidden, false);
+    assert.ok(ov._side.className.indexOf('is-usb') >= 0);
+    ov.setSide('lsb');
+    assert.ok(ov._side.className.indexOf('is-lsb') >= 0);
+    ov.setSide('');
+    assert.strictEqual(ov._side.hidden, true);
     ov.destroy();
 });
 
@@ -202,16 +218,6 @@ test('a lower limit narrows the channel already drawn', () => {
     ov.destroy();
 });
 
-test('click puts the channel center under the pointer, the setting stays without doppler', () => {
-    let got = null;
-    const ov = makeOverlay((off, bw) => { got = [off, bw]; });
-    ov.setChannel(0, 2_000);
-    ov.setShift(5_000);
-    ov._drag = { mode: 'click', x0: 632, moved: false, offset0: 0 };
-    ov._dragEnd({ clientX: 632 });
-    assert.deepStrictEqual(got, [95_000, 2_000]);
-    ov.destroy();
-});
 
 test('setShift with bad values keeps the channel unshifted', () => {
     const ov = makeOverlay();

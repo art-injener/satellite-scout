@@ -99,24 +99,41 @@ function hslToHex(h, s, l) {
 }
 
 /**
- * Палитра 12 цветов для трасс — равномерный шаг hue 30° (HSL).
- * Умеренная насыщенность: читаемо на карте, без кислотного неона.
- * Не для tracking/selected. Назначение — greedy по дистанции от занятых.
+ * Два кольца по 12 оттенков, шаг hue 30°.
+ * Второе кольцо темнее и входит в ход, только когда первое занято:
+ * на тонкой трассе соседние hue сливаются, а разная светлота читается.
+ * @param {readonly {l: number, s: number, hard?: boolean, hardL?: number, hardS?: number}[]} rings
+ * @returns {readonly string[]}
  */
-const _PALETTE_DARK = Object.freeze(
-    Array.from({ length: 12 }, (_, i) => hslToHex(i * 30, 68, 64))
-);
+function buildTrackPalette(rings) {
+    const colors = [];
+    for (let r = 0; r < rings.length; r++) {
+        const spec = rings[r];
+        for (let i = 0; i < 12; i++) {
+            const h = i * 30;
+            const hard = spec.hard && h >= 30 && h <= 180;
+            const l = hard ? spec.hardL : spec.l;
+            const s = hard ? spec.hardS : spec.s;
+            colors.push(hslToHex(h, s, l));
+        }
+    }
+    return Object.freeze(colors);
+}
 
-/** Светлая тема: живые mid-тона; жёлто-зелёно-бирюзовый ряд чуть темнее для читаемости. */
-const _PALETTE_LIGHT = Object.freeze(
-    Array.from({ length: 12 }, (_, i) => {
-        const h = i * 30;
-        const hardBand = (h >= 30 && h <= 180);
-        const l = hardBand ? 36 : 50;
-        const s = hardBand ? 74 : 70;
-        return hslToHex(h, s, l);
-    })
-);
+/** Тёмная карта: яркое кольцо, затем более глубокое. */
+const _PALETTE_DARK = buildTrackPalette([
+    { l: 64, s: 68 },
+    { l: 46, s: 78 },
+]);
+
+/**
+ * Светлая тема: живые mid-тона; жёлто-зелёно-бирюзовый ряд темнее, чтобы не теряться на светлом холсте.
+ * Второе кольцо ещё темнее.
+ */
+const _PALETTE_LIGHT = buildTrackPalette([
+    { l: 50, s: 70, hard: true, hardL: 36, hardS: 74 },
+    { l: 32, s: 72, hard: true, hardL: 24, hardS: 80 },
+]);
 
 /** @returns {{ h: number, s: number, l: number }} h в [0, 360), s/l в [0, 100]. */
 function hexToHsl(hex) {
@@ -183,8 +200,28 @@ function paletteMinHueSeparation(palette) {
 }
 
 /**
- * Выбор цвета трассы: из свободных в палитре (или из всей при исчерпании)
- * с максимальной дистанцией до уже назначенных в группе.
+ * Минимальная дистанция кандидата до уже выданных цветов.
+ * Совпадение с самим собой не считается: иначе при повторе у всех дистанция 0
+ * и побеждает первый красный.
+ * @param {string} candidate
+ * @param {readonly string[]} used
+ * @returns {number}
+ */
+function minDistanceToUsed(candidate, used) {
+    let minDist = Infinity;
+    for (let i = 0; i < used.length; i++) {
+        if (used[i] === candidate) { continue; }
+        const d = trackColorDistance(candidate, used[i]);
+        if (d < minDist) { minDist = d; }
+    }
+    return minDist;
+}
+
+/**
+ * Цвет трассы из палитры.
+ * Кольца по очереди: следующее, только когда предыдущее занято.
+ * Внутри кольца берётся самый редкий оттенок, далёкий от уже выданных
+ * и от последнего. Повтор не схлопывается в один красный.
  * @param {Set<string>|Iterable<string>} usedColors
  * @param {readonly string[]} palette
  * @returns {string}
@@ -194,22 +231,50 @@ function pickTrackColorFromPalette(usedColors, palette) {
     if (usedColors) {
         for (const c of usedColors) { used.push(c); }
     }
-    const available = palette.filter((c) => !used.includes(c));
-    const pool = available.length > 0 ? available : palette.slice();
-    if (used.length === 0) {
-        return pool[0];
+    const counts = new Map();
+    for (let i = 0; i < palette.length; i++) { counts.set(palette[i], 0); }
+    for (let i = 0; i < used.length; i++) {
+        counts.set(used[i], (counts.get(used[i]) || 0) + 1);
     }
+    let minCount = Infinity;
+    for (let i = 0; i < palette.length; i++) {
+        const n = counts.get(palette[i]) || 0;
+        if (n < minCount) { minCount = n; }
+    }
+    // Кольца по 12. Следующее кольцо, только когда предыдущее уже занято на этом круге.
+    // Иначе более тёмный «противоположный» оттенок обгоняет яркий из-за разницы светлоты.
+    const ringSize = 12;
+    let poolStart = 0;
+    for (let ring = 0; ring < palette.length; ring += ringSize) {
+        let has = false;
+        const end = Math.min(ring + ringSize, palette.length);
+        for (let i = ring; i < end; i++) {
+            if ((counts.get(palette[i]) || 0) === minCount) { has = true; break; }
+        }
+        if (has) { poolStart = ring; break; }
+    }
+    const pool = [];
+    const poolEnd = Math.min(poolStart + ringSize, palette.length);
+    for (let i = poolStart; i < poolEnd; i++) {
+        if ((counts.get(palette[i]) || 0) === minCount) { pool.push(palette[i]); }
+    }
+    if (pool.length === 0) { return palette[0]; }
+    if (used.length === 0) { return pool[0]; }
+
     let best = pool[0];
-    let bestScore = -1;
+    let bestDist = -1;
+    let bestRecent = -1;
+    const last = used[used.length - 1];
     for (let i = 0; i < pool.length; i++) {
         const candidate = pool[i];
-        let minDist = Infinity;
-        for (let j = 0; j < used.length; j++) {
-            const d = trackColorDistance(candidate, used[j]);
-            if (d < minDist) { minDist = d; }
-        }
-        if (minDist > bestScore) {
-            bestScore = minDist;
+        let minDist = minDistanceToUsed(candidate, used);
+        if (minDist === Infinity) { minDist = 1000; }
+        const recent = last === candidate ? 0 : trackColorDistance(candidate, last);
+        const betterDist = minDist > bestDist + 1e-9;
+        const tieRecent = Math.abs(minDist - bestDist) <= 1e-9 && recent > bestRecent + 1e-9;
+        if (betterDist || tieRecent) {
+            bestDist = minDist;
+            bestRecent = recent;
             best = candidate;
         }
     }
@@ -954,7 +1019,7 @@ class SatelliteStateManager {
             if (!groupIds.has(id)) { this._hiddenInShowAll.delete(id); }
         }
 
-        // Назначить цвета новым КА: greedy по дистанции от уже занятых.
+        // Назначить цвета новым КА: сначала строкам таблицы, потом ленте на час.
         const palette = getTrackColorPalette();
         for (const nid of groupIds) {
             if (!this._colorMap.has(nid)) {
@@ -962,6 +1027,7 @@ class SatelliteStateManager {
                 this._colorMap.set(nid, color);
             }
         }
+        this._separateVisibleSatelliteColors(data.satellites);
 
         // В режиме showAll — добавить все КА группы в visibleTrackIds.
         if (this._showAllMode) {
@@ -983,7 +1049,42 @@ class SatelliteStateManager {
             const color = pickTrackColorFromPalette(this._colorMap.values(), palette);
             this._colorMap.set(ids[i], color);
         }
+        if (this._satelliteGroup && Array.isArray(this._satelliteGroup.satellites)) {
+            this._separateVisibleSatelliteColors(this._satelliteGroup.satellites);
+        }
         this._notify(StateEventType.TRACK_VISIBILITY_CHANGE, this.getVisibleTrackIds());
+    }
+
+    /**
+     * КА в таблице не должны сидеть на соседних оттенках.
+     * Уже выданный цвет остаётся, если он не хуже лучшего относительно других видимых.
+     * Лента на час может повторять цвета: на карте важны те, кто сейчас в плане.
+     * @param {readonly {norad_id: number}[]} satellites
+     * @private
+     */
+    _separateVisibleSatelliteColors(satellites) {
+        if (!Array.isArray(satellites) || satellites.length === 0) { return; }
+        const visible = new Set();
+        for (let i = 0; i < satellites.length; i++) {
+            const id = satellites[i].norad_id;
+            if (this._colorMap.has(id)) { visible.add(id); }
+        }
+        const ordered = [];
+        for (const id of this._colorMap.keys()) {
+            if (visible.has(id)) { ordered.push(id); }
+        }
+        const palette = getTrackColorPalette();
+        for (let i = 1; i < ordered.length; i++) {
+            const id = ordered[i];
+            const others = [];
+            for (let j = 0; j < i; j++) { others.push(this._colorMap.get(ordered[j])); }
+            const current = this._colorMap.get(id);
+            const picked = pickTrackColorFromPalette(others, palette);
+            const curMin = minDistanceToUsed(current, others);
+            const bestMin = minDistanceToUsed(picked, others);
+            if (curMin + 0.02 >= bestMin) { continue; }
+            this._colorMap.set(id, picked);
+        }
     }
 
     /**

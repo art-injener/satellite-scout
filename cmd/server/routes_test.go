@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -12,6 +13,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sweep"
 )
 
 func TestSetupRoutes_LegacyRedirects(t *testing.T) {
@@ -58,6 +60,7 @@ func TestSetupRoutes_APIRegistered(t *testing.T) {
 		{http.MethodGet, "/api/settings"},
 		{http.MethodGet, "/api/exclusions"},
 		{http.MethodGet, "/api/sdr/devices"},
+		{http.MethodGet, "/api/sdr/sweep"},
 	}
 
 	for _, tc := range cases {
@@ -83,6 +86,7 @@ func TestSetupRoutes_ChangesRequireMaster(t *testing.T) {
 		{http.MethodPost, "/api/sdr/receiver"},
 		{http.MethodPost, "/api/sdr/channel"},
 		{http.MethodPost, "/api/sdr/demod"},
+		{http.MethodPost, "/api/sdr/sweep"},
 		{http.MethodPost, "/api/access/decide"},
 		{http.MethodPost, "/api/access/revoke"},
 	} {
@@ -178,5 +182,16 @@ func testTemplatesFS() fs.FS {
 		"pages/tracking.html": &fstest.MapFile{
 			Data: []byte(`{{define "tracking-content"}}ok{{end}}`),
 		},
+	}
+}
+
+func TestSweepRanges_MHzToHz(t *testing.T) {
+	got := sweepRanges(&config.SweepConfig{Ranges: []config.SweepRange{
+		{CenterMHz: 145.9},
+		{MinMHz: 435.4, MaxMHz: 437.8},
+	}})
+	want := []sweep.Range{{CenterHz: 145_900_000}, {LoHz: 435_400_000, HiHz: 437_800_000}}
+	if !slices.Equal(got, want) {
+		t.Errorf("sweepRanges = %+v, want %+v", got, want)
 	}
 }

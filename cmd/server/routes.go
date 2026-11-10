@@ -12,6 +12,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sweep"
 )
 
 type routeDeps struct {
@@ -28,6 +29,7 @@ type routeDeps struct {
 	ReceiverHub *sdr.ReceiverHub
 	Products    *products.Store
 	Audio       *demod.AudioHub
+	Sweep       *sweep.Service
 
 	Exclude   handlers.ExclusionAdder
 	PassCache handlers.PassCacheInvalidator
@@ -51,6 +53,10 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	trackingHandler := handlers.NewTrackingHandler(deps.Tracking)
 	settingsHandler := handlers.NewSettingsHandler(deps.ConfigStore)
 	sdrHandler := handlers.NewSDRHandler(deps.SDR, deps.ReceiverHub)
+	if deps.Sweep != nil {
+		sdrHandler.WithSweep(deps.Sweep)
+	}
+	sweepHandler := handlers.NewSweepHandler(deps.Sweep)
 	exclusionsHandler := handlers.NewExclusionsHandler(deps.Exclude, deps.PassCache, deps.Group)
 	accessHandler := handlers.NewAccessHandler(deps.Access)
 	master := deps.Access.RequireMaster
@@ -84,6 +90,8 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	mux.HandleFunc("POST /api/sdr/channel", deps.Access.RequireControl(sdrHandler.SetChannel))
 	mux.HandleFunc("POST /api/sdr/demod", deps.Access.RequireControl(sdrHandler.SetDemod))
 	mux.HandleFunc("GET /api/sdr/status", sdrHandler.GetStatus)
+	mux.HandleFunc("GET /api/sdr/sweep", sweepHandler.Get)
+	mux.HandleFunc("POST /api/sdr/sweep", deps.Access.RequireControl(sweepHandler.Set))
 	mux.HandleFunc("POST /api/tracking/current", trackingHandler.SetCurrent)
 	mux.HandleFunc("POST /api/tracking/reset", trackingHandler.ResetCurrent)
 	mux.HandleFunc("POST /api/exclusions", exclusionsHandler.Add)
@@ -105,9 +113,11 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 
 	// Бинарные chunked-стримы (ADR-002)
 	if deps.ReceiverHub != nil {
-		streamHandler := handlers.NewStreamHandler(deps.ReceiverHub).WithAudio(deps.Audio)
+		streamHandler := handlers.NewStreamHandler(deps.ReceiverHub).WithAudio(deps.Audio).WithSweep(deps.Sweep)
 		mux.HandleFunc("GET /api/stream/v1/spectrum", streamHandler.Spectrum)
+		mux.HandleFunc("GET /api/stream/v1/panorama", streamHandler.Panorama)
 		mux.HandleFunc("GET /api/stream/v1/audio", streamHandler.Audio)
+		mux.HandleFunc("GET /api/stream/v1/iq", streamHandler.IQ)
 	}
 }
 

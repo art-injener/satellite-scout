@@ -1,0 +1,83 @@
+{
+  "transmitters": [
+    {
+      "norad_id": 25544,
+      "name": "ISS",
+      "freq_hz": 437800000,
+      "mode": "FM",
+      "kind": "voice",
+      "note": "Голос"
+    },
+    {
+      "norad_id": 25544,
+      "name": "ISS",
+      "freq_hz": 145800000,
+      "mode": "SSTV",
+      "kind": "sstv",
+      "note": "SSTV"
+    },
+    {
+      "norad_id": 61781,
+      "name": "AO-123",
+      "freq_hz": 435400000,
+      "mode": "FM",
+      "kind": "voice",
+      "note": "ASRTU-1"
+    },
+    {
+      "norad_id": 27607,
+      "name": "SO-50",
+      "freq_hz": 436795000,
+      "mode": "FM",
+      "kind": "voice"
+    },
+    {
+      "norad_id": 43017,
+      "name": "AO-91",
+      "freq_hz": 145960000,
+      "mode": "FM",
+      "kind": "voice",
+      "note": "Только на солнце"
+    },
+    {
+      "norad_id": 44909,
+      "name": "RS-44",
+      "freq_hz": 435605000,
+      "mode": "CW",
+      "kind": "beacon",
+      "note": "Маяк"
+    },
+    {
+      "norad_id": 44909,
+      "name": "RS-44",
+      "freq_hz": 435640000,
+      "mode": "SSB",
+      "kind": "voice",
+      "note": "Середина транспондера 435,610–435,670"
+    },
+    {
+      "norad_id": 7530,
+      "name": "AO-7",
+      "freq_hz": 145950000,
+      "mode": "SSB",
+      "kind": "voice",
+      "note": "Mode B U/V, середина 145,925–145,975; только на солнце"
+    },
+    {
+      "norad_id": 57172,
+      "name": "UMKA-1",
+      "freq_hz": 437625000,
+      "mode": "SSTV",
+      "kind": "sstv",
+      "note": "RS40S"
+    },
+    {
+      "norad_id": 67291,
+      "name": "RS95S",
+      "freq_hz": 436950000,
+      "mode": "SSTV",
+      "kind": "sstv",
+      "note": "QMR-KWT-2"
+    }
+  ]
+}

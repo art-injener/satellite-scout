@@ -56,3 +56,8 @@ data/recordings/*
 
 # Картинки, принятые демодулятором
 data/products/
+
+# Кеш плана частот и журнал визитов панорамы (curated JSON в git)
+data/freq_plan.csv
+data/freq_visits.csv
+data/amsat_active.csv

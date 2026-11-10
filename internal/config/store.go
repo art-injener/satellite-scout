@@ -246,7 +246,7 @@ func cloneConfig(c *Config) *Config {
 	return &dup
 }
 
-// cloneRadioPath копирует радиотракт с нюансом по nullable Rotator, поправке и секции имитатора.
+// cloneRadioPath копирует радиотракт с нюансом по nullable Rotator, поправке, секциям имитатора и обхода.
 func cloneRadioPath(rp RadioPath) RadioPath {
 	out := rp
 	if rp.Rotator != nil {
@@ -261,6 +261,11 @@ func cloneRadioPath(rp RadioPath) RadioPath {
 		im := *rp.Receiver.Imitator
 		im.Signals = slices.Clone(im.Signals)
 		out.Receiver.Imitator = &im
+	}
+	if rp.Sweep != nil {
+		sw := *rp.Sweep
+		sw.Ranges = slices.Clone(sw.Ranges)
+		out.Sweep = &sw
 	}
 	return out
 }

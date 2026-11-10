@@ -39,7 +39,7 @@ func TestAudio_StreamsPCMFramesOfTheChannel(t *testing.T) {
 	receiver := &liveReceiver{}
 	hub.Register("p", sdr.PathConfig{}, func() (sdr.Receiver, error) { return receiver, nil })
 	audio := demod.NewAudioHub()
-	hub.SetStreamTap(demod.NewService(hub, func(string, []byte) {}).WithAudio(audio).Run)
+	hub.AddStreamTap(demod.NewService(hub, func(string, []byte) {}).WithAudio(audio).Run)
 	ch := sdr.ChannelSettings{OffsetHz: 50_000, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: "fm"}
 	if err := hub.SetChannel("p", ch); err != nil {
 		t.Fatal(err)

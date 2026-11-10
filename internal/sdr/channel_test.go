@@ -62,6 +62,12 @@ func TestChannelSettings_Validate(t *testing.T) {
 		{"CW wider than heard", func(c *ChannelSettings) { c.Demod = "cw"; c.BandwidthHz = 2_800 }, true},
 		{"Doppler of a satellite", func(c *ChannelSettings) { c.DopplerNorad = 25544 }, false},
 		{"Doppler of a negative NORAD", func(c *ChannelSettings) { c.DopplerNorad = -1 }, true},
+		{"manual Doppler inside the band", func(c *ChannelSettings) { c.DopplerManualHz = 10_000 }, false},
+		{"manual Doppler past the band edge", func(c *ChannelSettings) { c.DopplerManualHz = rate/2 - 7_499 }, true},
+		{"auto ignores a manual Doppler past the edge", func(c *ChannelSettings) {
+			c.DopplerAuto = true
+			c.DopplerManualHz = rate
+		}, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

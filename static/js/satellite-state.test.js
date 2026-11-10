@@ -1185,24 +1185,31 @@ test('multiple tracks hidden in showAll — all survive group update', () => {
 
 console.log('\nSatelliteStateManager — track color palette');
 
-test('dark palette has 12 unique hues with min separation >= 24°', () => {
-    const palette = getTrackColorPalette();
-    assert.strictEqual(palette.length, 12);
-    const unique = new Set(palette);
-    assert.strictEqual(unique.size, 12);
-    assert.ok(paletteMinHueSeparation(palette) >= 24,
-        `min hue separation ${paletteMinHueSeparation(palette)}°`);
+function assertTwoRings(palette) {
+    assert.strictEqual(palette.length, 24);
+    assert.strictEqual(new Set(palette).size, 24);
+    const ring1 = palette.slice(0, 12);
+    const ring2 = palette.slice(12);
+    assert.ok(paletteMinHueSeparation(ring1) >= 24,
+        `ring1 hue separation ${paletteMinHueSeparation(ring1)}°`);
+    assert.ok(paletteMinHueSeparation(ring2) >= 24,
+        `ring2 hue separation ${paletteMinHueSeparation(ring2)}°`);
+    for (let i = 0; i < 12; i++) {
+        const d = trackColorDistance(ring1[i], ring2[i]);
+        assert.ok(d > 0.05 && d < 0.35,
+            `rings at hue index ${i} distance ${d} (same hue, different lightness)`);
+    }
+}
+
+test('dark palette has two rings of 12 hues', () => {
+    assertTwoRings(getTrackColorPalette());
 });
 
-test('light palette has 12 unique colors with min separation >= 18°', () => {
+test('light palette has two rings of 12 hues', () => {
     const prev = global.getThemeId;
     global.getThemeId = () => 'light';
     try {
-        const palette = getTrackColorPalette();
-        assert.strictEqual(palette.length, 12);
-        assert.strictEqual(new Set(palette).size, 12);
-        assert.ok(paletteMinHueSeparation(palette) >= 18,
-            `min hue separation ${paletteMinHueSeparation(palette)}°`);
+        assertTwoRings(getTrackColorPalette());
     } finally {
         if (prev === undefined) { delete global.getThemeId; }
         else { global.getThemeId = prev; }
@@ -1215,21 +1222,44 @@ test('pickTrackColorFromPalette returns first color when none used', () => {
     assert.strictEqual(picked, palette[0]);
 });
 
-test('pickTrackColorFromPalette maximizes distance from used colors', () => {
+test('second ring starts only after every first-ring hue is used', () => {
+    const palette = getTrackColorPalette();
+    const ring1 = new Set(palette.slice(0, 12));
+    const used = [];
+    for (let i = 0; i < 12; i++) {
+        const color = pickTrackColorFromPalette(used, palette);
+        used.push(color);
+        assert.ok(ring1.has(color), `pick ${i + 1} left the first ring: ${color}`);
+    }
+    const next = pickTrackColorFromPalette(used, palette);
+    assert.ok(!ring1.has(next), `13th color should be the darker ring, got ${next}`);
+});
+
+test('reuse after the palette is full does not collapse to one color', () => {
+    const palette = getTrackColorPalette();
+    const used = [];
+    for (let i = 0; i < palette.length + 6; i++) {
+        used.push(pickTrackColorFromPalette(used, palette));
+    }
+    const extra = used.slice(palette.length);
+    assert.ok(new Set(extra).size >= 4, `reused colors collapsed: ${extra.join(' ')}`);
+    for (let i = 1; i < extra.length; i++) {
+        const d = trackColorDistance(extra[i - 1], extra[i]);
+        assert.ok(d >= 0.5, `adjacent reuse ${extra[i - 1]} then ${extra[i]}, distance ${d}`);
+    }
+});
+
+test('pickTrackColorFromPalette maximizes distance inside the active ring', () => {
     const palette = getTrackColorPalette();
     const used = new Set([palette[0]]);
     const picked = pickTrackColorFromPalette(used, palette);
-    let pickedMin = Infinity;
-    for (const c of used) {
-        pickedMin = Math.min(pickedMin, trackColorDistance(picked, c));
-    }
-    for (let i = 0; i < palette.length; i++) {
-        const cand = palette[i];
+    const ring = palette.slice(0, 12);
+    assert.ok(ring.indexOf(picked) !== -1, `left the first ring: ${picked}`);
+    const pickedMin = trackColorDistance(picked, palette[0]);
+    for (let i = 0; i < ring.length; i++) {
+        const cand = ring[i];
         if (used.has(cand)) { continue; }
-        let candMin = Infinity;
-        for (const c of used) {
-            candMin = Math.min(candMin, trackColorDistance(cand, c));
-        }
+        const candMin = trackColorDistance(cand, palette[0]);
         assert.ok(pickedMin >= candMin - 0.01,
             `suboptimal pick ${picked} vs ${cand}`);
     }
@@ -1285,6 +1315,34 @@ test('setSatelliteGroup assigns colors to hour-ahead timeline satellites too', (
     assert.ok(m.getMarkerColor(1), 'session-plan sat has a color');
     assert.ok(m.getMarkerColor(99), 'timeline-only sat has a color');
     assert.notStrictEqual(m.getMarkerColor(1), m.getMarkerColor(99));
+});
+
+test('visible table satellites are separated even if the timeline already used the palette', () => {
+    const m = new SatelliteStateManager();
+    const timeline = [];
+    for (let i = 0; i < 30; i++) {
+        timeline.push({ norad_id: 1000 + i, aos: i, los: i + 1 });
+    }
+    m.setSatelliteGroup({
+        satellites: [{ norad_id: 1000, sat_name: 'A' }],
+        primary_id: 1000,
+        timeline: timeline,
+    });
+    const late = [1027, 1028, 1029];
+    m.setSatelliteGroup({
+        satellites: late.map((id) => ({ norad_id: id, sat_name: 'S' + id })),
+        primary_id: late[0],
+        timeline: timeline,
+    });
+    const colors = late.map((id) => m.getMarkerColor(id));
+    assert.strictEqual(new Set(colors).size, 3, `visible colors ${colors.join(' ')}`);
+    let minPair = Infinity;
+    for (let i = 0; i < colors.length; i++) {
+        for (let j = i + 1; j < colors.length; j++) {
+            minPair = Math.min(minPair, trackColorDistance(colors[i], colors[j]));
+        }
+    }
+    assert.ok(minPair >= 0.99, `visible satellites too close: ${minPair} ${colors.join(' ')}`);
 });
 
 test('setSatelliteGroup keeps color while a sat is only on the timeline', () => {

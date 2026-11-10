@@ -112,6 +112,24 @@ func TestPassService_WithCacheTTL(t *testing.T) {
 	}
 }
 
+func TestPassService_GetAllGroupsPasses_EmptyCatalogNotCached(t *testing.T) {
+	store := tracker.NewTLEStore(nil)
+	observer := tracker.NewObserver(47.3157, 39.7885, 0.05)
+	svc := NewPassService(store, observer)
+
+	passes, err := svc.GetAllGroupsPasses(1, 5)
+	require.NoError(t, err)
+	require.Empty(t, passes)
+
+	key := svc.makeCacheKey(allGroupsCacheKey, 1, 5)
+	svc.mu.RLock()
+	_, cached := svc.cache[key]
+	svc.mu.RUnlock()
+	if cached {
+		t.Fatal("empty catalog must not be cached")
+	}
+}
+
 func TestPassService_GetPasses_EmptyStore(t *testing.T) {
 	store := tracker.NewTLEStore(nil)
 	observer := tracker.NewObserver(47.3157, 39.7885, 0.05)

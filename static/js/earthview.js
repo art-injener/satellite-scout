@@ -21,6 +21,14 @@
     const DEFAULT_ZOOM_ANIM_MS = 1500;
 
     /**
+     * Карандаш одной трассы (мс) и общий бюджет очереди, когда трасс несколько
+     * (смена масштаба или пачка появлений/скрытий).
+     */
+    const DEFAULT_TRACK_ANIM_MS = 800;
+    const DEFAULT_TRACK_SEQ_BUDGET_MS = 1800;
+    const TRACK_ANIM_MIN_SLICE_MS = 220;
+
+    /**
      * Поворот маркера с бэкенда (map_marker_rot_deg) — предпочтительно.
      * Запасной вариант: локальный расчёт с учётом внутреннего rotate(45) в SVG.
      */
@@ -147,7 +155,10 @@
             //   'instant' — без анимации, мгновенный переход.
             animStyle: 'phased',
             // Длительность phased-анимации (мс): за это время карта целиком прорисовывается заново.
-            zoomAnimDurationMs: DEFAULT_ZOOM_ANIM_MS
+            zoomAnimDurationMs: DEFAULT_ZOOM_ANIM_MS,
+            // Карандаш одной трассы и бюджет очереди, если трасс несколько.
+            trackAnimDurationMs: DEFAULT_TRACK_ANIM_MS,
+            trackSeqBudgetMs: DEFAULT_TRACK_SEQ_BUDGET_MS
         }, options || {});
 
         this._reloadColorsFromCss();
@@ -169,6 +180,14 @@
         this.zoom = MAP_ZOOM_LEVELS[this._zoomIdx];
         // Состояние phased-анимации: { startTs, fromIdx, toIdx, raf } или null.
         this._zoomAnim = null;
+        // Карандаш трасс: ключ NORAD → {phase, from, to, startTs, duration, geom, kind}.
+        this._trackAnims = {};
+        this._trackRedrawPending = false;
+        // true только на кадре, где карта уже дорисована и трассы можно вести.
+        this._trackRevealNow = false;
+        this._animRaf = 0;
+        this._animRafIsTimer = false;
+        this._desiredTracks = [];
         // Coalesce draw(): не чаще одного _drawStatic за кадр (POSITION SSE может приходить пачкой).
         this._drawCoalesceRaf = 0;
 
@@ -495,6 +514,10 @@
         if (typeof requestAnimationFrame !== 'undefined') {
             this._drawCoalesceRaf = requestAnimationFrame(function() {
                 self._drawCoalesceRaf = 0;
+                if (self._zoomAnim) {
+                    self._drawPhased(self._now());
+                    return;
+                }
                 self._drawStatic();
             });
         } else {
@@ -575,20 +598,15 @@
             this._drawSelectedVisibilityZone();
         }
 
-        // Слой 1: вторичные спутники (серые пунктиры).
+        // Трассы: карандаш при появлении, стирании и смене масштаба.
+        // Маркеры вторичных КА — между их трассами и трассами выбранного/сопровождаемого.
+        this._syncTrackAnims();
+        this._drawManagedTracks('secondary');
+
         this._drawSecondaryLayer();
 
-        // Слой 2: выбранный спутник (оранжевый, без точек).
-        // Рисуется только если отличается от tracking (иначе tracking перекроет).
-        if (this._selectedSatellite.noradId &&
-            this._selectedSatellite.noradId !== this.satellite.noradId) {
-            this._drawSelectedLayer();
-        }
-
-        // Слой 3: трасса спутника под наблюдением (red/green + dots).
-        if (this.satellite.noradId && this._hasGroundTrack()) {
-            this._drawGroundTrack();
-        }
+        this._drawManagedTracks('selected');
+        this._drawManagedTracks('tracking');
 
         // Мягкий оранжевый ореол выбранного КА — на canvas под DOM-иконкой.
         this._drawSelectedGlow();
@@ -613,6 +631,10 @@
             }
         } else {
             this._positionDomMarker('map-sat-selected', 'map-sat-selected-label', null, '', 'selected', null);
+        }
+
+        if (this._zoomAnim || this._hasActiveTrackAnim()) {
+            this._scheduleFrame();
         }
     };
 
@@ -1000,6 +1022,171 @@
     };
 
     /**
+     * Есть ли в трассе хотя бы один отрезок (две точки).
+     * @param {Array|Object} track
+     * @returns {boolean}
+     */
+    EarthView.prototype._trackHasGeometry = function(track) {
+        if (Array.isArray(track)) { return track.length >= 2; }
+        if (!track || typeof track !== 'object') { return false; }
+        const groups = [track.past, track.future];
+        for (let g = 0; g < groups.length; g++) {
+            const segs = groups[g];
+            if (!Array.isArray(segs)) { continue; }
+            for (let i = 0; i < segs.length; i++) {
+                if (Array.isArray(segs[i]) && segs[i].length >= 2) { return true; }
+            }
+        }
+        return false;
+    };
+
+    /**
+     * Трассы, которые сейчас должны быть на карте, в порядке карандаша:
+     * сопровождаемый, выбранный, затем остальные.
+     * inScope=false: линия видна сразу, без прорисовки (режим «все трассы» выключен).
+     * @returns {Array}
+     */
+    EarthView.prototype._collectDesiredTracks = function() {
+        const sm = (typeof window !== 'undefined') ? window._stateManager : null;
+        const showAll = !!(sm && typeof sm.isShowAllMode === 'function' && sm.isShowAllMode());
+        const list = [];
+        const trackingId = this.satellite && this.satellite.noradId;
+        const selectedId = this._selectedSatellite && this._selectedSatellite.noradId;
+        const same = function(a, b) {
+            return a != null && b != null && String(a) === String(b);
+        };
+
+        if (trackingId && this._trackHasGeometry(this.satellite.groundTrack)) {
+            list.push({
+                key: String(trackingId),
+                noradId: trackingId,
+                kind: 'tracking',
+                inScope: true,
+                track: this.satellite.groundTrack,
+                color: null,
+                colorIdx: 0
+            });
+        }
+        if (selectedId && !same(selectedId, trackingId) &&
+            this._trackHasGeometry(this._selectedSatellite.groundTrack)) {
+            list.push({
+                key: String(selectedId),
+                noradId: selectedId,
+                kind: 'selected',
+                inScope: true,
+                track: this._selectedSatellite.groundTrack,
+                color: this.colors.selectedTrack,
+                colorIdx: 0
+            });
+        }
+
+        const ids = Object.keys(this._secondarySatellites || {});
+        for (let i = 0; i < ids.length; i++) {
+            const sat = this._secondarySatellites[ids[i]];
+            if (!sat) { continue; }
+            const nid = parseInt(ids[i], 10);
+            if (same(nid, trackingId) || same(nid, selectedId)) { continue; }
+            const visible = !!(sm && typeof sm.isTrackVisible === 'function' && sm.isTrackVisible(nid));
+            if (!visible || !this._trackHasGeometry(sat.track)) { continue; }
+            const color = (sm && typeof sm.getTrackColor === 'function') ? sm.getTrackColor(nid) : null;
+            list.push({
+                key: String(nid),
+                noradId: nid,
+                kind: 'secondary',
+                inScope: showAll,
+                track: sat.track,
+                color: color,
+                colorIdx: i
+            });
+        }
+        return list;
+    };
+
+    /**
+     * Сводит желаемый набор трасс с уже идущими карандашами.
+     * Пока карта ещё перерисовывается и трассы скрыты, флаг смены масштаба не съедается.
+     */
+    EarthView.prototype._syncTrackAnims = function() {
+        const now = this._now();
+        const desired = this._collectDesiredTracks();
+        this._desiredTracks = desired;
+        const zooming = !!this._zoomAnim;
+        const reveal = !zooming || this._trackRevealNow;
+        const redraw = !!this._trackRedrawPending && reveal;
+        if (redraw) { this._trackRedrawPending = false; }
+        const instant = this.options.animStyle !== 'phased';
+        this._trackAnims = EarthView.planTrackAnims(this._trackAnims, desired, now, {
+            redraw: redraw && !instant,
+            instant: instant,
+            drawMs: this.options.trackAnimDurationMs,
+            seqBudgetMs: this.options.trackSeqBudgetMs
+        });
+        const byKey = {};
+        for (let i = 0; i < desired.length; i++) {
+            byKey[desired[i].key] = desired[i];
+        }
+        const anims = this._trackAnims || {};
+        for (const key in anims) {
+            const entry = anims[key];
+            const item = byKey[key];
+            if (item && entry && entry.phase !== 'erase') {
+                entry.geom = {
+                    track: item.track,
+                    kind: item.kind,
+                    color: item.color,
+                    colorIdx: item.colorIdx
+                };
+                entry.kind = item.kind;
+            }
+        }
+    };
+
+    EarthView.prototype._hasActiveTrackAnim = function() {
+        return EarthView.trackAnimsActive(this._trackAnims, this._now());
+    };
+
+    /**
+     * Рисует трассы одного слоя с учётом прогресса карандаша.
+     * Стираемые, которых уже нет в живых данных, берутся из снимка.
+     * @param {string} kind tracking | selected | secondary
+     */
+    EarthView.prototype._drawManagedTracks = function(kind) {
+        const now = this._now();
+        const desired = this._desiredTracks || [];
+        const anims = this._trackAnims || {};
+        const drawn = {};
+        for (let i = 0; i < desired.length; i++) {
+            const item = desired[i];
+            if (item.kind !== kind) { continue; }
+            drawn[item.key] = true;
+            const entry = anims[item.key];
+            const reveal = entry ? EarthView.sampleTrackProgress(entry, now) : 1;
+            if (reveal <= 0) { continue; }
+            this._paintTrackKind(item.kind, item.track, item.color, item.colorIdx, reveal);
+        }
+        for (const key in anims) {
+            if (drawn[key]) { continue; }
+            const entry = anims[key];
+            if (!entry || !entry.geom || !entry.geom.track) { continue; }
+            const entryKind = entry.kind || entry.geom.kind;
+            if (entryKind !== kind) { continue; }
+            const reveal = EarthView.sampleTrackProgress(entry, now);
+            if (reveal <= 0) { continue; }
+            this._paintTrackKind(entryKind, entry.geom.track, entry.geom.color, entry.geom.colorIdx, reveal);
+        }
+    };
+
+    EarthView.prototype._paintTrackKind = function(kind, track, color, colorIdx, progress) {
+        if (kind === 'tracking') {
+            this._drawGroundTrack(progress, track);
+        } else if (kind === 'selected') {
+            this._drawSelectedLayer(progress, track);
+        } else {
+            this._drawSecondaryGroundTrack({ track: track }, colorIdx || 0, color, progress);
+        }
+    };
+
+    /**
      * Проверка наличия данных трассы (массив точек или формат с сервера {past, future}).
      */
     EarthView.prototype._hasGroundTrack = function() {
@@ -1019,13 +1206,15 @@
      * Отрисовка наземной трассы спутника под наблюдением.
      * Сплошные линии: красная — прошлая орбита, зелёная — будущая; плюс точки (минутные метки).
      */
-    EarthView.prototype._drawGroundTrack = function() {
-        const track = this.satellite.groundTrack;
+    EarthView.prototype._drawGroundTrack = function(progress, trackOverride) {
+        const track = (trackOverride != null) ? trackOverride : this.satellite.groundTrack;
+        const reveal = (typeof progress === 'number') ? progress : 1;
+        if (reveal <= 0 || !track) { return; }
         this.ctx.setLineDash([]); // сплошная линия
 
         if (Array.isArray(track)) {
             if (track.length >= 2) {
-                this._drawTrackSegment(track, this.colors.orbitFuture);
+                this._drawTrackSegment(track, this.colors.orbitFuture, reveal);
             }
             return;
         }
@@ -1042,19 +1231,26 @@
         const pastSegs = (track && track.past) ? track.past : [];
         const futureSegs = (track && track.future) ? track.future : [];
         const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
+        const runs = [];
 
         if (Array.isArray(bridgedPast)) {
             for (let s = 0; s < bridgedPast.length; s++) {
                 const seg = bridgedPast[s];
                 if (Array.isArray(seg) && seg.length >= 2) {
-                    this._drawTrackSegment(seg, this.colors.orbitPast);
+                    runs.push({ points: seg, color: this.colors.orbitPast });
                 }
             }
         }
         for (let s = 0; s < futureSegs.length; s++) {
             const seg = futureSegs[s];
             if (Array.isArray(seg) && seg.length >= 2) {
-                this._drawTrackSegment(seg, this.colors.orbitFuture);
+                runs.push({ points: seg, color: this.colors.orbitFuture });
+            }
+        }
+        const locals = EarthView.revealRunProgress(runs.map(function(run) { return run.points.length; }), reveal);
+        for (let i = 0; i < runs.length; i++) {
+            if (locals[i] > 0) {
+                this._drawTrackSegment(runs[i].points, runs[i].color, locals[i]);
             }
         }
     };
@@ -1126,50 +1322,108 @@
      * @param {Array} points - Массив точек [{lon, lat, time} или {lon, lat, ts}]
      * @param {string} color - Цвет линии
      */
-    EarthView.prototype._drawTrackSegment = function(points, color) {
+    /**
+     * Ломаная трассы {lon,lat} с разрывом на скачке долготы, широты или пикселей.
+     * progress — доля длины [0..1]. Нет значения или значение >= 1: линия целиком.
+     * Между последней целой точкой и следующей дорисовывается короткий кончик.
+     * @param {Array} points
+     * @param {number} [progress]
+     */
+    EarthView.prototype._strokeTrackPoints = function(points, progress) {
+        if (!points || points.length < 2) { return; }
+        const partial = (typeof progress === 'number' && progress < 1);
+        if (partial && progress <= 0) { return; }
+
+        let count = points.length;
+        let tail = 0;
+        if (partial) {
+            const exact = (points.length - 1) * progress;
+            const whole = Math.floor(exact);
+            tail = exact - whole;
+            count = whole + 1;
+            if (count < 1) { count = 1; }
+            if (count > points.length) {
+                count = points.length;
+                tail = 0;
+            }
+            if (count < 2 && tail <= 0) { return; }
+        }
+
+        const ctx = this.ctx;
+        ctx.beginPath();
+        const thresh = this._antimeridianThreshold();
+        let prevP = null;
+        let prevLon = null;
+        let prevLat = null;
+        for (let k = 0; k < count; k++) {
+            const lon = points[k].lon;
+            const lat = points[k].lat;
+            const p = this.project(lon, lat);
+            let isJump = false;
+            if (prevP && Math.abs(p.x - prevP.x) > thresh) {
+                isJump = true;
+            } else if (prevLon !== null) {
+                let dLon = lon - prevLon;
+                while (dLon > 180) { dLon -= 360; }
+                while (dLon < -180) { dLon += 360; }
+                if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
+            }
+            if (!isJump && prevLat !== null && Math.abs(lat - prevLat) > TRACK_LAT_JUMP_DEG) {
+                isJump = true;
+            }
+            if (k === 0 || isJump) {
+                ctx.moveTo(p.x, p.y);
+            } else {
+                ctx.lineTo(p.x, p.y);
+            }
+            prevP = p;
+            prevLon = lon;
+            prevLat = lat;
+        }
+
+        if (partial && tail > 0 && count < points.length && prevP) {
+            const nLon = points[count].lon;
+            const nLat = points[count].lat;
+            const pn = this.project(nLon, nLat);
+            let isJump = false;
+            if (Math.abs(pn.x - prevP.x) > thresh) {
+                isJump = true;
+            } else if (prevLon !== null) {
+                let dLon = nLon - prevLon;
+                while (dLon > 180) { dLon -= 360; }
+                while (dLon < -180) { dLon += 360; }
+                if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
+            }
+            if (!isJump && prevLat !== null && Math.abs(nLat - prevLat) > TRACK_LAT_JUMP_DEG) {
+                isJump = true;
+            }
+            if (!isJump) {
+                ctx.lineTo(
+                    prevP.x + (pn.x - prevP.x) * tail,
+                    prevP.y + (pn.y - prevP.y) * tail
+                );
+            }
+        }
+
+        ctx.stroke();
+    };
+
+    EarthView.prototype._drawTrackSegment = function(points, color, progress) {
         if (!points || points.length < 2) { return; }
         const ctx = this.ctx;
         const mode = this.options.trackMode;
         const dotInterval = this.options.trackDotInterval;
+        const partial = (typeof progress === 'number' && progress < 1);
+        if (partial && progress <= 0) { return; }
 
         if (mode === 'line' || mode === 'both') {
             ctx.strokeStyle = color;
             ctx.lineWidth = this._mapTrackLineWidth;
             ctx.setLineDash([]);
-            ctx.beginPath();
-            const thresh = this._antimeridianThreshold();
-            let prevP = null;
-            let prevLon = null;
-            let prevLat = null;
-            for (let k = 0; k < points.length; k++) {
-                const p = this.project(points[k].lon, points[k].lat);
-                const lon = points[k].lon;
-                const lat = points[k].lat;
-                let isJump = false;
-                if (prevP && Math.abs(p.x - prevP.x) > thresh) {
-                    isJump = true;
-                } else if (prevLon !== null) {
-                    let dLon = lon - prevLon;
-                    while (dLon > 180) { dLon -= 360; }
-                    while (dLon < -180) { dLon += 360; }
-                    if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
-                }
-                if (!isJump && prevLat !== null && Math.abs(lat - prevLat) > TRACK_LAT_JUMP_DEG) {
-                    isJump = true;
-                }
-                if (k === 0 || isJump) {
-                    ctx.moveTo(p.x, p.y);
-                } else {
-                    ctx.lineTo(p.x, p.y);
-                }
-                prevP = p;
-                prevLon = lon;
-                prevLat = lat;
-            }
-            ctx.stroke();
+            this._strokeTrackPoints(points, partial ? progress : 1);
         }
 
-        if (mode === 'dots' || mode === 'both') {
+        if ((mode === 'dots' || mode === 'both') && !partial) {
             ctx.fillStyle = this.colors.orbitDots;
             let lastDotTime = -Infinity;
 
@@ -2337,6 +2591,230 @@
     };
 
     /**
+     * Доля длины каждого куска трассы при общем прогрессе карандаша [0..1].
+     * Вес куска — число отрезков (точек минус одна). Куски идут по порядку.
+     * @param {number[]} lengths
+     * @param {number} progress
+     * @returns {number[]}
+     */
+    function revealRunProgress(lengths, progress) {
+        const n = lengths.length;
+        const out = new Array(n);
+        const weights = new Array(n);
+        let total = 0;
+        for (let i = 0; i < n; i++) {
+            const w = Math.max(0, (lengths[i] || 0) - 1);
+            weights[i] = w;
+            total += w;
+        }
+        if (typeof progress !== 'number' || !(progress < 1)) {
+            for (let i = 0; i < n; i++) { out[i] = 1; }
+            return out;
+        }
+        if (progress <= 0 || total <= 0) {
+            for (let i = 0; i < n; i++) { out[i] = 0; }
+            return out;
+        }
+        let budget = progress * total;
+        for (let i = 0; i < n; i++) {
+            const w = weights[i];
+            if (w <= 0 || budget <= 0) {
+                out[i] = 0;
+                continue;
+            }
+            if (budget >= w) {
+                out[i] = 1;
+                budget -= w;
+            } else {
+                out[i] = budget / w;
+                budget = 0;
+            }
+        }
+        return out;
+    }
+
+    function sampleTrackProgress(entry, now) {
+        if (!entry) { return 1; }
+        if (entry.phase !== 'draw' && entry.phase !== 'erase') {
+            return typeof entry.progress === 'number' ? entry.progress : 1;
+        }
+        const dur = entry.duration > 0 ? entry.duration : 1;
+        const t = (now - entry.startTs) / dur;
+        if (t <= 0) { return entry.from; }
+        if (t >= 1) { return entry.to; }
+        return entry.from + (entry.to - entry.from) * t;
+    }
+
+    function settleTrackEntry(entry, now) {
+        if (!entry) { return null; }
+        if (entry.phase === 'draw' || entry.phase === 'erase') {
+            const dur = entry.duration > 0 ? entry.duration : 0;
+            if (now >= entry.startTs + dur) {
+                if (entry.phase === 'erase') { return null; }
+                return { phase: 'idle', progress: 1, geom: entry.geom, kind: entry.kind };
+            }
+        }
+        return entry;
+    }
+
+    function trackSliceMs(count, drawMs, budgetMs, sequential) {
+        if (!sequential || count <= 1) { return drawMs; }
+        const even = budgetMs / count;
+        return Math.max(TRACK_ANIM_MIN_SLICE_MS, Math.min(drawMs, even));
+    }
+
+    function trackAnimsActive(anims, now) {
+        if (!anims) { return false; }
+        for (const key in anims) {
+            const entry = anims[key];
+            if (!entry) { continue; }
+            if ((entry.phase === 'draw' || entry.phase === 'erase') &&
+                now < entry.startTs + entry.duration) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * План карандаша трасс.
+     * desired: {key, inScope, kind}[], порядок — очередь прорисовки.
+     * inScope=false: трасса видна сразу, запись анимации не заводится.
+     * redraw: все трассы в области анимации рисуются заново, строго по очереди.
+     * Несколько новых трасс за один вызов тоже идут по очереди; одна — за drawMs.
+     * Исчезнувшая трасса стирается обратным ходом. Повтор с тем же ключом
+     * не сбрасывает уже идущий карандаш (обновление точек с сервера).
+     */
+    function planTrackAnims(prev, desired, now, opts) {
+        prev = prev || {};
+        desired = desired || [];
+        opts = opts || {};
+        if (opts.instant) { return {}; }
+
+        const drawMs = opts.drawMs > 0 ? opts.drawMs : DEFAULT_TRACK_ANIM_MS;
+        const seqBudget = opts.seqBudgetMs > 0 ? opts.seqBudgetMs : DEFAULT_TRACK_SEQ_BUDGET_MS;
+        const redraw = !!opts.redraw;
+
+        const settled = {};
+        for (const key in prev) {
+            const kept = settleTrackEntry(prev[key], now);
+            if (kept) { settled[key] = kept; }
+        }
+
+        const want = {};
+        for (let i = 0; i < desired.length; i++) {
+            want[desired[i].key] = desired[i];
+        }
+
+        const next = {};
+        const freshDraw = [];
+        const freshErase = [];
+
+        for (const key in settled) {
+            if (want[key]) { continue; }
+            const entry = settled[key];
+            if (entry.phase === 'erase') {
+                next[key] = entry;
+                continue;
+            }
+            if (sampleTrackProgress(entry, now) > 0.001) {
+                freshErase.push(key);
+            }
+        }
+
+        if (redraw) {
+            for (let i = 0; i < desired.length; i++) {
+                if (desired[i].inScope) { freshDraw.push(desired[i].key); }
+            }
+        } else {
+            for (let i = 0; i < desired.length; i++) {
+                const item = desired[i];
+                if (!item.inScope) { continue; }
+                const entry = settled[item.key];
+                if (!entry) {
+                    freshDraw.push(item.key);
+                    continue;
+                }
+                if (entry.phase === 'erase') {
+                    const ink = sampleTrackProgress(entry, now);
+                    next[item.key] = {
+                        phase: 'draw',
+                        from: ink,
+                        to: 1,
+                        startTs: now,
+                        duration: Math.max(160, drawMs * (1 - ink)),
+                        progress: ink,
+                        geom: entry.geom,
+                        kind: item.kind
+                    };
+                    continue;
+                }
+                next[item.key] = entry;
+            }
+        }
+
+        if (freshDraw.length) {
+            const sequential = redraw || freshDraw.length > 1;
+            const per = trackSliceMs(freshDraw.length, drawMs, seqBudget, sequential);
+            for (let i = 0; i < freshDraw.length; i++) {
+                const key = freshDraw[i];
+                const prevEntry = settled[key];
+                next[key] = {
+                    phase: 'draw',
+                    from: 0,
+                    to: 1,
+                    startTs: now + (sequential ? i * per : 0),
+                    duration: per,
+                    progress: 0,
+                    geom: prevEntry ? prevEntry.geom : undefined,
+                    kind: (want[key] && want[key].kind) || (prevEntry && prevEntry.kind)
+                };
+            }
+        }
+
+        if (freshErase.length > 1) {
+            const per = trackSliceMs(freshErase.length, drawMs, seqBudget, true);
+            for (let i = 0; i < freshErase.length; i++) {
+                const key = freshErase[i];
+                if (next[key]) { continue; }
+                const entry = settled[key];
+                const ink = sampleTrackProgress(entry, now);
+                next[key] = {
+                    phase: 'erase',
+                    from: ink,
+                    to: 0,
+                    startTs: now + i * per,
+                    duration: per,
+                    progress: ink,
+                    geom: entry.geom,
+                    kind: entry.kind
+                };
+            }
+        } else if (freshErase.length === 1 && !next[freshErase[0]]) {
+            const key = freshErase[0];
+            const entry = settled[key];
+            const ink = sampleTrackProgress(entry, now);
+            next[key] = {
+                phase: 'erase',
+                from: ink,
+                to: 0,
+                startTs: now,
+                duration: Math.max(160, drawMs * ink),
+                progress: ink,
+                geom: entry.geom,
+                kind: entry.kind
+            };
+        }
+
+        return next;
+    }
+
+    EarthView.revealRunProgress = revealRunProgress;
+    EarthView.sampleTrackProgress = sampleTrackProgress;
+    EarthView.planTrackAnims = planTrackAnims;
+    EarthView.trackAnimsActive = trackAnimsActive;
+
+    /**
      * Стадии phased-анимации zoom — задаются в долях от полной длительности
      * (`options.zoomAnimDurationMs`). Стадия с `endFrac > startFrac` имеет
      * собственный прогресс [0..1], который передаётся в соответствующий слой;
@@ -2380,34 +2858,63 @@
      * @private
      */
     EarthView.prototype._startZoomAnim = function(fromIdx, toIdx) {
-        const self = this;
-        // Прерываем предыдущую анимацию, если она ещё крутится.
-        if (this._zoomAnim && this._zoomAnim.raf && typeof cancelAnimationFrame !== 'undefined') {
-            cancelAnimationFrame(this._zoomAnim.raf);
+        this._cancelFrame();
+        if (this._drawCoalesceRaf && typeof cancelAnimationFrame !== 'undefined') {
+            cancelAnimationFrame(this._drawCoalesceRaf);
+            this._drawCoalesceRaf = 0;
         }
+        // Трассы стартуют, когда карта уже видна (стадия наблюдателя), не в пустом кадре.
+        this._trackRedrawPending = true;
         this._zoomAnim = {
             startTs: this._now(),
             fromIdx: fromIdx,
             toIdx: toIdx,
             raf: null
         };
+        this._scheduleFrame();
+    };
+
+    EarthView.prototype._cancelFrame = function() {
+        if (this._zoomAnim && this._zoomAnim.raf) {
+            if (typeof cancelAnimationFrame !== 'undefined') {
+                cancelAnimationFrame(this._zoomAnim.raf);
+            }
+            this._zoomAnim.raf = null;
+        }
+        if (!this._animRaf) { return; }
+        if (this._animRafIsTimer) {
+            clearTimeout(this._animRaf);
+        } else if (typeof cancelAnimationFrame !== 'undefined') {
+            cancelAnimationFrame(this._animRaf);
+        }
+        this._animRaf = 0;
+        this._animRafIsTimer = false;
+    };
+
+    /** Следующий кадр карты или карандаша трасс. Повторный вызов не плодит таймеры. */
+    EarthView.prototype._scheduleFrame = function() {
+        const self = this;
+        if (this._animRaf) { return; }
         const tick = function() {
-            if (!self._zoomAnim) { return; }
-            const now = self._now();
-            self._drawPhased(now);
-            // Если ещё в анимации — следующий кадр.
+            self._animRaf = 0;
+            self._animRafIsTimer = false;
             if (self._zoomAnim) {
-                if (typeof requestAnimationFrame !== 'undefined') {
-                    self._zoomAnim.raf = requestAnimationFrame(tick);
-                } else {
-                    self._zoomAnim.raf = setTimeout(tick, 16);
-                }
+                self._drawPhased(self._now());
+            } else if (self._hasActiveTrackAnim()) {
+                self._drawStatic();
+            } else {
+                return;
+            }
+            if ((self._zoomAnim || self._hasActiveTrackAnim()) && !self._animRaf) {
+                self._scheduleFrame();
             }
         };
         if (typeof requestAnimationFrame !== 'undefined') {
-            this._zoomAnim.raf = requestAnimationFrame(tick);
+            this._animRaf = requestAnimationFrame(tick);
+            this._animRafIsTimer = false;
         } else {
-            this._zoomAnim.raf = setTimeout(tick, 16);
+            this._animRaf = setTimeout(tick, 16);
+            this._animRafIsTimer = true;
         }
     };
 
@@ -2460,7 +2967,10 @@
         // выносок под актуальную проекцию (текущий zoom/center).
         if (reached('observer')) {
             this._setCalloutsLayerVisible(true);
+            // Карандаш трасс включается вместе с готовой картой, не раньше.
+            this._trackRevealNow = true;
             this._drawStatic();
+            this._trackRevealNow = false;
             if (frac >= 1) { this._zoomAnim = null; }
             return;
         }
@@ -2587,10 +3097,12 @@
      * vs «куда летит» (сплошная).
      * @private
      */
-    EarthView.prototype._drawSelectedLayer = function() {
+    EarthView.prototype._drawSelectedLayer = function(progress, trackOverride) {
         const sel = this._selectedSatellite;
-        const track = sel.groundTrack;
+        const track = (trackOverride != null) ? trackOverride : (sel && sel.groundTrack);
         if (!track) { return; }
+        const reveal = (typeof progress === 'number') ? progress : 1;
+        if (reveal <= 0) { return; }
 
         const ctx = this.ctx;
         const trackColor = this.colors.selectedTrack;
@@ -2605,69 +3117,60 @@
         // пиксельной защите `|Δx|>thresh` разрываем линию при `|Δlon|>30°` —
         // ловит «палки» через половину карты при observerLon ≠ 0 (см. doc у
         // TRACK_LON_JUMP_DEG).
-        const drawSeg = function(self, seg, color) {
+        const self = this;
+        const drawSeg = function(seg, color, localProgress) {
             if (!Array.isArray(seg) || seg.length < 2) { return; }
+            if (typeof localProgress === 'number' && localProgress <= 0) { return; }
             ctx.strokeStyle = color;
-            ctx.beginPath();
-            const thresh = self._antimeridianThreshold();
-            let prevP = null;
-            let prevLon = null;
-            let prevLat = null;
-            for (let k = 0; k < seg.length; k++) {
-                const p = self.project(seg[k].lon, seg[k].lat);
-                const lon = seg[k].lon;
-                const lat = seg[k].lat;
-                let isJump = false;
-                if (prevP && Math.abs(p.x - prevP.x) > thresh) {
-                    isJump = true;
-                } else if (prevLon !== null) {
-                    let dLon = lon - prevLon;
-                    while (dLon > 180) { dLon -= 360; }
-                    while (dLon < -180) { dLon += 360; }
-                    if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
-                }
-                if (!isJump && prevLat !== null && Math.abs(lat - prevLat) > TRACK_LAT_JUMP_DEG) {
-                    isJump = true;
-                }
-                if (k === 0 || isJump) {
-                    ctx.moveTo(p.x, p.y);
-                } else {
-                    ctx.lineTo(p.x, p.y);
-                }
-                prevP = p;
-                prevLon = lon;
-                prevLat = lat;
-            }
-            ctx.stroke();
+            self._strokeTrackPoints(seg, localProgress);
         };
 
         if (track && typeof track === 'object' && !Array.isArray(track)) {
             const pastSegs = Array.isArray(track.past) ? track.past : [];
             const futureSegs = Array.isArray(track.future) ? track.future : [];
             const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
+            const pastRuns = [];
+            const futureRuns = [];
             if (Array.isArray(bridgedPast)) {
+                for (let s = 0; s < bridgedPast.length; s++) {
+                    if (Array.isArray(bridgedPast[s]) && bridgedPast[s].length >= 2) {
+                        pastRuns.push(bridgedPast[s]);
+                    }
+                }
+            }
+            for (let s = 0; s < futureSegs.length; s++) {
+                if (Array.isArray(futureSegs[s]) && futureSegs[s].length >= 2) {
+                    futureRuns.push(futureSegs[s]);
+                }
+            }
+            const lengths = [];
+            for (let i = 0; i < pastRuns.length; i++) { lengths.push(pastRuns[i].length); }
+            for (let i = 0; i < futureRuns.length; i++) { lengths.push(futureRuns[i].length); }
+            const locals = EarthView.revealRunProgress(lengths, reveal);
+            let ri = 0;
+
+            if (pastRuns.length > 0) {
                 // Past — крупные круглые точки через ~8 px:
-                // setLineDash([0, gap]) + lineCap='round' → нулевая длина
-                // штриха, gap между точками. Толщина 3*dpr — точки крупнее
-                // солидной future-линии и хорошо заметны.
+                // setLineDash([0, gap]) + lineCap='round' даёт нулевую длину
+                // штриха и промежуток между точками.
                 const prevCap = ctx.lineCap;
                 const prevWidth = ctx.lineWidth;
                 ctx.lineCap = 'round';
                 ctx.lineWidth = 4 * dpr;
                 ctx.setLineDash([0, 10]);
-                for (let s = 0; s < bridgedPast.length; s++) {
-                    drawSeg(this, bridgedPast[s], pastColor);
+                for (let s = 0; s < pastRuns.length; s++) {
+                    drawSeg(pastRuns[s], pastColor, locals[ri++]);
                 }
                 ctx.lineCap = prevCap || 'butt';
                 ctx.lineWidth = prevWidth;
             }
             ctx.setLineDash([]);
-            for (let s = 0; s < futureSegs.length; s++) {
-                drawSeg(this, futureSegs[s], futureColor);
+            for (let s = 0; s < futureRuns.length; s++) {
+                drawSeg(futureRuns[s], futureColor, locals[ri++]);
             }
         } else if (Array.isArray(track)) {
             ctx.setLineDash([]);
-            drawSeg(this, track, futureColor);
+            drawSeg(track, futureColor, reveal);
         }
         ctx.setLineDash([]);
     };
@@ -2749,7 +3252,7 @@
     };
 
     /**
-     * Отрисовка слоя вторичных спутников (траектории и маркеры).
+     * Маркеры вторичных спутников. Трассы рисует _drawManagedTracks.
      * @private
      */
     EarthView.prototype._drawSecondaryLayer = function() {
@@ -2758,12 +3261,7 @@
         for (let i = 0; i < ids.length; i++) {
             const sat = this._secondarySatellites[ids[i]];
             const nid = parseInt(ids[i], 10);
-            const trackVisible = sm && sm.isTrackVisible(nid);
             const markerColor = sm ? sm.getMarkerColor(nid) : null;
-            if (sat.track && trackVisible) {
-                const trackColor = sm ? sm.getTrackColor(nid) : null;
-                this._drawSecondaryGroundTrack(sat, i, trackColor);
-            }
             if (sat.position) {
                 this._drawSecondaryMarker(sat, i, markerColor);
             }
@@ -2773,14 +3271,14 @@
     /**
      * Отрисовка трассы вторичного спутника: past — пунктир, future — сплошная
      * (тот же контраст направления, что у выбранного КА, но без точек).
-     * Вызывается только из _drawSecondaryLayer при sat.track && isTrackVisible(noradId) —
-     * пока трасса в таблице не включена (⊙), линия на карте не рисуется.
+     * @param {number} [progress] доля длины [0..1]
      * @private
      */
-    EarthView.prototype._drawSecondaryGroundTrack = function(sat, colorIdx, paletteColor) {
+    EarthView.prototype._drawSecondaryGroundTrack = function(sat, colorIdx, paletteColor, progress) {
         const ctx = this.ctx;
         const track = sat.track;
-        if (!track) { return; }
+        const reveal = (typeof progress === 'number') ? progress : 1;
+        if (!track || reveal <= 0) { return; }
 
         const color = paletteColor || cssVar('--map-secondary-track-fallback', 'rgba(200, 220, 235, 0.9)');
         const dpr = window.devicePixelRatio || 1;
@@ -2795,55 +3293,45 @@
         // «палки через половину карты» при observerLon ≠ 0: разрыв при |Δlon|>30°
         // (см. TRACK_LON_JUMP_DEG).
         const self = this;
-        const drawSeg = function(seg) {
+        const drawSeg = function(seg, localProgress) {
             if (!Array.isArray(seg) || seg.length < 2) { return; }
-            ctx.beginPath();
-            const thresh = self._antimeridianThreshold();
-            let prevP = null;
-            let prevLon = null;
-            let prevLat = null;
-            for (let k = 0; k < seg.length; k++) {
-                const p = self.project(seg[k].lon, seg[k].lat);
-                const lon = seg[k].lon;
-                const lat = seg[k].lat;
-                let isJump = false;
-                if (prevP && Math.abs(p.x - prevP.x) > thresh) {
-                    isJump = true;
-                } else if (prevLon !== null) {
-                    let dLon = lon - prevLon;
-                    while (dLon > 180) { dLon -= 360; }
-                    while (dLon < -180) { dLon += 360; }
-                    if (Math.abs(dLon) > TRACK_LON_JUMP_DEG) { isJump = true; }
-                }
-                if (!isJump && prevLat !== null && Math.abs(lat - prevLat) > TRACK_LAT_JUMP_DEG) {
-                    isJump = true;
-                }
-                if (k === 0 || isJump) {
-                    ctx.moveTo(p.x, p.y);
-                } else {
-                    ctx.lineTo(p.x, p.y);
-                }
-                prevP = p;
-                prevLon = lon;
-                prevLat = lat;
-            }
-            ctx.stroke();
+            if (typeof localProgress === 'number' && localProgress <= 0) { return; }
+            self._strokeTrackPoints(seg, localProgress);
         };
 
         const pastSegs = Array.isArray(track.past) ? track.past : [];
         const futureSegs = Array.isArray(track.future) ? track.future : [];
         const bridgedPast = this._bridgePastFuture(pastSegs, futureSegs);
-        // Past — пунктир (в светлой теме плотнее, иначе трассы «пропадают»).
+        const pastRuns = [];
+        const futureRuns = [];
         if (Array.isArray(bridgedPast)) {
-            ctx.setLineDash(isLight ? [5, 4] : [5, 5]);
             for (let s = 0; s < bridgedPast.length; s++) {
-                drawSeg(bridgedPast[s]);
+                if (Array.isArray(bridgedPast[s]) && bridgedPast[s].length >= 2) {
+                    pastRuns.push(bridgedPast[s]);
+                }
+            }
+        }
+        for (let s = 0; s < futureSegs.length; s++) {
+            if (Array.isArray(futureSegs[s]) && futureSegs[s].length >= 2) {
+                futureRuns.push(futureSegs[s]);
+            }
+        }
+        const lengths = [];
+        for (let i = 0; i < pastRuns.length; i++) { lengths.push(pastRuns[i].length); }
+        for (let i = 0; i < futureRuns.length; i++) { lengths.push(futureRuns[i].length); }
+        const locals = EarthView.revealRunProgress(lengths, reveal);
+        let ri = 0;
+        // Past — пунктир (в светлой теме плотнее, иначе трассы «пропадают»).
+        if (pastRuns.length > 0) {
+            ctx.setLineDash(isLight ? [5, 4] : [5, 5]);
+            for (let s = 0; s < pastRuns.length; s++) {
+                drawSeg(pastRuns[s], locals[ri++]);
             }
         }
         // Future — сплошная линия «куда летит».
         ctx.setLineDash([]);
-        for (let s = 0; s < futureSegs.length; s++) {
-            drawSeg(futureSegs[s]);
+        for (let s = 0; s < futureRuns.length; s++) {
+            drawSeg(futureRuns[s], locals[ri++]);
         }
         ctx.setLineDash([]);
     };

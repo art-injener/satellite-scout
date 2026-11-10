@@ -78,8 +78,22 @@ func (s *Service) WithDoppler(src DopplerSource) *Service {
 	return s
 }
 
+// applyDoppler ставит поправку канала. «Авто» берёт орбиту КА. «Вручную» берёт герцы оператора.
+// nil — поправки нет: орбита неизвестна или ручное значение нулевое.
+func (s *Service) applyDoppler(chain *Chain, cs sdr.ChannelSettings, freq uint64) *float64 {
+	if !cs.DopplerAuto {
+		hz := float64(cs.DopplerManualHz)
+		chain.SetDopplerHz(hz)
+		if hz == 0 {
+			return nil
+		}
+		return &hz
+	}
+	return s.followDoppler(chain, cs.DopplerNorad, freq)
+}
+
 // followDoppler ставит канал цепочки на Доплер КА norad для частоты freq сейчас и возвращает
-// этот сдвиг; nil — канал за Доплером не следует или орбита КА неизвестна, канал стоит на сдвиге.
+// этот сдвиг; nil — канал за Доплером не следует или орбита КА неизвестна, канал стоит без поправки.
 func (s *Service) followDoppler(chain *Chain, norad int, freq uint64) *float64 {
 	chain.SetDopplerHz(0)
 	if norad == 0 || s.doppler == nil {
@@ -143,11 +157,13 @@ type StatusEvent struct {
 	BandwidthHz uint32 `json:"bandwidth_hz"`
 	OffsetHz    int64  `json:"offset_hz"` // по сдвигу, полосе, порогу и профилю клиенты следуют за каналом
 	// DopplerAuto — режим «Авто». DopplerNorad — КА, за которым следует канал.
-	// DopplerHz — его сдвиг сейчас. Нет поля: орбита неизвестна.
-	// Канал на спектре стоит на offset_hz плюс doppler_hz.
-	DopplerAuto  bool     `json:"doppler_auto"`
-	DopplerNorad int      `json:"doppler_norad,omitempty"`
-	DopplerHz    *float64 `json:"doppler_hz,omitempty"`
+	// DopplerManualHz — поправка оператора в режиме «Вручную».
+	// DopplerHz — действующая поправка сейчас. Нет поля: поправки нет.
+	// Панель держит offset_hz в нуле и сдвигает график на doppler_hz: столбец в середине экрана.
+	DopplerAuto     bool     `json:"doppler_auto"`
+	DopplerNorad    int      `json:"doppler_norad,omitempty"`
+	DopplerManualHz int64    `json:"doppler_manual_hz"`
+	DopplerHz       *float64 `json:"doppler_hz,omitempty"`
 	// GainDB — усиление приёмника, отрицательное при АРУ; нет, если приёмник его не сообщил.
 	GainDB *float32 `json:"gain_db,omitempty"`
 	// Reception — меры хода приёма; нет, пока уровень в канале не поднимался выше порога.
@@ -209,7 +225,7 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 			continue
 		}
 		demodOff = false
-		doppler := s.followDoppler(chain, cs.DopplerNorad, freq)
+		doppler := s.applyDoppler(chain, cs, freq)
 		for _, p := range chain.Process(f, cs) {
 			s.send(EventTelemetry, telemetryEvent(pathID, cs.Demod, p))
 		}
@@ -346,24 +362,25 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		demod = cs.Demod
 	}
 	ev := StatusEvent{
-		RadioPath:    pathID,
-		Active:       active,
-		Demod:        demod,
-		DemodOff:     cs.DemodOff,
-		Supported:    st.Supported,
-		FrequencyHz:  freq,
-		LevelDBFS:    st.LevelDBFS,
-		SquelchDBFS:  cs.SquelchDBFS,
-		SquelchOpen:  active && st.SquelchOpen,
-		FramesGood:   st.Good,
-		FramesBad:    st.Bad,
-		LastPacketMs: st.LastPacketMs,
-		BandwidthHz:  cs.BandwidthHz,
-		OffsetHz:     cs.OffsetHz,
-		DopplerAuto:  cs.DopplerAuto,
-		DopplerNorad: cs.DopplerNorad,
-		DopplerHz:    st.DopplerHz,
-		Picture:      st.Picture,
+		RadioPath:       pathID,
+		Active:          active,
+		Demod:           demod,
+		DemodOff:        cs.DemodOff,
+		Supported:       st.Supported,
+		FrequencyHz:     freq,
+		LevelDBFS:       st.LevelDBFS,
+		SquelchDBFS:     cs.SquelchDBFS,
+		SquelchOpen:     active && st.SquelchOpen,
+		FramesGood:      st.Good,
+		FramesBad:       st.Bad,
+		LastPacketMs:    st.LastPacketMs,
+		BandwidthHz:     cs.BandwidthHz,
+		OffsetHz:        cs.OffsetHz,
+		DopplerAuto:     cs.DopplerAuto,
+		DopplerNorad:    cs.DopplerNorad,
+		DopplerManualHz: cs.DopplerManualHz,
+		DopplerHz:       st.DopplerHz,
+		Picture:         st.Picture,
 	}
 	if st.Measured {
 		ev.Reception = &ReceptionStages{CarrierHz: st.CarrierHz, DeviationHz: st.DeviationHz, ClockJitter: st.ClockJitter}

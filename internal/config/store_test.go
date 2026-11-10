@@ -138,6 +138,30 @@ func TestStore_GetCopiesImitator(t *testing.T) {
 	}
 }
 
+func TestStore_GetCopiesSweep(t *testing.T) {
+	store := NewStore(filepath.Join(t.TempDir(), "config.json"))
+	seed := DefaultConfig()
+	seed.Station.RadioPaths = []RadioPath{{
+		ID:      1,
+		Name:    "Test",
+		Antenna: AntennaConfig{Type: AntennaTypeStationary, Kind: AntennaKindQFH},
+		Sweep:   &SweepConfig{DwellS: 60, Ranges: []SweepRange{{CenterMHz: 145.9}}},
+	}}
+	store.Set(seed)
+
+	first := store.Get()
+	first.Station.RadioPaths[0].Sweep.DwellS = 10
+	first.Station.RadioPaths[0].Sweep.Ranges[0].CenterMHz = 1
+
+	sw := store.Get().Station.RadioPaths[0].Sweep
+	if sw.DwellS != 60 {
+		t.Error("Get() returned shared sweep section")
+	}
+	if sw.Ranges[0].CenterMHz != 145.9 {
+		t.Error("Get() returned shared sweep ranges")
+	}
+}
+
 func TestStore_UpdateAppliesAndPersists(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "config.json")

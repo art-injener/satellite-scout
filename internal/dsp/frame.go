@@ -99,3 +99,16 @@ func MaxDBFS(bins []float32) float32 {
 	}
 	return m
 }
+
+// CropBand — какие бины спектра окна rate уходят клиенту: середина шириной usableHz.
+// Число бинов чётное, чтобы центр окна остался на бине bins/2. Возвращает первый бин,
+// их число и ширину оставленного участка; usableHz 0 или не меньше rate — всё окно.
+func CropBand(bins int, rate, usableHz uint32) (start, keep int, spanHz int64) {
+	if usableHz == 0 || usableHz >= rate {
+		return 0, bins, int64(rate)
+	}
+	keep = 2 * int(math.Round(float64(bins)*float64(usableHz)/float64(rate)/2))
+	start = bins/2 - keep/2
+	spanHz = int64(math.Round(float64(keep) * float64(rate) / float64(bins)))
+	return start, keep, spanHz
+}

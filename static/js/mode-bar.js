@@ -1,6 +1,6 @@
-// mode-bar.js — связка ModeManager с шапкой и селектором тракта в колонке «Приёмник».
-// Заполняет оба dropdown радиотрактов, переключатель режима (toggle), проксирует в ModeManager.
-// Секция «Тракт» шапки скрыта: выбор в колонке «Приёмник» на «SDR».
+// mode-bar.js — связка ModeManager с шапкой, селектором тракта в колонке «Приёмник»
+// и селектором приёмника на «Панораме».
+// Секция «Тракт» шапки скрыта: выбор в колонке «Приёмник» и в шапке обхода.
 
 'use strict';
 
@@ -25,6 +25,7 @@
         const dropdowns = [
             header.querySelector('#app-header-path'),
             document.getElementById('manual-rx-path'),
+            document.getElementById('manual-sweep-path'),
         ].filter(Boolean);
         const isBasic = manager.isBasic();
 

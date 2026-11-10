@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/dsp"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
@@ -21,6 +22,12 @@ const (
 	// usableFraction — годная середина окна. На краях завал от фильтра ПЧ тюнера и цифрового
 	// ФНЧ демодулятора, туда же складываются зеркала из-за Найквиста.
 	usableFraction = 0.8
+	// ifOffsetTuneHz — ПЧ демодулятора выше середины фильтра тюнера.
+	// 160 кГц (rate/16) уже вытаскивает край окна на спад фильтра: пол косой.
+	// 10 кГц на фоне полосы в 2 МГц не видно, а срез выреза постоянной 100 Гц
+	// несущую на таком отступе не задевает. После выреза спектр переносится
+	// обратно, в центре остаётся сигнал, фильтр по-прежнему на частоте настройки.
+	ifOffsetTuneHz = 10_000
 
 	bulkEndpoint uint8 = 0x81
 	// streamBuffers — запросов в очереди ядра: 16 буферов по блоку, при 2 МГц около 130 мс запаса.
@@ -29,6 +36,10 @@ const (
 	usbPacket = 512
 	// autoGain — усиление, означающее АРУ.
 	autoGain = -1
+	// defaultGainDB — ручное усиление при старте, ступень R820T 32,8 дБ.
+	// АРУ выключена: она поднимает усилитель до упора и перегружает вход.
+	// 32,8 дБ — середина шкалы, потолок 49,6: слабый КА ещё слышно, сильное вещание рядом не забивает АЦП.
+	defaultGainDB float32 = 32.8
 )
 
 // ErrStreamAlreadyRunning — поток уже запущен.
@@ -69,6 +80,7 @@ type Receiver struct {
 	centerHz   uint64
 	gainDB     float32
 	sampleRate uint32
+	shiftHz    int32 // цифровой перенос, Гц: минус сдвиг ПЧ демодулятора
 	chip       *chip
 	tuner      *r820t
 	cancel     context.CancelFunc
@@ -80,7 +92,7 @@ func New(opts Options) *Receiver {
 	if opts.open == nil {
 		opts.open = openUSB
 	}
-	return &Receiver{opts: opts, centerHz: DefaultFrequencyHz, gainDB: autoGain}
+	return &Receiver{opts: opts, centerHz: DefaultFrequencyHz, gainDB: defaultGainDB}
 }
 
 func (r *Receiver) Name() string { return "rtlsdr" }
@@ -117,6 +129,15 @@ func (r *Receiver) Tune(frequencyHz uint64) error {
 	}
 	r.centerHz = frequencyHz
 	return nil
+}
+
+// ifOffsetHz — на сколько ПЧ демодулятора выше середины фильтра тюнера.
+// На очень низкой частоте дискретизации отступ уменьшается, чтобы остаться в полосе.
+func ifOffsetHz(rate uint32) uint32 {
+	if rate < ifOffsetTuneHz*4 {
+		return rate / 4
+	}
+	return ifOffsetTuneHz
 }
 
 // SetGain задаёт усиление тюнера в дБ; отрицательное — АРУ.
@@ -180,6 +201,7 @@ func (r *Receiver) StartStream(ctx context.Context, cfg sdr.StreamConfig) (<-cha
 	}
 
 	r.chip, r.tuner, r.sampleRate = c, tuner, rate
+	r.shiftHz = -int32(ifOffsetHz(rate))
 	streamCtx, cancel := context.WithCancel(ctx)
 	r.cancel = cancel
 	done := make(chan struct{})
@@ -214,13 +236,14 @@ func bringUp(c *chip, rate uint32, centerHz uint64, gainDB float32) (*r820t, uin
 	if err != nil {
 		return nil, 0, err
 	}
-	// Фильтр ПЧ драйвера RTL-SDR Blog вокруг 6 МГц, затем демодулятор на эту ПЧ
-	// и только после этого гетеродин: он считает LO как частота плюс эта ПЧ.
+	// Фильтр ПЧ вокруг 6 МГц и на запрошенной частоте. Демодулятор смотрит на
+	// ifOffsetTuneHz выше, поэтому постоянная не попадает в середину фильтра.
+	// Гетеродин считает LO как частота плюс ПЧ фильтра, не плюс ПЧ демодулятора.
 	ifHz, err := t.setBandwidth(ifBandwidthForRate(actual))
 	if err != nil {
 		return nil, 0, err
 	}
-	if err := c.setIFFreq(ifHz); err != nil {
+	if err := c.setIFFreq(ifHz + ifOffsetHz(actual)); err != nil {
 		return nil, 0, err
 	}
 	if err := t.setFreq(uint32(centerHz)); err != nil {
@@ -259,6 +282,9 @@ func (r *Receiver) pump(ctx context.Context, stream bulkStream, dev usbDevice, r
 ) {
 	defer close(done)
 	defer close(ch)
+	r.mu.Lock()
+	corr := dsp.NewDCShift(float64(r.shiftHz), float64(rate))
+	r.mu.Unlock()
 	defer func() {
 		r.mu.Lock()
 		// Отмена отпускает горутину, ждущую конца потока, и когда донгл пропал сам.
@@ -278,9 +304,13 @@ func (r *Receiver) pump(ctx context.Context, stream bulkStream, dev usbDevice, r
 		}
 		r.mu.Lock()
 		center := r.centerHz
+		shift := r.shiftHz
 		r.mu.Unlock()
+		samples := convertU8(buf)
+		corr.SetOffset(float64(shift))
+		corr.Correct(samples)
 		frame := sdr.IQFrame{
-			Samples:     convertU8(buf),
+			Samples:     samples,
 			CenterHz:    center,
 			SampleRate:  rate,
 			TimestampMs: uint64(time.Now().UnixMilli()),

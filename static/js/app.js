@@ -432,7 +432,9 @@
             // Пересчёт вторичных: бывший selected возвращается в карту вторичных,
             // ему нужно восстановить sky-трек из данных группы.
             _updateSecondaryPositions();
+            _updateSecondaryTracks();
             _refreshSecondarySkyTracks();
+            if (window.earthView) { window.earthView.draw(); }
         });
 
         // ── TRACKING_CHANGE: смена/сброс наблюдения ──
@@ -469,6 +471,9 @@
                     window.skyView.setSatellitePosition(NaN, NaN);
                 }
             }
+            _updateSecondaryPositions();
+            _updateSecondaryTracks();
+            if (window.earthView) { window.earthView.draw(); }
         });
 
         // ── GROUP_POSITION: batch satellite_state_update завершён ──

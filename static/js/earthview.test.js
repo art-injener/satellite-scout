@@ -1287,6 +1287,208 @@ test('calloutCardWidth: clamped by max logical width', () => {
     assert.ok(calloutCardWidth(ctx, longName, '', 2, 240) > 260);
 });
 
+// ── Карандаш трасс ───────────────────────────────────────────────────────────
+
+console.log('\nEarthView: track pencil');
+
+const TRACK_ANIM_OPTS = { drawMs: 800, seqBudgetMs: 1800 };
+
+test('revealRunProgress делит прогресс по кускам по порядку', () => {
+    assert.deepStrictEqual(EarthView.revealRunProgress([4, 4], 0.5), [1, 0]);
+    const quarter = EarthView.revealRunProgress([4, 4], 0.25);
+    assert.ok(Math.abs(quarter[0] - 0.5) < 1e-9, 'quarter[0]=' + quarter[0]);
+    assert.strictEqual(quarter[1], 0);
+    assert.deepStrictEqual(EarthView.revealRunProgress([4, 4], 1), [1, 1]);
+});
+
+test('sampleTrackProgress: до старта — from, в середине — линейно, после — to', () => {
+    const entry = { phase: 'draw', from: 0, to: 1, startTs: 1000, duration: 800 };
+    assert.strictEqual(EarthView.sampleTrackProgress(entry, 900), 0);
+    assert.strictEqual(EarthView.sampleTrackProgress(entry, 1000), 0);
+    assert.ok(Math.abs(EarthView.sampleTrackProgress(entry, 1400) - 0.5) < 1e-9);
+    assert.strictEqual(EarthView.sampleTrackProgress(entry, 1800), 1);
+});
+
+test('planTrackAnims: новая трасса рисуется с нуля и не сбрасывается повторным планом', () => {
+    const first = EarthView.planTrackAnims({}, [
+        { key: '1', inScope: true, kind: 'selected' }
+    ], 1000, TRACK_ANIM_OPTS);
+    assert.strictEqual(first['1'].phase, 'draw');
+    assert.strictEqual(first['1'].from, 0);
+    assert.strictEqual(first['1'].startTs, 1000);
+    assert.strictEqual(first['1'].duration, 800);
+    const second = EarthView.planTrackAnims(first, [
+        { key: '1', inScope: true, kind: 'selected' }
+    ], 1100, TRACK_ANIM_OPTS);
+    assert.strictEqual(second['1'].startTs, 1000);
+    assert.strictEqual(second['1'].phase, 'draw');
+});
+
+test('planTrackAnims: исчезнувшая трасса стирается с текущего прогресса', () => {
+    const idle = { '1': { phase: 'idle', progress: 1, kind: 'selected', geom: { t: 1 } } };
+    const next = EarthView.planTrackAnims(idle, [], 50, TRACK_ANIM_OPTS);
+    assert.strictEqual(next['1'].phase, 'erase');
+    assert.strictEqual(next['1'].from, 1);
+    assert.strictEqual(next['1'].to, 0);
+    assert.strictEqual(next['1'].geom.t, 1);
+    assert.strictEqual(next['1'].duration, 800);
+});
+
+test('planTrackAnims: трасса вне области анимации не получает запись', () => {
+    const next = EarthView.planTrackAnims({}, [
+        { key: '9', inScope: false, kind: 'secondary' }
+    ], 0, TRACK_ANIM_OPTS);
+    assert.deepStrictEqual(next, {});
+});
+
+test('planTrackAnims: несколько новых трасс идут строго по очереди', () => {
+    const next = EarthView.planTrackAnims({}, [
+        { key: '1', inScope: true, kind: 'tracking' },
+        { key: '2', inScope: true, kind: 'selected' },
+        { key: '3', inScope: true, kind: 'secondary' }
+    ], 1000, TRACK_ANIM_OPTS);
+    assert.strictEqual(next['1'].startTs, 1000);
+    assert.strictEqual(next['2'].startTs, next['1'].startTs + next['1'].duration);
+    assert.strictEqual(next['3'].startTs, next['2'].startTs + next['2'].duration);
+    assert.ok(next['1'].duration < 800, 'три трассы делят бюджет, duration=' + next['1'].duration);
+});
+
+test('planTrackAnims: redraw перерисовывает видимые трассы по очереди с нуля', () => {
+    const prev = {
+        '1': { phase: 'idle', progress: 1, kind: 'tracking' },
+        '2': { phase: 'idle', progress: 1, kind: 'selected' }
+    };
+    const next = EarthView.planTrackAnims(prev, [
+        { key: '1', inScope: true, kind: 'tracking' },
+        { key: '2', inScope: true, kind: 'selected' }
+    ], 5000, Object.assign({ redraw: true }, TRACK_ANIM_OPTS));
+    assert.strictEqual(next['1'].phase, 'draw');
+    assert.strictEqual(next['1'].from, 0);
+    assert.strictEqual(next['1'].startTs, 5000);
+    assert.ok(next['2'].startTs > next['1'].startTs);
+});
+
+test('planTrackAnims: законченное стирание удаляет запись', () => {
+    const prev = {
+        '1': { phase: 'erase', from: 1, to: 0, startTs: 0, duration: 100, kind: 'selected', geom: {} }
+    };
+    const next = EarthView.planTrackAnims(prev, [], 100, TRACK_ANIM_OPTS);
+    assert.strictEqual(next['1'], undefined);
+});
+
+test('collect: без «всех трасс» карандаш только у выбранного и сопровождаемого', () => {
+    const ev = makeEv({ animStyle: 'phased' });
+    const track = { past: [[{ lon: 0, lat: 0 }, { lon: 10, lat: 10 }]], future: [] };
+    ev.satellite.noradId = 1;
+    ev.satellite.groundTrack = track;
+    ev._selectedSatellite.noradId = 2;
+    ev._selectedSatellite.groundTrack = track;
+    ev._secondarySatellites[3] = { noradId: 3, track: track, name: 'C' };
+    const prevSm = global.window._stateManager;
+    global.window._stateManager = {
+        isShowAllMode: function() { return false; },
+        isTrackVisible: function() { return true; },
+        getTrackColor: function() { return '#abc'; }
+    };
+    try {
+        const list = ev._collectDesiredTracks();
+        const byKey = {};
+        list.forEach(function(item) { byKey[item.key] = item; });
+        assert.strictEqual(byKey['1'].kind, 'tracking');
+        assert.strictEqual(byKey['1'].inScope, true);
+        assert.strictEqual(byKey['2'].kind, 'selected');
+        assert.strictEqual(byKey['2'].inScope, true);
+        assert.strictEqual(byKey['3'].kind, 'secondary');
+        assert.strictEqual(byKey['3'].inScope, false);
+        global.window._stateManager.isShowAllMode = function() { return true; };
+        const all = ev._collectDesiredTracks();
+        const sec = all.find(function(item) { return item.key === '3'; });
+        assert.strictEqual(sec.inScope, true);
+    } finally {
+        global.window._stateManager = prevSm;
+    }
+});
+
+test('sync: смена масштаба запускает очередь только когда трассы уже можно показать', () => {
+    const ev = makeEv({ animStyle: 'phased', trackAnimDurationMs: 800, trackSeqBudgetMs: 1800 });
+    ev._scheduleFrame = function() {};
+    const track = { past: [[{ lon: 0, lat: 0 }, { lon: 10, lat: 10 }]], future: [] };
+    ev.satellite.noradId = 1;
+    ev.satellite.groundTrack = track;
+    ev._selectedSatellite.noradId = 2;
+    ev._selectedSatellite.groundTrack = track;
+    ev._now = function() { return 5000; };
+    ev._startZoomAnim(0, 1);
+    assert.strictEqual(ev._trackRedrawPending, true);
+    ev._syncTrackAnims();
+    assert.strictEqual(ev._trackRedrawPending, true, 'до стадии наблюдателя очередь не стартует');
+    ev._trackRevealNow = true;
+    ev._syncTrackAnims();
+    ev._trackRevealNow = false;
+    assert.strictEqual(ev._trackRedrawPending, false);
+    assert.strictEqual(ev._trackAnims['1'].phase, 'draw');
+    assert.strictEqual(ev._trackAnims['1'].startTs, 5000);
+    assert.ok(ev._trackAnims['2'].startTs > ev._trackAnims['1'].startTs);
+});
+
+test('sync: обновление точек той же трассы не перезапускает карандаш', () => {
+    const ev = makeEv({ animStyle: 'phased', trackAnimDurationMs: 800, trackSeqBudgetMs: 1800 });
+    const track = { past: [[{ lon: 0, lat: 0 }, { lon: 10, lat: 10 }]], future: [] };
+    ev.satellite.noradId = 1;
+    ev.satellite.groundTrack = track;
+    ev._now = function() { return 0; };
+    ev._syncTrackAnims();
+    const start = ev._trackAnims['1'].startTs;
+    ev.satellite.groundTrack = { past: [[{ lon: 1, lat: 1 }, { lon: 12, lat: 12 }]], future: [] };
+    ev._now = function() { return 100; };
+    ev._syncTrackAnims();
+    assert.strictEqual(ev._trackAnims['1'].phase, 'draw');
+    assert.strictEqual(ev._trackAnims['1'].startTs, start);
+});
+
+test('sync: снятие трассы запускает стирание', () => {
+    const ev = makeEv({ animStyle: 'phased', trackAnimDurationMs: 800, trackSeqBudgetMs: 1800 });
+    const track = { past: [[{ lon: 0, lat: 0 }, { lon: 10, lat: 10 }]], future: [] };
+    ev.satellite.noradId = 1;
+    ev.satellite.groundTrack = track;
+    ev._now = function() { return 0; };
+    ev._syncTrackAnims();
+    ev._now = function() { return 5000; };
+    ev._syncTrackAnims();
+    assert.strictEqual(ev._trackAnims['1'].phase, 'idle');
+    ev.satellite.noradId = null;
+    ev.satellite.groundTrack = [];
+    ev._syncTrackAnims();
+    assert.strictEqual(ev._trackAnims['1'].phase, 'erase');
+    assert.strictEqual(ev._trackAnims['1'].from, 1);
+});
+
+test('_strokeTrackPoints: progress 0 не рисует, дробный короче полной линии и имеет кончик', () => {
+    const { ev, calls } = makeRecordingTrackEv();
+    ev.observer = { lon: 0, lat: 0, name: 'gw' };
+    ev._syncCenterToObserver();
+    const points = [];
+    for (let i = 0; i < 5; i++) { points.push({ lon: i * 10, lat: 0 }); }
+
+    ev._strokeTrackPoints(points, 0);
+    assert.strictEqual(calls.filter(function(c) { return c.op === 'stroke'; }).length, 0);
+
+    calls.length = 0;
+    ev._strokeTrackPoints(points, 0.25);
+    const atQuarter = calls.filter(function(c) { return c.op === 'lineTo'; }).length;
+
+    calls.length = 0;
+    ev._strokeTrackPoints(points, 0.3);
+    const withTip = calls.filter(function(c) { return c.op === 'lineTo'; }).length;
+
+    calls.length = 0;
+    ev._strokeTrackPoints(points, 1);
+    const full = calls.filter(function(c) { return c.op === 'lineTo'; }).length;
+
+    assert.ok(atQuarter > 0 && atQuarter < full, 'quarter ' + atQuarter + ' full ' + full);
+    assert.ok(withTip > atQuarter, 'tip ' + withTip + ' quarter ' + atQuarter);
+});
+
 // ── Итоги ────────────────────────────────────────────────────────────────────
 
 console.log(`\nResults: ${passed} passed, ${failed} failed\n`);

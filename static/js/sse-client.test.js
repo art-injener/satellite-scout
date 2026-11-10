@@ -896,7 +896,7 @@ test('control events are re-dispatched on document as satellite-scout-access', (
 
 console.log('\nSSEClient — demodulator events');
 
-test('telemetry, demod_status and product are re-dispatched on document as satellite-scout-demod', () => {
+test('telemetry, demod_status, product, band_signals and sweep_state are re-dispatched on document as satellite-scout-demod', () => {
     const dispatched = [];
     const prevDocument = global.document;
     const prevCustomEvent = global.CustomEvent;
@@ -910,11 +910,13 @@ test('telemetry, demod_status and product are re-dispatched on document as satel
         es._emit('telemetry', { radio_path: 'radio_path_1', src: 'SCOUT' });
         es._emit('demod_status', { radio_path: 'radio_path_1', active: true });
         es._emit('product', { id: 'p1', lines: 12 });
+        es._emit('band_signals', { radio_path: 'radio_path_1', signals: [] });
+        es._emit('sweep_state', { radio_path: 'radio_path_1', running: true });
         es._emit('telemetry', 'not json');
 
-        assert.deepStrictEqual(dispatched.map((e) => e.type),
-            ['satellite-scout-demod', 'satellite-scout-demod', 'satellite-scout-demod']);
-        assert.deepStrictEqual(dispatched.map((e) => e.detail.event), ['telemetry', 'demod_status', 'product']);
+        assert.ok(dispatched.every((e) => e.type === 'satellite-scout-demod'));
+        assert.deepStrictEqual(dispatched.map((e) => e.detail.event),
+            ['telemetry', 'demod_status', 'product', 'band_signals', 'sweep_state']);
         assert.strictEqual(dispatched[0].detail.data.src, 'SCOUT');
         assert.strictEqual(dispatched[1].detail.data.active, true);
         client.disconnect();

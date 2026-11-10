@@ -41,7 +41,7 @@ func (h *ReceiverHub) Subscribe(pathID string) (<-chan IQFrame, func(), error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	tap := h.streamTap()
+	taps := h.streamTaps()
 
 	entry.sessMu.Lock()
 	defer entry.sessMu.Unlock()
@@ -57,7 +57,7 @@ func (h *ReceiverHub) Subscribe(pathID string) (<-chan IQFrame, func(), error) {
 		entry.session = s
 		// Подписка до запуска переноса: иначе первые кадры уйдут мимо первого зрителя.
 		frames = s.ring.Subscribe()
-		if tap != nil {
+		for _, tap := range taps {
 			go tap(pathID, s.ring.Subscribe())
 		}
 		go pumpSession(entry, receiver, s, in, s.gen.Load())

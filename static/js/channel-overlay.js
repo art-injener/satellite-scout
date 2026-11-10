@@ -1,14 +1,10 @@
 // channel-overlay.js — канал демодулятора поверх спектра и водопада.
 //
-// Окно приёмника (центр и «Полоса») и канал демодулятора — разные вещи:
-// канал задаётся сдвигом от центра приёмника и шириной. Заливка с чертой
-// центра лежит над графиками; щелчок ставит центр канала, перетаскивание
-// заливки двигает канал. Ширину задаёт список «Полоса канала».
-// Приёмник при этом не перестраивается. Канал за краем окна — стрелка у края.
-// Сервер сдвигает канал на Доплер. У SSB и CW полоса шире предела профиля не слышна,
-// и заливка всегда показывает то, что слышно.
-// Перетаскивание по пустому месту графика сообщает сдвиг в герцах.
-// На всей полосе это перестройка приёмника, при масштабе — сдвиг окна.
+// Столбец всегда по центру частоты, которую слушает демодулятор: частота приёмника
+// плюс Доплер. Ширину задаёт «Полоса канала». У USB и LSB внутри столбца залита
+// правая или левая половина: там работает демодулятор.
+// Перетаскивание по графику сообщает сдвиг в герцах: панель на эту величину
+// крутит приёмник, и на всей полосе, и в увеличении. Щелчок частоту не меняет.
 
 'use strict';
 
@@ -79,7 +75,7 @@
      * @param {HTMLCanvasElement[]} [opts.clickTargets] — графики, щелчок по которым ставит центр
      * @param {number} opts.marginLeft
      * @param {number} opts.marginRight
-     * @param {function(number, number)} opts.onChange — (сдвиг, ширина) после жеста
+     * @param {function(number)} [opts.onTune] — щелчок: абсолютная частота точки, Гц
      * @param {function(number)} [opts.onPan] — перетаскивание по графику: на сколько Гц
      *   сдвинуть видимую часть
      */
@@ -98,9 +94,15 @@
         if (!host || typeof document === 'undefined') { return; }
         this._root = makeEl('ml-chan', host);
         this._fill = makeEl('ml-chan__fill', this._root);
+        this._side = makeEl('ml-chan__side', this._root);
+        this._side.hidden = true;
         this._center = makeEl('ml-chan__center', this._root);
         this._label = makeEl('ml-chan__label', this._root);
         this._arrow = makeEl('ml-chan-arrow', host);
+        // Красный пунктир середины. Виден, только пока демодулятор выключен:
+        // включённый сам показывает центр чертой своей полосы.
+        this._guide = makeEl('ml-center-guide', host);
+        this._guide.hidden = true;
         this._root.hidden = true;
         this._arrow.hidden = true;
         this._bind();
@@ -157,6 +159,17 @@
         this.render();
     };
 
+    /**
+     * Половина столбца, где слушает SSB: 'usb' — правая, 'lsb' — левая, иначе весь столбец.
+     * @param {string} side
+     */
+    ChannelOverlay.prototype.setSide = function(side) {
+        if (!this._side) { return; }
+        const s = side === 'usb' || side === 'lsb' ? side : '';
+        this._side.hidden = s === '';
+        this._side.className = 'ml-chan__side' + (s ? ' is-' + s : '');
+    };
+
     /** Самая широкая полоса, которую слышно у профиля, Гц; 0 — без предела. */
     ChannelOverlay.prototype.setMaxWidth = function(hz) {
         this._maxWidthHz = hz > 0 ? Number(hz) : 0;
@@ -190,8 +203,25 @@
         this._root.classList.toggle('is-open', state === 'open');
     };
 
+    /** Пунктир середины графика: есть, только пока столбец демодулятора скрыт. */
+    ChannelOverlay.prototype._placeGuide = function() {
+        if (!this._guide) { return; }
+        if (this._shown) {
+            this._guide.hidden = true;
+            return;
+        }
+        const plot = this._plot();
+        if (!plot || !(plot.width > 0)) {
+            this._guide.hidden = true;
+            return;
+        }
+        this._guide.hidden = false;
+        this._guide.style.left = (plot.left + plot.width / 2) + 'px';
+    };
+
     ChannelOverlay.prototype.render = function() {
         if (!this._root) { return; }
+        this._placeGuide();
         if (!this._shown) {
             this._root.hidden = true;
             this._arrow.hidden = true;
@@ -241,8 +271,6 @@
                 if (e.currentTarget.setPointerCapture) { e.currentTarget.setPointerCapture(e.pointerId); }
             };
         };
-        this._fill.addEventListener('pointerdown', start('move'));
-        this._center.addEventListener('pointerdown', start('move'));
         (this._opts.clickTargets || []).forEach(function(c) {
             if (c) { c.addEventListener('pointerdown', start('click')); }
         });
@@ -260,18 +288,11 @@
         if (!d.moved) { return; }
         const plot = this._plot();
         const win = this._window();
-        if (d.mode === 'click') {
-            // Содержимое графика идёт за указателем
-            const dx = e.clientX - d.xLast;
-            d.xLast = e.clientX;
-            if (dx && this._opts.onPan) { this._opts.onPan(-dx * win.spanHz / plot.width); }
-            return;
-        }
-        if (d.mode !== 'move') { return; }
-        const dHz = (e.clientX - d.x0) * win.spanHz / plot.width;
-        const off = Math.round((d.offset0 + dHz) / 10) * 10;
-        this._ch.offsetHz = clampOffset(off, this._ch.bandwidthHz, this._band.spanHz);
-        this.render();
+        if (d.mode !== 'click' || !plot || !win) { return; }
+        // Содержимое графика идёт за указателем. Панель решает, сдвигать ли окно.
+        const dx = e.clientX - d.xLast;
+        d.xLast = e.clientX;
+        if (dx && this._opts.onPan) { this._opts.onPan(-dx * win.spanHz / plot.width); }
     };
 
     ChannelOverlay.prototype._dragEnd = function(e) {
@@ -284,16 +305,10 @@
         const band = this._band;
         const plot = this._plot();
         if (!band || !plot) { return; }
-        // Перетаскивание по графику только сдвигало видимую часть
-        if (d.mode === 'click' && (d.moved || !this._shown)) { return; }
-        if (!d.moved) {
-            // Щелчок по графику или по заливке ставит центр канала в эту точку;
-            // в настройку уходит сдвиг без Доплера, его сервер добавит сам
-            const off = offsetFromX(e.clientX - plot.hostLeft, this._window(), plot) - Math.round(this._shift.dopplerHz / 10) * 10;
-            this._ch.offsetHz = clampOffset(off, this._ch.bandwidthHz, band.spanHz);
-        }
-        this.render();
-        if (this._opts.onChange) { this._opts.onChange(this._ch.offsetHz, this._ch.bandwidthHz); }
+        // Щелчок частоту не меняет: приёмник крутят перетаскиванием.
+        if (d.mode !== 'click' || d.moved || !this._opts.onTune || !this._shown) { return; }
+        const rel = offsetFromX(e.clientX - plot.hostLeft, this._window(), plot);
+        this._opts.onTune(band.centerHz + rel);
     };
 
     ChannelOverlay.prototype.destroy = function() {
@@ -303,6 +318,7 @@
         }
         if (this._root && this._root.parentNode) { this._root.parentNode.removeChild(this._root); }
         if (this._arrow && this._arrow.parentNode) { this._arrow.parentNode.removeChild(this._arrow); }
+        if (this._guide && this._guide.parentNode) { this._guide.parentNode.removeChild(this._guide); }
     };
 
     ChannelOverlay.channelBox = channelBox;

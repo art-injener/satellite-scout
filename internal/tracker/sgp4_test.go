@@ -271,6 +271,39 @@ func TestGravityModels(t *testing.T) {
 	t.Logf("WGS84: X=%.3f, Y=%.3f, Z=%.3f", pos84.X, pos84.Y, pos84.Z)
 }
 
+// Один и тот же момент в UTC и в местном поясе даёт одну орбиту.
+// Иначе Доплер канала, который зовёт Propagate(time.Now()), смотрит на часы пояса как на UTC.
+func TestPropagate_SameInstantAnyZone(t *testing.T) {
+	t.Parallel()
+
+	tle := &TLE{Name: sgp4TestISSName, Line1: sgp4TestISSLine1, Line2: sgp4TestISSLine2}
+	prop, err := NewPropagator(tle)
+	if err != nil {
+		t.Fatalf("NewPropagator: %v", err)
+	}
+	utc := time.Date(2024, 6, 1, 18, 30, 0, 0, time.UTC)
+	msk := utc.In(time.FixedZone("MSK", 3*3600))
+
+	posUTC, err := prop.Propagate(utc)
+	if err != nil {
+		t.Fatalf("Propagate UTC: %v", err)
+	}
+	posMSK, err := prop.Propagate(msk)
+	if err != nil {
+		t.Fatalf("Propagate MSK: %v", err)
+	}
+	if posUTC.X != posMSK.X || posUTC.Y != posMSK.Y || posUTC.Z != posMSK.Z {
+		t.Fatalf("ECI UTC (%.3f, %.3f, %.3f), MSK (%.3f, %.3f, %.3f)",
+			posUTC.X, posUTC.Y, posUTC.Z, posMSK.X, posMSK.Y, posMSK.Z)
+	}
+	if GMST(utc) != GMST(msk) {
+		t.Fatalf("GMST UTC %.6f, MSK %.6f", GMST(utc), GMST(msk))
+	}
+	if JulianDay(utc) != JulianDay(msk) {
+		t.Fatalf("JD UTC %.6f, MSK %.6f", JulianDay(utc), JulianDay(msk))
+	}
+}
+
 // TestGMST проверяет расчёт GMST.
 func TestGMST(t *testing.T) {
 	t.Parallel()

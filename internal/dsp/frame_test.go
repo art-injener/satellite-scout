@@ -109,3 +109,28 @@ func TestPayloadSize(t *testing.T) {
 		t.Errorf("PayloadSize(512)=%d, want 2048", PayloadSize(512))
 	}
 }
+
+func TestCropBand(t *testing.T) {
+	cases := []struct {
+		name         string
+		bins         int
+		rate, usable uint32
+		start, keep  int
+		spanHz       int64
+	}{
+		{"rtl-sdr 2.56 MS/s keeps 2.048 MHz", 4096, 2_560_000, 2_048_000, 410, 3276, 2_047_500},
+		{"whole window usable", 1024, 2_048_000, 2_048_000, 0, 1024, 2_048_000},
+		{"no usable band given", 1024, 2_048_000, 0, 0, 1024, 2_048_000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, keep, span := CropBand(tc.bins, tc.rate, tc.usable)
+			if start != tc.start || keep != tc.keep || span != tc.spanHz {
+				t.Errorf("CropBand = %d, %d, %d; want %d, %d, %d", start, keep, span, tc.start, tc.keep, tc.spanHz)
+			}
+			if tc.bins/2-start != keep/2 {
+				t.Errorf("center bin moved: start %d, keep %d of %d", start, keep, tc.bins)
+			}
+		})
+	}
+}
