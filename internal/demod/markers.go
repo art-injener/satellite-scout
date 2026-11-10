@@ -39,12 +39,12 @@ func (s *Service) bandMarkers(centerHz uint64, spanHz uint32) []TxMarker {
 	if s.transmitters == nil {
 		return nil
 	}
-	return markersInBand(s.transmitters.ExpectedTransmitters(), s.doppler, s.now(), centerHz, spanHz)
+	return MarkersInBand(s.transmitters.ExpectedTransmitters(), s.doppler, s.now(), centerHz, spanHz)
 }
 
-// markersInBand сдвигает номиналы на Доплер КА по той же формуле, что канал, и оставляет
+// MarkersInBand сдвигает номиналы на Доплер КА по той же формуле, что канал, и оставляет
 // попавшие в окно центр ± полоса/2. КА без известной орбиты пропускается: где он звучит, неизвестно.
-func markersInBand(txs []ExpectedTransmitter, doppler DopplerSource, now time.Time,
+func MarkersInBand(txs []ExpectedTransmitter, doppler DopplerSource, now time.Time,
 	centerHz uint64, spanHz uint32) []TxMarker {
 	if doppler == nil || len(txs) == 0 {
 		return nil

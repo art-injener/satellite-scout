@@ -386,12 +386,36 @@ func TestHub_SetSampleRateRestartsStreamKeepingViewers(t *testing.T) {
 // tapRecorder collects the streams handed to the hub stream tap.
 func tapRecorder(hub *ReceiverHub) <-chan (<-chan IQFrame) {
 	taps := make(chan (<-chan IQFrame), 4)
-	hub.SetStreamTap(func(pathID string, frames <-chan IQFrame) {
+	hub.AddStreamTap(func(pathID string, frames <-chan IQFrame) {
 		if pathID == "p" {
 			taps <- frames
 		}
 	})
 	return taps
+}
+
+// The demodulator and the band detector both ride the same device stream.
+func TestSession_EveryStreamTapGetsTheStream(t *testing.T) {
+	hub, stub := hubWithStub(PathConfig{})
+	first := tapRecorder(hub)
+	second := tapRecorder(hub)
+	_, unsubscribe, err := hub.Subscribe("p")
+	if err != nil {
+		t.Fatalf("Subscribe: %v", err)
+	}
+	defer unsubscribe()
+	a, b := recvTap(t, first), recvTap(t, second)
+
+	stub.send(makeFrame(61))
+	if id := frameID(recvFrame(t, a)); id != 61 {
+		t.Errorf("first tap got id=%d, want 61", id)
+	}
+	if id := frameID(recvFrame(t, b)); id != 61 {
+		t.Errorf("second tap got id=%d, want 61", id)
+	}
+	if starts := func() int { s, _ := stub.counts(); return s }(); starts != 1 {
+		t.Errorf("starts=%d, want one device stream for both taps", starts)
+	}
 }
 
 func recvTap(t *testing.T, taps <-chan (<-chan IQFrame)) <-chan IQFrame {

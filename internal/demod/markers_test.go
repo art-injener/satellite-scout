@@ -32,7 +32,7 @@ func TestMarkersInBand_KeepsTransmittersInsideTheReceiverWindow(t *testing.T) {
 	}
 	doppler := dopplerByNorad{1: 3, 2: 0, 4: -5}
 
-	got := markersInBand(txs, doppler, time.Now(), testCenter, testRate)
+	got := MarkersInBand(txs, doppler, time.Now(), testCenter, testRate)
 	if len(got) != 1 {
 		t.Fatalf("markers = %+v, want only the in-band transmitter", got)
 	}
@@ -51,10 +51,10 @@ func TestMarkersInBand_KeepsTransmittersInsideTheReceiverWindow(t *testing.T) {
 
 func TestMarkersInBand_NothingWithoutOrbitsOrTransmitters(t *testing.T) {
 	txs := []ExpectedTransmitter{{NoradID: 1, UUID: "in", FreqHz: 436_600_000}}
-	if got := markersInBand(txs, nil, time.Now(), testCenter, testRate); got != nil {
+	if got := MarkersInBand(txs, nil, time.Now(), testCenter, testRate); got != nil {
 		t.Errorf("without orbits: %+v, want none", got)
 	}
-	if got := markersInBand(nil, dopplerByNorad{1: 0}, time.Now(), testCenter, testRate); got != nil {
+	if got := MarkersInBand(nil, dopplerByNorad{1: 0}, time.Now(), testCenter, testRate); got != nil {
 		t.Errorf("without transmitters: %+v, want none", got)
 	}
 }

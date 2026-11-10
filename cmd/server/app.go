@@ -7,18 +7,22 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"math"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
 	assets "github.com/art-injener/satellite-scout"
 	"github.com/art-injener/satellite-scout/internal/access"
+	"github.com/art-injener/satellite-scout/internal/bandscan"
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/exclude"
+	"github.com/art-injener/satellite-scout/internal/freqplan"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
@@ -27,6 +31,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/sdr/imitator"
 	"github.com/art-injener/satellite-scout/internal/services"
 	"github.com/art-injener/satellite-scout/internal/sigmf"
+	"github.com/art-injener/satellite-scout/internal/sweep"
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
 
@@ -55,9 +60,14 @@ type app struct {
 	receiverHub *sdr.ReceiverHub // приёмники по радиотрактам из конфига
 	products    *products.Store  // картинки, принятые демодулятором; nil — каталог недоступен
 	audio       *demod.AudioHub  // звук демодулятора для потока /audio
+	sweep       *sweep.Service   // обход трактов по диапазонам из конфига, снимки окон панорамы
+	bandscan    *bandscan.Service
 
 	satnogs        *satnogs.Service           // интеграция с SatNOGS
 	satnogsAdapter *satnogsTransmitterAdapter // адаптер SatNOGS → services
+
+	freqPlanMu sync.Mutex
+	freqPlan   []freqplan.Entry // последний план частот для журнала визитов
 }
 
 // setupLogger — стандартный логгер без сторонних зависимостей.
@@ -182,9 +192,20 @@ func NewApp(configStore *config.Store) *app {
 	} else {
 		demodService.WithProducts(productStore)
 	}
-	receiverHub.SetStreamTap(demodService.Run)
+	receiverHub.AddStreamTap(demodService.Run)
+	// Обнаружитель сигналов в полосе — тоже попутно: участки и их статистика копятся, пока идёт поток.
+	bandService := bandscan.NewService(receiverHub, sseHub.Broadcast).
+		WithExpected(bandExpected{tracking: trackingService})
+	receiverHub.AddStreamTap(bandService.Run)
+	// Обход сам держит поток тракта: обнаружитель и разбор работают без открытой страницы.
+	sweepService := sweep.NewService(receiverHub, sseHub.Broadcast)
+	for _, rp := range cfg.Station.RadioPaths {
+		if rp.Sweep != nil {
+			sweepService.Configure(fmt.Sprintf("radio_path_%d", rp.ID), sweepRanges(rp.Sweep), rp.Sweep.Dwell())
+		}
+	}
 
-	return &app{
+	a := &app{
 		cfg:         cfg,
 		configStore: configStore,
 		templates:   templates,
@@ -199,7 +220,11 @@ func NewApp(configStore *config.Store) *app {
 		receiverHub: receiverHub,
 		products:    productStore,
 		audio:       audioHub,
+		sweep:       sweepService,
+		bandscan:    bandService,
 	}
+	sweepService.OnDwellEnd(a.onSweepDwellEnd)
+	return a
 }
 
 // Run запускает HTTP-сервер и фоновые сервисы, ждёт сигнала завершения.
@@ -228,6 +253,7 @@ func (a *app) Run() error {
 
 	go a.tracking.Run(ctx)
 	a.startSatNOGS(ctx)
+	a.startFreqPlan(ctx)
 	a.startHotReload()
 
 	serverErr := make(chan error, 1)
@@ -329,7 +355,7 @@ func (a *app) startSatNOGS(ctx context.Context) {
 		WithWorkers(a.cfg.SatNOGS.Workers)
 	go a.satnogs.Run(ctx)
 	a.satnogsAdapter = newSatnogsTransmitterAdapter(a.satnogs)
-	a.tracking.SetTransmitterProvider(a.satnogsAdapter)
+	a.wireFreqPlanProvider()
 	slog.InfoContext(ctx, "satnogs integration enabled", "cache_ttl", a.cfg.SatNOGS.CacheTTL.Duration())
 
 	// Имитация приёма в таблице передатчиков (пакеты, уровень, SNR, lock) пока выключена.
@@ -367,6 +393,16 @@ func (a *app) startHotReload() {
 	})
 }
 
+// sweepRanges переводит диапазоны обхода из МГц конфига в Гц.
+func sweepRanges(sc *config.SweepConfig) []sweep.Range {
+	hz := func(mhz float64) uint64 { return uint64(math.Round(mhz * 1e6)) }
+	out := make([]sweep.Range, len(sc.Ranges))
+	for i, r := range sc.Ranges {
+		out[i] = sweep.Range{CenterHz: hz(r.CenterMHz), LoHz: hz(r.MinMHz), HiHz: hz(r.MaxMHz)}
+	}
+	return out
+}
+
 // routeDeps собирает зависимости для setupRoutes.
 func (a *app) routeDeps() *routeDeps {
 	return &routeDeps{
@@ -382,6 +418,7 @@ func (a *app) routeDeps() *routeDeps {
 		ReceiverHub: a.receiverHub,
 		Products:    a.products,
 		Audio:       a.audio,
+		Sweep:       a.sweep,
 		Exclude:     a.exclude,
 		PassCache:   a.pass,
 		Group:       a.tracking,

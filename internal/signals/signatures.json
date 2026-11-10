@@ -1,0 +1,72 @@
+[
+  {
+    "id": "broadcast",
+    "label": "Эфирное радио",
+    "modulations": ["wfm"],
+    "bands": [{"lo_hz": 87500000, "hi_hz": 108000000}],
+    "probe": "none"
+  },
+  {
+    "id": "amateur_voice",
+    "label": "Радиопередатчик",
+    "modulations": ["fm", "fm_voice"],
+    "bands": [
+      {"lo_hz": 144000000, "hi_hz": 146000000},
+      {"lo_hz": 430000000, "hi_hz": 440000000}
+    ],
+    "width_min_hz": 8000,
+    "width_max_hz": 25000,
+    "probe": "none"
+  },
+  {
+    "id": "amateur_data",
+    "label": "Радиопередатчик",
+    "modulations": ["2fsk"],
+    "bands": [
+      {"lo_hz": 144000000, "hi_hz": 146000000},
+      {"lo_hz": 435000000, "hi_hz": 438000000}
+    ],
+    "width_min_hz": 2000,
+    "width_max_hz": 30000,
+    "baud_min": 1000,
+    "baud_max": 20000,
+    "probe": "none"
+  },
+  {
+    "id": "ism_burst",
+    "label": "Датчик или брелок",
+    "modulations": ["ook", "2fsk"],
+    "bands": [{"lo_hz": 433075000, "hi_hz": 434790000}],
+    "baud_min": 1000,
+    "baud_max": 10000,
+    "emission": "pulsed",
+    "bursts_min": 2,
+    "burst_min_s": 0.05,
+    "burst_max_s": 1,
+    "probe": "none"
+  },
+  {
+    "id": "lora",
+    "label": "LoRa",
+    "modulations": ["lfm"],
+    "bands": [
+      {"lo_hz": 433075000, "hi_hz": 434790000},
+      {"lo_hz": 863000000, "hi_hz": 870000000}
+    ],
+    "width_hz": [125000, 250000, 500000],
+    "width_tol_hz": 40000,
+    "probe": "required"
+  },
+  {
+    "id": "gsm_base",
+    "label": "GSM",
+    "modulations": ["2fsk"],
+    "bands": [
+      {"lo_hz": 935000000, "hi_hz": 960000000},
+      {"lo_hz": 1805000000, "hi_hz": 1880000000}
+    ],
+    "width_min_hz": 120000,
+    "width_max_hz": 280000,
+    "probe": "required"
+  }
+]

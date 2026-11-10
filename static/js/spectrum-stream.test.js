@@ -20,7 +20,7 @@ const assert = require('assert');
 global.window = {};
 const {
     SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, DisplaySmooth,
-    markerReadout, cursorSample, dbmOffset, shiftLevels, zoomView, panView, viewSlice,
+    markerReadout, cursorSample, dbmOffset, shiftLevels, zoomView, panView, viewSlice, shiftedSlice,
 } = require('./spectrum-stream.js');
 
 const HEADER = 40;
@@ -176,19 +176,18 @@ test('AutoRange: noise floor sits near the bottom, 40 dB of room above it', () =
     assert.deepStrictEqual(r, { min: -80, max: -25 });
 });
 
-test('AutoRange: a strong peak raises the top at once', () => {
+test('AutoRange: a strong peak does not stretch the window', () => {
     const ar = new AutoRange();
-    ar.update(noiseFrame(-69));
-    assert.deepStrictEqual(ar.update(noiseFrame(-69, { 512: -11 })), { min: -80, max: -5 });
+    const quiet = ar.update(noiseFrame(-69));
+    assert.deepStrictEqual(ar.update(noiseFrame(-69, { 512: -11 })), quiet,
+        'a peak above the window clips; the noise floor stays on the scale');
 });
 
-test('AutoRange: after the peak is gone the top comes back slowly', () => {
+test('AutoRange: a transient peak leaves the window alone', () => {
     const ar = new AutoRange();
+    const quiet = ar.update(noiseFrame(-69));
     ar.update(noiseFrame(-69, { 512: -11 }));
-    assert.strictEqual(ar.update(noiseFrame(-69)).max, -5, 'one quiet frame must not drop the top');
-    let r;
-    for (let i = 0; i < 200; i++) { r = ar.update(noiseFrame(-69)); }
-    assert.deepStrictEqual(r, { min: -80, max: -25 });
+    assert.deepStrictEqual(ar.update(noiseFrame(-69)), quiet);
 });
 
 test('AutoRange: noise jitter of a few dB keeps the scale still', () => {
@@ -207,10 +206,10 @@ test('AutoRange: the scale follows a lasting change of the noise floor', () => {
     assert.deepStrictEqual(r, { min: -60, max: -5 });
 });
 
-test('AutoRange: the top also fits the held trace, the floor stays on the live frame', () => {
+test('AutoRange: a held peak does not lift the window, the floor stays on the live frame', () => {
     const held = noiseFrame(-40, { 512: -11 });
-    assert.deepStrictEqual(new AutoRange().update(noiseFrame(-69), held), { min: -80, max: -5 },
-        'a held peak above the live one lifts the top, the held noise does not lift the bottom');
+    assert.deepStrictEqual(new AutoRange().update(noiseFrame(-69), held), { min: -80, max: -25 },
+        'hold is drawn on the same window and does not stretch it');
 });
 
 test('AutoRange: floor is the median, so a band full of carriers below half does not lift it', () => {
@@ -335,6 +334,19 @@ test('viewSlice: window at the band edge ends at the last bin', () => {
     const s = viewSlice(4096, FULL, { offsetHz: 768000, spanHz: 512000 });
     assert.strictEqual(s.start + s.count, 4096);
     assert.strictEqual(s.offsetHz, 767500);
+});
+
+test('shiftedSlice keeps the requested center and pads the side that left the band', () => {
+    const inside = shiftedSlice(4096, FULL, 512000, 384000);
+    assert.deepStrictEqual(inside, {
+        start: 2304, count: 1025, padLeft: 0, padRight: 0, offsetHz: 384000, spanHz: 512000,
+    });
+    // Center 8 kHz above the middle of a 16 kHz window on a 64-bin, 64 kHz band: one side sticks out.
+    const over = shiftedSlice(64, 64000, 32000, 24000);
+    assert.strictEqual(over.padLeft, 0);
+    assert.ok(over.padRight > 0, 'the high side is past the receiver band');
+    assert.strictEqual(over.padLeft + over.count + over.padRight, Math.round(32000 / 1000) + 1);
+    assert.ok(Math.abs(over.offsetHz - 24000) < 1000);
 });
 
 // ── Long-lived request ────────────────────────────────────────────────

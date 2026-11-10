@@ -27,6 +27,21 @@ const (
 	SignalBeacon SignalKind = "beacon"
 	// SignalSSTV — картинка SSTV в режиме SSTVMode поверх ЧМ раз в Period.
 	SignalSSTV SignalKind = "sstv"
+	// SignalOOK — непрерывный OOK 2000 Бод по битам PRBS-9, как датчики и брелоки ЛПД.
+	SignalOOK SignalKind = "ook"
+	// SignalCW — телеграф 18 слов в минуту, текст cwText по кругу.
+	SignalCW SignalKind = "cw"
+	// SignalLFM — повторяющиеся свипы, как преамбула LoRa. На низкой частоте
+	// отсчётов размах сужается, чтобы свип поместился в полосу.
+	SignalLFM SignalKind = "lfm"
+)
+
+const (
+	ookBaud = 2000
+	cwWPM   = 18
+	cwText  = "CQ CQ DE R1SIM K"
+	// cwWordGap — пауза между повторами текста, в точках.
+	cwWordGap = 7
 )
 
 // BeaconModem — модуляция кадра маяка; названия совпадают с демодуляторами канала.
@@ -109,6 +124,12 @@ func newSignalSource(sig Signal, sampleRate float64) (*signalSource, error) {
 		gen = carrierGen{}
 	case SignalAFSKPRBS:
 		gen = newAFSKPRBSGen(sampleRate)
+	case SignalOOK:
+		gen = newOOKGen(sampleRate)
+	case SignalCW:
+		gen = newCWGen(sampleRate)
+	case SignalLFM:
+		gen = newLFMGen(sampleRate)
 	case SignalBeacon:
 		b, err := newBeaconGen(sig, sampleRate)
 		if err != nil {
@@ -222,6 +243,63 @@ func (g *afskPRBSGen) fillClean(dst []complex64) {
 				g.levels[k] = g.prbs.Next()
 			}
 			g.modBuf = g.mod.Modulate(g.modBuf[:0], g.levels)
+			g.pending = g.modBuf
+		}
+		n := copy(dst[i:], g.pending)
+		g.pending = g.pending[n:]
+		i += n
+	}
+}
+
+// keyedGen — манипуляция «есть/нет» без конца: уровни берутся порциями из next.
+type keyedGen struct {
+	mod     *modem.OOK
+	next    func() []byte
+	modBuf  []complex64
+	pending []complex64
+}
+
+func newOOKGen(sampleRate float64) *keyedGen {
+	prbs := modem.NewPRBS9()
+	levels := make([]byte, symbolChunk)
+	return &keyedGen{
+		mod: modem.NewOOK(modem.OOKConfig{SampleRate: sampleRate, Baud: ookBaud}),
+		next: func() []byte {
+			for k := range levels {
+				levels[k] = prbs.Next()
+			}
+			return levels
+		},
+	}
+}
+
+func newCWGen(sampleRate float64) *keyedGen {
+	levels := append(modem.MorseLevels(cwText), make([]byte, cwWordGap)...)
+	return &keyedGen{
+		mod:  modem.NewOOK(modem.OOKConfig{SampleRate: sampleRate, Baud: modem.CWBaud(cwWPM)}),
+		next: func() []byte { return levels },
+	}
+}
+
+type lfmGen struct {
+	sw *modem.Sweep
+}
+
+func newLFMGen(sampleRate float64) *lfmGen {
+	return &lfmGen{sw: modem.NewSweep(sampleRate, 125_000, 7)}
+}
+
+func (g *lfmGen) fillClean(dst []complex64) {
+	for i := range dst {
+		dst[i] = g.sw.Next()
+	}
+}
+
+func (g *keyedGen) fillClean(dst []complex64) {
+	i := 0
+	for i < len(dst) {
+		if len(g.pending) == 0 {
+			g.modBuf = g.mod.Modulate(g.modBuf[:0], g.next())
 			g.pending = g.modBuf
 		}
 		n := copy(dst[i:], g.pending)

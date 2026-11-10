@@ -3,6 +3,8 @@ package rtlsdr
 import (
 	"context"
 	"errors"
+	"math"
+	"math/cmplx"
 	"strings"
 	"sync"
 	"syscall"
@@ -167,16 +169,20 @@ func TestReceiver_StreamConvertsUnsignedSamples(t *testing.T) {
 	if d.bufSize%512 != 0 || d.bufSize < 2*256 {
 		t.Errorf("bulk buffer %d bytes: want a multiple of 512 holding the block", d.bufSize)
 	}
-	d.stream.chunks <- []byte{0, 255, 127, 128}
-	f := nextFrame(t, ch)
+	raw := convertU8([]byte{0, 255, 127, 128})
 	want := []complex64{complex(-1, 1), complex(-0.5/127.5, 0.5/127.5)}
-	if len(f.Samples) != len(want) {
-		t.Fatalf("%d samples, want %d", len(f.Samples), len(want))
+	if len(raw) != len(want) {
+		t.Fatalf("%d samples, want %d", len(raw), len(want))
 	}
 	for i := range want {
-		if f.Samples[i] != want[i] {
-			t.Errorf("sample %d = %v, want %v", i, f.Samples[i], want[i])
+		if raw[i] != want[i] {
+			t.Errorf("sample %d = %v, want %v", i, raw[i], want[i])
 		}
+	}
+	d.stream.chunks <- []byte{0, 255, 127, 128}
+	f := nextFrame(t, ch)
+	if len(f.Samples) != len(want) {
+		t.Fatalf("%d samples, want %d", len(f.Samples), len(want))
 	}
 	if f.SampleRate != 2_048_000 || f.CenterHz != DefaultFrequencyHz {
 		t.Errorf("frame at %d Hz, %d S/s", f.CenterHz, f.SampleRate)
@@ -197,21 +203,15 @@ func TestReceiver_BringUpThenFIFOResetBeforeStream(t *testing.T) {
 			t.Errorf("tuner not initialised: reg 0x%02x = 0x%02x", 5+i, d.regs[5+i])
 		}
 	}
-	// 0x44 is the nint word for 436.5 MHz at the 6 MHz IF.
-	if d.regs[0x14] != 0x44 {
-		t.Errorf("tuner not at 436.5 MHz: reg 0x14 = 0x%02x", d.regs[0x14])
+	if got, want := programmedLO(d.regs, DefaultFrequencyHz), float64(DefaultFrequencyHz)+float64(r820tBlogIFHz); math.Abs(got-want) > 1000 {
+		t.Errorf("LO %.0f Hz, want %.0f Hz (tuner stays on the requested frequency)", got, want)
 	}
-	ifHz := map[uint16]byte{}
-	for _, c := range d.f.writes() {
-		if isDemodWrite(c, 1, 0x19) || isDemodWrite(c, 1, 0x1a) || isDemodWrite(c, 1, 0x1b) {
-			ifHz[c.value>>8] = c.data[0]
-		}
+	wantIF := float64(r820tBlogIFHz + ifOffsetHz(2_048_000))
+	if got := demodIFHz(d.f.writes()); math.Abs(got-wantIF) > 1000 {
+		t.Errorf("demod IF %.0f Hz, want %.0f Hz (filter centre plus %d Hz)", got, wantIF, ifOffsetTuneHz)
 	}
-	if ifHz[0x19] != 0x32 || ifHz[0x1a] != 0xaa || ifHz[0x1b] != 0xab {
-		t.Errorf("demod IF = %x, want 6 MHz", ifHz)
-	}
-	if st := r.Status(); !st.Running || st.SampleRate != 2_048_000 || st.GainDB >= 0 {
-		t.Errorf("status %+v: want running at 2.048 MS/s with AGC", st)
+	if st := r.Status(); !st.Running || st.SampleRate != 2_048_000 || st.GainDB != defaultGainDB {
+		t.Errorf("status %+v: want running at 2.048 MS/s with manual gain %.1f dB", st, defaultGainDB)
 	}
 }
 
@@ -222,7 +222,7 @@ func TestReceiver_TuneIsKeptUntilStartAndAppliedLive(t *testing.T) {
 		t.Fatal(err)
 	}
 	ch := startStream(t, r, 2_048_000, 0)
-	at145 := d.regs[0x14]
+	lo145 := programmedLO(d.regs, 145_800_000)
 
 	d.stream.chunks <- []byte{1, 2}
 	if f := nextFrame(t, ch); f.CenterHz != 145_800_000 {
@@ -231,8 +231,9 @@ func TestReceiver_TuneIsKeptUntilStartAndAppliedLive(t *testing.T) {
 	if err := r.Tune(436_500_000); err != nil {
 		t.Fatal(err)
 	}
-	if d.regs[0x14] == at145 || d.regs[0x14] != 0x44 {
-		t.Errorf("live tune did not reach the tuner: reg 0x14 = 0x%02x", d.regs[0x14])
+	lo436 := programmedLO(d.regs, 436_500_000)
+	if math.Abs(lo436-lo145) < 1000 || math.Abs(lo436-float64(436_500_000+r820tBlogIFHz)) > 1000 {
+		t.Errorf("LO %.0f Hz after live tune, want %.0f Hz", lo436, float64(436_500_000+r820tBlogIFHz))
 	}
 	d.stream.chunks <- []byte{1, 2}
 	if f := nextFrame(t, ch); f.CenterHz != 436_500_000 {
@@ -356,7 +357,7 @@ func TestProbe_ReadsSamplesAndReleases(t *testing.T) {
 		t.Fatal(err)
 	}
 	if rep.Tuner != "R820T/R820T2" || rep.Samples < probeSamples || rep.SampleRate != RecommendedSampleRate ||
-		rep.CenterHz != DefaultFrequencyHz || rep.GainDB >= 0 {
+		rep.CenterHz != DefaultFrequencyHz || rep.GainDB != defaultGainDB {
 		t.Errorf("report %+v", rep)
 	}
 	if !d.closed() {
@@ -383,4 +384,95 @@ func TestReceiver_CapabilitiesSkipResamplerGap(t *testing.T) {
 			t.Fatalf("choices %v, want %v", choices, want)
 		}
 	}
+}
+
+// The demodulator IF sits a few kilohertz above the tuner filter, so the requested
+// centre arrives at +ifOffsetHz beside a DC pedestal. The stream shifts it back to
+// zero and drops the pedestal. The tuner LO stays on the requested frequency.
+func TestReceiver_OffsetRecentersCarrierAndDropsDC(t *testing.T) {
+	const (
+		rate  = uint32(2_048_000)
+		block = 8192
+		amps  = 40.0
+	)
+	off := float64(ifOffsetHz(rate))
+	d := newFakeDongle()
+	r := newFakeReceiver(d)
+	ch := startStream(t, r, rate, block)
+
+	const frames = 6
+	for n := 0; n < frames; n++ {
+		buf := make([]byte, block*2)
+		for i := 0; i < block; i++ {
+			ph := 2 * math.Pi * off * float64(n*block+i) / float64(rate)
+			buf[2*i] = byte(math.Round(127.5 + amps*math.Cos(ph) + 25))
+			buf[2*i+1] = byte(math.Round(127.5 + amps*math.Sin(ph) - 18))
+		}
+		d.stream.chunks <- buf
+	}
+	var last sdr.IQFrame
+	for n := 0; n < frames; n++ {
+		last = nextFrame(t, ch)
+	}
+	if last.CenterHz != DefaultFrequencyHz {
+		t.Errorf("frame centre %d Hz, want the requested frequency", last.CenterHz)
+	}
+	if f := frameHz(last.Samples, float64(rate)); math.Abs(f) > 25 {
+		t.Errorf("carrier at %g Hz, want 0", f)
+	}
+	if mag := frameMag(last.Samples); math.Abs(mag-amps/127.5) > 0.04 {
+		t.Errorf("amplitude %g, want %g", mag, amps/127.5)
+	}
+	if got, want := programmedLO(d.regs, DefaultFrequencyHz), float64(DefaultFrequencyHz)+float64(r820tBlogIFHz); math.Abs(got-want) > 1000 {
+		t.Errorf("LO %.0f Hz, want %.0f", got, want)
+	}
+}
+
+// demodIFHz восстанавливает последнюю ПЧ демодулятора из записей регистров, Гц.
+func demodIFHz(writes []ctrlCall) float64 {
+	var b19, b1a, b1b byte
+	for _, c := range writes {
+		switch {
+		case isDemodWrite(c, 1, 0x19):
+			b19 = c.data[0]
+		case isDemodWrite(c, 1, 0x1a):
+			b1a = c.data[0]
+		case isDemodWrite(c, 1, 0x1b):
+			b1b = c.data[0]
+		}
+	}
+	raw := int32(b19&0x3f)<<16 | int32(b1a)<<8 | int32(b1b)
+	if raw&0x200000 != 0 {
+		raw -= 0x400000
+	}
+	return float64(-int64(raw)*xtalHz) / float64(uint32(1)<<22)
+}
+
+// programmedLO reconstructs the synthesizer frequency from the tuner registers.
+func programmedLO(regs [32]byte, rf uint32) float64 {
+	lo := float64(rf) + float64(r820tBlogIFHz)
+	mixDiv := 2.0
+	for lo*mixDiv < float64(r820tVCOMin) {
+		mixDiv *= 2
+	}
+	v := regs[0x14]
+	nint := 13 + 4*float64(v&0x3f) + float64(v>>6)
+	sdm := float64(uint16(regs[0x16])<<8 | uint16(regs[0x15]))
+	return 2 * xtalHz * (nint + sdm/65536) / mixDiv
+}
+
+func frameHz(x []complex64, rate float64) float64 {
+	var acc complex128
+	for i := 0; i < len(x)-1; i++ {
+		acc += complex128(x[i+1]) * cmplx.Conj(complex128(x[i]))
+	}
+	return cmplx.Phase(acc) * rate / (2 * math.Pi)
+}
+
+func frameMag(x []complex64) float64 {
+	var sum float64
+	for _, v := range x {
+		sum += cmplx.Abs(complex128(v))
+	}
+	return sum / float64(len(x))
 }

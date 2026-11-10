@@ -203,6 +203,7 @@ MockStream.shiftLevels = realStream.shiftLevels;
 MockStream.zoomView = realStream.zoomView;
 MockStream.panView = realStream.panView;
 MockStream.viewSlice = realStream.viewSlice;
+MockStream.shiftedSlice = realStream.shiftedSlice;
 global.window.SpectrumStream = MockStream;
 
 // ChannelOverlay mock: geometry is tested in channel-overlay.test.js; here — wiring
@@ -212,7 +213,7 @@ function MockChannelOverlay(host, opts) {
     this.calls = [];
     MockChannelOverlay.last = this;
 }
-['setBand', 'setView', 'setChannel', 'setShift', 'setMaxWidth', 'setStatus', 'setVisible', 'render', 'destroy'].forEach((name) => {
+['setBand', 'setView', 'setChannel', 'setShift', 'setSide', 'setMaxWidth', 'setStatus', 'setVisible', 'render', 'destroy'].forEach((name) => {
     MockChannelOverlay.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
 });
 MockChannelOverlay.prototype.lastCall = function(name) {
@@ -231,7 +232,34 @@ function MockTxMarkers(host, opts) {
     MockTxMarkers.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
 });
 MockTxMarkers.markersWithLabels = require('./tx-markers.js').markersWithLabels;
+MockTxMarkers.satNames = require('./tx-markers.js').satNames;
 global.window.TxMarkers = MockTxMarkers;
+
+// BandMarks mock: labels are tested in band-marks.test.js; here — wiring
+function MockBandMarks(host, opts) {
+    this.host = host;
+    this.opts = opts;
+    this.calls = [];
+    MockBandMarks.last = this;
+}
+['setBand', 'setView', 'setSignals', 'render', 'destroy'].forEach((name) => {
+    MockBandMarks.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
+});
+MockBandMarks.prototype.lastCall = MockChannelOverlay.prototype.lastCall;
+MockBandMarks.pickBandwidth = require('./band-marks.js').pickBandwidth;
+global.window.BandMarks = MockBandMarks;
+
+function MockAirTable(tbody, opts) {
+    this.tbody = tbody;
+    this.opts = opts;
+    this.calls = [];
+    MockAirTable.last = this;
+}
+['setSignals', 'destroy'].forEach((name) => {
+    MockAirTable.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
+});
+MockAirTable.prototype.lastCall = MockChannelOverlay.prototype.lastCall;
+global.window.AirTable = MockAirTable;
 
 /** FFT frame as SpectrumStream hands it over. */
 function fftFrame(centerHz, values, spanHz) {
@@ -241,15 +269,17 @@ function fftFrame(centerHz, values, spanHz) {
     };
 }
 
-// fetch mock: records POST /api/sdr/tune, answers with fetchMock.status
-const fetchMock = { calls: [], status: 200, body: { ok: true } };
+// fetch mock: records requests, answers with fetchMock.status; /api/sdr/sweep — with fetchMock.sweep
+const fetchMock = { calls: [], status: 200, body: { ok: true }, sweep: { status: 404, body: { error: 'no sweep' } } };
 global.fetch = function(url, init) {
     fetchMock.calls.push({ url: url, body: init && init.body ? JSON.parse(init.body) : null });
-    const status = fetchMock.status;
+    const isSweep = String(url).indexOf('/api/sdr/sweep') === 0;
+    const status = isSweep ? fetchMock.sweep.status : fetchMock.status;
+    const body = isSweep ? fetchMock.sweep.body : fetchMock.body;
     return Promise.resolve({
         ok: status >= 200 && status < 300,
         status: status,
-        json: () => Promise.resolve(fetchMock.body),
+        json: () => Promise.resolve(body),
     });
 };
 function tuneCalls() {
@@ -304,6 +334,10 @@ MockPanorama.prototype.isActive = function() { return false; };
 MockPanorama.prototype.getSelectedTx = function() { return this._selected || null; };
 MockPanorama.prototype.refreshAfterThemeChange = function() { this.calls.push(['refreshAfterThemeChange']); };
 MockPanorama.prototype.setTransmitters = function(l) { this.calls.push(['setTransmitters', l]); };
+['setSweepState', 'putFrame', 'setSignals', 'setEmptyText'].forEach((name) => {
+    MockPanorama.prototype[name] = function(...args) { this.calls.push([name, ...args]); };
+});
+MockPanorama.prototype.marks = function() { return this._marks || []; };
 MockPanorama.prototype.destroy = function() { this.calls.push(['destroy']); };
 global.window.ManualPanorama = MockPanorama;
 
@@ -455,6 +489,17 @@ const tabAntenna = makeDomElement('tab-antenna', { _attrs: { 'data-tab': 'antenn
 const panePanorama = makeDomElement('pane-panorama', { _attrs: { 'data-pane': 'panorama' } });
 const paneSpectrum = makeDomElement('pane-spectrum', { _attrs: { 'data-pane': 'spectrum' } });
 const paneAntenna = makeDomElement('pane-antenna', { _attrs: { 'data-pane': 'antenna' } });
+// Panorama header: sweep status and Start / Stop
+const sweepStatus = makeDomElement('manual-sweep-status');
+const sweepToggle = makeDomElement('manual-sweep-toggle', { disabled: false, title: '' });
+const sweepFreq = makeDomElement('manual-sweep-freq');
+const sweepPath = makeDomElement('manual-sweep-path');
+const sweepProgress = makeDomElement('manual-sweep-progress');
+_domNodes.set('manual-sweep-status', sweepStatus);
+_domNodes.set('manual-sweep-toggle', sweepToggle);
+_domNodes.set('manual-sweep-freq', sweepFreq);
+_domNodes.set('manual-sweep-path', sweepPath);
+_domNodes.set('manual-sweep-progress', sweepProgress);
 _domNodes.set('manual-tabbar', makeDomElement('manual-tabbar', {
     querySelectorAll: () => [tabPanorama, tabSpectrum, tabAntenna],
 }));
@@ -556,6 +601,9 @@ _domNodes.set('manual-spectrum', makeDomElement('manual-spectrum'));
 _domNodes.get('manual-spectrum').getBoundingClientRect = function() {
     return { left: 0, top: 0, width: 200, height: 400 };
 };
+_domNodes.set('manual-wf-marks', makeDomElement('manual-wf-marks', { hidden: false }));
+_domNodes.set('manual-air-tbody', makeDomElement('manual-air-tbody'));
+_domNodes.set('manual-spec-marks', makeDomElement('manual-spec-marks'));
 _domNodes.set('manual-spec-cursor', makeDomElement('manual-spec-cursor', { hidden: true }));
 _domNodes.set('manual-spec-cursor-line', makeDomElement('manual-spec-cursor-line'));
 _domNodes.set('manual-spec-cursor-mark', makeDomElement('manual-spec-cursor-mark', { hidden: true }));
@@ -664,7 +712,7 @@ test('constructor wires info element ids to indicators', () => {
 
 console.log('\n— ManualLayout: activate / deactivate —');
 
-test('activate starts on Spectrum; a panorama request does not start the sweep', () => {
+test('activate opens Spectrum and runs its timer; Panorama does not start', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
     assert.strictEqual(m.isActive(), false);
@@ -672,11 +720,7 @@ test('activate starts on Spectrum; a panorama request does not start the sweep',
     assert.strictEqual(m.isActive(), true);
     assert.strictEqual(m._view, 'spectrum');
     assert.ok(m._spectrumTimer, 'spectrum view must run the timer');
-    m._setView('panorama');
-    assert.strictEqual(m._view, 'spectrum', 'panorama is off, so the sweep is not started');
-    assert.ok(m._spectrumTimer, 'the spectrum timer stays while panorama is off');
-    const sweep = m._panorama.calls.filter((c) => c[0] === 'activate');
-    assert.strictEqual(sweep.length, 0);
+    assert.strictEqual(m._panorama.calls.filter((c) => c[0] === 'activate').length, 0);
     m.deactivate();
     assert.strictEqual(m.isActive(), false);
     assert.strictEqual(m._spectrumTimer, null, 'spectrum timer must be cleared');
@@ -782,22 +826,13 @@ test('constructor creates ManualPanorama instance', () => {
     m.destroy();
 });
 
-test('activate does not start the panorama imitator', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    m.activate();
-    const activateCalls = m._panorama.calls.filter((c) => c[0] === 'activate');
-    assert.strictEqual(activateCalls.length, 0);
-    m.destroy();
-});
-
 test('deactivate calls panorama.deactivate', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
     m.activate();
     m.deactivate();
     const deactivateCalls = m._panorama.calls.filter((c) => c[0] === 'deactivate');
-    assert.strictEqual(deactivateCalls.length, 2, 'spectrum entry and leaving Manual both stop the sweep');
+    assert.ok(deactivateCalls.length >= 1, 'leaving Manual stops drawing the panorama');
     m.destroy();
 });
 
@@ -1324,13 +1359,16 @@ function activeTabOf(m) {
     return tabs[0];
 }
 
-test('entering Manual opens the Spectrum tab and does not sweep', () => {
-    const m = new ManualLayout(makeStateManager());
-    m.activate();
-    assert.strictEqual(activeTabOf(m), 'spectrum');
-    assert.strictEqual(m._view, 'spectrum');
-    assert.ok(m._spectrumTimer);
-    m.destroy();
+test('entering Manual opens the Spectrum tab and does not tune the receiver', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        assert.strictEqual(activeTabOf(m), 'spectrum');
+        assert.strictEqual(m._view, 'spectrum');
+        assert.ok(m._spectrumTimer, 'the channel stream runs on entry');
+        assert.strictEqual(tuneCalls().length, 0);
+        m.destroy();
+    });
 });
 
 test('Spectrum tab switches the SDR to HOLD', () => {
@@ -1343,15 +1381,18 @@ test('Spectrum tab switches the SDR to HOLD', () => {
     m.destroy();
 });
 
-test('hidden Panorama tab does not leave Spectrum', () => {
-    const m = new ManualLayout(makeStateManager());
-    m.activate();
-    fire(tabSpectrum, 'click');
-    fire(tabPanorama, 'click');
-    assert.strictEqual(activeTabOf(m), 'spectrum');
-    assert.strictEqual(m._view, 'spectrum');
-    assert.ok(m._spectrumTimer);
-    m.destroy();
+test('Panorama tab is a view: Spectrum and back do not tune the receiver', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fire(tabPanorama, 'click');
+        assert.strictEqual(activeTabOf(m), 'panorama');
+        assert.strictEqual(m._view, 'panorama');
+        assert.strictEqual(m._spectrumTimer, null);
+        assert.strictEqual(tuneCalls().length, 0);
+        m.destroy();
+    });
 });
 
 const AO91 = { freqMHz: 435.25, label: 'AO-91', modulation: 'BPSK', noradId: 43017 };
@@ -1371,16 +1412,37 @@ test('Antenna from Spectrum keeps the channel and the dial retune', () => {
     m.destroy();
 });
 
-test('Antenna does not tune from a panorama selection while the tab is hidden', () => {
+test('Antenna from Panorama tunes to the transmitter selected there', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
+    fire(tabPanorama, 'click');
     m._panorama._selected = AO91;
     fire(tabAntenna, 'click');
     assert.strictEqual(activeTabOf(m), 'antenna');
     assert.strictEqual(m._view, 'spectrum');
     assert.ok(m._spectrumTimer);
-    assert.strictEqual(m._freqDial.getHz(), 436000000, 'sweep selection is not applied');
+    assert.strictEqual(m._freqDial.getHz(), 435250000);
     m.destroy();
+});
+
+test('Antenna from Panorama during a sweep stops the sweep and does not retune', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabPanorama, 'click');
+        m._applySweepState({
+            radio_path: 'radio_path_1', running: true, dwell_s: 60,
+            windows: [{ center_hz: 436000000, span_hz: 2000000 }], index: 0, cycle: 1,
+        });
+        fetchMock.calls = [];
+        m._panorama._selected = AO91;
+        fire(tabAntenna, 'click');
+        assert.strictEqual(activeTabOf(m), 'antenna');
+        assert.strictEqual(m._view, 'spectrum');
+        assert.strictEqual(tuneCalls().length, 0);
+        assert.deepStrictEqual(sweepPosts().map((c) => c.body), [{ radio_path: 'radio_path_1', running: false }]);
+        m.destroy();
+    });
 });
 
 test('Antenna from Panorama without a selection resumes the last channel', () => {
@@ -1389,7 +1451,7 @@ test('Antenna from Panorama without a selection resumes the last channel', () =>
     tuneTo(AO91.freqMHz, AO91);
     m._freqDial.emit(435260000);
     fire(tabPanorama, 'click');
-    assert.strictEqual(m._view, 'spectrum', 'hidden panorama tab is ignored');
+    assert.strictEqual(m._view, 'panorama');
     fire(tabAntenna, 'click');
     assert.strictEqual(m._view, 'spectrum');
     assert.strictEqual(m._freqDial.getHz(), 435260000, 'dial retune is kept');
@@ -1421,24 +1483,14 @@ test('with nothing chosen Antenna holds without retuning the shared receiver', (
     });
 });
 
-test('hidden Panorama tab does not leave Antenna', () => {
+test('Panorama from Antenna shows the panorama and stops the spectrum timer', () => {
     const m = new ManualLayout(makeStateManager());
     m.activate();
     fire(tabAntenna, 'click');
     fire(tabPanorama, 'click');
-    assert.strictEqual(activeTabOf(m), 'antenna');
-    assert.strictEqual(m._view, 'spectrum');
-    assert.ok(m._spectrumTimer);
-    m.destroy();
-});
-
-test('a panorama request while on Antenna stays on Antenna', () => {
-    const m = new ManualLayout(makeStateManager());
-    m.activate();
-    fire(tabAntenna, 'click');
-    m._setView('panorama');
-    assert.strictEqual(activeTabOf(m), 'antenna');
-    assert.strictEqual(m._view, 'spectrum');
+    assert.strictEqual(activeTabOf(m), 'panorama');
+    assert.strictEqual(m._view, 'panorama');
+    assert.strictEqual(m._spectrumTimer, null);
     m.destroy();
 });
 
@@ -1465,9 +1517,9 @@ test('re-entering Manual starts on Spectrum', () => {
     m.destroy();
 });
 
-console.log('\n— ManualLayout: leaving HOLD while recording —');
+console.log('\n— ManualLayout: tabs while recording —');
 
-test('hidden Panorama tab does not interrupt a recording', () => {
+test('Panorama tab does not interrupt a recording: the receiver stays on the channel', () => {
     const { m, start } = makeRecorder();
     let asked = 0;
     m._confirm = () => { asked++; return false; };
@@ -1476,22 +1528,8 @@ test('hidden Panorama tab does not interrupt a recording', () => {
     fire(start, 'click');
     fire(tabPanorama, 'click');
     assert.strictEqual(asked, 0);
-    assert.strictEqual(activeTabOf(m), 'spectrum');
-    assert.strictEqual(m._view, 'spectrum');
+    assert.strictEqual(activeTabOf(m), 'panorama');
     assert.ok(m._rec.file, 'recording must go on');
-    m.destroy();
-});
-
-test('confirming a hidden Panorama click does not stop the recording', () => {
-    const { m, start, stop } = makeRecorder();
-    m._confirm = () => true;
-    m.activate();
-    fire(tabSpectrum, 'click');
-    fire(start, 'click');
-    fire(tabPanorama, 'click');
-    assert.strictEqual(activeTabOf(m), 'spectrum');
-    assert.ok(m._rec.file, 'hidden tab does not leave the channel');
-    assert.strictEqual(stop.disabled, false);
     m.destroy();
 });
 
@@ -1519,7 +1557,7 @@ test('Antenna while recording does not ask and keeps recording', () => {
     m.destroy();
 });
 
-test('hidden Panorama tab from Antenna does not ask while recording', () => {
+test('Panorama from Antenna does not ask while recording', () => {
     const { m, start } = makeRecorder();
     let asked = 0;
     m._confirm = () => { asked++; return false; };
@@ -1529,9 +1567,121 @@ test('hidden Panorama tab from Antenna does not ask while recording', () => {
     fire(tabAntenna, 'click');
     fire(tabPanorama, 'click');
     assert.strictEqual(asked, 0);
-    assert.strictEqual(activeTabOf(m), 'antenna');
+    assert.strictEqual(activeTabOf(m), 'panorama');
     assert.ok(m._rec.file, 'recording must go on');
     m.destroy();
+});
+
+console.log('\n— ManualLayout: sweep —');
+
+const SWEEP_WINDOWS = [{ center_hz: 145900000, span_hz: 1600000 }, { center_hz: 437000000, span_hz: 1600000 }];
+
+function sweepState(running, extra) {
+    return Object.assign({ radio_path: 'radio_path_1', running: running, dwell_s: 60,
+        windows: SWEEP_WINDOWS, index: 0, cycle: running ? 1 : 0 }, extra || {});
+}
+
+function sweepPosts() {
+    return fetchMock.calls.filter((c) => c.url === '/api/sdr/sweep' && c.body);
+}
+
+test('sweep bar: frequency of the dwell, window, time left and dwell progress', () => {
+    const st = sweepState(true, { index: 1, window_start_ms: 40000, window_end_ms: 100000 });
+    assert.deepStrictEqual(ManualLayout.sweepBarModel(st, '', 58000, null),
+        { freq: '437,000 МГц', status: 'окно 2/2 · осталось 00:42', progress: 0.3 });
+    assert.deepStrictEqual(ManualLayout.sweepBarModel(sweepState(false), '', 0, null),
+        { freq: '', status: 'Обход остановлен · окон: 2', progress: null });
+    assert.deepStrictEqual(ManualLayout.sweepBarModel(null, 'Обход не настроен', 0, null),
+        { freq: '', status: 'Обход не настроен', progress: null });
+});
+
+test('sweep bar says where the receiver came from right after a retune', () => {
+    const st = sweepState(true, { index: 1, window_start_ms: 40000, window_end_ms: 100000 });
+    const retune = { fromHz: 145900000, untilMs: 41000 };
+    assert.strictEqual(ManualLayout.sweepBarModel(st, '', 40500, retune).status,
+        'окно 2/2 · перестройка с 145,900 МГц');
+    assert.strictEqual(ManualLayout.sweepBarModel(st, '', 42000, retune).status, 'окно 2/2 · осталось 00:58');
+});
+
+test('sweep bar names the tract and remembers the previous window on a retune', () => {
+    const mm = Object.assign({}, TRACT_1, { getRadioPath: () => ({ id: 1, name: 'RTL-SDR V3' }) });
+    withStation({ mm }, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        m._applySweepState(sweepState(true, { index: 0, window_end_ms: Date.now() + 60000 }));
+        assert.strictEqual(sweepFreq.textContent, '145,900 МГц');
+        m._applySweepState(sweepState(true, { index: 1, window_end_ms: Date.now() + 60000 }));
+        assert.strictEqual(sweepFreq.textContent, '437,000 МГц');
+        assert.ok(/перестройка с 145,900/.test(sweepStatus.textContent), sweepStatus.textContent);
+        m.destroy();
+    });
+});
+
+test('sweep_state of the selected tract goes to the panorama and the bar, other tracts are ignored', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        emit('sweep_state', sweepState(true, { radio_path: 'radio_path_2' }));
+        assert.strictEqual(m._sweepRunning(), false);
+        emit('sweep_state', sweepState(true));
+        assert.strictEqual(m._sweepRunning(), true);
+        const set = m._panorama.calls.filter((c) => c[0] === 'setSweepState');
+        assert.strictEqual(set[set.length - 1][1].running, true);
+        assert.strictEqual(sweepToggle.textContent, 'Стоп');
+        emit('band_signals', { radio_path: 'radio_path_1', signals: [{ id: 'a' }] });
+        assert.ok(m._panorama.calls.some((c) => c[0] === 'setSignals' && c[1][0].id === 'a'));
+        m.destroy();
+    }));
+});
+
+test('Start while recording asks first; refusal keeps the recording and sends nothing', () => {
+    withStation({}, () => {
+        const { m, start } = makeRecorder();
+        let asked = 0;
+        m._confirm = () => { asked++; return false; };
+        m.activate();
+        m._applySweepState(sweepState(false));
+        fire(tabSpectrum, 'click');
+        fire(start, 'click');
+        fire(sweepToggle, 'click');
+        assert.strictEqual(asked, 1);
+        assert.ok(m._rec.file);
+        assert.strictEqual(sweepPosts().length, 0);
+        m._confirm = () => true;
+        fire(sweepToggle, 'click');
+        assert.strictEqual(m._rec.file, null, 'the receiver leaves the channel, recording stops');
+        assert.deepStrictEqual(sweepPosts().map((c) => c.body), [{ radio_path: 'radio_path_1', running: true }]);
+        m.destroy();
+    });
+});
+
+test('Stop posts running:false without asking', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        let asked = 0;
+        m._confirm = () => { asked++; return true; };
+        m.activate();
+        m._applySweepState(sweepState(true));
+        fire(sweepToggle, 'click');
+        assert.strictEqual(asked, 0);
+        assert.deepStrictEqual(sweepPosts().map((c) => c.body), [{ radio_path: 'radio_path_1', running: false }]);
+        m.destroy();
+    });
+});
+
+test('without control rights the button is disabled and a click only shows a notice', () => {
+    withStation({ access: makeAccess(false) }, (ac) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        m._applySweepState(sweepState(false));
+        assert.strictEqual(sweepToggle.disabled, true);
+        fire(sweepToggle, 'click');
+        assert.strictEqual(sweepPosts().length, 0);
+        assert.ok(ac.notices.some((t) => /«Контроль»/.test(t)), ac.notices.join(' | '));
+        ac.setRole(true);
+        assert.strictEqual(sweepToggle.disabled, false);
+        m.destroy();
+    });
 });
 
 console.log('\n— ManualLayout: slew controls availability —');
@@ -1778,17 +1928,31 @@ console.log('\n— ManualLayout: live spectrum stream —');
 test('Spectrum opens one stream for the selected tract and leaving Manual stops it', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
+        const before = MockStream.instances.length;
         m.activate();
         const s = MockStream.last();
+        assert.strictEqual(MockStream.instances.length, before + 1, 'entry opens the channel stream');
+        fire(tabSpectrum, 'click');
+        assert.strictEqual(MockStream.last(), s, 'the tab is already Spectrum');
         assert.ok(/^\/api\/stream\/v1\/spectrum\?/.test(s.opts.url), s.opts.url);
         assert.ok(s.opts.url.indexOf('radio_path=radio_path_1') >= 0, s.opts.url);
         assert.strictEqual(s.started, 1);
         fire(tabAntenna, 'click');
         assert.strictEqual(MockStream.last(), s, 'Antenna keeps the same stream');
-        fire(tabPanorama, 'click');
-        assert.strictEqual(s.stopped, 0, 'hidden panorama does not stop the stream');
         m.deactivate();
         assert.strictEqual(s.stopped, 1, 'leaving Manual closes the stream');
+        m.destroy();
+    });
+});
+
+test('Panorama closes the spectrum stream: the panorama has its own', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const s = MockStream.last();
+        fire(tabPanorama, 'click');
+        assert.strictEqual(s.stopped, 1);
         m.destroy();
     });
 });
@@ -2177,11 +2341,11 @@ test('frame is drawn on the FFT and the waterfall in the auto dB scale, band fro
         m._fft.calls = [];
         m._wf.calls = [];
         MockStream.last().opts.onFrame(fftFrame(436500000, [-100, -50, 0], 2048000));
-        // median -50 gives the bottom -60, peak 0 gives the top +5
+        // median -50: floor -60, top is 40 dB above the noise, a peak does not stretch it
         assert.strictEqual(m._fft._dbMin, -60);
-        assert.strictEqual(m._fft._dbMax, 5);
+        assert.strictEqual(m._fft._dbMax, -10);
         assert.strictEqual(m._antFft._dbMin, -60, 'Antenna spectrum shares the scale');
-        const want = Array.from(realStream.dbfsToUnit(new Float32Array([-100, -50, 0]), -60, 5));
+        const want = Array.from(realStream.dbfsToUnit(new Float32Array([-100, -50, 0]), -60, -10));
         const draw = m._fft.calls.find((c) => c[0] === 'draw');
         assert.deepStrictEqual(Array.from(draw[1]), want);
         const line = m._wf.calls.find((c) => c[0] === 'pushLine');
@@ -2321,7 +2485,7 @@ function rampValues() {
     return Array.from({ length: 64 }, (_, i) => -100 + i);
 }
 
-test('wheel over the spectrum zooms in around the pointer: FFT and waterfall get the visible bins', () => {
+test('wheel over the spectrum zooms in around the centre: the demodulator stays put', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
@@ -2329,21 +2493,21 @@ test('wheel over the spectrum zooms in around the pointer: FFT and waterfall get
         const s = MockStream.last();
         const values = rampValues();
         s.opts.onFrame(fftFrame(436500000, values, 64000));
-        // strong wheel: the window narrows to the minimum, 32 bins around the pointer at 3/4
+        // strong wheel anywhere: the window narrows to 32 bins around the centre, not the pointer
         assert.ok(wheelSpectrum(-10000, 150), 'page does not scroll');
         m._fft.calls = [];
         m._wf.calls = [];
         s.opts.onFrame(fftFrame(436500000, values, 64000));
-        assert.strictEqual(m._fft.freqCenterMHz, 436.508);
+        assert.strictEqual(m._fft.freqCenterMHz, 436.5);
         assert.strictEqual(m._fft.freqSpanMHz, 0.032);
-        assert.strictEqual(m._wf._freqCenterMHz, 436.508);
+        assert.strictEqual(m._wf._freqCenterMHz, 436.5);
         assert.strictEqual(m._wf._freqSpanMHz, 0.032);
-        const want = Array.from(realStream.dbfsToUnit(new Float32Array(values.slice(24, 57)), m._fft._dbMin, m._fft._dbMax));
+        const want = Array.from(realStream.dbfsToUnit(new Float32Array(values.slice(16, 49)), m._fft._dbMin, m._fft._dbMax));
         const draw = m._fft.calls.find((c) => c[0] === 'draw');
         assert.deepStrictEqual(Array.from(draw[1]), want);
         const line = m._wf.calls.find((c) => c[0] === 'pushLine');
         assert.deepStrictEqual(Array.from(line[1]), want);
-        assert.deepStrictEqual(MockChannelOverlay.last.lastCall('setView'), ['setView', 8000, 32000]);
+        assert.deepStrictEqual(MockChannelOverlay.last.lastCall('setView'), ['setView', 0, 32000]);
         assert.strictEqual(m._antFft.freqSpanMHz, 0.064, 'Antenna keeps the whole band');
         m.destroy();
     });
@@ -2389,7 +2553,7 @@ test('cursor reads the zoomed window under the same pixel', () => {
         s.opts.onFrame(fftFrame(436500000, rampValues(), 64000));
         m._onSpecPointer({ clientX: 150, clientY: 40 });
         const tag = _domNodes.get('manual-spec-cursor-tag').textContent;
-        assert.strictEqual(tag, '436.516 МГц  −52.0 dBFS');
+        assert.strictEqual(tag, '436.508 МГц  −60.0 dBFS');
         m.destroy();
     });
 });
@@ -2427,22 +2591,32 @@ test('zoom keeps the waterfall history: old lines are remapped to the new scale'
     });
 });
 
-test('drag on the spectrum and the horizontal wheel pan the zoomed window', () => {
-    withStation({}, () => {
-        const m = new ManualLayout(makeStateManager());
-        m.activate();
-        fire(tabSpectrum, 'click');
-        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
-        wheelSpectrum(-10000, 150);
-        MockChannelOverlay.last.opts.onPan(-4000);
-        assert.strictEqual(m._fft.freqCenterMHz, 436.504);
-        assert.strictEqual(tuneCalls().length, 0, 'zoomed drag pans the window and does not retune');
-        // 50 px of 200 is a quarter of the 32 kHz window
-        wheelSpectrum(0, 150, 50);
-        assert.strictEqual(m._fft.freqCenterMHz, 436.512);
-        assert.strictEqual(m._fft.freqSpanMHz, 0.032);
-        m.destroy();
-    });
+test('drag and the horizontal wheel tune the receiver while zoomed and keep the magnification', () => {
+    const box = makeDomElement('manual-rx-channel-show', { checked: true });
+    _domNodes.set('manual-rx-channel-show', box);
+    try {
+        withStation({}, () => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fire(tabSpectrum, 'click');
+            const s = MockStream.last();
+            s.opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+            wheelSpectrum(-10000, 150);
+            assert.strictEqual(m._fft.freqSpanMHz, 0.032);
+            MockChannelOverlay.last.opts.onPan(-4000);
+            assert.strictEqual(m._freqDial.getHz(), 436496000);
+            assert.deepStrictEqual(tuneCalls().map((c) => c.body.center_hz), [436496000]);
+            s.opts.onFrame(fftFrame(436496000, rampValues(), 64000));
+            assert.strictEqual(m._fft.freqCenterMHz, 436.496);
+            assert.strictEqual(m._fft.freqSpanMHz, 0.032, 'magnification survives the retune');
+            // 50 px of 200 is a quarter of the 32 kHz window: +8 kHz
+            wheelSpectrum(0, 150, 50);
+            assert.strictEqual(m._freqDial.getHz(), 436504000);
+            m.destroy();
+        });
+    } finally {
+        _domNodes.delete('manual-rx-channel-show');
+    }
 });
 
 test('drag on the full-span spectrum retunes the receiver and the dial follows', () => {
@@ -2478,7 +2652,7 @@ test('viewer drag on the spectrum does not tune', () => {
     });
 });
 
-test('1:1 shows the whole band again, retune drops the zoom', () => {
+test('1:1 shows the whole band again, retune keeps the magnification', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
@@ -2496,8 +2670,8 @@ test('1:1 shows the whole band again, retune drops the zoom', () => {
         wheelSpectrum(-10000, 150);
         s.opts.onFrame(fftFrame(436600000, rampValues(), 64000));
         assert.strictEqual(m._fft.freqCenterMHz, 436.6);
-        assert.strictEqual(m._fft.freqSpanMHz, 0.064);
-        assert.strictEqual(btn.disabled, true);
+        assert.strictEqual(m._fft.freqSpanMHz, 0.032, 'the same magnification follows the new centre');
+        assert.strictEqual(btn.disabled, false);
         m.destroy();
     });
 });
@@ -2606,7 +2780,7 @@ test('channel changed on the server follows into the fields; repeats keep the op
         m.activate();
         fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
         const st = { radio_path: 'radio_path_1', active: true, demod: 'fsk9600_g3ruh',
-            offset_hz: -2500, bandwidth_hz: 6000, squelch_dbfs: -80 };
+            offset_hz: 0, bandwidth_hz: 6000, squelch_dbfs: -80, doppler_manual_hz: -2500 };
         emit('demod_status', st);
         const bw = () => filterBwSel.options[filterBwSel.selectedIndex].value;
         assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500');
@@ -2623,7 +2797,7 @@ test('channel changed on the server follows into the fields; repeats keep the op
         assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500');
 
         emit('demod_status', { radio_path: 'radio_path_2', active: true, demod: 'afsk1200',
-            offset_hz: 9000, bandwidth_hz: 15000, squelch_dbfs: -90 });
+            offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -90, doppler_manual_hz: 9000 });
         assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '-2500', 'other tract is ignored');
         m.destroy();
     }));
@@ -2781,13 +2955,14 @@ test('demodulator «Установить» sends only the channel', () => {
         assert.strictEqual(receiverCalls().length, 0);
         assert.deepStrictEqual(channelCalls()[0].body, {
             radio_path: 'radio_path_1',
-            offset_hz: 1500,
+            offset_hz: 0,
             bandwidth_hz: 18000,
             squelch_dbfs: -75,
             demod: 'afsk1200',
             demod_off: false,
             doppler_norad: 0,
             doppler_auto: true,
+            doppler_manual_hz: 1500,
         });
         m.destroy();
     });
@@ -2889,12 +3064,173 @@ test('picking a marker puts the channel on the nominal and turns Doppler Auto on
             label: 'CAS-5A · FM', tx: tx });
         assert.strictEqual(dopplerSel.selectedIndex, 1, 'Doppler switched to Auto');
         const body = channelCalls().pop().body;
-        assert.strictEqual(body.offset_hz, 50000, 'nominal minus the receiver centre');
+        assert.strictEqual(body.offset_hz, 0, 'the demodulator stays at the receiver centre');
         assert.strictEqual(body.doppler_norad, 54684);
-        assert.strictEqual(fetchMock.calls.filter((c) => c.url === '/api/sdr/tune').length, 0,
-            'the receiver is not retuned');
+        assert.strictEqual(fetchMock.calls.filter((c) => c.url === '/api/sdr/tune').pop().body.center_hz, 436550000);
         m.destroy();
     });
+});
+
+console.log('\n— ManualLayout: detected signals —');
+
+const GROUND_SIGNAL = { id: 's1', center_hz: 436520000, bandwidth_hz: 9000, snr_db: 12, last_seen_ms: 2000,
+    origin: 'terrestrial', emission: 'continuous', stats: { observed_s: 400, on_s: 400, bursts: 1 } };
+
+test('detected signals of the selected tract reach the waterfall strip and follow band and zoom', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const bm = MockBandMarks.last;
+        assert.strictEqual(bm.host, _domNodes.get('manual-wf-marks'));
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        assert.deepStrictEqual(bm.lastCall('setBand'), ['setBand', 436500000, 64000]);
+
+        emit('band_signals', { radio_path: 'radio_path_2', timestamp_ms: 2000, signals: [GROUND_SIGNAL] });
+        assert.strictEqual(bm.lastCall('setSignals'), null, 'another tract is ignored');
+        emit('band_signals', { radio_path: 'radio_path_1', timestamp_ms: 2000, signals: [GROUND_SIGNAL] });
+        assert.deepStrictEqual(bm.lastCall('setSignals'), ['setSignals', [GROUND_SIGNAL], 2000]);
+        assert.deepStrictEqual(MockAirTable.last.lastCall('setSignals'), ['setSignals', [GROUND_SIGNAL]]);
+
+        wheelSpectrum(-10000, 150);
+        assert.ok(bm.lastCall('setView')[2] > 0, 'zoom window reaches the strip');
+        m.destroy();
+        assert.ok(bm.calls.some((c) => c[0] === 'destroy'));
+        assert.ok(MockAirTable.last.calls.some((c) => c[0] === 'destroy'));
+    }));
+});
+
+test('during sweep the air table follows the server list', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        m._panorama._marks = [{ id: 'old', center_hz: 435e6 }, GROUND_SIGNAL];
+        m._applySweepState(sweepState(true));
+        emit('band_signals', { radio_path: 'radio_path_1', timestamp_ms: 2000, signals: [GROUND_SIGNAL] });
+        assert.deepStrictEqual(MockAirTable.last.lastCall('setSignals'), ['setSignals', [GROUND_SIGNAL]]);
+        m.destroy();
+    }));
+});
+
+test('picking a ground signal centres the channel on it, fits the width and fixes Doppler', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fillRx({ gain: 28, offset: 0, bwIndex: 0, squelch: -90, demodIndex: 0 });
+        dopplerSel.selectedIndex = 1;
+        MockStream.last().opts.onFrame(fftFrame(436500000, [-100, -50, 0], 2048000));
+        MockBandMarks.last.opts.onPick(GROUND_SIGNAL);
+        assert.strictEqual(dopplerSel.selectedIndex, 0, 'Doppler fixed: the signal stands still');
+        const body = channelCalls().pop().body;
+        assert.strictEqual(body.offset_hz, 0);
+        assert.strictEqual(body.doppler_manual_hz, 0);
+        assert.strictEqual(body.bandwidth_hz, 15000, 'narrowest width that holds 9 kHz');
+        assert.strictEqual(body.doppler_auto, false);
+        assert.strictEqual(body.doppler_norad, 0);
+        assert.strictEqual(fetchMock.calls.filter((c) => c.url === '/api/sdr/tune').pop().body.center_hz, 436520000);
+        m.destroy();
+    });
+});
+
+test('picking an SSTV mark selects the SSTV pipeline', () => {
+    pipelineSel.options.push({ value: 'sstv', text: 'SSTV' });
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        fillRx({ gain: 28, offset: 0, bwIndex: 0, squelch: -90, demodIndex: 0 });
+        MockStream.last().opts.onFrame(fftFrame(436500000, [-100, -50, 0], 2048000));
+        MockBandMarks.last.opts.onPick({
+            center_hz: 436580000, bandwidth_hz: 18000, origin: 'terrestrial', emission: 'pulsed',
+            structure: { modulation: 'fm', service: 'sstv', service_label: 'SSTV, Robot 36' },
+        });
+        assert.strictEqual(pipelineSel.options[pipelineSel.selectedIndex].value, 'sstv');
+        assert.strictEqual(channelCalls().pop().body.demod, 'sstv');
+        m.destroy();
+    });
+});
+
+test('Apply demod while SSTV picture is in progress asks first; refusal sends nothing', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ gain: 28, offset: 0, bwIndex: 0, squelch: -90, demodIndex: 0 });
+        m._demodStatus = {
+            active: true, squelch_open: true,
+            picture: { mode: 'robot36', mode_name: 'Robot 36', lines: 48, height: 240 },
+        };
+        assert.strictEqual(m._receptionBusy(), true);
+        let asked = 0;
+        m._confirm = (msg) => { asked++; assert.ok(/приём/.test(msg)); return false; };
+        fetchMock.calls = [];
+        m._applyDemodSettings();
+        assert.strictEqual(asked, 1);
+        assert.strictEqual(channelCalls().length, 0);
+        m.destroy();
+    });
+});
+
+test('picking a satellite signal goes through its transmitter marker: nominal and Doppler Auto', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const sm = makeStateManager();
+        sm.getSatelliteGroup = () => MARK_GROUP;
+        const m = new ManualLayout(sm);
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, [-100, -50, 0], 2048000));
+        emit('demod_status', { radio_path: 'radio_path_1', active: true, offset_hz: 0, bandwidth_hz: 2800,
+            tx_markers: [{ norad_id: 54684, uuid: 'tx-cas', freq_hz: 436553000, doppler_hz: 3000 }] });
+        dopplerSel.selectedIndex = 0;
+        MockBandMarks.last.opts.onPick({ center_hz: 436553200, bandwidth_hz: 12000, origin: 'satellite',
+            norad_id: 54684 });
+        assert.strictEqual(dopplerSel.selectedIndex, 1, 'Doppler switched to Auto');
+        const body = channelCalls().pop().body;
+        assert.strictEqual(body.offset_hz, 0, 'transmitter nominal is the receiver frequency');
+        assert.strictEqual(fetchMock.calls.filter((c) => c.url === '/api/sdr/tune').pop().body.center_hz, 436550000);
+        assert.strictEqual(body.bandwidth_hz, 15000);
+        assert.strictEqual(body.doppler_norad, 54684);
+        m.destroy();
+    }));
+});
+
+test('the strip tooltip names the satellite from the group', () => {
+    withStation({}, () => {
+        const sm = makeStateManager();
+        sm.getSatelliteGroup = () => MARK_GROUP;
+        const m = new ManualLayout(sm);
+        m.activate();
+        fire(tabSpectrum, 'click');
+        assert.strictEqual(MockBandMarks.last.opts.nameOf(54684), 'CAS-5A');
+        assert.strictEqual(MockBandMarks.last.opts.nameOf(1), null);
+        m.destroy();
+    });
+});
+
+test('«Маркеры» hides the strip above the waterfall and is remembered', () => {
+    withStorage({}, (data) => withStation({}, () => {
+        const btn = _domNodes.get('manual-spec-marks');
+        const strip = _domNodes.get('manual-wf-marks');
+        let m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        assert.strictEqual(btn.getAttribute('aria-pressed'), 'true');
+        assert.strictEqual(strip.hidden, false);
+        fire(btn, 'click');
+        assert.strictEqual(btn.getAttribute('aria-pressed'), 'false');
+        assert.strictEqual(strip.hidden, true);
+        assert.strictEqual(data['ux.manual.specBandMarks'], '0');
+        m.destroy();
+
+        m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        assert.strictEqual(strip.hidden, true, 'hidden after reload');
+        fire(btn, 'click');
+        assert.strictEqual(strip.hidden, false);
+        assert.strictEqual(data['ux.manual.specBandMarks'], '1');
+        m.destroy();
+    }));
 });
 
 console.log('\n— ManualLayout: listening —');
@@ -2988,7 +3324,7 @@ test('stream frame gives the channel overlay the receiver band', () => {
         fire(_domNodes.get('manual-rx-doppler-val'), 'input');
         MockStream.last().opts.onFrame(fftFrame(436200000, null, 1024000));
         assert.deepStrictEqual(ov.lastCall('setBand'), ['setBand', 436200000, 1024000]);
-        assert.deepStrictEqual(ov.lastCall('setChannel'), ['setChannel', -12000, 18000]);
+        assert.deepStrictEqual(ov.lastCall('setChannel'), ['setChannel', 0, 18000]);
         m.destroy();
     });
     resetSpanOptions();
@@ -3132,22 +3468,14 @@ function selectByValueForTest(sel, value) {
     sel.selectedIndex = sel.options.findIndex((o) => o.value === value);
 }
 
-test('gesture on the channel fills the fields and sends the settings at once', () => {
+test('a click on the spectrum does not tune the receiver', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
-        fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -75, demodIndex: 1 });
-        const ov = MockChannelOverlay.last;
-        ov.opts.onChange(2500, 18000);
-        assert.strictEqual(_domNodes.get('manual-rx-doppler-val').value, '2500');
-        assert.strictEqual(filterBwSel.options[filterBwSel.selectedIndex].value, '18000');
-        assert.strictEqual(channelCalls().length, 1);
-        assert.strictEqual(receiverCalls().length, 0, 'a channel gesture does not retune the receiver');
-        const body = channelCalls()[0].body;
-        assert.strictEqual(body.offset_hz, 2500);
-        assert.strictEqual(body.bandwidth_hz, 18000);
-        assert.strictEqual(body.demod, 'fsk1200', 'the rest of the demodulator column goes as is');
-        assert.strictEqual(body.gain_db, undefined);
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        assert.strictEqual(typeof MockChannelOverlay.last.opts.onTune, 'undefined');
+        assert.strictEqual(tuneCalls().length, 0);
         m.destroy();
     });
 });
@@ -3160,11 +3488,11 @@ test('demod status labels the channel with profile and good frames', () => {
         emit('demod_status', {
             radio_path: 'radio_path_1', demod: 'afsk1200', squelch_open: true, frames_good: 7,
         });
-        assert.deepStrictEqual(ov.lastCall('setStatus'), ['setStatus', 'AFSK 1200 · ✔ 7', 'open']);
+        assert.deepStrictEqual(ov.lastCall('setStatus'), ['setStatus', 'AFSK 1200', 'open']);
         emit('demod_status', {
             radio_path: 'radio_path_1', demod: 'afsk1200', squelch_open: false, frames_good: 7,
         });
-        assert.deepStrictEqual(ov.lastCall('setStatus'), ['setStatus', 'AFSK 1200 · ✔ 7', 'idle']);
+        assert.deepStrictEqual(ov.lastCall('setStatus'), ['setStatus', 'AFSK 1200', 'idle']);
         m.destroy();
     }));
 });
@@ -3195,6 +3523,41 @@ test('viewer: receiver fields are disabled and «Установить» sends no
 const asyncTests = [];
 function testAsync(name, fn) { asyncTests.push([name, fn]); }
 const flush = () => new Promise((r) => setImmediate(r));
+
+testAsync('Panorama reads the sweep state, then opens the panorama stream; 404 opens nothing', async () => {
+    const prevSweep = fetchMock.sweep;
+    const m = withStation({}, () => {
+        fetchMock.sweep = { status: 404, body: { error: 'no sweep' } };
+        const layout = new ManualLayout(makeStateManager());
+        layout.activate();
+        fire(tabPanorama, 'click');
+        return layout;
+    });
+    const before = MockStream.instances.length;
+    await flush();
+    await flush();
+    assert.strictEqual(MockStream.instances.length, before, 'nothing to stream without sweep ranges');
+    assert.ok(/не настроен/.test(sweepStatus.textContent), sweepStatus.textContent);
+    assert.strictEqual(sweepToggle.disabled, true);
+
+    fetchMock.sweep = { status: 200, body: { radio_path: 'radio_path_1', running: false, dwell_s: 60,
+        windows: [{ center_hz: 437000000, span_hz: 1600000 }], index: 0, cycle: 0 } };
+    withStation({}, () => {
+        fire(tabSpectrum, 'click');
+        fire(tabPanorama, 'click');
+    });
+    await flush();
+    await flush();
+    const s = MockStream.last();
+    assert.ok(/^\/api\/stream\/v1\/panorama\?radio_path=radio_path_1$/.test(s.opts.url), s.opts.url);
+    s.opts.onFrame({ header: { dataType: 0x01, centerHz: 437000000 }, values: new Float32Array(2) });
+    assert.ok(m._panorama.calls.some((c) => c[0] === 'putFrame'));
+    assert.strictEqual(sweepStatus.textContent, 'Обход остановлен · окон: 1');
+    m.deactivate();
+    assert.strictEqual(s.stopped, 1, 'leaving Manual closes the panorama stream');
+    m.destroy();
+    fetchMock.sweep = prevSweep;
+});
 
 testAsync('tune refused with 403 reverts the dial to the receiver and re-reads the role', async () => {
     const ac = makeAccess(true);
@@ -3335,7 +3698,7 @@ testAsync('tract without calibration stays in dBFS with a known gain', async () 
 
 // ── Receiver settings from the server status ───────────────────
 
-const CHANNEL_FSK = { offset_hz: -2500, bandwidth_hz: 6000, squelch_dbfs: -80, demod: 'fsk9600_g3ruh' };
+const CHANNEL_FSK = { offset_hz: 0, doppler_manual_hz: -2500, bandwidth_hz: 6000, squelch_dbfs: -80, demod: 'fsk9600_g3ruh' };
 
 testAsync('receiver status fills gain, АРУ, channel and demodulator', async () => {
     fillRx({ gain: 32, agc: true, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 2 });

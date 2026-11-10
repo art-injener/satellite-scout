@@ -186,31 +186,6 @@ func TestSpectrum_CropsEdgesToUsableBand(t *testing.T) {
 	}
 }
 
-func TestCropBand(t *testing.T) {
-	cases := []struct {
-		name         string
-		bins         int
-		rate, usable uint32
-		start, keep  int
-		spanHz       int64
-	}{
-		{"rtl-sdr 2.56 MS/s keeps 2.048 MHz", 4096, 2_560_000, 2_048_000, 410, 3276, 2_047_500},
-		{"whole window usable", 1024, 2_048_000, 2_048_000, 0, 1024, 2_048_000},
-		{"no usable band given", 1024, 2_048_000, 0, 0, 1024, 2_048_000},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			start, keep, span := cropBand(tc.bins, tc.rate, tc.usable)
-			if start != tc.start || keep != tc.keep || span != tc.spanHz {
-				t.Errorf("cropBand = %d, %d, %d; want %d, %d, %d", start, keep, span, tc.start, tc.keep, tc.spanHz)
-			}
-			if tc.bins/2-start != keep/2 {
-				t.Errorf("center bin moved: start %d, keep %d of %d", start, keep, tc.bins)
-			}
-		})
-	}
-}
-
 func TestSpectrum_RequestsPathSampleRate(t *testing.T) {
 	cases := []struct {
 		name       string
@@ -365,12 +340,19 @@ func TestSpectrum_TwoViewersShareDeviceStream(t *testing.T) {
 			t.Errorf("viewer %s: got %d bytes, want spectrum frames", name, rec.Body.Len())
 		}
 	}
-	receiver.mu.Lock()
-	running := receiver.running
-	receiver.mu.Unlock()
-	if running {
-		t.Error("device must stop after the last viewer left")
+	// The last viewer does not stop the receiver at once: the session waits out
+	// its idle grace so a spectrum stream can reopen. The stop follows that grace.
+	stopBy := time.Now().Add(2 * time.Second)
+	for time.Now().Before(stopBy) {
+		receiver.mu.Lock()
+		running := receiver.running
+		receiver.mu.Unlock()
+		if !running {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
+	t.Error("device must stop after the idle grace that follows the last viewer")
 }
 
 func TestIQChunker_SplitsIntoOwnBlocks(t *testing.T) {

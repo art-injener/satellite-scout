@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -422,6 +423,160 @@ func TestTLEStore_LoadGroup_FallbackToCache(t *testing.T) {
 	if store.Count() != 2 {
 		t.Errorf("Count after fallback: got %d, want 2", store.Count())
 	}
+}
+
+// TestTLEStore_Start_FreshCacheSkipsNetwork: свежий кеш отдаётся сразу, HTTP не вызывается.
+func TestTLEStore_Start_FreshCacheSkipsNetwork(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(testTLEData))
+	}))
+	t.Cleanup(srv.Close)
+
+	store := newCachedStore(t, srv.URL, 0)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		store.Stop()
+	})
+
+	started := time.Now()
+	if err := store.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Start blocked for %s", elapsed)
+	}
+	if store.Count() != 2 {
+		t.Fatalf("Count = %d, want 2 from cache", store.Count())
+	}
+
+	time.Sleep(200 * time.Millisecond)
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("network hits = %d, want 0", n)
+	}
+}
+
+// TestTLEStore_Start_StaleCacheServesThenRefreshes: устаревший кеш уже в памяти, сеть идёт следом.
+func TestTLEStore_Start_StaleCacheServesThenRefreshes(t *testing.T) {
+	var hits atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits.Add(1)
+		timer := time.NewTimer(time.Second)
+		select {
+		case <-timer.C:
+		case <-r.Context().Done():
+			timer.Stop()
+			return
+		}
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	t.Cleanup(srv.Close)
+
+	store := newCachedStore(t, srv.URL, -2*time.Hour)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(func() {
+		cancel()
+		store.Stop()
+	})
+
+	started := time.Now()
+	if err := store.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Start blocked for %s", elapsed)
+	}
+	if store.Count() != 2 {
+		t.Fatalf("Count = %d, want cached 2 before network", store.Count())
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for hits.Load() == 0 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if hits.Load() == 0 {
+		t.Fatal("expected background refresh of stale cache")
+	}
+}
+
+// TestTLEStore_Start_MissingCacheDoesNotBlock: без кеша Start не ждёт ответ Celestrak.
+func TestTLEStore_Start_MissingCacheDoesNotBlock(t *testing.T) {
+	entered := make(chan struct{})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		select {
+		case <-entered:
+		default:
+			close(entered)
+		}
+		<-r.Context().Done()
+	}))
+	t.Cleanup(srv.Close)
+
+	cfg := DefaultTLEStoreConfig()
+	cfg.CacheDir = t.TempDir()
+	cfg.Groups = []string{"amateur"}
+	cfg.UpdateInterval = time.Hour
+	client := NewCelestrakClient(WithBaseURL(srv.URL), WithRateLimit(0), WithMaxRetries(0))
+	store := NewTLEStore(cfg, WithCelestrakClient(client))
+
+	ctx, cancel := context.WithCancel(context.Background())
+	startedOK := false
+	t.Cleanup(func() {
+		cancel()
+		if startedOK {
+			store.Stop()
+		}
+	})
+
+	started := time.Now()
+	if err := store.Start(ctx); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	startedOK = true
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("Start blocked for %s", elapsed)
+	}
+	select {
+	case <-entered:
+	case <-time.After(2 * time.Second):
+		t.Fatal("expected background fetch when cache is missing")
+	}
+}
+
+// newCachedStore готовит хранилище с файловым кешем. age сдвигает метку свежести.
+func newCachedStore(t *testing.T, baseURL string, age time.Duration) *TLEStore {
+	t.Helper()
+	cfg := DefaultTLEStoreConfig()
+	cfg.CacheDir = t.TempDir()
+	cfg.Groups = []string{"amateur"}
+	cfg.UpdateInterval = time.Hour
+	client := NewCelestrakClient(WithBaseURL(baseURL), WithRateLimit(0), WithMaxRetries(0))
+	store := NewTLEStore(cfg, WithCelestrakClient(client))
+
+	tles, err := ParseTLEBatch(testTLEData)
+	if err != nil {
+		t.Fatalf("ParseTLEBatch: %v", err)
+	}
+	if err := store.saveGroupToCache("amateur", tles); err != nil {
+		t.Fatalf("saveGroupToCache: %v", err)
+	}
+	if age != 0 {
+		meta, err := store.loadCacheMeta()
+		if err != nil {
+			t.Fatalf("loadCacheMeta: %v", err)
+		}
+		meta.Groups["amateur"] = CacheGroupMeta{
+			UpdatedAt: time.Now().Add(age),
+			Count:     len(tles),
+		}
+		if err := store.saveCacheMeta(meta); err != nil {
+			t.Fatalf("saveCacheMeta: %v", err)
+		}
+	}
+	return store
 }
 
 // ============================================================================

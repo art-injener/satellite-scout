@@ -216,11 +216,11 @@
         </div>
     </section>
 
-    <!-- Вкладки слева от графиков: «Панорама» и «Спектр» переключают режим SDR, «Антенна» — только вид -->
+    <!-- Вкладки слева от графиков — только вид: приёмник не перестраивают, обход запускает кнопка в шапке панорамы -->
     <div class="ml-tabbar" id="manual-tabbar" role="tablist" aria-orientation="vertical">
-        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="panorama" hidden aria-selected="false">Панорама</button>
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="spectrum" aria-selected="true">Спектр</button>
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="antenna" aria-selected="false">Антенна</button>
+        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="panorama" aria-selected="false">Панорама</button>
     </div>
 
     <!-- Лента передатчиков: подписи к таймлайну и панораме, на «Спектре» —
@@ -234,36 +234,56 @@
     </section>
 
     <div class="ml-panes">
-        <!-- Вкладка «Панорама» (обзор): FFT по span с метками передатчиков,
-             под ним водопад обходов, ниже сводная таблица «Эфир». Управлять в обзоре нечем — колонки приёмника нет. -->
-        <div class="ml-tabpane ml-tabpane--panorama" data-pane="panorama" role="tabpanel" hidden>
+        <!-- Вкладка «Панорама» (обзор): шапка обхода (тракт, частота стоянки, ход стоянки,
+             «За обходом», «Старт / Стоп»), обзорная полоса всех диапазонов, спектр и водопад
+             видимой части, ниже сводная таблица «Эфир».
+             Приёмник обхода выбирается здесь: колонка «Приёмник» на этой вкладке скрыта. -->
+        <div class="ml-tabpane ml-tabpane--panorama" data-pane="panorama" role="tabpanel">
             <section class="ml-panel ml-panorama" id="manual-panorama">
+                <div class="ml-sweepbar">
+                    <div class="ml-sweepbar__controls">
+                        <select class="ml-sweepbar__path" id="manual-sweep-path" aria-label="Приёмник обхода"></select>
+                        <button type="button" class="ml-sweepbar__follow" id="manual-pan-follow" aria-pressed="true" title="Вид едет за окном обхода. Колесо мыши — масштаб, перетаскивание — сдвиг">⌖ За обходом</button>
+                        <button type="button" class="ml-sweepbar__toggle" id="manual-sweep-toggle" aria-pressed="false" disabled>Старт</button>
+                    </div>
+                    <span class="ml-sweepbar__freq" id="manual-sweep-freq" title="Частота стоянки"></span>
+                    <span class="ml-sweepbar__status" id="manual-sweep-status" aria-live="polite"></span>
+                    <span class="ml-sweepbar__progress" aria-hidden="true"><span class="ml-sweepbar__progress-fill" id="manual-sweep-progress"></span></span>
+                </div>
                 <div class="ml-panel__body ml-panorama__body">
+                    <div class="ml-panorama__overview">
+                        <canvas id="manual-panorama-overview" class="ml-canvas" role="img" aria-label="Все диапазоны обхода, рамка — видимая часть; нажатие переносит рамку" title="Нажмите или тяните, чтобы перенести видимую часть"></canvas>
+                    </div>
                     <div class="ml-panorama__fft">
-                        <canvas id="manual-panorama-fft" class="ml-canvas" role="img" aria-label="Панорама эфира: FFT по span (полосам обзора) с маркерами передатчиков"></canvas>
+                        <canvas id="manual-panorama-fft" class="ml-canvas" role="img" aria-label="Спектр видимой части диапазонов: линия — кадр, тень — максимум за стоянку; метки передатчиков"></canvas>
                     </div>
                     <div class="ml-panorama__wf">
-                        <canvas id="manual-panorama-wf" class="ml-canvas" role="img" aria-label="Водопад обходов панорамы: строка на цикл, свежая сверху"></canvas>
+                        <canvas id="manual-panorama-wf" class="ml-canvas" role="img" aria-label="Водопад: строка на кадр окна, на котором стоит обход, свежая сверху"></canvas>
                     </div>
                 </div>
             </section>
-            <!-- «Эфир»: в обзоре демодуляции нет, столбцы приёма — история прошлых сеансов -->
+            <!-- «Эфир»: участки band_signals; столбцы как у карточки маркера -->
             <section class="ml-panel ml-air">
                 <div class="ml-air__toolbar">
                     <span class="ml-panel__title">Эфир</span>
                 </div>
                 <div class="ml-air__scroll">
-                    <table class="ml-air__grid" title="Настроить">
+                    <table class="ml-air__grid">
                         <thead>
                             <tr>
                                 <th>Передатчик</th>
-                                <th>Частота · мода</th>
-                                <th>RSSI</th>
-                                <th>SNR</th>
-                                <th>Lock</th>
-                                <th>Декод. / битые</th>
-                                <th>Доплер</th>
-                                <th>Последний пакет</th>
+                                <th>Частота</th>
+                                <th>Полоса</th>
+                                <th>Дрейф</th>
+                                <th>Модуляция</th>
+                                <th>Вероятность</th>
+                                <th>Вид передачи</th>
+                                <th>Положение</th>
+                                <th>Демодулятор</th>
+                                <th>Период</th>
+                                <th>С/Ш</th>
+                                <th>В эфире</th>
+                                <th>Время</th>
                             </tr>
                         </thead>
                         <tbody id="manual-air-tbody"></tbody>
@@ -437,13 +457,16 @@
                         </select>
                         <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-reset"
                                 title="Начать накопление заново">Сброс</button>
+                        <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-marks" aria-pressed="true"
+                                title="Обнаруженные сигналы над водопадом: показать или скрыть. Риски передатчиков на спектре остаются">Маркеры</button>
                         <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-zoom-reset" disabled
-                                title="Вся полоса приёмника. Масштаб — колесом над спектром. На всей полосе перетаскивание меняет частоту, при увеличении сдвигает окно">1:1</button>
+                                title="Вся полоса приёмника. Масштаб — колесом над спектром. Перетаскивание крутит частоту и в увеличении">1:1</button>
                     </div>
                 </div>
                 <div class="ml-spectrum__scale-wrap">
                     <canvas id="manual-spec-scale" class="bp-freq-scale-canvas" aria-hidden="true"></canvas>
                 </div>
+                <div class="ml-spectrum__marks" id="manual-wf-marks" role="group" aria-label="Обнаруженные сигналы"></div>
                 <div class="ml-spectrum__wf">
                     <canvas id="manual-wf" class="ml-canvas" role="img" aria-label="Спектрограмма (водопад) активного канала"></canvas>
                 </div>
@@ -555,7 +578,7 @@
                         <span class="ml-rx-stepper">
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-gain-dec" aria-label="Меньше">−</button>
                             <input class="ml-rx-panel__input" id="manual-rx-gain" type="text" inputmode="decimal"
-                                   autocomplete="off" spellcheck="false" value="32">
+                                   autocomplete="off" spellcheck="false" value="32.8">
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-gain-inc" aria-label="Больше">+</button>
                         </span>
                         <span class="ml-rx-panel__unit">дБ</span>
@@ -592,9 +615,8 @@
                 </div>
             </div>
 
-            <!-- Демодулятор вырезает из полосы приёмника свой канал: сдвиг от центра
-                 и ширина. Канал виден на спектре заливкой, приёмник при этом не
-                 перестраивается. -->
+            <!-- Демодулятор слушает частоту приёмника. Полоса всегда по центру,
+                 поправка только Доплером. -->
             <div class="ml-ctl__section ml-ctl__section--demod" id="manual-demod-settings">
                 <div class="ml-ctl__section-title ml-ctl__section-title--check">
                     <span>Демодулятор</span>
@@ -633,18 +655,6 @@
                     </select>
                 </label>
                 <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label" title="Сдвиг центра канала от частоты приёмника">Сдвиг канала</span>
-                    <span class="ml-rx-panel__controls">
-                        <span class="ml-rx-stepper">
-                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-dec" aria-label="Меньше">−</button>
-                            <input class="ml-rx-panel__input" id="manual-rx-doppler-val" type="text" inputmode="numeric"
-                                   autocomplete="off" spellcheck="false" value="0">
-                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-inc" aria-label="Больше">+</button>
-                        </span>
-                        <span class="ml-rx-panel__unit">Гц</span>
-                    </span>
-                </label>
-                <label class="ml-rx-panel__field">
                     <span class="ml-rx-panel__label">Полоса канала</span>
                     <select class="ml-rx-panel__sel" id="manual-rx-filter-bw">
                         <option value="500">500 Гц</option>
@@ -669,13 +679,20 @@
                 </label>
                 <div class="ml-rx-panel__field">
                     <label class="ml-rx-panel__label" for="manual-rx-doppler-mode"
-                           title="Авто — канал идёт за сдвигом Доплера настроенного спутника по его орбите">Доплер</label>
+                           title="Авто — по орбите выбранного спутника. Вручную — поправка в герцах">Доплер</label>
                     <div class="ml-rx-panel__controls">
                         <select class="ml-rx-panel__sel" id="manual-rx-doppler-mode">
-                            <option value="off">Фикс.</option>
+                            <option value="off">Вручную</option>
                             <option value="auto" selected>Авто</option>
                         </select>
-                        <span class="ml-rx-panel__unit" id="manual-rx-doppler-now" title="Текущий сдвиг Доплера канала"></span>
+                        <span class="ml-rx-stepper" id="manual-rx-doppler-step" hidden>
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-dec" aria-label="Меньше">−</button>
+                            <input class="ml-rx-panel__input" id="manual-rx-doppler-val" type="text" inputmode="numeric"
+                                   autocomplete="off" spellcheck="false" value="0">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-inc" aria-label="Больше">+</button>
+                        </span>
+                        <span class="ml-rx-panel__unit" id="manual-rx-doppler-unit" hidden>Гц</span>
+                        <span class="ml-rx-panel__unit" id="manual-rx-doppler-now" title="Текущая поправка Доплера"></span>
                     </div>
                 </div>
                 <div class="ml-rx-panel__field">

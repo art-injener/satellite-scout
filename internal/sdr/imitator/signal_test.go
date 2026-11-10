@@ -224,6 +224,28 @@ func TestSignal_SweepWithoutPeriodRejected(t *testing.T) {
 	}
 }
 
+// Манипуляция «есть/нет»: в потоке есть и несущая, и тишина.
+func TestSignal_KeyedKindsHaveMarksAndSpaces(t *testing.T) {
+	for _, kind := range []SignalKind{SignalOOK, SignalCW} {
+		sig := testCarrier(0)
+		sig.Kind = kind
+		block := make([]complex64, testRate)
+		newTestSource(t, sig).fill(block, testCenter)
+		var marks, spaces int
+		for _, v := range block {
+			switch a := real(v)*real(v) + imag(v)*imag(v); {
+			case a > 0.9:
+				marks++
+			case a < 0.01:
+				spaces++
+			}
+		}
+		if marks < len(block)/5 || spaces < len(block)/5 {
+			t.Errorf("%s: %d marks and %d spaces in %d samples, want both", kind, marks, spaces, len(block))
+		}
+	}
+}
+
 func TestSignal_UnknownKindRejected(t *testing.T) {
 	sig := testCarrier(0)
 	sig.Kind = "noise"
@@ -234,7 +256,7 @@ func TestSignal_UnknownKindRejected(t *testing.T) {
 
 // Блоки разной длины дают тот же поток, что и один большой блок: фаза и время не рвутся.
 func TestSignal_NoDiscontinuityBetweenBlocks(t *testing.T) {
-	for _, kind := range []SignalKind{SignalCarrier, SignalAFSKPRBS} {
+	for _, kind := range []SignalKind{SignalCarrier, SignalAFSKPRBS, SignalOOK, SignalCW, SignalLFM} {
 		sig := testCarrier(3_000)
 		sig.Kind = kind
 		sig.DopplerRateHzS = 500

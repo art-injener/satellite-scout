@@ -12,14 +12,33 @@ import (
 
 // SDRHandler — REST API управления SDR-приёмниками.
 type SDRHandler struct {
-	svc *sdr.Service
-	hub *sdr.ReceiverHub
+	svc   *sdr.Service
+	hub   *sdr.ReceiverHub
+	sweep SweepStopper
+}
+
+// SweepStopper останавливает обход тракта: ручная перестройка и обход иначе перебивают друг друга.
+type SweepStopper interface {
+	Stop(pathID string) bool
 }
 
 // NewSDRHandler создаёт обработчик SDR API.
 // hub может быть nil — тогда Tune/Status недоступны (station_type=basic).
 func NewSDRHandler(svc *sdr.Service, hub *sdr.ReceiverHub) *SDRHandler {
 	return &SDRHandler{svc: svc, hub: hub}
+}
+
+// WithSweep подключает обход: ручная перестройка тракта будет его останавливать.
+func (h *SDRHandler) WithSweep(sw SweepStopper) *SDRHandler {
+	h.sweep = sw
+	return h
+}
+
+// stopSweep останавливает обход тракта перед ручной перестройкой.
+func (h *SDRHandler) stopSweep(pathID string) {
+	if h.sweep != nil && h.sweep.Stop(pathID) {
+		slog.Info("sweep stopped by manual tune", slog.String("radio_path", pathID))
+	}
 }
 
 // ListDevices возвращает список обнаруженных приёмников.
@@ -148,6 +167,7 @@ func (h *SDRHandler) Tune(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.stopSweep(req.RadioPath)
 	if err := receiver.Tune(req.CenterHz); err != nil {
 		slog.Error("tune: failed",
 			"radio_path", req.RadioPath, "center_hz", req.CenterHz, "error", err)
@@ -231,6 +251,7 @@ func (h *SDRHandler) SetReceiver(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	h.stopSweep(req.RadioPath)
 	if err := receiver.Tune(req.CenterHz); err != nil {
 		slog.Error("receiver settings: tune failed",
 			slog.String("radio_path", req.RadioPath), slog.Any("error", err))

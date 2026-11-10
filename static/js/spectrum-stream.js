@@ -146,51 +146,39 @@
         return out;
     }
 
-    // Автодиапазон шкалы dB
+    // Автодиапазон шкалы dB. Окно над шумом фиксировано: пик выше верха обрезается
+    // цветом максимума и шкалу не растягивает, иначе шум на водопаде сливается с фоном.
     const RANGE_FLOOR_MARGIN_DB = 10;  // запас под уровнем шума
-    const RANGE_MIN_SPAN_DB = 40;      // окно над шумом, даже когда сигналов нет
-    const RANGE_PEAK_MARGIN_DB = 5;    // запас над пиком
+    const RANGE_MIN_SPAN_DB = 40;      // окно над шумом, оно же потолок шкалы
     const RANGE_STEP_DB = 5;           // границы кратны шагу, чтобы сетка не дрожала
     const RANGE_FLOOR_ALPHA = 0.1;     // сглаживание уровня шума по кадрам
-    const RANGE_PEAK_DECAY_DB = 0.5;   // спад удержания пика за кадр
 
     /**
-     * Шкала dB по самим данным: низ чуть ниже шума, верх над недавним пиком.
-     * Шум — медиана кадра: несущие, занимающие меньше половины полосы, его не поднимают.
-     * Низ сдвигается, только когда шум ушёл дальше шага; верх растёт сразу,
-     * а сжимается, когда запас превысил два шага: водопад не перекрашивается от дрожи шума.
+     * Шкала dB по шуму кадра. Шум — медиана: несущие меньше половины полосы его не поднимают.
+     * Границы сдвигаются, только когда шум ушёл дальше шага.
      */
     function AutoRange() {
         this._floor = null;
-        this._peak = null;
         this.min = null;
         this.max = null;
     }
 
     /**
      * @param {Float32Array} dbfs — кадр спектра
-     * @param {?Float32Array} [heldDbfs] — удержание рядом с кадром: поднимает только верх,
-     *        шум удержания выше живого и низ по нему не считается
+     * @param {?Float32Array} [heldDbfs] — удержание рисуется на той же шкале и её не двигает
      * @returns {{min: number, max: number}}
      */
     AutoRange.prototype.update = function(dbfs, heldDbfs) {
         const sorted = Float32Array.from(dbfs).sort();
         const median = sorted[sorted.length >> 1];
-        let top = sorted[sorted.length - 1];
-        if (heldDbfs) {
-            for (let i = 0; i < heldDbfs.length; i++) {
-                if (heldDbfs[i] > top) { top = heldDbfs[i]; }
-            }
-        }
         this._floor = this._floor === null ? median : this._floor + RANGE_FLOOR_ALPHA * (median - this._floor);
-        this._peak = this._peak === null ? top : Math.max(top, this._peak - RANGE_PEAK_DECAY_DB);
 
         const lo = this._floor - RANGE_FLOOR_MARGIN_DB;
-        const hi = Math.max(this._floor + RANGE_MIN_SPAN_DB, this._peak + RANGE_PEAK_MARGIN_DB);
+        const hi = this._floor + RANGE_MIN_SPAN_DB;
         if (this.min === null || Math.abs(lo - this.min) > RANGE_STEP_DB) {
             this.min = Math.floor(lo / RANGE_STEP_DB) * RANGE_STEP_DB;
         }
-        if (this.max === null || hi > this.max || hi < this.max - 2 * RANGE_STEP_DB) {
+        if (this.max === null || Math.abs(hi - this.max) > RANGE_STEP_DB) {
             this.max = Math.ceil(hi / RANGE_STEP_DB) * RANGE_STEP_DB;
         }
         return { min: this.min, max: this.max };
@@ -326,6 +314,29 @@
     }
 
     /**
+     * Окно с центром centerOffsetHz. Края за полосой приёмника добиваются пустыми бинами,
+     * центр не прижимается к краю: так столбец демодулятора остаётся посередине экрана.
+     * @returns {?{start: number, count: number, padLeft: number, padRight: number, offsetHz: number, spanHz: number}}
+     */
+    function shiftedSlice(nBins, fullSpanHz, spanHz, centerOffsetHz) {
+        if (!(nBins > 1) || !(fullSpanHz > 0) || !(spanHz > 0)) { return null; }
+        const binHz = fullSpanHz / nBins;
+        const count = Math.min(nBins, Math.max(2, Math.round(spanHz / binHz) + 1));
+        const span = (count - 1) * binHz;
+        const first = Math.round((centerOffsetHz - span / 2 + fullSpanHz / 2) / binHz);
+        const srcStart = Math.max(0, Math.min(nBins, first));
+        const srcEnd = Math.max(srcStart, Math.min(nBins, first + count));
+        return {
+            start: srcStart,
+            count: srcEnd - srcStart,
+            padLeft: srcStart - first,
+            padRight: first + count - srcEnd,
+            offsetHz: -fullSpanHz / 2 + (first + (count - 1) / 2) * binHz,
+            spanHz: span,
+        };
+    }
+
+    /**
      * Чтение потока с переподключением.
      * @param {{url: string,
      *          onFrame: function({header: Object, values: ?Float32Array}): void,
@@ -438,6 +449,7 @@
     SpectrumStream.zoomView = zoomView;
     SpectrumStream.panView = panView;
     SpectrumStream.viewSlice = viewSlice;
+    SpectrumStream.shiftedSlice = shiftedSlice;
 
     if (typeof window !== 'undefined') {
         window.SpectrumStream = SpectrumStream;
@@ -458,6 +470,7 @@
             zoomView: zoomView,
             panView: panView,
             viewSlice: viewSlice,
+            shiftedSlice: shiftedSlice,
         };
     }
 })();

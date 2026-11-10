@@ -1,5 +1,7 @@
 package config
 
+import "time"
+
 // CurrentVersion — текущая версия схемы файла конфигурации.
 // Используется для миграций: при чтении файла сравниваем с этим значением и при
 // расхождении применяем правила миграции в Migrate().
@@ -191,6 +193,40 @@ type RadioPath struct {
 	Antenna  AntennaConfig  `json:"antenna"`
 	Receiver ReceiverConfig `json:"receiver"`
 	Rotator  *RotatorConfig `json:"rotator,omitempty"`
+	// Sweep — диапазоны обхода тракта. nil — обхода нет, панорама пуста.
+	Sweep *SweepConfig `json:"sweep,omitempty"`
+}
+
+// Пределы стоянки обхода на окне, секунды.
+const (
+	SweepDwellDefaultS = 60
+	SweepDwellMinS     = 5
+	SweepDwellMaxS     = 3600
+)
+
+// SweepConfig — обход тракта по диапазонам: сервер стоит на каждом окне DwellS секунд, по кругу.
+type SweepConfig struct {
+	// DwellS — стоянка на окне; 0 — SweepDwellDefaultS.
+	DwellS int `json:"dwell_s,omitempty"`
+	// Ranges — статичные полосы вокруг частот КА. Ширина рёбер min/max не должна
+	// быть уже годной полосы приёмника (~2 МГц у RTL @ 2,56 МС/с): уже — одно окно
+	// по середине, но пустая настройка; для узкого VHF лучше center_mhz.
+	Ranges []SweepRange `json:"ranges"`
+}
+
+// SweepRange — одно окно по центру или диапазон по краям; задаётся что-то одно.
+type SweepRange struct {
+	CenterMHz float64 `json:"center_mhz,omitempty"`
+	MinMHz    float64 `json:"min_mhz,omitempty"`
+	MaxMHz    float64 `json:"max_mhz,omitempty"`
+}
+
+// Dwell — стоянка на окне с учётом значения по умолчанию.
+func (s SweepConfig) Dwell() time.Duration {
+	if s.DwellS <= 0 {
+		return SweepDwellDefaultS * time.Second
+	}
+	return time.Duration(s.DwellS) * time.Second
 }
 
 // Типы антенны радиотракта (операционная классификация для UI и валидации).
@@ -286,10 +322,15 @@ const (
 	ImitatorAFSKPRBS = "afsk_prbs" // непрерывный AFSK 1200 на PRBS-9, эталон для BER
 	ImitatorBeacon   = "beacon"    // кадр AX.25 раз в period_s, модуляция по modem
 	ImitatorSSTV     = "sstv"      // картинка SSTV в режиме sstv_mode поверх ЧМ раз в period_s
+	ImitatorOOK      = "ook"       // непрерывный OOK 2000 Бод на PRBS-9, как датчики ЛПД
+	ImitatorCW       = "cw"        // телеграф 18 слов в минуту, текст по кругу
+	ImitatorLFM      = "lfm"       // повторяющиеся свипы, как преамбула LoRa
 )
 
 // ImitatorSignalKinds — все допустимые значения ImitatorSignal.Kind.
-var ImitatorSignalKinds = []string{ImitatorCarrier, ImitatorAFSKPRBS, ImitatorBeacon, ImitatorSSTV}
+var ImitatorSignalKinds = []string{
+	ImitatorCarrier, ImitatorAFSKPRBS, ImitatorBeacon, ImitatorSSTV, ImitatorOOK, ImitatorCW, ImitatorLFM,
+}
 
 // ImitatorSSTVModes — допустимые значения ImitatorSignal.SSTVMode; пусто — robot36.
 var ImitatorSSTVModes = []string{"robot36", "pd120", "pd180"}

@@ -53,15 +53,11 @@
     }
 
     /**
-     * Маркеры сервера с подписями: КА — из группы, модуляция — из ленты передатчиков по uuid.
-     * @param {?Array} serverMarkers — tx_markers из demod_status
-     * @param {Array} ribbon — передатчики ленты (transmittersFromGroup)
+     * Имена КА по NORAD: сначала из списка группы, затем из ленты пролётов.
      * @param {?Object} group — satellite_group_update
-     * @returns {Array<{noradId: number, uuid: string, freqHz: number, nominalHz: number, label: string, tx: ?Object}>}
+     * @returns {Object<number, string>}
      */
-    function markersWithLabels(serverMarkers, ribbon, group) {
-        const out = [];
-        if (!Array.isArray(serverMarkers)) { return out; }
+    function satNames(group) {
         const names = {};
         const addNames = function(list) {
             if (!Array.isArray(list)) { return; }
@@ -76,6 +72,20 @@
             addNames(group.satellites);
             addNames(group.timeline);
         }
+        return names;
+    }
+
+    /**
+     * Маркеры сервера с подписями: КА — из группы, модуляция — из ленты передатчиков по uuid.
+     * @param {?Array} serverMarkers — tx_markers из demod_status
+     * @param {Array} ribbon — передатчики ленты (transmittersFromGroup)
+     * @param {?Object} group — satellite_group_update
+     * @returns {Array<{noradId: number, uuid: string, freqHz: number, nominalHz: number, label: string, tx: ?Object}>}
+     */
+    function markersWithLabels(serverMarkers, ribbon, group) {
+        const out = [];
+        if (!Array.isArray(serverMarkers)) { return out; }
+        const names = satNames(group);
         const byUuid = {};
         for (let i = 0; i < (ribbon || []).length; i++) {
             if (ribbon[i].uuid) { byUuid[ribbon[i].uuid] = ribbon[i]; }
@@ -205,6 +215,7 @@
     TxMarkers.markerX = markerX;
     TxMarkers.labelRows = labelRows;
     TxMarkers.markersWithLabels = markersWithLabels;
+    TxMarkers.satNames = satNames;
 
     if (typeof window !== 'undefined') {
         window.TxMarkers = TxMarkers;
@@ -216,6 +227,7 @@
             markerX: markerX,
             labelRows: labelRows,
             markersWithLabels: markersWithLabels,
+            satNames: satNames,
         };
     }
 })();

@@ -482,6 +482,80 @@ func TestRestartRequiredFields_ImitatorChanged(t *testing.T) {
 	}
 }
 
+func sweepPath() RadioPath {
+	rp := sampleRadioPath(1)
+	rp.Sweep = &SweepConfig{
+		DwellS: 60,
+		Ranges: []SweepRange{{CenterMHz: 145.9}, {MinMHz: 435.4, MaxMHz: 437.8}},
+	}
+	return rp
+}
+
+func TestValidate_SweepSectionPasses(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Station.RadioPaths = []RadioPath{sweepPath()}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("valid sweep section rejected: %v", err)
+	}
+}
+
+func TestValidate_SweepDwellDefaultsToZero(t *testing.T) {
+	rp := sweepPath()
+	rp.Sweep.DwellS = 0
+	cfg := DefaultConfig()
+	cfg.Station.RadioPaths = []RadioPath{rp}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("dwell_s 0 means default, got: %v", err)
+	}
+}
+
+func TestValidate_SweepErrors(t *testing.T) {
+	const prefix = "station.radio_paths[0].sweep"
+	cases := []struct {
+		name  string
+		edit  func(s *SweepConfig)
+		field string
+	}{
+		{"no ranges", func(s *SweepConfig) { s.Ranges = nil }, ".ranges"},
+		{"empty range", func(s *SweepConfig) { s.Ranges[0] = SweepRange{} }, ".ranges[0]"},
+		{"center and edges", func(s *SweepConfig) { s.Ranges[0].MinMHz = 145 }, ".ranges[0]"},
+		{"only min", func(s *SweepConfig) { s.Ranges[1].MaxMHz = 0 }, ".ranges[1]"},
+		{"min above max", func(s *SweepConfig) { s.Ranges[1].MinMHz = 439 }, ".ranges[1]"},
+		{"negative center", func(s *SweepConfig) { s.Ranges[0].CenterMHz = -1 }, ".ranges[0]"},
+		{"dwell too short", func(s *SweepConfig) { s.DwellS = 2 }, ".dwell_s"},
+		{"dwell too long", func(s *SweepConfig) { s.DwellS = 7200 }, ".dwell_s"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			rp := sweepPath()
+			c.edit(rp.Sweep)
+			cfg := DefaultConfig()
+			cfg.Station.RadioPaths = []RadioPath{rp}
+			verrs := mustValidationErrors(t, cfg.Validate())
+			if !hasField(verrs, prefix+c.field) {
+				t.Errorf("expected error on %s, got %v", prefix+c.field, verrs)
+			}
+		})
+	}
+}
+
+func TestRestartRequiredFields_SweepChanged(t *testing.T) {
+	old := DefaultConfig()
+	old.Station.RadioPaths = []RadioPath{sweepPath()}
+	same := DefaultConfig()
+	same.Station.RadioPaths = []RadioPath{sweepPath()}
+	if got := RestartRequiredFields(old, same); hasString(got, "station.radio_paths") {
+		t.Errorf("equal sweep sections must not require restart, got %v", got)
+	}
+	rp := sweepPath()
+	rp.Sweep.Ranges[0].CenterMHz = 145.8
+	updated := DefaultConfig()
+	updated.Station.RadioPaths = []RadioPath{rp}
+	if got := RestartRequiredFields(old, updated); !hasString(got, "station.radio_paths") {
+		t.Errorf("sweep windows are built at start, expected restart, got %v", got)
+	}
+}
+
 func TestRestartRequiredFields_NilSafe(t *testing.T) {
 	if RestartRequiredFields(nil, DefaultConfig()) != nil {
 		t.Error("expected nil for nil old")

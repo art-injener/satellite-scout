@@ -3,6 +3,7 @@ package sdr
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 )
@@ -41,25 +42,26 @@ type hubEntry struct {
 type ReceiverHub struct {
 	mu      sync.Mutex
 	entries map[string]*hubEntry
-	tap     StreamTap
+	taps    []StreamTap
 }
 
-// StreamTap — попутный получатель потока тракта (демодулятор). Вызывается в отдельной горутине
-// при запуске каждого потока устройства. Зрителем не считается: поток не держит, его канал
-// закрывается вместе с потоком. Короткую паузу без зрителей и смену частоты дискретизации переживает.
+// StreamTap — попутный получатель потока тракта (демодулятор, обнаружитель сигналов). Вызывается
+// в отдельной горутине при запуске каждого потока устройства. Зрителем не считается: поток не держит,
+// его канал закрывается вместе с потоком. Короткую паузу без зрителей и смену частоты дискретизации переживает.
 type StreamTap func(pathID string, frames <-chan IQFrame)
 
-// SetStreamTap задаёт попутного получателя для потоков, запущенных после вызова.
-func (h *ReceiverHub) SetStreamTap(tap StreamTap) {
+// AddStreamTap добавляет попутного получателя для потоков, запущенных после вызова.
+// Каждый получает свою подписку на кольцо: медленный не задерживает остальных.
+func (h *ReceiverHub) AddStreamTap(tap StreamTap) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	h.tap = tap
+	h.taps = append(h.taps, tap)
 }
 
-func (h *ReceiverHub) streamTap() StreamTap {
+func (h *ReceiverHub) streamTaps() []StreamTap {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	return h.tap
+	return slices.Clone(h.taps)
 }
 
 // NewReceiverHub создаёт пустой хаб приёмников.

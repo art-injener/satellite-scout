@@ -89,6 +89,7 @@ function makeManager(mode, pathId) {
 
 const headerSelect = makeSelect();
 const panelSelect = makeSelect();
+const panoramaSelect = makeSelect();
 const pathSection = { hidden: false };
 const header = {
     querySelector(sel) {
@@ -103,6 +104,7 @@ global.document = {
     getElementById(id) {
         if (id === 'app-header') { return header; }
         if (id === 'manual-rx-path') { return panelSelect; }
+        if (id === 'manual-sweep-path') { return panoramaSelect; }
         return null;
     },
     createElement() { return { value: '', textContent: '' }; },
@@ -131,8 +133,10 @@ test('manual hides the header tract and both selects list the same paths', () =>
     assert.strictEqual(pathSection.hidden, true);
     assert.deepStrictEqual(labels(headerSelect), ['1. VHF', '4. RTL-SDR V3 (R)']);
     assert.deepStrictEqual(labels(panelSelect), labels(headerSelect));
+    assert.deepStrictEqual(labels(panoramaSelect), labels(headerSelect));
     assert.strictEqual(headerSelect.value, '4');
     assert.strictEqual(panelSelect.value, '4');
+    assert.strictEqual(panoramaSelect.value, '4');
     bar.destroy();
 });
 
@@ -148,6 +152,18 @@ test('panel select change updates the header select', () => {
     const bar = attachModeBar(manager);
     panelSelect.value = '4';
     panelSelect._listeners.change[0]({ currentTarget: panelSelect });
+    assert.strictEqual(manager.getRadioPathId(), 4);
+    assert.strictEqual(headerSelect.value, '4');
+    assert.strictEqual(panelSelect.value, '4');
+    assert.strictEqual(panoramaSelect.value, '4');
+    bar.destroy();
+});
+
+test('panorama select change updates the other selects', () => {
+    const manager = makeManager('manual', 1);
+    const bar = attachModeBar(manager);
+    panoramaSelect.value = '4';
+    panoramaSelect._listeners.change[0]({ currentTarget: panoramaSelect });
     assert.strictEqual(manager.getRadioPathId(), 4);
     assert.strictEqual(headerSelect.value, '4');
     assert.strictEqual(panelSelect.value, '4');

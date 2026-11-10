@@ -100,14 +100,14 @@ func (p *Propagator) Propagate(t time.Time) (*ECIPosition, error) {
 		return nil, ErrNilTLE
 	}
 
-	// Извлекаем компоненты времени.
-	year, month, day := t.Date()
-	hour, minute, sec := t.Clock()
+	// Календарь SGP4 считается по UTC. Date и Clock берут пояс времени,
+	// и местные часы уехали бы на величину пояса: в Москве Доплер смотрит на три часа вперёд.
+	year, month, day, hour, minute, sec := utcClock(t)
 
 	// Вызываем SGP4 пропагатор.
 	position, velocity := satellite.Propagate(
 		p.satellite,
-		year, int(month), day,
+		year, month, day,
 		hour, minute, sec,
 	)
 
@@ -179,20 +179,27 @@ func (p *Propagator) GravityModel() GravityModel {
 }
 
 // GMST рассчитывает Greenwich Mean Sidereal Time для указанного времени.
-// Используется для преобразования ECI -> ECEF.
+// Используется для преобразования ECI в ECEF. Момент берётся в UTC, как и пропагация.
 func GMST(t time.Time) float64 {
-	year, month, day := t.Date()
-	hour, minute, sec := t.Clock()
+	year, month, day, hour, minute, sec := utcClock(t)
 
-	return satellite.GSTimeFromDate(year, int(month), day, hour, minute, sec)
+	return satellite.GSTimeFromDate(year, month, day, hour, minute, sec)
 }
 
-// JulianDay рассчитывает юлианскую дату для указанного времени.
+// JulianDay рассчитывает юлианскую дату для указанного времени. Пояс t не влияет.
 func JulianDay(t time.Time) float64 {
-	year, month, day := t.Date()
-	hour, minute, sec := t.Clock()
+	year, month, day, hour, minute, sec := utcClock(t)
 
-	return satellite.JDay(year, int(month), day, hour, minute, sec)
+	return satellite.JDay(year, month, day, hour, minute, sec)
+}
+
+// utcClock возвращает календарные поля момента в UTC.
+// SGP4 и звёздное время считают дату без пояса, поэтому местные часы нельзя передавать как есть.
+func utcClock(t time.Time) (year, month, day, hour, minute, sec int) {
+	u := t.UTC()
+	year, m, day := u.Date()
+	hour, minute, sec = u.Clock()
+	return year, int(m), day, hour, minute, sec
 }
 
 // isNaN проверяет, является ли значение NaN.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"log/slog"
-	"math"
 	"net/http"
 	"strconv"
 	"time"
@@ -12,6 +11,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/dsp"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sweep"
 )
 
 const (
@@ -39,6 +39,7 @@ const (
 type StreamHandler struct {
 	hub   *sdr.ReceiverHub
 	audio *demod.AudioHub
+	sweep *sweep.Service
 }
 
 // NewStreamHandler создаёт обработчик бинарных потоков.
@@ -162,7 +163,7 @@ func serveSpectrumLoop(
 			}
 			center, rate = frame.CenterHz, frame.SampleRate
 			sw.lastCenter = int64(frame.CenterHz)
-			sw.cropStart, sw.cropKeep, sw.lastSpan = cropBand(p.bins, rate, p.caps.UsableBandHz(rate))
+			sw.cropStart, sw.cropKeep, sw.lastSpan = dsp.CropBand(p.bins, rate, p.caps.UsableBandHz(rate))
 			chunker.feed(frame.Samples, pipeline.Push)
 
 		case <-ticker.C:
@@ -221,19 +222,6 @@ type spectrumWriter struct {
 	lastWrite  time.Time
 	// cropStart, cropKeep — какие бины кадра уходят клиенту; cropKeep 0 — все.
 	cropStart, cropKeep int
-}
-
-// cropBand — какие бины спектра окна rate уходят клиенту: середина шириной usableHz.
-// Число бинов чётное, чтобы центр окна остался на бине bins/2. Возвращает первый бин,
-// их число и ширину оставленного участка; usableHz 0 или не меньше rate — всё окно.
-func cropBand(bins int, rate, usableHz uint32) (start, keep int, spanHz int64) {
-	if usableHz == 0 || usableHz >= rate {
-		return 0, bins, int64(rate)
-	}
-	keep = 2 * int(math.Round(float64(bins)*float64(usableHz)/float64(rate)/2))
-	start = bins/2 - keep/2
-	spanHz = int64(math.Round(float64(keep) * float64(rate) / float64(bins)))
-	return start, keep, spanHz
 }
 
 // flushPipeline сбрасывает pipeline в HTTP. Возвращает true, если записан фрейм.

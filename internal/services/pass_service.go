@@ -213,6 +213,12 @@ func (s *PassService) GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.P
 		return nil, err
 	}
 
+	// Каталог ещё пуст (TLE не успели прочитаться). Пустой ответ не запоминаем,
+	// иначе после загрузки орбит пролёты не появятся до конца TTL.
+	if s.store != nil && s.store.Count() == 0 {
+		return passes, nil
+	}
+
 	// Сохранение в кеш.
 	s.mu.Lock()
 	s.cache[cacheKey] = &cacheEntry{

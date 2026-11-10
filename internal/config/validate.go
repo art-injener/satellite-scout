@@ -139,6 +139,7 @@ func (c *Config) Validate() error {
 			errs = append(errs, validateAntennaKind(prefix+".antenna.kind", rp)...)
 			errs = append(errs, validateRadioPathRotator(prefix, rp)...)
 			errs = append(errs, validateImitator(prefix+".receiver", rp.Receiver)...)
+			errs = append(errs, validateSweep(prefix+".sweep", rp.Sweep)...)
 			if cal := rp.Receiver.CalibrationDB; cal != nil && (*cal < CalibrationMinDB || *cal > CalibrationMaxDB) {
 				errs = append(errs, ValidationError{
 					Field: prefix + ".receiver.calibration_db",
@@ -230,6 +231,9 @@ func radioPathsEqual(a, b []RadioPath) bool {
 		if !rotatorEqual(a[i].Rotator, b[i].Rotator) {
 			return false
 		}
+		if !reflect.DeepEqual(a[i].Sweep, b[i].Sweep) {
+			return false
+		}
 	}
 	return true
 }
@@ -314,6 +318,38 @@ func validateRadioPathRotator(prefix string, rp RadioPath) ValidationErrors {
 				Field:   prefix + ".rotator.port",
 				Message: fmt.Sprintf("порт %d вне диапазона [1; 65535]", rp.Rotator.Port),
 			})
+		}
+	}
+	return errs
+}
+
+// validateSweep: у каждого диапазона либо центр, либо обе границы.
+func validateSweep(prefix string, sw *SweepConfig) ValidationErrors {
+	if sw == nil {
+		return nil
+	}
+	var errs ValidationErrors
+	add := func(field, msg string) {
+		errs = append(errs, ValidationError{Field: prefix + field, Message: msg})
+	}
+	if sw.DwellS != 0 && (sw.DwellS < SweepDwellMinS || sw.DwellS > SweepDwellMaxS) {
+		add(".dwell_s", fmt.Sprintf("стоянка %d с вне диапазона [%d; %d]", sw.DwellS, SweepDwellMinS, SweepDwellMaxS))
+	}
+	if len(sw.Ranges) == 0 {
+		add(".ranges", "укажите хотя бы один диапазон обхода")
+	}
+	for i, r := range sw.Ranges {
+		field := fmt.Sprintf(".ranges[%d]", i)
+		hasEdges := r.MinMHz != 0 || r.MaxMHz != 0
+		switch {
+		case r.CenterMHz != 0 && hasEdges:
+			add(field, "укажите либо center_mhz, либо min_mhz и max_mhz")
+		case r.CenterMHz < 0:
+			add(field, "частота центра должна быть положительной")
+		case r.CenterMHz == 0 && !hasEdges:
+			add(field, "диапазон пуст: укажите center_mhz или min_mhz и max_mhz")
+		case hasEdges && (r.MinMHz <= 0 || r.MaxMHz <= r.MinMHz):
+			add(field, "нужны обе границы, min_mhz > 0 и min_mhz < max_mhz")
 		}
 	}
 	return errs
