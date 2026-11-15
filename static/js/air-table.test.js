@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('assert');
-const { markRows } = require('./band-marks.js');
+const { markRows, hearRows } = require('./band-marks.js');
 const { AirTable } = require('./air-table.js');
 
 let passed = 0;
@@ -96,6 +96,16 @@ test('rows follow markRows and sort by frequency', () => {
     const cells = tbody.children[0].children.map((td) => td.textContent);
     const expect = markRows(SIG_B, 'GEOSCAN').map((r) => r[1]);
     assert.deepStrictEqual(cells, expect);
+    table.destroy();
+});
+
+test('rowsFn uses hearRows for the spectrum table', () => {
+    const tbody = el('tbody');
+    const table = new AirTable(tbody, { rowsFn: hearRows, nameOf: () => null });
+    table.setSignals([SIG_A]);
+    const cells = tbody.children[0].children.map((td) => td.textContent);
+    assert.deepStrictEqual(cells, hearRows(SIG_A, null).map((r) => r[1]));
+    assert.strictEqual(cells.length, 9);
     table.destroy();
 });
 

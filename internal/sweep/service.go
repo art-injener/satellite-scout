@@ -89,15 +89,28 @@ type Snapshot struct {
 // DwellEndFunc вызывается в конце стоянки на окне, до перестройки на следующее.
 type DwellEndFunc func(pathID string, w Window, startMs, endMs int64)
 
-// Service обходит тракты по окнам из конфига. Обход держит поток тракта как зритель,
-// поэтому попутные получатели (обнаружитель, демодулятор) работают и без открытой страницы.
-// Снимки окон живут до перезапуска сервера.
+// PlanFreqsFunc — частоты TX плана на горизонте [now, until] для тракта.
+// Не должна вызывать методы Service (окна считаются под мьютексом).
+type PlanFreqsFunc func(pathID string, now, until time.Time) []uint64
+
+// DwellFunc — до какого момента (Unix мс) стоять на окне.
+// configDwellMs — dwell_s тракта. holdUntil <= now означает «уйти».
+// Без зависимости от bandscan/freqplan: снимок эфира собирает wiring.
+type DwellFunc func(pathID string, w Window, startMs, nowMs, configDwellMs int64) (holdUntilMs int64)
+
+// Service обходит тракты по диапазонам конфига ∪ кластерам плана.
+// Обход держит поток тракта как зритель, поэтому попутные получатели
+// (обнаружитель, демодулятор) работают и без открытой страницы.
+// Снимки окон живут до перезапуска сервера. Список окон пересчитывается
+// на границе цикла, если задан PlanFreqs. Стоянка — DwellFunc или жёсткий dwell.
 type Service struct {
 	hub   Hub
 	emit  Sink
 	clock Clock
 
 	onDwellEnd DwellEndFunc
+	planFreqs  PlanFreqsFunc
+	dwellFn    DwellFunc
 
 	mu    sync.Mutex
 	paths map[string]*path
@@ -127,6 +140,22 @@ func (s *Service) OnDwellEnd(fn DwellEndFunc) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onDwellEnd = fn
+}
+
+// WithPlanFreqs подключает частоты плана: окна = конфиг ∪ жадные кластеры.
+func (s *Service) WithPlanFreqs(fn PlanFreqsFunc) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.planFreqs = fn
+	return s
+}
+
+// WithDwell подключает гибкую стоянку; nil — жёсткий таймер dwell конфига.
+func (s *Service) WithDwell(fn DwellFunc) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.dwellFn = fn
+	return s
 }
 
 func (s *Service) withClock(c Clock) *Service {
@@ -159,13 +188,32 @@ func (s *Service) path(pathID string) (*path, error) {
 	return p, nil
 }
 
-// windows — окна тракта при текущей годной полосе.
+// windows — окна тракта при текущей годной полосе (конфиг ∪ план).
 func (s *Service) windows(pathID string, p *path) ([]Window, uint32, error) {
+	return s.windowsHorizon(pathID, p, 0)
+}
+
+// windowsHorizon режет диапазоны на окна. horizonN > 0 — оценка длины цикла
+// для горизонта плана; иначе берётся число окон только из ranges конфига.
+func (s *Service) windowsHorizon(pathID string, p *path, horizonN int) ([]Window, uint32, error) {
 	band, err := s.hub.UsableBand(pathID)
 	if err != nil {
 		return nil, 0, err
 	}
-	centers := Windows(p.ranges, band)
+	ranges := p.ranges
+	if s.planFreqs != nil {
+		n := horizonN
+		if n <= 0 {
+			n = len(Windows(p.ranges, band))
+		}
+		if n <= 0 {
+			n = 1
+		}
+		now := s.clock.Now()
+		until := now.Add(time.Duration(n) * p.dwell)
+		ranges = MergeRanges(p.ranges, Clusters(s.planFreqs(pathID, now, until), band))
+	}
+	centers := Windows(ranges, band)
 	out := make([]Window, len(centers))
 	for i, c := range centers {
 		out[i] = Window{CenterHz: c, SpanHz: band}
@@ -226,9 +274,11 @@ func (s *Service) Start(pathID string) error {
 	r := &run{cancel: cancel, done: make(chan struct{})}
 	p.run = r
 	now := s.clock.Now()
+	startMs := now.UnixMilli()
+	endMs := evalHold(s.dwellFn, pathID, ws[0], startMs, startMs, p.dwell)
 	p.state = State{
 		RadioPath: pathID, Running: true, DwellS: int(p.dwell / time.Second), Windows: ws,
-		Index: 0, Cycle: 1, WindowStartMs: now.UnixMilli(), WindowEndMs: now.Add(p.dwell).UnixMilli(),
+		Index: 0, Cycle: 1, WindowStartMs: startMs, WindowEndMs: endMs,
 	}
 	st := cloneState(p.state)
 	s.mu.Unlock()
@@ -238,6 +288,7 @@ func (s *Service) Start(pathID string) error {
 	s.sendState(st)
 	go s.loop(ctx, pathID, p, r, loopParams{
 		receiver: receiver, frames: frames, unsubscribe: unsubscribe, windows: ws, band: band,
+		holdUntilMs: endMs,
 	})
 	return nil
 }
@@ -297,15 +348,16 @@ type loopParams struct {
 	unsubscribe func()
 	windows     []Window
 	band        uint32
+	holdUntilMs int64
 }
 
-// loop стоит на окне dwell, затем перестраивает приёмник на следующее, по кругу.
+// loop стоит на окне до holdUntil, при продлении шлёт новый sweep_state, иначе — следующее окно.
 func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp loopParams) {
 	defer close(r.done)
 	defer lp.unsubscribe()
 	tick, stopTick := s.clock.Ticker(snapshotInterval)
 	defer stopTick()
-	dwell := s.clock.After(p.dwell)
+	dwell := s.armHold(lp.holdUntilMs)
 	acc := newAccumulator(lp.windows[0].CenterHz, lp.band)
 	idx, cycle := 0, 1
 
@@ -323,10 +375,29 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 			s.publish(p, acc.snapshot(s.clock.Now()))
 		case <-dwell:
 			s.publish(p, acc.snapshot(s.clock.Now()))
+			// Дедлайн сработал: даже если тестовые часы не тикнули, считаем время = holdUntil.
+			nowMs := s.clock.Now().UnixMilli()
+			if nowMs < lp.holdUntilMs {
+				nowMs = lp.holdUntilMs
+			}
+			startMs := s.windowStartMs(p, r)
+			next := s.holdUntil(pathID, lp.windows[idx], startMs, nowMs, p.dwell)
+			if next > nowMs {
+				lp.holdUntilMs = next
+				s.extendHold(p, r, next)
+				dwell = s.armHold(next)
+				continue
+			}
 			s.notifyDwellEnd(pathID, p, lp.windows[idx])
 			idx = (idx + 1) % len(lp.windows)
 			if idx == 0 {
 				cycle++
+				ws, band, ok := s.rebuildWindows(pathID, p, r, len(lp.windows))
+				if !ok {
+					s.finish(pathID, p, r)
+					return
+				}
+				lp.windows, lp.band = ws, band
 			}
 			if err := lp.receiver.Tune(lp.windows[idx].CenterHz); err != nil {
 				slog.Warn("sweep: tune failed", slog.String("radio_path", pathID), slog.Any("error", err))
@@ -334,10 +405,84 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 				return
 			}
 			acc.retune(lp.windows[idx].CenterHz)
-			dwell = s.clock.After(p.dwell)
-			s.advance(p, r, idx, cycle)
+			now := s.clock.Now()
+			startMs = now.UnixMilli()
+			lp.holdUntilMs = s.holdUntil(pathID, lp.windows[idx], startMs, startMs, p.dwell)
+			dwell = s.armHold(lp.holdUntilMs)
+			s.advance(p, r, idx, cycle, startMs, lp.holdUntilMs)
 		}
 	}
+}
+
+// holdUntil спрашивает политику стоянки; без неё — start + dwell конфига.
+func (s *Service) holdUntil(pathID string, w Window, startMs, nowMs int64, dwell time.Duration) int64 {
+	s.mu.Lock()
+	fn := s.dwellFn
+	s.mu.Unlock()
+	return evalHold(fn, pathID, w, startMs, nowMs, dwell)
+}
+
+func evalHold(fn DwellFunc, pathID string, w Window, startMs, nowMs int64, dwell time.Duration) int64 {
+	cfgMs := dwell.Milliseconds()
+	if fn == nil {
+		end := startMs + cfgMs
+		if nowMs >= end {
+			return nowMs
+		}
+		return end
+	}
+	return fn(pathID, w, startMs, nowMs, cfgMs)
+}
+
+func (s *Service) armHold(untilMs int64) <-chan time.Time {
+	now := s.clock.Now()
+	d := time.UnixMilli(untilMs).Sub(now)
+	if d < 0 {
+		d = 0
+	}
+	return s.clock.After(d)
+}
+
+func (s *Service) windowStartMs(p *path, r *run) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p.run != r {
+		return 0
+	}
+	return p.state.WindowStartMs
+}
+
+// extendHold продлевает стоянку и шлёт sweep_state с новым window_end_ms.
+func (s *Service) extendHold(p *path, r *run, untilMs int64) {
+	s.mu.Lock()
+	if p.run != r {
+		s.mu.Unlock()
+		return
+	}
+	p.state.WindowEndMs = untilMs
+	st := cloneState(p.state)
+	s.mu.Unlock()
+	s.sendState(st)
+}
+
+// rebuildWindows пересчитывает окна на границе цикла.
+// false — обход уже остановлен, ошибка полосы или окон не осталось.
+func (s *Service) rebuildWindows(pathID string, p *path, r *run, prevN int) ([]Window, uint32, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if p.run != r {
+		return nil, 0, false
+	}
+	ws, band, err := s.windowsHorizon(pathID, p, prevN)
+	if err != nil {
+		slog.Warn("sweep: rebuild windows", slog.String("radio_path", pathID), slog.Any("error", err))
+		return nil, 0, false
+	}
+	if len(ws) == 0 {
+		return nil, 0, false
+	}
+	p.state.Windows = slices.Clone(ws)
+	return ws, band, true
 }
 
 // notifyDwellEnd сообщает о завершённой стоянке на w (до смены index).
@@ -353,15 +498,14 @@ func (s *Service) notifyDwellEnd(pathID string, p *path, w Window) {
 }
 
 // advance отмечает переход на окно idx; остановленный обход не трогает.
-func (s *Service) advance(p *path, r *run, idx, cycle int) {
+func (s *Service) advance(p *path, r *run, idx, cycle int, startMs, endMs int64) {
 	s.mu.Lock()
 	if p.run != r {
 		s.mu.Unlock()
 		return
 	}
-	now := s.clock.Now()
 	p.state.Index, p.state.Cycle = idx, cycle
-	p.state.WindowStartMs, p.state.WindowEndMs = now.UnixMilli(), now.Add(p.dwell).UnixMilli()
+	p.state.WindowStartMs, p.state.WindowEndMs = startMs, endMs
 	st := cloneState(p.state)
 	s.mu.Unlock()
 	s.sendState(st)

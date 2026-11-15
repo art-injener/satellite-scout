@@ -33,7 +33,7 @@ func TestStore_CreatesOnlyRegistryTables(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = db.Close() }()
-	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name`)
+	rows, err := db.Query(`SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +49,7 @@ func TestStore_CreatesOnlyRegistryTables(t *testing.T) {
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"orbits", "satellites", "source_loads", "transmitters"}
+	want := []string{"orbits", "rx_visits", "satellites", "source_loads", "transmitters"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tables = %v, want %v", names, want)
 	}

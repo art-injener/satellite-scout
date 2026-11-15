@@ -65,7 +65,7 @@ func TestRegistry_HasLabel(t *testing.T) {
 		{"alive by AMSAT", 1, LabelAlive, rtlBands, true},
 		{"sonik only not alive", 3, LabelAlive, rtlBands, false},
 		{"curated counts as alive for the operator", 5, LabelAlive, rtlBands, true},
-		{"heard is stub false", 1, LabelHeard, rtlBands, false},
+		{"heard without visits is false", 1, LabelHeard, rtlBands, false},
 		{"ISS is a station", 25544, LabelStations, rtlBands, true},
 		{"AO-7 is not a station", 5, LabelStations, rtlBands, false},
 		{"LRPT near 137 is weather", 59051, LabelWeather, rtlBands, true},

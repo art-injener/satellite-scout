@@ -46,7 +46,7 @@ func ValidGroupLabel(label string) bool {
 }
 
 // HasLabel сообщает, что КА несёт указанную метку реестра.
-// Диапазон — у приёмника (bands), не у антенны. Метка «слышали» пока всегда false.
+// Диапазон — у приёмника (bands), не у антенны. «слышали» — из журнала визитов (energy).
 func (r *Registry) HasLabel(norad int, label string, bands Bands) bool {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
@@ -124,7 +124,8 @@ func (r *Registry) hasLabelLocked(norad int, label string, bands Bands) bool {
 	case LabelAlive:
 		return r.hasAliveLocked(norad)
 	case LabelHeard:
-		return false // статистика приёма ещё не подключена
+		_, ok := r.heard[norad]
+		return ok
 	case LabelStations:
 		_, ok := inhabitedStations[norad]
 		return ok

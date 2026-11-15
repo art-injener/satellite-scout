@@ -22,6 +22,7 @@ type Registry struct {
 	orbits map[int]Orbit
 	txs    map[int]map[string][]Transmitter
 	loads  map[string]SourceLoad
+	heard  map[int]struct{} // NORAD с хотя бы одним визитом energy=true
 
 	store *store // nil — только память
 }
@@ -33,6 +34,7 @@ func New() *Registry {
 		orbits: make(map[int]Orbit),
 		txs:    make(map[int]map[string][]Transmitter),
 		loads:  make(map[string]SourceLoad),
+		heard:  make(map[int]struct{}),
 	}
 }
 

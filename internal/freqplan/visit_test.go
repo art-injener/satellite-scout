@@ -18,7 +18,7 @@ func TestJudge_MarksEnergyWhenSightingNearPlanFreq(t *testing.T) {
 		RadioPath: "rp1", CenterHz: 436_500_000, SpanHz: 1_600_000,
 		WindowStartMs: 10_000, WindowEndMs: 70_000,
 		NoradID: 27607, Name: "SO-50", UUID: "u", FreqHz: 436_795_000,
-		Energy: true, Origin: "satellite", Emission: "pulsed", Received: true, Source: SourceCurated,
+		Energy: true, SNRDB: 12, Origin: "satellite", Emission: "pulsed", Received: true, Source: SourceCurated,
 	}}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("got %+v, want %+v", got, want)

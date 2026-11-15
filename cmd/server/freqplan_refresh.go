@@ -15,7 +15,6 @@ import (
 const (
 	freqCuratedPath = "data/freq_curated.json"
 	freqPlanPath    = "data/freq_plan.csv"
-	freqVisitsPath  = "data/freq_visits.csv"
 	freqAMSATCache  = "data/amsat_active.csv"
 	freqHACache     = "data/heavensabove_amateur.html"
 	freqPlanEvery   = 5 * time.Minute
@@ -120,28 +119,69 @@ func (a *app) refreshFreqPlan(ctx context.Context) {
 	)
 }
 
-// onSweepDwellEnd пишет журнал визитов: план × обнаружения в закончившемся окне.
-func (a *app) onSweepDwellEnd(pathID string, w sweep.Window, startMs, endMs int64) {
+// planSweepFreqs — частоты плана в полосе приёмника ∩ антенны на горизонте обхода.
+func (a *app) planSweepFreqs(_ string, now, until time.Time) []uint64 {
+	plan := a.loadFreqPlan()
+	bands, antenna := a.bands, a.antennaBands
+	return freqplan.ActiveFreqs(plan, now.UnixMilli(), until.UnixMilli(), func(hz int64) bool {
+		if !bands.Allow(hz) {
+			return false
+		}
+		if len(antenna) > 0 && !antenna.Allow(hz) {
+			return false
+		}
+		return true
+	})
+}
+
+// loadFreqPlan — копия плана в памяти или CSV на диске.
+func (a *app) loadFreqPlan() []freqplan.Entry {
 	a.freqPlanMu.Lock()
 	plan := append([]freqplan.Entry(nil), a.freqPlan...)
 	a.freqPlanMu.Unlock()
 	if len(plan) == 0 {
 		if loaded, err := freqplan.ReadPlan(freqPlanPath); err == nil {
-			plan = loaded
+			return loaded
 		}
+	}
+	return plan
+}
+
+// bandSightings — участки bandscan в окне обхода.
+func (a *app) bandSightings(pathID string, w sweep.Window) []freqplan.Sighting {
+	if a.bandscan == nil {
+		return nil
 	}
 	var sights []freqplan.Sighting
-	if a.bandscan != nil {
-		for _, s := range a.bandscan.SignalsInBand(pathID, w.CenterHz, w.SpanHz) {
-			sights = append(sights, freqplan.Sighting{
-				CenterHz: s.CenterHz, NoradID: s.NoradID,
-				Origin: s.Origin, Emission: s.Emission, SNRDB: s.SNRDB,
-			})
-		}
+	for _, s := range a.bandscan.SignalsInBand(pathID, w.CenterHz, w.SpanHz) {
+		sights = append(sights, freqplan.Sighting{
+			CenterHz: s.CenterHz, NoradID: s.NoradID,
+			Origin: s.Origin, Emission: s.Emission, SNRDB: s.SNRDB,
+			LastSeenMs: int64(s.LastSeenMs), //nolint:gosec // метки времени bandscan < MaxInt64
+		})
 	}
+	return sights
+}
+
+// sweepDwell — гибкая стоянка: план × обнаружения → DecideHold.
+func (a *app) sweepDwell(pathID string, w sweep.Window, startMs, nowMs, configDwellMs int64) int64 {
+	return freqplan.DecideHold(
+		freqplan.Window{CenterHz: w.CenterHz, SpanHz: w.SpanHz},
+		startMs, nowMs, configDwellMs,
+		a.loadFreqPlan(), a.bandSightings(pathID, w),
+	)
+}
+
+// onSweepDwellEnd пишет журнал визитов: план × обнаружения в закончившемся окне.
+func (a *app) onSweepDwellEnd(pathID string, w sweep.Window, startMs, endMs int64) {
+	plan := a.loadFreqPlan()
+	sights := a.bandSightings(pathID, w)
 	visits := freqplan.Judge(pathID, freqplan.Window{CenterHz: w.CenterHz, SpanHz: w.SpanHz},
 		startMs, endMs, plan, sights)
-	if err := freqplan.AppendVisits(freqVisitsPath, visits); err != nil {
+	if a.registry == nil {
+		return
+	}
+	if err := a.registry.AppendVisits(context.Background(), visits); err != nil {
 		slog.Warn("freqplan: visits", slogKeyError, err)
 		return
 	}

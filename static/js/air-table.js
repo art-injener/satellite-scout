@@ -1,6 +1,6 @@
-// air-table.js — таблица «Эфир» под панорамой: участки band_signals.
+// air-table.js — таблица «Эфир»: участки band_signals.
 //
-// Столбцы совпадают со строками карточки маркера (BandMarks.markRows).
+// Столбцы — BandMarks.markRows (панорама) или hearRows (спектр), задаётся rowsFn.
 // Щелчок по строке вызывает onPick — тот же путь, что щелчок по маркеру.
 
 'use strict';
@@ -9,12 +9,13 @@
 
     /**
      * @param {HTMLElement} tbody
-     * @param {{onPick: ?function(Object), nameOf: ?function(number): ?string}} opts
+     * @param {{onPick: ?function(Object), nameOf: ?function(number): ?string, rowsFn: ?function(Object, ?string): Array}} opts
      */
     function AirTable(tbody, opts) {
         this._tbody = tbody || null;
         this._onPick = opts && opts.onPick;
         this._nameOf = opts && opts.nameOf;
+        this._rowsFn = opts && opts.rowsFn;
         this._signals = [];
         this._selectedId = null;
         this._onClick = null;
@@ -48,9 +49,9 @@
 
     AirTable.prototype.render = function() {
         if (!this._tbody) { return; }
-        const rows = window.BandMarks && typeof window.BandMarks.markRows === 'function'
-            ? window.BandMarks.markRows
-            : null;
+        const rows = this._rowsFn
+            || (window.BandMarks && typeof window.BandMarks.markRows === 'function'
+                ? window.BandMarks.markRows : null);
         if (!rows) { return; }
         const nameOf = this._nameOf;
         const sample = rows({ center_hz: 0, stats: {} }, null);

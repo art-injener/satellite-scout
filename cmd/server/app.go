@@ -255,6 +255,8 @@ func NewApp(configStore *config.Store) *app {
 		bandscan:     bandService,
 	}
 	sweepService.OnDwellEnd(a.onSweepDwellEnd)
+	sweepService.WithPlanFreqs(a.planSweepFreqs)
+	sweepService.WithDwell(a.sweepDwell)
 	return a
 }
 

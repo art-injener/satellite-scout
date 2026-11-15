@@ -400,6 +400,17 @@
         }
         this.windows = wins;
         this.spans = spans;
+        // Список окон сменился на границе цикла: убрать снимки и отметки чужих центров.
+        const keep = new Set(wins.map(function(w) { return w.centerHz; }));
+        this._snaps.forEach(function(_, hz) {
+            if (!keep.has(hz)) { this._snaps.delete(hz); }
+        }, this);
+        this._signals.forEach(function(_, hz) {
+            if (!keep.has(hz)) { this._signals.delete(hz); }
+        }, this);
+        if (this._live && !keep.has(this._live.centerHz)) {
+            this._live = null;
+        }
     };
 
     /** Окно с центром centerHz или null. */

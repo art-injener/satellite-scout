@@ -1835,12 +1835,14 @@
     grid-template-rows:
         var(--ml-timeline-h)
         auto
-        minmax(0, 4fr)
+        minmax(0, 3fr)
+        minmax(72px, 1.2fr)
         minmax(0, 2fr);
     grid-template-areas:
         "timeline timeline ctl"
         "tabbar   txlist   ctl"
         "tabbar   spectrum ctl"
+        "tabbar   air      ctl"
         "tabbar   result   ctl";
 }
 
@@ -1850,6 +1852,16 @@
 }
 
 .ml-tabpane--spectrum .ml-spectrum { grid-area: spectrum; }
+
+.ml-tabpane--spectrum .ml-air--spectrum {
+    grid-area: air;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+}
 
 /* ───────────── Колонка приёмника: справа на «Спектре» и «Антенне» ───────────── */
 

@@ -404,8 +404,10 @@
         this._txMarkList = [];
         /** Обнаруженные сигналы в строке над водопадом. */
         this._bandMarks = null;
-        /** Таблица «Эфир» под панорамой — те же поля, что карточка маркера. */
+        /** Таблица «Эфир» под панорамой — markRows. */
         this._airTable = null;
+        /** Таблица «Эфир» под спектром — hearRows (HEAR). */
+        this._specAirTable = null;
 
         this._layoutRoot = document.getElementById('layout-manual');
         this._azCanvas = document.getElementById('manual-azimuth-view');
@@ -3523,25 +3525,34 @@
         return window.TxMarkers ? window.TxMarkers.satNames(group)[noradId] || null : null;
     };
 
-    /** Таблица «Эфир»: участки band_signals, щелчок как по маркеру. */
+    /** Таблицы «Эфир»: панорама (markRows) и спектр (hearRows). */
     ManualLayout.prototype._initAirTable = function() {
-        const tbody = document.getElementById('manual-air-tbody');
-        if (!tbody || typeof window.AirTable !== 'function') { return; }
+        if (typeof window.AirTable !== 'function') { return; }
         const self = this;
-        this._airTable = new window.AirTable(tbody, {
-            onPick: function(sig) { self._pickBandSignal(sig); },
-            nameOf: function(noradId) { return self._satNameOf(noradId); },
-        });
+        const nameOf = function(noradId) { return self._satNameOf(noradId); };
+        const onPick = function(sig) { self._pickBandSignal(sig); };
+        const panBody = document.getElementById('manual-air-tbody');
+        if (panBody) {
+            this._airTable = new window.AirTable(panBody, { onPick: onPick, nameOf: nameOf });
+        }
+        const specBody = document.getElementById('manual-spec-air-tbody');
+        if (specBody) {
+            const hear = window.BandMarks && typeof window.BandMarks.hearRows === 'function'
+                ? window.BandMarks.hearRows : null;
+            this._specAirTable = new window.AirTable(specBody, {
+                onPick: onPick, nameOf: nameOf, rowsFn: hear,
+            });
+        }
     };
 
     /**
-     * Таблица «Эфир» повторяет список сервера: час памяти, на каждом проходе
+     * Таблицы «Эфир» повторяют список сервера: час памяти, на каждом проходе
      * обновляется та же строка. Отметки на графике панорама копит отдельно, по окнам.
      * @param {Array} signals
      */
     ManualLayout.prototype._setAirSignals = function(signals) {
-        if (!this._airTable) { return; }
-        this._airTable.setSignals(signals);
+        if (this._airTable) { this._airTable.setSignals(signals); }
+        if (this._specAirTable) { this._specAirTable.setSignals(signals); }
     };
 
     ManualLayout.prototype._initProductGallery = function() {
@@ -4087,6 +4098,10 @@
         if (this._airTable) {
             this._airTable.destroy();
             this._airTable = null;
+        }
+        if (this._specAirTable) {
+            this._specAirTable.destroy();
+            this._specAirTable = null;
         }
         if (this._accessPanel) {
             this._accessPanel.destroy();

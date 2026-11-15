@@ -529,6 +529,19 @@ test('age of a window comes from its frame time', () => {
 
 const f32 = (a) => new Float32Array(a);
 
+test('shrinking the window list drops snaps and marks of removed centers', () => {
+    const s = new PanoramaStitcher();
+    s.setWindows(WINDOWS);
+    s.putFrame(436_000_000, 2_000_000, 1000, f32([-50, -50]));
+    s.endDwell();
+    s.setSignals(1, [{ id: 'uhf', center_hz: 436_500_000 }]);
+    s.setWindows([WINDOWS[0]]);
+    assert.strictEqual(s.windows.length, 1);
+    assert.strictEqual(s.ageMs(436_000_000, 2000), null);
+    assert.deepStrictEqual(s.marks(), []);
+    assert.strictEqual(s.layers()[0].line, null);
+});
+
 test('live window: the line is the latest frame, the shadow is the maximum of the dwell', () => {
     const s = new PanoramaStitcher();
     s.setWindows(WINDOWS);

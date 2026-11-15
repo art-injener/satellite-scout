@@ -18,10 +18,10 @@ const (
 	// Ожидание занятой базы и журнал WAL: чтение не ждёт записи.
 	sqlitePragmas = "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 
-	schemaVersion = 1
+	schemaVersion = 2
 )
 
-// Время хранится в наносекундах Unix, нулевое время — 0. Наносекунды сохраняют эпоху TLE без округления.
+// Время реестра — наносекунды Unix, нулевое время — 0. Наносекунды сохраняют эпоху TLE без округления.
 const schemaV1 = `
 CREATE TABLE IF NOT EXISTS satellites (
 	norad      INTEGER NOT NULL,
@@ -67,6 +67,29 @@ CREATE TABLE IF NOT EXISTS source_loads (
 );
 `
 
+// schemaV2 — журнал стоянок обхода (энергия у TX без демода).
+const schemaV2 = `
+CREATE TABLE IF NOT EXISTS rx_visits (
+	id              INTEGER PRIMARY KEY AUTOINCREMENT,
+	radio_path      TEXT    NOT NULL,
+	center_hz       INTEGER NOT NULL,
+	span_hz         INTEGER NOT NULL,
+	window_start_ms INTEGER NOT NULL,
+	window_end_ms   INTEGER NOT NULL,
+	norad_id        INTEGER NOT NULL,
+	name            TEXT    NOT NULL DEFAULT '',
+	uuid            TEXT    NOT NULL DEFAULT '',
+	freq_hz         INTEGER NOT NULL,
+	energy          INTEGER NOT NULL DEFAULT 0,
+	snr_db          REAL    NOT NULL DEFAULT 0,
+	origin          TEXT    NOT NULL DEFAULT '',
+	emission        TEXT    NOT NULL DEFAULT '',
+	received        INTEGER NOT NULL DEFAULT 0,
+	source          TEXT    NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS rx_visits_norad_energy ON rx_visits (norad_id, energy);
+`
+
 // ErrSchemaNewer база создана более новой версией программы.
 var ErrSchemaNewer = errors.New("registry: database schema is newer than supported")
 
@@ -105,13 +128,28 @@ func (s *store) migrate(ctx context.Context) error {
 	if version > schemaVersion {
 		return fmt.Errorf("%w: %d > %d", ErrSchemaNewer, version, schemaVersion)
 	}
-	if version == schemaVersion {
-		return nil
+	if version < 1 {
+		if _, err := s.db.ExecContext(ctx, schemaV1); err != nil {
+			return fmt.Errorf("registry: create schema v1: %w", err)
+		}
+		if err := s.setUserVersion(ctx, 1); err != nil {
+			return err
+		}
+		version = 1
 	}
-	if _, err := s.db.ExecContext(ctx, schemaV1); err != nil {
-		return fmt.Errorf("registry: create schema: %w", err)
+	if version < 2 {
+		if _, err := s.db.ExecContext(ctx, schemaV2); err != nil {
+			return fmt.Errorf("registry: create schema v2: %w", err)
+		}
+		if err := s.setUserVersion(ctx, 2); err != nil {
+			return err
+		}
 	}
-	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, schemaVersion)); err != nil {
+	return nil
+}
+
+func (s *store) setUserVersion(ctx context.Context, version int) error {
+	if _, err := s.db.ExecContext(ctx, fmt.Sprintf(`PRAGMA user_version = %d`, version)); err != nil {
 		return fmt.Errorf("registry: set schema version: %w", err)
 	}
 	return nil
@@ -128,7 +166,10 @@ func (s *store) load(ctx context.Context, r *Registry) error {
 	if err := s.loadTx(ctx, r); err != nil {
 		return err
 	}
-	return s.loadLoads(ctx, r)
+	if err := s.loadLoads(ctx, r); err != nil {
+		return err
+	}
+	return s.loadHeard(ctx, r)
 }
 
 func (s *store) loadFacts(ctx context.Context, r *Registry) error {

@@ -7,7 +7,7 @@
 'use strict';
 
 const assert = require('assert');
-const { markCode, markKind, markTitle, markSummary, clusterAt, leaderAnchor, pickBandwidth, openCardSignals } = require('./band-marks.js');
+const { markCode, markKind, markTitle, markSummary, hearRows, clusterAt, leaderAnchor, pickBandwidth, openCardSignals } = require('./band-marks.js');
 
 let passed = 0;
 let failed = 0;
@@ -99,6 +99,29 @@ test('card lists the agreed air fields; emission and features stay off', () => {
         'В эфире\t41 с',
         'Время\t' + t0 + ' → ' + t1,
     ].join('\n'));
+});
+
+test('hearRows: nine HEAR columns, frames and data are dashes', () => {
+    const rows = hearRows({
+        center_hz: 436198200, bandwidth_hz: 18000, snr_db: 14.2,
+        origin: 'satellite', emission: 'pulsed',
+        structure: {
+            modulation: '2fsk', confidence: 0.8, demod: 'fsk9600_g3ruh',
+            service: 'sat_tx', service_label: 'ТМИ', params: { baud: 9600 },
+        },
+        stats: { on_s: 41 },
+    }, 'GEOSCAN');
+    assert.deepStrictEqual(rows.map((r) => r[0]), [
+        'Передатчик', 'Частота·полоса', 'Уровень', 'Сигнал', 'Вид·положение',
+        'Демод', 'В эфире', 'Кадры', 'Данные',
+    ]);
+    assert.strictEqual(rows[0][1], 'GEOSCAN');
+    assert.ok(rows[1][1].indexOf('436.1982 МГц') === 0 && rows[1][1].indexOf('18 кГц') > 0, rows[1][1]);
+    assert.strictEqual(rows[2][1], '14.2 дБ');
+    assert.ok(rows[3][1].indexOf('·') > 0, rows[3][1]);
+    assert.ok(rows[4][1].indexOf('ТМИ') >= 0 && rows[4][1].indexOf('Космос') >= 0, rows[4][1]);
+    assert.strictEqual(rows[7][1], '—');
+    assert.strictEqual(rows[8][1], '—');
 });
 
 test('RDS station fills transmitter; wfm suggests FM broadcast demod', () => {

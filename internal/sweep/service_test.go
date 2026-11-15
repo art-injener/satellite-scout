@@ -416,3 +416,90 @@ func TestService_StateBeforeStartListsWindows(t *testing.T) {
 		t.Errorf("state %+v, want stopped with windows %v", st, want)
 	}
 }
+
+func TestService_PlanFreqsUnionConfigWindows(t *testing.T) {
+	h := newHarness(t, Range{CenterHz: 145_900_000})
+	h.svc.WithPlanFreqs(func(string, time.Time, time.Time) []uint64 {
+		return []uint64{401_000_000}
+	})
+	st, err := h.svc.State(testPath)
+	if err != nil {
+		t.Fatalf("State: %v", err)
+	}
+	want := []Window{
+		{CenterHz: 145_900_000, SpanHz: testBand},
+		{CenterHz: 401_000_000, SpanHz: testBand},
+	}
+	if !slices.Equal(st.Windows, want) {
+		t.Errorf("windows %+v, want %+v", st.Windows, want)
+	}
+}
+
+func TestService_DwellPolicyExtendsThenLeaves(t *testing.T) {
+	h := newHarness(t, Range{CenterHz: 145_900_000})
+	var calls int
+	h.svc.WithDwell(func(_ string, _ Window, startMs, nowMs, _ int64) int64 {
+		calls++
+		if calls == 1 {
+			return startMs + 15_000 // проба
+		}
+		if calls == 2 {
+			return startMs + 30_000 // продление
+		}
+		return nowMs // уход
+	})
+	if err := h.svc.Start(testPath); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	st := h.nextState(t)
+	if st.WindowEndMs-st.WindowStartMs != 15_000 {
+		t.Fatalf("first hold %+v, want 15 s probe", st)
+	}
+	h.clock.fireDwell(t)
+	st = h.nextState(t) // продление, тот же index
+	if st.Index != 0 || st.WindowEndMs-st.WindowStartMs != 30_000 {
+		t.Fatalf("extend %+v, want index 0 and 30 s end", st)
+	}
+	h.clock.fireDwell(t)
+	st = h.nextState(t) // уход → то же единственное окно, cycle 2
+	if st.Index != 0 || st.Cycle != 2 {
+		t.Fatalf("after leave %+v, want wrap to cycle 2", st)
+	}
+}
+
+func TestService_RebuildWindowsOnCycleBoundary(t *testing.T) {
+	h := newHarness(t, Range{CenterHz: 145_900_000})
+	var mu sync.Mutex
+	plan := []uint64{401_000_000}
+	h.svc.WithPlanFreqs(func(string, time.Time, time.Time) []uint64 {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(plan)
+	})
+	if err := h.svc.Start(testPath); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	st := h.nextState(t)
+	if len(st.Windows) != 2 || st.Windows[1].CenterHz != 401_000_000 {
+		t.Fatalf("start windows %+v, want 145.9 and 401", st.Windows)
+	}
+
+	// Первый цикл: два окна; перед вторым циклом убираем 401 из плана.
+	h.clock.fireDwell(t)
+	h.nextState(t) // index 1
+	mu.Lock()
+	plan = nil
+	mu.Unlock()
+	h.clock.fireDwell(t)
+	st = h.nextState(t) // index 0, cycle 2, окна пересчитаны
+	if st.Index != 0 || st.Cycle != 2 {
+		t.Fatalf("after wrap %+v, want index 0 cycle 2", st)
+	}
+	want := []Window{{CenterHz: 145_900_000, SpanHz: testBand}}
+	if !slices.Equal(st.Windows, want) {
+		t.Errorf("rebuilt windows %+v, want only config %+v", st.Windows, want)
+	}
+	if got := h.waitTunes(t, 3); got[2] != 145_900_000 {
+		t.Errorf("tunes %v, want third tune back to 145.9", got)
+	}
+}

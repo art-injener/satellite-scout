@@ -17,6 +17,7 @@ var visitsHeader = []string{
 
 // AppendVisits дописывает визиты в CSV; пустой список — ничего не делает.
 // Если файла нет — пишет заголовок.
+// Устарело: рабочий журнал визитов пишется в scout.db (registry.AppendVisits).
 func AppendVisits(path string, visits []Visit) error {
 	if len(visits) == 0 {
 		return nil
@@ -65,7 +66,8 @@ func AppendVisits(path string, visits []Visit) error {
 	return nil
 }
 
-// ReadVisits читает журнал. Нет файла — nil без ошибки.
+// ReadVisits читает журнал CSV. Нет файла — nil без ошибки.
+// Устарело: см. registry.ListVisits.
 func ReadVisits(path string) ([]Visit, error) {
 	f, err := os.Open(path)
 	if err != nil {

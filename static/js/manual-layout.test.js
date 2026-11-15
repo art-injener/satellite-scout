@@ -617,6 +617,7 @@ _domNodes.get('manual-spectrum').getBoundingClientRect = function() {
 };
 _domNodes.set('manual-wf-marks', makeDomElement('manual-wf-marks', { hidden: false }));
 _domNodes.set('manual-air-tbody', makeDomElement('manual-air-tbody'));
+_domNodes.set('manual-spec-air-tbody', makeDomElement('manual-spec-air-tbody'));
 _domNodes.set('manual-spec-marks', makeDomElement('manual-spec-marks'));
 _domNodes.set('manual-spec-cursor', makeDomElement('manual-spec-cursor', { hidden: true }));
 _domNodes.set('manual-spec-cursor-line', makeDomElement('manual-spec-cursor-line'));

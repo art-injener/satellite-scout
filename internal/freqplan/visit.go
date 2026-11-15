@@ -10,11 +10,12 @@ type Window struct {
 
 // Sighting — обнаруженный участок в полосе (из bandscan, без зависимости пакета).
 type Sighting struct {
-	CenterHz int64
-	NoradID  int
-	Origin   string
-	Emission string
-	SNRDB    float32
+	CenterHz   int64
+	NoradID    int
+	Origin     string
+	Emission   string
+	SNRDB      float32
+	LastSeenMs int64 // для гибкой стоянки: сигнал пропал дольше GoneMs
 }
 
 // Visit — итог стоянки обхода по одному ожидаемому передатчику из плана.
@@ -29,6 +30,7 @@ type Visit struct {
 	UUID          string
 	FreqHz        int64
 	Energy        bool
+	SNRDB         float32 // из ближайшего обнаружения; без энергии — 0
 	Origin        string
 	Emission      string
 	Received      bool // MVP: совпадает с Energy; кадр демода — позже
@@ -60,6 +62,7 @@ func Judge(pathID string, w Window, startMs, endMs int64, plan []Entry, sights [
 		}
 		if s, ok := closestSighting(sights, e.FreqHz); ok {
 			v.Energy, v.Received = true, true
+			v.SNRDB = s.SNRDB
 			v.Origin, v.Emission = s.Origin, s.Emission
 		}
 		out = append(out, v)

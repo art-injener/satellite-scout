@@ -285,6 +285,40 @@
         ];
     }
 
+    /**
+     * Сжатые столбцы таблицы под «Спектром» (цепочка HEAR).
+     * Кадры и Данные — «—» до статистики кадров демода.
+     * @param {Object} sig
+     * @param {?string} satName
+     * @returns {Array<[string, string]>}
+     */
+    function hearRows(sig, satName) {
+        const st = sig.stats || {};
+        const freq = (sig.center_hz / 1e6).toFixed(4) + ' МГц';
+        const bw = sig.bandwidth_hz ? formatWidth(sig.bandwidth_hz) : '—';
+        const mod = modulationText(sig);
+        const prob = probabilityText(sig);
+        const signal = (mod !== '—' || prob !== '—')
+            ? (mod === '—' ? prob : (prob === '—' ? mod : mod + ' · ' + prob))
+            : '—';
+        const svc = serviceText(sig);
+        const pos = positionText(sig);
+        const kind = (svc !== '—' || pos !== '—')
+            ? (svc === '—' ? pos : (pos === '—' ? svc : svc + ' · ' + pos))
+            : '—';
+        return [
+            ['Передатчик', transmitterText(sig, satName)],
+            ['Частота·полоса', freq + ' · ' + bw],
+            ['Уровень', snrText(sig)],
+            ['Сигнал', signal],
+            ['Вид·положение', kind],
+            ['Демод', demodText(sig)],
+            ['В эфире', st.on_s > 0 ? formatDuration(st.on_s) : '—'],
+            ['Кадры', '—'],
+            ['Данные', '—'],
+        ];
+    }
+
     /** Те же строки текстом: для проверки. */
     function markTitle(sig, satName) {
         return markRows(sig, satName).map(function(row) { return row[0] + '\t' + row[1]; }).join('\n');
@@ -728,6 +762,7 @@
     BandMarks.markKind = markKind;
     BandMarks.markTitle = markTitle;
     BandMarks.markRows = markRows;
+    BandMarks.hearRows = hearRows;
     BandMarks.markSummary = markSummary;
     BandMarks.clusterAt = clusterAt;
     BandMarks.openCardSignals = openCardSignals;
@@ -745,6 +780,7 @@
             markKind: markKind,
             markTitle: markTitle,
             markRows: markRows,
+            hearRows: hearRows,
             markSummary: markSummary,
             clusterAt: clusterAt,
             openCardSignals: openCardSignals,
