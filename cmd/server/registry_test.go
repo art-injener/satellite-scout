@@ -36,26 +36,69 @@ func TestPassExcluder_ManualOrDecayed(t *testing.T) {
 	}
 }
 
-func TestPassExcluder_DropsUnreceivable(t *testing.T) {
+func TestPassExcluder_KeepsCatalogWithoutReceivable(t *testing.T) {
 	reg := registry.New()
 	ctx := context.Background()
 	at := time.Now()
 	_ = reg.ReplaceTransmitters(ctx, registry.SourceSonik, []registry.Transmitter{
 		{NoradID: 2, DownlinkHz: 437_000_000, Status: "active"},
 	}, at)
-	ex := passExcluder{manual: manualSet{}, reg: reg, bands: registry.Bands{{MinHz: 24_100_000, MaxHz: 1_766_000_000}}}
-	if ex.Contains(2) {
-		t.Fatal("without liveness sources the filter must stay off")
-	}
-
 	_ = reg.ReplaceTransmitters(ctx, registry.SourceAMSAT, []registry.Transmitter{
 		{NoradID: 1, DownlinkHz: 145_900_000},
 	}, at)
-	if ex.Contains(1) {
-		t.Error("alive satellite in band must stay")
+	ex := passExcluder{manual: manualSet{}, reg: reg}
+	if ex.Contains(1) || ex.Contains(2) {
+		t.Fatal("pass excluder must not drop satellites by receivable/liveness labels")
 	}
-	if !ex.Contains(2) {
-		t.Error("satellite known only to sonik must be dropped")
+}
+
+func TestGroupLabelFilter_Default(t *testing.T) {
+	reg := registry.New()
+	ctx := context.Background()
+	at := time.Now()
+	_ = reg.ReplaceTransmitters(ctx, registry.SourceAMSAT, []registry.Transmitter{
+		{NoradID: 1, DownlinkHz: 145_900_000},
+	}, at)
+	_ = reg.ReplaceTransmitters(ctx, registry.SourceSonik, []registry.Transmitter{
+		{NoradID: 2, DownlinkHz: 437_000_000, Status: "active"},
+	}, at)
+	f := newGroupLabelFilter(reg, registry.Bands{{MinHz: 24_100_000, MaxHz: 1_766_000_000}}, "")
+	if !f.Include(1) {
+		t.Fatal("alive in-band must be in the default group")
+	}
+	if f.Include(2) {
+		t.Fatal("sonik-only must stay out of the default group once liveness is known")
+	}
+	f.SetLabel(registry.LabelStations)
+	if f.Include(1) {
+		t.Fatal("AMSAT voice bird is not a station")
+	}
+}
+
+func TestBandSource_PrefersAntennaBand(t *testing.T) {
+	reg := registry.New()
+	_ = reg.ReplaceTransmitters(context.Background(), registry.SourceHeavensAbove, []registry.Transmitter{
+		{NoradID: 1, DownlinkHz: 145_800_000},
+		{NoradID: 1, DownlinkHz: 437_800_000},
+	}, time.Now())
+	ant := registry.Bands{{MinHz: 430_000_000, MaxHz: 450_000_000}}
+	got := bandSource{
+		src: reg, bands: registry.Bands{{MinHz: 24_100_000, MaxHz: 1_766_000_000}}, antenna: ant,
+	}.Transmitters(1)
+	if len(got) != 2 || got[0].FreqHz != 437_800_000 {
+		t.Fatalf("got %+v, want UHF first", got)
+	}
+}
+
+func TestStationAntennaBands(t *testing.T) {
+	min, max := 430.0, 450.0
+	paths := []config.RadioPath{
+		{ID: 1, Antenna: config.AntennaConfig{FreqMinMHz: &min, FreqMaxMHz: &max}},
+		{ID: 2, Antenna: config.AntennaConfig{}},
+	}
+	got := stationAntennaBands(paths)
+	if len(got) != 1 || got[0].MinHz != 430_000_000 || got[0].MaxHz != 450_000_000 {
+		t.Fatalf("bands = %+v", got)
 	}
 }
 

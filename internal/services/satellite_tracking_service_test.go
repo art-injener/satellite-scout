@@ -31,7 +31,6 @@ func setupTLEStore(t *testing.T) *tracker.TLEStore {
 	t.Helper()
 
 	cfg := tracker.DefaultTLEStoreConfig()
-	cfg.Groups = []string{} // Не загружаем с Celestrak.
 	store := tracker.NewTLEStore(cfg)
 
 	tle, err := tracker.ParseTLE(issLines)
@@ -792,6 +791,38 @@ func TestUpdateGroup_TimelineListsPassesForTheNextHour(t *testing.T) {
 	later := ev.Timeline[1]
 	if later.NoradID != 99901 || later.SatName != "LATER" || later.TCAEl != 12.5 || later.TCA == 0 {
 		t.Errorf("timeline pass = %+v, want LATER with TCA and max elevation", later)
+	}
+}
+
+type allowlistFilter map[int]bool
+
+func (a allowlistFilter) Include(norad int) bool { return a[norad] }
+
+func TestUpdateGroup_GroupFilterKeepsOnlyMatchingSats(t *testing.T) {
+	hub := handlers.NewSSEHub()
+	go hub.Run(t.Context())
+
+	svc := NewSatelliteTrackingService(hub, setupTLEStore(t), tracker.NewObserver(47.315813, 39.788243, 0.070))
+	now := time.Now().UTC()
+	provider := &stubPassProvider{}
+	provider.set(
+		stubPass(issNoradID, "ISS", now, -2*time.Minute, 8*time.Minute, 40),
+		stubPass(99901, "OTHER", now, -1*time.Minute, 6*time.Minute, 20),
+		stubPass(99902, "LATER", now, 30*time.Minute, 40*time.Minute, 12.5),
+	)
+	svc.SetPassProvider(provider)
+	svc.WithGroupFilter(allowlistFilter{issNoradID: true, 99902: true})
+
+	svc.updateGroup()
+
+	ev := waitTimeline(t, hub, 2)
+	if len(ev.Satellites) != 1 || ev.Satellites[0].NoradID != issNoradID {
+		t.Fatalf("group satellites = %+v, want only ISS", ev.Satellites)
+	}
+	for _, p := range ev.Timeline {
+		if p.NoradID == 99901 {
+			t.Fatal("filtered NORAD must not appear in the timeline")
+		}
 	}
 }
 

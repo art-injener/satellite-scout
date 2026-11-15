@@ -58,17 +58,26 @@
                         <input type="checkbox" class="settings-field__checkbox" data-bind="ui.show_all_tracks_on_start">
                         <span class="settings-field__label">Показывать все трассы группы при старте</span>
                     </label>
+                    <h3 class="settings-pane__title">Группа «над нами»</h3>
+                    <p class="settings-pane__hint">Метка отбора, кого слушать в скользящем окне. Карта и пролёты показывают весь каталог. Применяется сразу, без перезапуска.</p>
+                    <label class="settings-field">
+                        <span class="settings-field__label">Метка группы</span>
+                        <select class="settings-field__input" data-bind="ui.group_label">
+                            <option value="in_band_alive">В диапазоне станции и жив</option>
+                            <option value="in_band">В диапазоне станции</option>
+                            <option value="alive">Жив</option>
+                            <option value="heard">Слышали</option>
+                            <option value="stations">Станции</option>
+                            <option value="weather">Погодные</option>
+                        </select>
+                    </label>
                 </article>
                 <article class="settings-pane" data-pane="tle">
                     <h3 class="settings-pane__title">Источники TLE</h3>
-                    <p class="settings-pane__hint">Каталог кеша и список групп требуют перезапуска.</p>
+                    <p class="settings-pane__hint">Состав каталога — из реестра КА. Celestrak подтягивает орбиты по NORAD, если Space-Track недоступен. Смена каталога кеша требует перезапуска.</p>
                     <label class="settings-field">
                         <span class="settings-field__label">Каталог кеша</span>
                         <input type="text" class="settings-field__input" data-bind="tle.cache_dir">
-                    </label>
-                    <label class="settings-field">
-                        <span class="settings-field__label">Группы (через запятую)</span>
-                        <input type="text" class="settings-field__input" data-bind="tle.groups" data-bind-type="csv-list">
                     </label>
                     <label class="settings-field">
                         <span class="settings-field__label">Интервал обновления</span>

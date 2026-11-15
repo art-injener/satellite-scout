@@ -1,9 +1,6 @@
 package tracker
 
 import (
-	"errors"
-	"fmt"
-	"strings"
 	"time"
 )
 
@@ -19,18 +16,12 @@ const (
 	DefaultMaxTLEAgeDays = 7.0
 )
 
-// ErrUnknownTLEGroups указаны неизвестные группы TLE.
-var ErrUnknownTLEGroups = errors.New("unknown TLE groups")
-
-// DefaultTLEGroups группы спутников по умолчанию для загрузки.
+// DefaultTLEGroups — имена старых файлов кеша групп Celestrak на диске.
+// В конфиг больше не входят: состав каталога из реестра, Celestrak — запас по NORAD.
 var DefaultTLEGroups = []string{"stations", "amateur", "cubesat"}
 
 // TLEStoreConfig содержит настройки TLEStore.
 type TLEStoreConfig struct {
-	// Groups список групп спутников для загрузки с Celestrak.
-	// Примеры: "stations", "amateur", "cubesat", "weather", "starlink".
-	Groups []string `yaml:"groups"`
-
 	// UpdateInterval интервал автоматического обновления TLE.
 	// По умолчанию: 6 часов.
 	UpdateInterval time.Duration `yaml:"update_interval"`
@@ -52,7 +43,6 @@ type TLEStoreConfig struct {
 // DefaultTLEStoreConfig возвращает конфигурацию TLEStore со значениями по умолчанию.
 func DefaultTLEStoreConfig() *TLEStoreConfig {
 	return &TLEStoreConfig{
-		Groups:         DefaultTLEGroups,
 		UpdateInterval: DefaultTLEUpdateInterval,
 		CacheDir:       DefaultTLECacheDir,
 		MaxTLEAgeDays:  DefaultMaxTLEAgeDays,
@@ -61,7 +51,6 @@ func DefaultTLEStoreConfig() *TLEStoreConfig {
 }
 
 // Validate проверяет и корректирует конфигурацию TLEStore.
-// Возвращает ошибку, если указаны невалидные группы спутников.
 func (c *TLEStoreConfig) Validate() error {
 	if c.UpdateInterval < time.Minute {
 		c.UpdateInterval = DefaultTLEUpdateInterval
@@ -72,24 +61,5 @@ func (c *TLEStoreConfig) Validate() error {
 	if c.MaxTLEAgeDays <= 0 {
 		c.MaxTLEAgeDays = DefaultMaxTLEAgeDays
 	}
-	if len(c.Groups) == 0 {
-		c.Groups = DefaultTLEGroups
-	}
-
-	// Проверяем, что все указанные группы допустимы
-	var invalid []string
-	for _, g := range c.Groups {
-		if !IsValidGroup(g) {
-			invalid = append(invalid, g)
-		}
-	}
-	if len(invalid) > 0 {
-		return fmt.Errorf("%w: %s (available: %s)",
-			ErrUnknownTLEGroups,
-			strings.Join(invalid, ", "),
-			strings.Join(AvailableGroupNames(), ", "),
-		)
-	}
-
 	return nil
 }

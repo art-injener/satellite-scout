@@ -56,14 +56,16 @@ type app struct {
 	templates fs.FS
 	static    fs.FS
 
-	sseHub   *handlers.SSEHub                   // рассылка real-time данных
-	access   *access.Manager                    // роли: мастер и зрители
-	tleStore *tracker.TLEStore                  // хранилище TLE
-	registry *registry.Registry                 // реестр КА: карточки, орбиты, передатчики
-	bands    registry.Bands                     // диапазоны приёмников радиотрактов
-	tracking *services.SatelliteTrackingService // отслеживание спутников
-	pass     *services.PassService              // расчёт пролётов
-	exclude  *exclude.Store                     // исключённые NORAD ID
+	sseHub       *handlers.SSEHub                   // рассылка real-time данных
+	access       *access.Manager                    // роли: мастер и зрители
+	tleStore     *tracker.TLEStore                  // хранилище TLE
+	registry     *registry.Registry                 // реестр КА: карточки, орбиты, передатчики
+	bands        registry.Bands                     // диапазоны приёмников радиотрактов
+	antennaBands registry.Bands                     // рабочие полосы антенн (сортировка TX)
+	groupFilter  *groupLabelFilter                  // метка группы «над нами»
+	tracking     *services.SatelliteTrackingService // отслеживание спутников
+	pass         *services.PassService              // расчёт пролётов
+	exclude      *exclude.Store                     // исключённые NORAD ID
 
 	sdrService  *sdr.Service     // обнаружение и проверка SDR-приёмников
 	receiverHub *sdr.ReceiverHub // приёмники по радиотрактам из конфига
@@ -163,15 +165,18 @@ func NewApp(configStore *config.Store) *app {
 		slog.Int("count", len(excludeStore.List())),
 	)
 
-	// Расчёт и кеширование пролётов. Вместе с исключёнными отсекаются сошедшие с орбиты КА
-	// и те, которые станция не услышит. Диапазоны трактов берутся на старте.
+	// Расчёт и кеширование пролётов: исключённые оператором и сошедшие с орбиты.
+	// Отбор «кого слушать» — метка группы, не фильтр пролётов (карта видит весь каталог).
 	bands := stationBands(cfg.Station.RadioPaths)
+	antennaBands := stationAntennaBands(cfg.Station.RadioPaths)
 	passService := services.NewPassService(tleStore, observer).
-		WithExcluder(passExcluder{manual: excludeStore, reg: reg, bands: bands})
+		WithExcluder(passExcluder{manual: excludeStore, reg: reg})
 
-	// Пролёты для авто-трекинга и список исключений.
+	// Пролёты для авто-трекинга и список исключений. Группа «над нами» — по метке реестра.
+	groupFilter := newGroupLabelFilter(reg, bands, cfg.UI.GroupLabel)
 	trackingService.SetPassProvider(passService)
 	trackingService.WithExcluder(excludeStore)
+	trackingService.WithGroupFilter(groupFilter)
 
 	// В конфиге у нас описаны настройки станции. Я сразу закладываю вариант, что на станции может быть несколько
 	// антенн с приемниками (радиотракт), а значит при старте нам надо пройтись по конфигу и зарегистрировать приемники.
@@ -228,24 +233,26 @@ func NewApp(configStore *config.Store) *app {
 	}
 
 	a := &app{
-		cfg:         cfg,
-		configStore: configStore,
-		templates:   templates,
-		static:      static,
-		sseHub:      sseHub,
-		access:      accessManager,
-		tleStore:    tleStore,
-		registry:    reg,
-		bands:       bands,
-		tracking:    trackingService,
-		pass:        passService,
-		exclude:     excludeStore,
-		sdrService:  sdr.NewService().WithProbe("rtlsdr", rtlsdr.Probe),
-		receiverHub: receiverHub,
-		products:    productStore,
-		audio:       audioHub,
-		sweep:       sweepService,
-		bandscan:    bandService,
+		cfg:          cfg,
+		configStore:  configStore,
+		templates:    templates,
+		static:       static,
+		sseHub:       sseHub,
+		access:       accessManager,
+		tleStore:     tleStore,
+		registry:     reg,
+		bands:        bands,
+		antennaBands: antennaBands,
+		groupFilter:  groupFilter,
+		tracking:     trackingService,
+		pass:         passService,
+		exclude:      excludeStore,
+		sdrService:   sdr.NewService().WithProbe("rtlsdr", rtlsdr.Probe),
+		receiverHub:  receiverHub,
+		products:     productStore,
+		audio:        audioHub,
+		sweep:        sweepService,
+		bandscan:     bandService,
 	}
 	sweepService.OnDwellEnd(a.onSweepDwellEnd)
 	return a
@@ -470,6 +477,11 @@ func (a *app) startHotReload() {
 				slog.Info("theme hot-reloaded", slog.String("theme", n.UI.Theme))
 			}
 		}
+		if old.UI.GroupLabel != n.UI.GroupLabel && a.groupFilter != nil {
+			a.groupFilter.SetLabel(n.UI.GroupLabel)
+			a.tracking.ForceGroupUpdate()
+			slog.Info("group label hot-reloaded", slog.String("label", registry.NormalizeGroupLabel(n.UI.GroupLabel)))
+		}
 	})
 }
 
@@ -517,11 +529,13 @@ func newServer(cfg *config.Config, handler http.Handler) *http.Server {
 }
 
 // tleSourceOptions включает Space-Track и каталог sonik, если учётка задана.
-// Без учётки элементы идут только из Celestrak по группам, как раньше.
+// Без учётки орбиты берутся с Celestrak по NORAD состава реестра.
 func tleSourceOptions(creds config.SpaceTrackCredentials) []tracker.TLEStoreOption {
 	if !creds.Enabled() {
-		slog.Info("space-track credentials not set, source skipped")
-		return nil
+		slog.Info("space-track credentials not set: celestrak by NORAD as orbit source")
+		return []tracker.TLEStoreOption{
+			tracker.WithSonikClient(tracker.NewSonikClient()),
+		}
 	}
 	slog.Info("space-track enabled: catalog from composition and fresh sonik launches")
 	return []tracker.TLEStoreOption{

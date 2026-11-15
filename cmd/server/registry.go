@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"slices"
+	"sync/atomic"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/config"
@@ -45,32 +46,45 @@ func registrySink(reg *registry.Registry) tracker.CatalogSink {
 	}
 }
 
-// passExcluder убирает из пролётов, группы и плана КА, исключённые оператором, сошедшие с орбиты
-// и те, которые станция не услышит: мёртвые, на высокой орбите или без передатчика в диапазоне
-// приёмников. Пока ни один источник не сказал, жив ли КА, последний отбор не включается.
+// passExcluder убирает из пролётов КА, исключённые оператором, и сошедшие с орбиты.
+// Отбор «кого слушать» — метка группы «над нами», не фильтр пролётов.
 type passExcluder struct {
 	manual services.Excluder
 	reg    *registry.Registry
-	bands  registry.Bands
 }
 
 func (e passExcluder) Contains(norad int) bool {
-	if e.manual.Contains(norad) || e.reg.Decayed(norad) {
-		return true
-	}
-	return e.reg.KnowsLiveness() && !e.reg.Receivable(norad, e.bands)
+	return e.manual.Contains(norad) || e.reg.Decayed(norad)
 }
 
-// bandSource отдаёт плану частот только передатчики, которые могут настроить приёмники станции.
+// bandSource отдаёт плану частот передатчики в диапазоне приёмников.
+// Полоса антенны не отсекает — только поднимает совпавшие частоты выше остальных.
 type bandSource struct {
-	src   freqplan.Source
-	bands registry.Bands
+	src     freqplan.Source
+	bands   registry.Bands
+	antenna registry.Bands
 }
 
 func (b bandSource) Transmitters(norad int) []freqplan.Tx {
-	return slices.DeleteFunc(b.src.Transmitters(norad), func(tx freqplan.Tx) bool {
+	txs := slices.Clone(b.src.Transmitters(norad))
+	txs = slices.DeleteFunc(txs, func(tx freqplan.Tx) bool {
 		return !b.bands.Allow(tx.FreqHz)
 	})
+	if len(b.antenna) == 0 || len(txs) < 2 {
+		return txs
+	}
+	slices.SortStableFunc(txs, func(a, c freqplan.Tx) int {
+		ain, cin := b.antenna.Allow(a.FreqHz), b.antenna.Allow(c.FreqHz)
+		switch {
+		case ain == cin:
+			return 0
+		case ain:
+			return -1
+		default:
+			return 1
+		}
+	})
+	return txs
 }
 
 // stationBands собирает диапазоны перестройки приёмников радиотрактов по возможностям драйвера.
@@ -93,6 +107,44 @@ func stationBands(paths []config.RadioPath) registry.Bands {
 		})
 	}
 	return out
+}
+
+// stationAntennaBands собирает рабочие полосы антенн трактов (МГц конфига → Гц).
+// Пустая полоса у тракта не участвует: сортировка по антенне для него не задана.
+func stationAntennaBands(paths []config.RadioPath) registry.Bands {
+	out := make(registry.Bands, 0, len(paths))
+	for _, rp := range paths {
+		if rp.Antenna.FreqMinMHz == nil || rp.Antenna.FreqMaxMHz == nil {
+			continue
+		}
+		out = append(out, registry.Band{
+			MinHz: int64(*rp.Antenna.FreqMinMHz * 1e6),
+			MaxHz: int64(*rp.Antenna.FreqMaxMHz * 1e6),
+		})
+	}
+	return out
+}
+
+// groupLabelFilter отбирает КА группы «над нами» по метке реестра.
+type groupLabelFilter struct {
+	reg   *registry.Registry
+	bands registry.Bands
+	label atomic.Value // string
+}
+
+func newGroupLabelFilter(reg *registry.Registry, bands registry.Bands, label string) *groupLabelFilter {
+	f := &groupLabelFilter{reg: reg, bands: bands}
+	f.SetLabel(label)
+	return f
+}
+
+func (f *groupLabelFilter) SetLabel(label string) {
+	f.label.Store(registry.NormalizeGroupLabel(label))
+}
+
+func (f *groupLabelFilter) Include(norad int) bool {
+	label, _ := f.label.Load().(string)
+	return f.reg.MatchGroupLabel(norad, label, f.bands)
 }
 
 // syncRegistryOrbits переносит в реестр элементы хранилища TLE (кеш на диске, Celestrak).

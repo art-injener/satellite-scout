@@ -47,10 +47,10 @@ func DefaultConfig() *Config {
 		UI: UIConfig{
 			Theme:                defaultTheme,
 			ShowAllTracksOnStart: false,
+			GroupLabel:           "in_band_alive",
 		},
 		TLE: TLEConfig{
 			CacheDir:       tleDefaults.CacheDir,
-			Groups:         append([]string(nil), tleDefaults.Groups...),
 			UpdateInterval: Duration(tleDefaults.UpdateInterval),
 			MaxTLEAgeDays:  tleDefaults.MaxTLEAgeDays,
 		},
@@ -84,7 +84,6 @@ func DefaultConfig() *Config {
 // пакету tracker. Не зависит от файла на диске — преобразование структур.
 func (c *Config) TLEStoreConfig() *tracker.TLEStoreConfig {
 	return &tracker.TLEStoreConfig{
-		Groups:         append([]string(nil), c.TLE.Groups...),
 		UpdateInterval: c.TLE.UpdateInterval.Duration(),
 		CacheDir:       c.TLE.CacheDir,
 		MaxTLEAgeDays:  c.TLE.MaxTLEAgeDays,

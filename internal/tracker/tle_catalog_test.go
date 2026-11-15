@@ -46,7 +46,6 @@ func newCatalogFixture(t *testing.T, sonik *httptest.Server, composition []int, 
 
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = t.TempDir()
-	cfg.Groups = []string{"amateur"}
 	cfg.UpdateInterval = time.Hour
 	opts := []TLEStoreOption{
 		WithCelestrakClient(NewCelestrakClient(WithBaseURL(celestrak.URL), WithRateLimit(0), WithMaxRetries(0))),
@@ -62,7 +61,7 @@ func newCatalogFixture(t *testing.T, sonik *httptest.Server, composition []int, 
 	if err := f.store.saveGroupToCache("amateur", []*TLE{makeTestTLE(t, 25544, "ISS (ZARYA)", oldEpoch)}); err != nil {
 		t.Fatalf("saveGroupToCache: %v", err)
 	}
-	f.store.loadCachedGroups()
+	f.store.loadLegacyGroupCaches()
 	return f
 }
 
@@ -141,7 +140,6 @@ func TestTLEStore_RefreshCatalog_ProgressReportsGPThenClears(t *testing.T) {
 	_, stSrv := newFakeSpaceTrack(t, makeTestTLE(t, 25544, "ISS (ZARYA)", freshEpoch))
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = t.TempDir()
-	cfg.Groups = []string{"amateur"}
 	cfg.UpdateInterval = time.Hour
 	store := NewTLEStore(cfg,
 		WithSpaceTrackClient(newTestSpaceTrackClient(stSrv.URL, WithSpaceTrackBatchSize(1))),
@@ -262,15 +260,12 @@ func TestTLEStore_Refresh_FallsBackToCelestrakOnSpaceTrackError(t *testing.T) {
 	f := newCatalogFixture(t, sonik, []int{25544}, makeTestTLE(t, 25544, "ISS (ZARYA)", freshEpoch))
 	f.st.failStatus = http.StatusServiceUnavailable
 
-	f.store.refresh(context.Background(), f.cfg.Groups)
+	f.store.refresh(context.Background())
 
 	if n := f.celestrakHits.Load(); n == 0 {
-		t.Fatal("expected Celestrak fallback after Space-Track error")
+		t.Fatal("expected Celestrak NORAD fallback after Space-Track error")
 	}
 	st := f.store.Status(time.Now())
-	if st.Source != TLESourceCache {
-		t.Fatalf("status source = %q, want %q", st.Source, TLESourceCache)
-	}
 	if !strings.Contains(st.LastError, "space-track") {
 		t.Fatalf("status last_error = %q, want Space-Track error", st.LastError)
 	}
@@ -378,7 +373,7 @@ func sinkStore(f *catalogFixture, passes *[]CatalogPass) *TLEStore {
 		*passes = append(*passes, p)
 	}))
 	store := NewTLEStore(f.cfg, opts...)
-	store.loadCachedGroups()
+	store.loadLegacyGroupCaches()
 	return store
 }
 

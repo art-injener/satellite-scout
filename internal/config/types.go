@@ -94,6 +94,10 @@ type UIConfig struct {
 	// переключить через глазик в течение сессии — это runtime-only состояние,
 	// в config обратно не пишется.
 	ShowAllTracksOnStart bool `json:"show_all_tracks_on_start"`
+
+	// GroupLabel — метка отбора группы «над нами» (ADR-011 §2.4).
+	// Пусто = in_band_alive (в диапазоне станции и жив). Без перезапуска.
+	GroupLabel string `json:"group_label,omitempty"`
 }
 
 // TLEConfig — настройки загрузки и кеширования TLE.
@@ -104,9 +108,6 @@ type UIConfig struct {
 type TLEConfig struct {
 	// CacheDir — каталог для файлового кеша TLE.
 	CacheDir string `json:"cache_dir"`
-
-	// Groups — группы спутников для загрузки с Celestrak (stations, amateur, ...).
-	Groups []string `json:"groups"`
 
 	// UpdateInterval — интервал автообновления TLE ("6h", "30m").
 	UpdateInterval Duration `json:"update_interval"`

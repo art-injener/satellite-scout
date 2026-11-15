@@ -234,9 +234,6 @@ func cloneConfig(c *Config) *Config {
 	}
 	dup := *c
 
-	if c.TLE.Groups != nil {
-		dup.TLE.Groups = append([]string(nil), c.TLE.Groups...)
-	}
 	if c.Station.RadioPaths != nil {
 		dup.Station.RadioPaths = make([]RadioPath, len(c.Station.RadioPaths))
 		for i, rp := range c.Station.RadioPaths {

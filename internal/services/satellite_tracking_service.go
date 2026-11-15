@@ -252,6 +252,9 @@ type SatelliteTrackingService struct {
 	// Набор исключённых NORAD ID. Опционально, nil = исключений нет.
 	excluder Excluder
 
+	// Отбор КА в группу «над нами» по метке реестра. nil = все пролёты из PassService.
+	groupFilter GroupMemberFilter
+
 	// Per-client состояние наблюдения
 	clientState *ClientStateStore
 	// clientID последнего SetManualSelection — для направленного SSE-уведомления.
@@ -381,6 +384,19 @@ func (s *SatelliteTrackingService) SetTransmitterProvider(provider TransmitterPr
 // WithExcluder подключает набор исключённых NORAD ID (жёсткий запрет на ручное наблюдение).
 func (s *SatelliteTrackingService) WithExcluder(e Excluder) *SatelliteTrackingService {
 	s.excluder = e
+	return s
+}
+
+// GroupMemberFilter отбирает КА в группу «над нами» (и ленту пролётов группы).
+type GroupMemberFilter interface {
+	Include(norad int) bool
+}
+
+// WithGroupFilter подключает отбор группы по метке реестра.
+func (s *SatelliteTrackingService) WithGroupFilter(f GroupMemberFilter) *SatelliteTrackingService {
+	s.mu.Lock()
+	s.groupFilter = f
+	s.mu.Unlock()
 	return s
 }
 
@@ -604,7 +620,7 @@ func (s *SatelliteTrackingService) updateGroup() {
 	groupChanged := GroupEntriesChanged(snap.oldGroupEntries, newGroupEntries)
 	primaryChanged := newPrimaryID != snap.currentID
 
-	upcoming := FindConcurrentPasses(passes, now, DefaultGroupPassHorizon)
+	upcoming := filterPassInfos(FindConcurrentPasses(passes, now, DefaultGroupPassHorizon), snap.groupFilter)
 	upcomingEntries := GroupEntries(upcoming)
 	s.mu.Lock()
 	upcomingChanged := GroupEntriesChanged(s.currentUpcomingEntries, upcomingEntries)
@@ -660,6 +676,7 @@ type groupSnapshot struct {
 	manualSel        *int
 	forceBroadcast   bool
 	directedClientID string
+	groupFilter      GroupMemberFilter
 }
 
 func (s *SatelliteTrackingService) snapshotGroupState() groupSnapshot {
@@ -673,6 +690,7 @@ func (s *SatelliteTrackingService) snapshotGroupState() groupSnapshot {
 		manualSel:        s.manualSelection,
 		forceBroadcast:   s.pendingManualBroadcast,
 		directedClientID: s.pendingDirectedClientID,
+		groupFilter:      s.groupFilter,
 	}
 	s.pendingManualBroadcast = false
 	s.pendingDirectedClientID = ""
@@ -691,11 +709,11 @@ func (s *SatelliteTrackingService) resolveGroupSatellites(
 	}
 
 	now := time.Now().UTC()
-	rawSatellites := FindConcurrentPasses(passes, now, snap.windowFwd)
+	rawSatellites := filterPassInfos(FindConcurrentPasses(passes, now, snap.windowFwd), snap.groupFilter)
 	satellites := rawSatellites
 
 	if len(satellites) == 0 {
-		nearest := findNearestFuturePass(passes, now)
+		nearest := findNearestFuturePass(filterTrackerPasses(passes, snap.groupFilter), now)
 		if nearest == nil {
 			slog.Debug("group-update: no passes available at all")
 			return nil, nil, nil, time.Time{}, false
@@ -957,6 +975,34 @@ func timelineOf(upcoming []PassInfo) []timelinePass {
 			LOS:      u.Pass.LOS,
 			TCA:      u.Pass.TCA,
 			TCAEl:    roundTo(u.Pass.TCAEl, 1),
+		}
+	}
+	return out
+}
+
+// filterPassInfos оставляет пролёты, прошедшие отбор метки группы.
+func filterPassInfos(in []PassInfo, f GroupMemberFilter) []PassInfo {
+	if f == nil || len(in) == 0 {
+		return in
+	}
+	out := make([]PassInfo, 0, len(in))
+	for _, p := range in {
+		if f.Include(p.NoradID) {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// filterTrackerPasses оставляет сырые пролёты по той же метке.
+func filterTrackerPasses(in []*tracker.Pass, f GroupMemberFilter) []*tracker.Pass {
+	if f == nil || len(in) == 0 {
+		return in
+	}
+	out := make([]*tracker.Pass, 0, len(in))
+	for _, p := range in {
+		if p != nil && f.Include(p.NoradID) {
+			out = append(out, p)
 		}
 	}
 	return out

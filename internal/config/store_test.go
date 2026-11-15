@@ -96,15 +96,15 @@ func TestStore_GetReturnsDeepCopy(t *testing.T) {
 
 	first := store.Get()
 	first.Station.Observer.Lat = 999.0
-	first.TLE.Groups[0] = "tampered"
+	first.TLE.CacheDir = "tampered"
 	first.Station.RadioPaths[0].Rotator = &RotatorConfig{Driver: "tampered"}
 
 	second := store.Get()
 	if second.Station.Observer.Lat == 999.0 {
 		t.Error("Get() returned shared Config — Observer mutation leaked")
 	}
-	if second.TLE.Groups[0] == "tampered" {
-		t.Error("Get() returned shared TLE.Groups slice")
+	if second.TLE.CacheDir == "tampered" {
+		t.Error("Get() returned shared TLE.CacheDir")
 	}
 	if second.Station.RadioPaths[0].Rotator != nil {
 		t.Error("Get() returned shared RadioPath — Rotator mutation leaked")

@@ -99,7 +99,9 @@ func (a *app) refreshFreqPlan(ctx context.Context) {
 	// Новые сведения о живости меняют отбор КА в пролётах.
 	a.pass.InvalidateCache()
 	// Приоритет на близкой частоте задаёт реестр: curated, Heavens-Above, AMSAT, sonik, SatNOGS.
-	entries := freqplan.Merge(passes, []freqplan.Source{bandSource{src: a.registry, bands: a.bands}})
+	entries := freqplan.Merge(passes, []freqplan.Source{bandSource{
+		src: a.registry, bands: a.bands, antenna: a.antennaBands,
+	}})
 	if err := freqplan.WritePlan(freqPlanPath, entries); err != nil {
 		slog.WarnContext(ctx, "freqplan: write", slogKeyError, err)
 		return

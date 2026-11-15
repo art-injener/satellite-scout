@@ -46,9 +46,6 @@ func TestDefaultConfig_Values(t *testing.T) {
 	if cfg.TLE.CacheDir == "" {
 		t.Error("TLE.CacheDir is empty")
 	}
-	if len(cfg.TLE.Groups) == 0 {
-		t.Error("TLE.Groups is empty")
-	}
 	if cfg.TLE.UpdateInterval <= 0 {
 		t.Errorf("TLE.UpdateInterval = %v, want > 0", cfg.TLE.UpdateInterval)
 	}
@@ -88,7 +85,7 @@ func TestDefaultConfig_ExcludeNoradPath(t *testing.T) {
 }
 
 // TestConfig_TLEStoreConfig — преобразование TLE-секции в форму, понятную
-// пакету tracker. Гарантирует, что Groups копируются (не shared slice).
+// пакету tracker.
 func TestConfig_TLEStoreConfig(t *testing.T) {
 	cfg := DefaultConfig()
 	tle := cfg.TLEStoreConfig()
@@ -101,13 +98,6 @@ func TestConfig_TLEStoreConfig(t *testing.T) {
 	}
 	if tle.MaxTLEAgeDays != cfg.TLE.MaxTLEAgeDays {
 		t.Errorf("MaxTLEAgeDays mismatch")
-	}
-	if len(tle.Groups) != len(cfg.TLE.Groups) {
-		t.Fatalf("Groups len mismatch")
-	}
-	tle.Groups[0] = "modified"
-	if cfg.TLE.Groups[0] == "modified" {
-		t.Error("TLEStoreConfig() returned shared Groups slice — must be copy")
 	}
 }
 

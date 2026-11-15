@@ -84,19 +84,101 @@ func (s *TLEStore) GetUngrouped() []*TLE {
 	return tles
 }
 
-// refresh — один проход обновления: Space-Track по всему каталогу,
-// при его отказе или без учётки — Celestrak по перечисленным группам.
-func (s *TLEStore) refresh(ctx context.Context, groups []string) {
+// celestrakFetchName — ключ сведений о запасной загрузке орбит с Celestrak по NORAD.
+const celestrakFetchName = "celestrak"
+
+// refresh — один проход обновления: Space-Track по каталогу;
+// при отказе или без учётки — Celestrak по NORAD состава (не по группам).
+func (s *TLEStore) refresh(ctx context.Context) {
 	if s.spacetrack != nil {
 		err := s.refreshCatalog(ctx)
 		if err == nil || ctx.Err() != nil {
 			return
 		}
-		s.logger.WarnContext(ctx, "space-track refresh failed, trying celestrak", slog.Any(slogKeyError, err))
+		s.logger.WarnContext(ctx, "space-track refresh failed, trying celestrak by NORAD", slog.Any(slogKeyError, err))
 	}
-	if err := s.loadGroups(ctx, groups); err != nil && ctx.Err() == nil {
-		s.logger.WarnContext(ctx, "TLE refresh had errors", slog.Any(slogKeyError, err))
+	if err := s.refreshCelestrakByNorad(ctx); err != nil && ctx.Err() == nil {
+		s.logger.WarnContext(ctx, "celestrak NORAD refresh had errors", slog.Any(slogKeyError, err))
 	}
+}
+
+// refreshCelestrakByNorad подтягивает орбиты с Celestrak по одному NORAD из состава каталога.
+// Группы Celestrak (GROUP=…) больше не задают состав — только запасной путь по ID.
+func (s *TLEStore) refreshCelestrakByNorad(ctx context.Context) error {
+	pass := CatalogPass{At: time.Now()}
+	ids := s.catalogNoradIDs(ctx, &pass)
+	if len(ids) == 0 {
+		s.mu.RLock()
+		ids = slices.Collect(maps.Keys(s.catalog))
+		s.mu.RUnlock()
+		slices.Sort(ids)
+	}
+	if len(ids) == 0 {
+		s.logger.WarnContext(ctx, "celestrak NORAD refresh skipped: no composition and empty catalog")
+		return nil
+	}
+
+	s.beginLoad(TLELoadPhaseCelestrak, len(ids))
+	defer s.endLoad()
+
+	got := make([]*TLE, 0, len(ids))
+	var firstErr error
+	for i, id := range ids {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		tle, err := s.client.FetchByNoradID(ctx, id)
+		s.reportLoadProgress(i+1, len(ids))
+		if err != nil {
+			if firstErr == nil {
+				firstErr = err
+			}
+			s.logger.DebugContext(ctx, "celestrak NORAD miss",
+				slog.Int("norad_id", id), slog.Any(slogKeyError, err))
+			continue
+		}
+		got = append(got, tle)
+	}
+
+	if len(got) == 0 {
+		fetchErr := ""
+		if firstErr != nil {
+			fetchErr = firstErr.Error()
+		}
+		s.mu.Lock()
+		s.setFetch(celestrakFetchName, func(f *groupFetch) {
+			f.lastErr = fetchErr
+		})
+		s.mu.Unlock()
+		if firstErr != nil {
+			return firstErr
+		}
+		return nil
+	}
+
+	now := time.Now()
+	s.mu.Lock()
+	for _, tle := range got {
+		s.addInternal(tle, "")
+	}
+	s.setFetch(celestrakFetchName, func(f *groupFetch) {
+		f.source = TLESourceCelestrak
+		f.fetchedAt = now
+		f.lastErr = ""
+	})
+	all := make([]*TLE, 0, len(s.catalog))
+	for _, tle := range s.catalog {
+		all = append(all, tle)
+	}
+	s.mu.Unlock()
+
+	if err := s.saveGroupToCache(catalogCacheName, all); err != nil {
+		s.logger.WarnContext(ctx, "failed to save catalog after celestrak", slog.Any(slogKeyError, err))
+	}
+
+	s.logger.InfoContext(ctx, "loaded TLE from celestrak by NORAD",
+		slog.Int("requested", len(ids)), slog.Int("received", len(got)))
+	return nil
 }
 
 // refreshCatalog обновляет элементы каталога одним проходом Space-Track.
@@ -305,4 +387,39 @@ func (s *TLEStore) catalogNeedsNetwork() bool {
 		return true
 	}
 	return !s.cacheWithinInterval(meta, catalogCacheName)
+}
+
+// needsNetworkRefresh — нужен ли сетевой проход при старте.
+func (s *TLEStore) needsNetworkRefresh() bool {
+	if s.spacetrack != nil {
+		return s.catalogNeedsNetwork()
+	}
+	return s.celestrakNeedsNetwork()
+}
+
+// celestrakNeedsNetwork — без Space-Track: пустой каталог или протухший запасной снимок.
+func (s *TLEStore) celestrakNeedsNetwork() bool {
+	if s.Count() == 0 {
+		return true
+	}
+	meta, err := s.loadCacheMeta()
+	if err != nil {
+		return true
+	}
+	if s.cacheWithinInterval(meta, catalogCacheName) {
+		return false
+	}
+	for _, g := range DefaultTLEGroups {
+		if s.cacheWithinInterval(meta, g) {
+			return false
+		}
+	}
+	s.mu.RLock()
+	f := s.fetch[celestrakFetchName]
+	s.mu.RUnlock()
+	if !f.fetchedAt.IsZero() && s.config.UpdateInterval > 0 &&
+		time.Since(f.fetchedAt) < s.config.UpdateInterval {
+		return false
+	}
+	return true
 }

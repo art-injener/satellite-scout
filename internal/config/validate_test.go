@@ -17,6 +17,18 @@ func TestValidate_DefaultConfigPasses(t *testing.T) {
 	}
 }
 
+func TestValidate_GroupLabel(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.UI.GroupLabel = "weather"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("weather label must be valid: %v", err)
+	}
+	cfg.UI.GroupLabel = "cubesat"
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("unknown group label must fail")
+	}
+}
+
 func TestValidate_ObserverLatOutOfRange(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Station.Observer.Lat = 91.0
@@ -197,17 +209,6 @@ func TestRestartRequiredFields_ObserverDoesNotRequireRestart(t *testing.T) {
 	got := RestartRequiredFields(old, updated)
 	if len(got) != 0 {
 		t.Errorf("observer/theme changes must be hot-reload, got restart fields %v", got)
-	}
-}
-
-func TestRestartRequiredFields_TLEGroupsChanged(t *testing.T) {
-	old := DefaultConfig()
-	updated := DefaultConfig()
-	updated.TLE.Groups = []string{"weather"}
-
-	got := RestartRequiredFields(old, updated)
-	if !hasString(got, "tle.groups") {
-		t.Errorf("expected tle.groups, got %v", got)
 	}
 }
 

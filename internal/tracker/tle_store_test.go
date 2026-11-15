@@ -544,10 +544,9 @@ func TestTLEStore_Start_MissingCacheDoesNotBlock(t *testing.T) {
 
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = t.TempDir()
-	cfg.Groups = []string{"amateur"}
 	cfg.UpdateInterval = time.Hour
 	client := NewCelestrakClient(WithBaseURL(srv.URL), WithRateLimit(0), WithMaxRetries(0))
-	store := NewTLEStore(cfg, WithCelestrakClient(client))
+	store := NewTLEStore(cfg, WithCelestrakClient(client), WithComposition(func() []int { return []int{25544} }))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	startedOK := false
@@ -578,7 +577,6 @@ func newCachedStore(t *testing.T, baseURL string, age time.Duration) *TLEStore {
 	t.Helper()
 	cfg := DefaultTLEStoreConfig()
 	cfg.CacheDir = t.TempDir()
-	cfg.Groups = []string{"amateur"}
 	cfg.UpdateInterval = time.Hour
 	client := NewCelestrakClient(WithBaseURL(baseURL), WithRateLimit(0), WithMaxRetries(0))
 	store := NewTLEStore(cfg, WithCelestrakClient(client))

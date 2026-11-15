@@ -465,7 +465,11 @@
         const inputs = this._root.querySelectorAll('[data-bind]');
         inputs.forEach((input) => {
             const path = input.dataset.bind;
-            const value = getByPath(self._workingConfig, path);
+            let value = getByPath(self._workingConfig, path);
+            // Пустая метка в старых конфигах = отбор по умолчанию.
+            if (path === 'ui.group_label' && !value) {
+                value = 'in_band_alive';
+            }
             writeField(input, value);
         });
     };

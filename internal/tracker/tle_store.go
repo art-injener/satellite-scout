@@ -57,14 +57,14 @@ type TLEStore struct {
 	loadTotal int
 
 	// Зависимости
-	client       *CelestrakClient
-	spacetrack   *SpaceTrackClient // nil — учётки нет, элементы только из Celestrak
-	sonik        *SonikClient      // справочник sonik (имена, свежие запуски); nil — без sonik
-	composition  Composition       // NORAD из curated/HA/AMSAT; nil — только свежий sonik
-	sink         CatalogSink       // получает итог каждого прохода каталога; nil — никто
-	namer        Namer             // подставляет отображаемое имя КА; nil — имя из TLE
-	config       *TLEStoreConfig
-	logger       *slog.Logger
+	client      *CelestrakClient
+	spacetrack  *SpaceTrackClient // nil — учётки нет, элементы только из Celestrak
+	sonik       *SonikClient      // справочник sonik (имена, свежие запуски); nil — без sonik
+	composition Composition       // NORAD из curated/HA/AMSAT; nil — только свежий sonik
+	sink        CatalogSink       // получает итог каждого прохода каталога; nil — никто
+	namer       Namer             // подставляет отображаемое имя КА; nil — имя из TLE
+	config      *TLEStoreConfig
+	logger      *slog.Logger
 
 	// Background updater control
 	stopCh chan struct{}
@@ -160,19 +160,15 @@ func NewTLEStore(cfg *TLEStoreConfig, opts ...TLEStoreOption) *TLEStore {
 // или который старше UpdateInterval. Так HTTP-сервер стартует, даже если источник недоступен.
 func (s *TLEStore) Start(ctx context.Context) error {
 	s.logger.InfoContext(ctx, "starting TLEStore",
-		"groups", s.config.Groups,
 		"update_interval", s.config.UpdateInterval,
 	)
 
-	loaded := s.loadCachedGroups()
-	if s.spacetrack != nil {
-		s.loadCatalogCache()
-	}
-	need := s.groupsNeedingNetwork(loaded)
-	catalogStale := s.spacetrack != nil && s.catalogNeedsNetwork()
+	s.loadLegacyGroupCaches()
+	s.loadCatalogCache()
+	needNetwork := s.needsNetworkRefresh()
 	s.logger.InfoContext(ctx, "TLE cache loaded",
 		"count", s.Count(),
-		"refresh_groups", need,
+		"need_network", needNetwork,
 	)
 	if st := s.Status(time.Now()); st.Level != TLELevelOK {
 		s.logger.WarnContext(ctx, "TLE cache is outdated, passes may be inaccurate",
@@ -182,7 +178,7 @@ func (s *TLEStore) Start(ctx context.Context) error {
 		)
 	}
 
-	go s.startUpdater(ctx, need, catalogStale)
+	go s.startUpdater(ctx, needNetwork)
 
 	return nil
 }
@@ -313,50 +309,18 @@ func (s *TLEStore) GroupCount(group string) int {
 	return len(s.byGroup[strings.ToLower(group)])
 }
 
-// LoadAllGroups загружает все настроенные группы TLE.
-func (s *TLEStore) LoadAllGroups(ctx context.Context) error {
-	return s.loadGroups(ctx, s.config.Groups)
-}
-
-// loadGroups качает перечисленные группы. При отмене контекста останавливается,
-// не дожидаясь остальных.
-func (s *TLEStore) loadGroups(ctx context.Context, groups []string) error {
-	var lastErr error
-
-	for _, group := range groups {
-		if err := ctx.Err(); err != nil {
-			return err
-		}
-		if err := s.LoadGroup(ctx, group); err != nil {
-			s.logger.WarnContext(ctx, "failed to load group",
-				"group", group,
-				slogKeyError, err,
-			)
-			lastErr = err
-		}
-	}
-
-	s.logger.InfoContext(ctx, "loaded TLE groups",
-		"total_count", s.Count(),
-		"groups", s.Groups(),
-	)
-
-	return lastErr
-}
-
-// loadCachedGroups читает уже сохранённые группы в память.
-// Ключ карты — имя группы в нижнем регистре, значение — сколько TLE прочитано.
-func (s *TLEStore) loadCachedGroups() map[string]int {
-	loaded := make(map[string]int, len(s.config.Groups))
+// loadLegacyGroupCaches поднимает с диска старые файлы групп Celestrak (stations.tle и т.п.).
+// Только локальный посев; сеть по GROUP= не дергается.
+func (s *TLEStore) loadLegacyGroupCaches() {
 	meta, metaErr := s.loadCacheMeta()
 	if metaErr != nil {
 		meta = &CacheMeta{}
 	}
-	for _, group := range s.config.Groups {
+	for _, group := range DefaultTLEGroups {
 		tles, err := s.loadGroupFromCache(group)
 		if err != nil {
 			if !errors.Is(err, os.ErrNotExist) {
-				s.logger.Warn("failed to load TLE cache",
+				s.logger.Warn("failed to load legacy TLE cache",
 					"group", group,
 					slogKeyError, err,
 				)
@@ -375,30 +339,11 @@ func (s *TLEStore) loadCachedGroups() map[string]int {
 			f.fetchedAt = meta.Groups[strings.ToLower(group)].UpdatedAt
 		})
 		s.mu.Unlock()
-		loaded[strings.ToLower(group)] = len(tles)
-		s.logger.Info("loaded TLE group from cache",
+		s.logger.Info("loaded legacy TLE group from cache",
 			"group", group,
 			"count", len(tles),
 		)
 	}
-	return loaded
-}
-
-// groupsNeedingNetwork — группы, которые надо запросить у Celestrak:
-// файл не прочитался или метка кеша старше интервала обновления.
-func (s *TLEStore) groupsNeedingNetwork(loaded map[string]int) []string {
-	meta, err := s.loadCacheMeta()
-	if err != nil {
-		s.logger.Warn("failed to read TLE cache meta", slogKeyError, err)
-		return append([]string(nil), s.config.Groups...)
-	}
-	need := make([]string, 0, len(s.config.Groups))
-	for _, group := range s.config.Groups {
-		if loaded[strings.ToLower(group)] == 0 || !s.cacheWithinInterval(meta, group) {
-			need = append(need, group)
-		}
-	}
-	return need
 }
 
 // cacheWithinInterval сообщает, что кеш группы моложе интервала обновления.
@@ -534,23 +479,12 @@ func (s *TLEStore) addToIndex(index map[string][]int, key string, id int) {
 }
 
 // startUpdater сначала добирает устаревшее, затем обновляет каталог по таймеру.
-// С учёткой Space-Track сеть при старте нужна только для устаревшего файла каталога:
-// группы тогда — запасной путь и сами по себе Celestrak не дёргают.
-func (s *TLEStore) startUpdater(ctx context.Context, initial []string, catalogStale bool) {
+func (s *TLEStore) startUpdater(ctx context.Context, needNetwork bool) {
 	defer close(s.doneCh)
 
-	switch {
-	case s.spacetrack != nil:
-		if catalogStale {
-			s.logger.InfoContext(ctx, "refreshing TLE catalog from network")
-			s.refresh(ctx, initial)
-			s.notifyRefresh()
-		}
-	case len(initial) > 0:
-		s.logger.InfoContext(ctx, "refreshing TLE from network", "groups", initial)
-		if err := s.loadGroups(ctx, initial); err != nil && ctx.Err() == nil {
-			s.logger.WarnContext(ctx, "initial TLE refresh had errors", slogKeyError, err)
-		}
+	if needNetwork {
+		s.logger.InfoContext(ctx, "refreshing TLE from network")
+		s.refresh(ctx)
 		s.notifyRefresh()
 	}
 
@@ -567,7 +501,7 @@ func (s *TLEStore) startUpdater(ctx context.Context, initial []string, catalogSt
 			return
 		case <-ticker.C:
 			s.logger.InfoContext(ctx, "starting scheduled TLE update")
-			s.refresh(ctx, s.config.Groups)
+			s.refresh(ctx)
 			s.notifyRefresh()
 		}
 	}

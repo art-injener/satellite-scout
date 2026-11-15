@@ -114,6 +114,13 @@ func (c *Config) Validate() error {
 		})
 	}
 
+	if !validGroupLabel(c.UI.GroupLabel) {
+		errs = append(errs, ValidationError{
+			Field:   "ui.group_label",
+			Message: "неизвестная метка группы «над нами»",
+		})
+	}
+
 	if len(c.Station.RadioPaths) > 0 { //nolint:nestif // валидация каждого тракта в одном проходе по индексам
 		seenIDs := make(map[int]int, len(c.Station.RadioPaths))
 		for i, rp := range c.Station.RadioPaths {
@@ -167,7 +174,7 @@ func (c *Config) Validate() error {
 // список путей полей, для применения которых нужен перезапуск сервера.
 //
 // Hot-reload получают: ui.theme, station.observer.* (через ConfigStore.Subscribe).
-// Restart нужен для server.port, tle.cache_dir/groups/update_interval/max_age,
+// Restart нужен для server.port, tle.cache_dir/update_interval/max_age,
 // satnogs.enabled, station.radio_paths (инициализация SDR-устройств), SCOUT_DEV_MODE.
 func RestartRequiredFields(old, next *Config) []string {
 	if old == nil || next == nil {
@@ -180,9 +187,6 @@ func RestartRequiredFields(old, next *Config) []string {
 	}
 	if old.TLE.CacheDir != next.TLE.CacheDir {
 		fields = append(fields, "tle.cache_dir")
-	}
-	if !stringSlicesEqual(old.TLE.Groups, next.TLE.Groups) {
-		fields = append(fields, "tle.groups")
 	}
 	if old.TLE.UpdateInterval != next.TLE.UpdateInterval {
 		fields = append(fields, "tle.update_interval")
@@ -447,4 +451,15 @@ func rotatorEqual(a, b *RotatorConfig) bool {
 		return false
 	}
 	return *a == *b
+}
+
+// validGroupLabel — допустимые метки группы «над нами» (пусто = дефолт in_band_alive).
+// Значения совпадают с registry.Label*.
+func validGroupLabel(label string) bool {
+	switch label {
+	case "", "in_band_alive", "in_band", "alive", "heard", "stations", "weather":
+		return true
+	default:
+		return false
+	}
 }

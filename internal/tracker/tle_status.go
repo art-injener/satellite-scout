@@ -53,8 +53,9 @@ const (
 
 // Фазы фоновой загрузки каталога с Space-Track (индикатор в шапке).
 const (
-	TLELoadPhaseGP     = "gp"
-	TLELoadPhaseSatcat = "satcat"
+	TLELoadPhaseGP        = "gp"
+	TLELoadPhaseSatcat    = "satcat"
+	TLELoadPhaseCelestrak = "celestrak"
 )
 
 // TLEStatus — сводка актуальности каталога TLE.
@@ -179,17 +180,24 @@ func (s *TLEStore) fillPassCheck(st *TLEStatus) {
 	}
 }
 
-// fillFetchStatus сводит источник и загрузки по группам конфига. Вызывать под s.mu.
-// С учёткой Space-Track элементы всего каталога приходят одним проходом,
-// поэтому сводка берётся по каталогу, а группы остаются запасным путём.
+// fillFetchStatus сводит источник и время последней загрузки. Вызывать под s.mu.
+// С Space-Track сводка по каталогу; без него — Celestrak по NORAD или наследие файлов групп.
 func (s *TLEStore) fillFetchStatus(st *TLEStatus, now time.Time) {
 	networkLag := networkLagIntervals * s.config.UpdateInterval
 	if f, ok := s.fetch[catalogCacheName]; ok && s.spacetrack != nil {
 		st.addFetch(f, now, networkLag)
 		return
 	}
-	for _, group := range s.config.Groups {
-		if f, ok := s.fetch[strings.ToLower(group)]; ok {
+	if f, ok := s.fetch[celestrakFetchName]; ok {
+		st.addFetch(f, now, networkLag)
+		return
+	}
+	if f, ok := s.fetch[catalogCacheName]; ok {
+		st.addFetch(f, now, networkLag)
+		return
+	}
+	for _, g := range DefaultTLEGroups {
+		if f, ok := s.fetch[strings.ToLower(g)]; ok {
 			st.addFetch(f, now, networkLag)
 		}
 	}

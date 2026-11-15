@@ -185,7 +185,7 @@ func TestTLEStore_Status_FetchErrorFallsBackToCache(t *testing.T) {
 func TestTLEStore_Status_OldDownloadWarnsNetwork(t *testing.T) {
 	// UpdateInterval в newCachedStore — 1 ч; кеш скачан 3 ч назад, это больше двух интервалов.
 	store := newCachedStore(t, "http://127.0.0.1:0", -3*time.Hour)
-	store.loadCachedGroups()
+	store.loadLegacyGroupCaches()
 
 	st := store.Status(time.Now())
 
@@ -202,7 +202,7 @@ func TestTLEStore_Status_OldDownloadWarnsNetwork(t *testing.T) {
 
 func TestTLEStore_Status_RecentCacheDoesNotWarnNetwork(t *testing.T) {
 	store := newCachedStore(t, "http://127.0.0.1:0", -30*time.Minute)
-	store.loadCachedGroups()
+	store.loadLegacyGroupCaches()
 
 	st := store.Status(time.Now())
 
