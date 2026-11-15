@@ -679,6 +679,56 @@ func BenchmarkPredictPasses_ISS24h(b *testing.B) {
 	}
 }
 
+func TestPredictPassesForAll_IncludesUngroupedSatellites(t *testing.T) {
+	store := NewTLEStore(nil)
+	store.AddWithGroup(parsePPTLE(t, ppISSLines), "stations")
+	store.Add(parsePPTLE(t, ppPolarLines))
+
+	passes, err := PredictPassesForAll(store, ppObserver, ppBaseTime, ppBaseTime.Add(24*time.Hour), DefaultMinElevation)
+	require.NoError(t, err)
+
+	groupByNorad := map[int]string{}
+	for _, p := range passes {
+		groupByNorad[p.NoradID] = p.Group
+	}
+	require.Contains(t, groupByNorad, 25544)
+	require.Equal(t, "stations", groupByNorad[25544])
+	require.Contains(t, groupByNorad, 40069, "satellite without group must get passes")
+	require.Empty(t, groupByNorad[40069])
+}
+
+func TestPredictPassesForTLEs_MatchesPerSatelliteResults(t *testing.T) {
+	tles := []*TLE{
+		parsePPTLE(t, ppISSLines),
+		parsePPTLE(t, ppPolarLines),
+		parsePPTLE(t, ppGEOLines),
+		parsePPTLE(t, ppHighInclLines),
+	}
+	start, end := ppBaseTime, ppBaseTime.Add(48*time.Hour)
+
+	var want []string
+	for _, tle := range tles {
+		if IsGeostationary(tle) {
+			continue
+		}
+		passes, err := PredictPassesForTLE(tle, ppObserver, start, end, DefaultMinElevation)
+		require.NoError(t, err)
+		for _, p := range passes {
+			want = append(want, fmt.Sprintf("%d:%d", p.NoradID, p.AOS))
+		}
+	}
+
+	got := make([]string, 0, len(want))
+	prevAOS := int64(math.MinInt64)
+	for _, p := range predictPassesForTLEs(tles, ppObserver, start, end, DefaultMinElevation) {
+		require.GreaterOrEqual(t, p.AOS, prevAOS, "passes must be sorted by AOS")
+		prevAOS = p.AOS
+		got = append(got, fmt.Sprintf("%d:%d", p.NoradID, p.AOS))
+	}
+	require.NotEmpty(t, want)
+	require.ElementsMatch(t, want, got)
+}
+
 func BenchmarkPredictPasses_Polar24h(b *testing.B) {
 	tle := parseBenchTLE(b, ppPolarLines)
 

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/art-injener/satellite-scout/internal/config"
@@ -226,6 +227,36 @@ func TestSettingsHandler_UpdateKeepsMasterPassword(t *testing.T) {
 				t.Errorf("other settings must still apply, theme=%q", got)
 			}
 		})
+	}
+}
+
+func TestSettingsHandler_SpaceTrackCredentialsHiddenAndKept(t *testing.T) {
+	store := newTestStore(t)
+	if err := store.Update(func(c *config.Config) error {
+		c.SpaceTrack = config.SpaceTrackCredentials{Identity: "user@example.org", Password: "st-secret"}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewSettingsHandler(store)
+
+	w := httptest.NewRecorder()
+	h.Get(w, httptest.NewRequest(http.MethodGet, "/api/settings", nil))
+	resp := w.Body.String()
+	if strings.Contains(resp, "st-secret") || strings.Contains(resp, "user@example.org") {
+		t.Fatalf("space-track credentials leaked: %s", resp)
+	}
+
+	updated := config.DefaultConfig()
+	updated.UI.Theme = "classic"
+	body, _ := json.Marshal(updated)
+	w = httptest.NewRecorder()
+	h.Update(w, httptest.NewRequest(http.MethodPut, "/api/settings", bytes.NewReader(body)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	if got := store.Get().SpaceTrack.Password; got != "st-secret" {
+		t.Errorf("space-track password=%q, want kept after settings update", got)
 	}
 }
 

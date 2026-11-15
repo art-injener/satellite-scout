@@ -40,6 +40,14 @@ type cacheEntry struct {
 	group     string
 	hours     int
 	minEl     float64
+	stale     bool // орбиты обновились: запись отдаётся, пока идёт пересчёт
+}
+
+// passCall — расчёт пролётов в работе; все, кто ждёт этот ключ, получают один результат.
+type passCall struct {
+	done   chan struct{}
+	passes []*tracker.Pass
+	err    error
 }
 
 // isExpired проверяет, истёк ли TTL записи.
@@ -58,8 +66,13 @@ type PassService struct {
 	cacheTTL time.Duration
 	excluder Excluder
 
-	mu    sync.RWMutex
-	cache map[string]*cacheEntry // ключ: "group:hours:minEl"
+	mu       sync.RWMutex
+	cache    map[string]*cacheEntry // ключ: "group:hours:minEl"
+	inflight map[string]*passCall   // фоновые расчёты всех групп, ключ как у cache
+	gen      uint64                 // растёт при сбросе кеша: результат старого поколения не сохраняется
+
+	// computeAll считает пролёты всех КА; в тестах подменяется управляемой функцией.
+	computeAll func(hours int, minEl float64) ([]*tracker.Pass, error)
 }
 
 // NewPassService создаёт новый сервис пролётов.
@@ -68,7 +81,9 @@ func NewPassService(store *tracker.TLEStore, observer *tracker.Observer) *PassSe
 		store:    store,
 		cacheTTL: DefaultPassCacheTTL,
 		cache:    make(map[string]*cacheEntry),
+		inflight: make(map[string]*passCall),
 	}
+	s.computeAll = s.computeAllPasses
 	s.observer.Store(observer)
 	return s
 }
@@ -180,7 +195,9 @@ func (s *PassService) GetPasses(group string, hours int, minEl float64) ([]*trac
 
 // GetAllGroupsPasses возвращает список пролётов для ВСЕХ загруженных спутников.
 // Объединяет пролёты всех групп (stations, amateur, cubesat и др.).
-// Результат кешируется на время cacheTTL.
+// Результат кешируется на время cacheTTL. Устаревшая запись отдаётся сразу,
+// а пересчёт идёт в фоне; ждать приходится только первый расчёт для ключа,
+// и все одновременные вызовы ждут один общий расчёт.
 // Пролёты отсортированы по времени AOS (ближайшие первыми).
 func (s *PassService) GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.Pass, error) {
 	// Нормализация параметров.
@@ -193,50 +210,83 @@ func (s *PassService) GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.P
 
 	cacheKey := s.makeCacheKey(allGroupsCacheKey, hours, minEl)
 
-	// Проверка кеша.
 	s.mu.RLock()
 	entry, ok := s.cache[cacheKey]
+	fresh := ok && !entry.stale && !entry.isExpired(s.cacheTTL)
 	s.mu.RUnlock()
-
-	if ok && !entry.isExpired(s.cacheTTL) {
-		// slog.Debug("all groups pass cache hit",
-		// 	"hours", hours,
-		// 	"min_el", minEl,
-		// 	"passes", len(entry.passes),
-		// )
+	if fresh {
 		return entry.passes, nil
 	}
 
-	// Расчёт пролётов для всех спутников.
-	passes, err := s.computeAllPasses(hours, minEl)
-	if err != nil {
-		return nil, err
-	}
-
-	// Каталог ещё пуст (TLE не успели прочитаться). Пустой ответ не запоминаем,
-	// иначе после загрузки орбит пролёты не появятся до конца TTL.
-	if s.store != nil && s.store.Count() == 0 {
-		return passes, nil
-	}
-
-	// Сохранение в кеш.
 	s.mu.Lock()
-	s.cache[cacheKey] = &cacheEntry{
-		passes:    passes,
-		createdAt: time.Now(),
-		group:     allGroupsCacheKey,
-		hours:     hours,
-		minEl:     minEl,
+	entry, ok = s.cache[cacheKey]
+	if ok {
+		if entry.stale || entry.isExpired(s.cacheTTL) {
+			s.startComputeAllLocked(cacheKey, hours, minEl)
+		}
+		s.mu.Unlock()
+		return entry.passes, nil
 	}
+	call := s.startComputeAllLocked(cacheKey, hours, minEl)
 	s.mu.Unlock()
 
-	slog.Debug("all groups pass cache miss, computed",
-		"hours", hours,
-		"min_el", minEl,
-		"passes", len(passes),
-	)
+	<-call.done
+	return call.passes, call.err
+}
 
-	return passes, nil
+// startComputeAllLocked запускает фоновый расчёт пролётов всех КА, если для ключа он ещё не идёт.
+// Вызывать под s.mu.
+func (s *PassService) startComputeAllLocked(cacheKey string, hours int, minEl float64) *passCall {
+	if call, ok := s.inflight[cacheKey]; ok {
+		return call
+	}
+	call := &passCall{done: make(chan struct{})}
+	s.inflight[cacheKey] = call
+	gen := s.gen
+
+	go func() {
+		started := time.Now()
+		passes, err := s.computeAll(hours, minEl)
+		// Каталог ещё пуст (TLE не успели прочитаться). Пустой ответ не запоминаем,
+		// иначе после загрузки орбит пролёты не появятся до конца TTL.
+		catalogReady := s.store == nil || s.store.Count() > 0
+
+		s.mu.Lock()
+		if s.inflight[cacheKey] == call {
+			delete(s.inflight, cacheKey)
+		}
+		if err == nil && catalogReady && gen == s.gen {
+			s.cache[cacheKey] = &cacheEntry{
+				passes:    passes,
+				createdAt: time.Now(),
+				group:     allGroupsCacheKey,
+				hours:     hours,
+				minEl:     minEl,
+			}
+		}
+		s.mu.Unlock()
+
+		call.passes, call.err = passes, err
+		close(call.done)
+
+		slog.Debug("all groups passes computed",
+			"hours", hours,
+			"min_el", minEl,
+			"passes", len(passes),
+			"took", time.Since(started).Round(time.Millisecond),
+		)
+	}()
+	return call
+}
+
+// MarkStale помечает кеш устаревшим после обновления орбит: до конца фонового
+// пересчёта отдаются прежние пролёты. Смена станции требует InvalidateCache.
+func (s *PassService) MarkStale() {
+	s.mu.Lock()
+	for _, entry := range s.cache {
+		entry.stale = true
+	}
+	s.mu.Unlock()
 }
 
 // computeAllPasses рассчитывает пролёты для всех спутников в хранилище.
@@ -252,10 +302,13 @@ func (s *PassService) computeAllPasses(hours int, minEl float64) ([]*tracker.Pas
 	return s.filterExcluded(passes), nil
 }
 
-// InvalidateCache очищает весь кеш пролётов.
+// InvalidateCache очищает весь кеш пролётов. Расчёты, начатые до сброса,
+// в кеш не попадут: следующий вызов запустит новый.
 func (s *PassService) InvalidateCache() {
 	s.mu.Lock()
 	s.cache = make(map[string]*cacheEntry)
+	s.inflight = make(map[string]*passCall)
+	s.gen++
 	s.mu.Unlock()
 
 	slog.Info("pass cache invalidated")

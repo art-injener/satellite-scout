@@ -168,6 +168,30 @@ func TestSSEHub_BroadcastSingleClient(t *testing.T) {
 	}
 }
 
+func TestSSEHub_NewClientGetsCachedTLEStatus(t *testing.T) {
+	hub, cancel := startTestHub(t)
+	defer cancel()
+
+	first := registerTestClient(hub)
+	waitForClientCount(t, hub, 1)
+	hub.Broadcast("tle_status", []byte(`{"level":"warn"}`))
+	select {
+	case <-first.events:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for broadcast to first client")
+	}
+
+	late := registerTestClient(hub)
+	select {
+	case event := <-late.events:
+		if event.Type != "tle_status" || string(event.Data) != `{"level":"warn"}` {
+			t.Fatalf("got %q %s, want cached tle_status", event.Type, event.Data)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("late client did not receive cached tle_status")
+	}
+}
+
 func TestSSEHub_BroadcastMultipleClients(t *testing.T) {
 	hub, cancel := startTestHub(t)
 	defer cancel()

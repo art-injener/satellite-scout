@@ -61,3 +61,7 @@ data/products/
 data/freq_plan.csv
 data/freq_visits.csv
 data/amsat_active.csv
+data/satnogs_transmitters.json
+data/heavensabove_amateur.html
+data/sonik_transmitters.json
+data/scout.db*

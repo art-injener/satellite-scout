@@ -84,7 +84,7 @@ func NewPropagatorWithGravity(tle *TLE, gravity GravityModel) (*Propagator, erro
 	}
 
 	// Инициализируем спутник через go-satellite.
-	sat := satellite.TLEToSat(tle.Line1, tle.Line2, gravConst)
+	sat := satellite.TLEToSat(numericSatnumLine1(tle.Line1), tle.Line2, gravConst)
 
 	return &Propagator{
 		tle:       tle,
@@ -191,6 +191,16 @@ func JulianDay(t time.Time) float64 {
 	year, month, day, hour, minute, sec := utcClock(t)
 
 	return satellite.JDay(year, month, day, hour, minute, sec)
+}
+
+// numericSatnumLine1 заменяет буквенный номер КА (Alpha-5, NORAD > 99999) нулями.
+// go-satellite разбирает номер как целое и на букве завершает процесс через log.Fatal,
+// а в расчёте SGP4 номер не участвует. Контрольную сумму библиотека не проверяет.
+func numericSatnumLine1(line1 string) string {
+	if len(line1) < 7 || line1[2] < 'A' || line1[2] > 'Z' {
+		return line1
+	}
+	return line1[:2] + "00000" + line1[7:]
 }
 
 // utcClock возвращает календарные поля момента в UTC.

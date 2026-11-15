@@ -218,6 +218,18 @@ class SSEClient {
             }
         });
 
+        // Актуальность TLE для индикатора в шапке (tle-status.js).
+        this._eventSource.addEventListener('tle_status', (e) => {
+            try {
+                const payload = JSON.parse(e.data);
+                document.dispatchEvent(new CustomEvent('satellite-scout-tle-status', {
+                    detail: payload,
+                }));
+            } catch (err) {
+                console.error('[SSEClient] tle_status parse error:', err);
+            }
+        });
+
         // Передача управления приёмником: разбирает access-control.js.
         for (const name of SSEClient.ACCESS_EVENTS) {
             this._eventSource.addEventListener(name, (e) => {

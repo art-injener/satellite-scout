@@ -5,14 +5,23 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"slices"
 	"strconv"
+	"strings"
 )
 
 // Имена переменных окружения для пути к файлу конфигурации и режима разработки
 const (
 	envConfigPath = "SCOUT_CONFIG_PATH"
 	envDevMode    = "SCOUT_DEV_MODE"
+
+	// Учётка Space-Track: из окружения или .env, в config.json не пишется
+	envSpaceTrackIdentity = "SPACETRACK_IDENTITY"
+	envSpaceTrackPassword = "SPACETRACK_PASSWORD"
 )
+
+// dotEnvPath — файл с секретами в рабочем каталоге сервера (лежит в .gitignore).
+const dotEnvPath = ".env"
 
 // DefaultConfigPath — путь к файлу конфигурации по умолчанию.
 const DefaultConfigPath = "data/config.json"
@@ -66,8 +75,64 @@ func applyRuntimeEnv(store *Store) {
 	if cfg == nil {
 		return
 	}
-	cfg.DevMode = envBool(envDevMode, true) // пока что только DevMode
+	cfg.DevMode = envBool(envDevMode, true)
+	cfg.SpaceTrack = loadSpaceTrackCredentials(dotEnvPath)
 	store.Set(cfg)
+}
+
+// loadSpaceTrackCredentials берёт учётку из окружения, недостающее — из файла envFile.
+// Неполная пара даёт пустую учётку: источник Space-Track тогда пропускается.
+func loadSpaceTrackCredentials(envFile string) SpaceTrackCredentials {
+	identity := os.Getenv(envSpaceTrackIdentity)
+	password := os.Getenv(envSpaceTrackPassword)
+	if identity == "" || password == "" {
+		fromFile := readDotEnv(envFile, envSpaceTrackIdentity, envSpaceTrackPassword)
+		if identity == "" {
+			identity = fromFile[envSpaceTrackIdentity]
+		}
+		if password == "" {
+			password = fromFile[envSpaceTrackPassword]
+		}
+	}
+	creds := SpaceTrackCredentials{Identity: identity, Password: password}
+	if !creds.Enabled() {
+		return SpaceTrackCredentials{}
+	}
+	return creds
+}
+
+// readDotEnv читает из файла строки KEY=VALUE, только перечисленные ключи.
+// Остальное содержимое файла не разбирается и никуда не попадает.
+func readDotEnv(path string, keys ...string) map[string]string {
+	values := make(map[string]string, len(keys))
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			slog.Warn("env file is not readable", slog.String("path", path), slog.Any("error", err))
+		}
+		return values
+	}
+	for line := range strings.Lines(string(data)) {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		key, value, ok := strings.Cut(strings.TrimPrefix(line, "export "), "=")
+		key = strings.TrimSpace(key)
+		if !ok || !slices.Contains(keys, key) {
+			continue
+		}
+		values[key] = unquoteEnvValue(strings.TrimSpace(value))
+	}
+	return values
+}
+
+// unquoteEnvValue снимает парные одинарные или двойные кавычки вокруг значения.
+func unquoteEnvValue(v string) string {
+	if len(v) >= 2 && (v[0] == '"' || v[0] == '\'') && v[len(v)-1] == v[0] {
+		return v[1 : len(v)-1]
+	}
+	return v
 }
 
 // envBool возвращает значение env-переменной, или defaultVal

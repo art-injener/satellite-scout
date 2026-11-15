@@ -88,6 +88,33 @@ func TestTLEStore_AddAndGet(t *testing.T) {
 	}
 }
 
+func TestTLEStore_WithNamer(t *testing.T) {
+	store := NewTLEStore(nil, WithNamer(func(norad int, name string) string {
+		if norad == 44881 {
+			return "CAS-6 (TO-108)"
+		}
+		return name
+	}))
+	placeholder := &TLE{NoradID: 44881, Name: "OBJECT C", Epoch: time.Now()}
+	iss := &TLE{NoradID: 25544, Name: "ISS (ZARYA)", Epoch: time.Now()}
+
+	store.Add(placeholder)
+	store.Add(iss)
+
+	if got, _ := store.Get(44881); got.Name != "CAS-6 (TO-108)" {
+		t.Errorf("renamed = %q, want CAS-6 (TO-108)", got.Name)
+	}
+	if placeholder.Name != "OBJECT C" {
+		t.Errorf("caller TLE mutated: %q", placeholder.Name)
+	}
+	if got, _ := store.Get(25544); got != iss {
+		t.Error("unchanged name must keep the same TLE")
+	}
+	if found := store.GetByName("cas-6 (to-108)"); len(found) != 1 {
+		t.Errorf("name index: found %d, want 1", len(found))
+	}
+}
+
 func TestTLEStore_GetNotFound(t *testing.T) {
 	store := NewTLEStore(nil)
 

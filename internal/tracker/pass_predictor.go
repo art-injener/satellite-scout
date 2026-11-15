@@ -4,7 +4,10 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"runtime"
 	"sort"
+	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -516,7 +519,7 @@ func PredictAllPasses(
 }
 
 // PredictPassesForAll рассчитывает пролёты для ВСЕХ спутников в хранилище.
-// Итерирует по группам, заполняет поле Pass.Group именем группы.
+// Итерирует по группам, заполняет поле Pass.Group именем группы; КА без группы — с пустым Pass.Group.
 // Возвращает пролёты отсортированные по AOS (ближайшие первыми).
 func PredictPassesForAll(
 	store *TLEStore,
@@ -532,14 +535,9 @@ func PredictPassesForAll(
 		return nil, ErrNilObserver
 	}
 
-	groups := store.Groups()
-	if len(groups) == 0 {
-		return nil, nil
-	}
-
 	var allPasses []*Pass
 
-	for _, group := range groups {
+	for _, group := range store.Groups() {
 		passes, err := PredictAllPasses(store, obs, group, start, end, minElDeg)
 		if err != nil {
 			continue
@@ -549,6 +547,9 @@ func PredictPassesForAll(
 		}
 		allPasses = append(allPasses, passes...)
 	}
+
+	// КА без группы (например, известные только из каталога sonik) получают пролёты с пустой группой.
+	allPasses = append(allPasses, predictPassesForTLEs(store.GetUngrouped(), obs, start, end, minElDeg)...)
 
 	// Дедупликация: один спутник может входить в несколько групп (например cubesat и amateur).
 	allPasses = deduplicatePassesByNoradAndAOS(allPasses)
@@ -575,25 +576,43 @@ func deduplicatePassesByNoradAndAOS(passes []*Pass) []*Pass {
 	return out
 }
 
+// passWorkers — сколько КА считается одновременно. Половина ядер: остальное
+// остаётся приёму SDR и демодулятору.
+var passWorkers = max(1, runtime.NumCPU()/2)
+
 // predictPassesForTLEs — внутренняя функция расчёта пролётов для списка TLE.
+// КА считаются параллельно на passWorkers потоках.
 func predictPassesForTLEs(
 	tles []*TLE,
 	obs *Observer,
 	start, end time.Time,
 	minElDeg float64,
 ) []*Pass {
+	perSat := make([][]*Pass, len(tles))
+	var next atomic.Int64
+	var wg sync.WaitGroup
+	for range min(passWorkers, len(tles)) {
+		wg.Go(func() {
+			for {
+				i := int(next.Add(1) - 1)
+				if i >= len(tles) {
+					return
+				}
+				if IsGeostationary(tles[i]) {
+					continue
+				}
+				passes, err := PredictPassesForTLE(tles[i], obs, start, end, minElDeg)
+				if err != nil {
+					continue
+				}
+				perSat[i] = passes
+			}
+		})
+	}
+	wg.Wait()
+
 	var allPasses []*Pass
-
-	for _, tle := range tles {
-		if IsGeostationary(tle) {
-			continue
-		}
-
-		passes, err := PredictPassesForTLE(tle, obs, start, end, minElDeg)
-		if err != nil {
-			continue
-		}
-
+	for _, passes := range perSat {
 		allPasses = append(allPasses, passes...)
 	}
 

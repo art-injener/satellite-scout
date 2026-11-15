@@ -227,6 +227,7 @@ func (st *hubState) cleanup(ctx context.Context) {
 // Порядок важен:
 //  1. satellite_group_update — состав группы, primary, tracking_id (источник истины для новых клиентов)
 //  2. satellite_state_update — последние позиции/треки
+//  3. tx_cycle, tle_status — состояние для нижней панели и шапки
 //
 // satellite_change НЕ кешируется: это событие-транзакция («что произошло»),
 // актуально только для живых клиентов. Отправлять его новому клиенту бессмысленно
@@ -236,6 +237,7 @@ func sendCachedEvents(client *sseClient, lastEvents map[string]SSEEvent) {
 		"satellite_group_update",
 		"satellite_state_update",
 		"tx_cycle",
+		"tle_status",
 	} {
 		if cached, ok := lastEvents[eventType]; ok {
 			select {

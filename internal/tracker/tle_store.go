@@ -39,10 +39,32 @@ type TLEStore struct {
 	// Метаданные спутников (опционально, из SatNOGS)
 	metadata map[int]*SatelliteMetadata
 
+	// Источник и время загрузки по группам (ключ — имя в нижнем регистре)
+	fetch map[string]groupFetch
+
+	// Вызывается после каждой фоновой загрузки, см. SetOnRefresh
+	onRefresh func()
+	// Вызывается при смене прогресса пачек Space-Track, см. SetOnProgress
+	onProgress func()
+
+	// Последняя сверка пролётов со сторонним прогнозом, см. SetPassCheck
+	passCheck *PassCheck
+
+	// Прогресс текущего прохода Space-Track (под s.mu).
+	loading   bool
+	loadPhase string
+	loadDone  int
+	loadTotal int
+
 	// Зависимости
-	client *CelestrakClient
-	config *TLEStoreConfig
-	logger *slog.Logger
+	client       *CelestrakClient
+	spacetrack   *SpaceTrackClient // nil — учётки нет, элементы только из Celestrak
+	sonik        *SonikClient      // справочник sonik (имена, свежие запуски); nil — без sonik
+	composition  Composition       // NORAD из curated/HA/AMSAT; nil — только свежий sonik
+	sink         CatalogSink       // получает итог каждого прохода каталога; nil — никто
+	namer        Namer             // подставляет отображаемое имя КА; nil — имя из TLE
+	config       *TLEStoreConfig
+	logger       *slog.Logger
 
 	// Background updater control
 	stopCh chan struct{}
@@ -96,6 +118,17 @@ func WithCelestrakClient(client *CelestrakClient) TLEStoreOption {
 	}
 }
 
+// Namer возвращает отображаемое имя КА по NORAD и имени из TLE.
+type Namer func(norad int, tleName string) string
+
+// WithNamer подставляет имя КА при добавлении элемента в хранилище: так одно имя видят
+// пролёты, карта, группа и поиск. Изменённое имя пишется в копию, TLE вызывающего не меняется.
+func WithNamer(namer Namer) TLEStoreOption {
+	return func(s *TLEStore) {
+		s.namer = namer
+	}
+}
+
 // NewTLEStore создаёт новый TLEStore с указанной конфигурацией.
 func NewTLEStore(cfg *TLEStoreConfig, opts ...TLEStoreOption) *TLEStore {
 	if cfg == nil {
@@ -107,6 +140,7 @@ func NewTLEStore(cfg *TLEStoreConfig, opts ...TLEStoreOption) *TLEStore {
 		byGroup:  make(map[string][]int),
 		byName:   make(map[string][]int),
 		metadata: make(map[int]*SatelliteMetadata),
+		fetch:    make(map[string]groupFetch),
 		config:   cfg,
 		client:   NewCelestrakClient(),
 		logger:   slog.Default(),
@@ -122,8 +156,8 @@ func NewTLEStore(cfg *TLEStoreConfig, opts ...TLEStoreOption) *TLEStore {
 }
 
 // Start поднимает каталог из файлового кеша и запускает автообновление.
-// Ответ Celestrak не ждём: сеть идёт в фоне и только для групп без кеша
-// или старше UpdateInterval. Так HTTP-сервер стартует, даже если источник недоступен.
+// Ответ сети не ждём: она идёт в фоне и только для кеша, которого нет
+// или который старше UpdateInterval. Так HTTP-сервер стартует, даже если источник недоступен.
 func (s *TLEStore) Start(ctx context.Context) error {
 	s.logger.InfoContext(ctx, "starting TLEStore",
 		"groups", s.config.Groups,
@@ -131,13 +165,24 @@ func (s *TLEStore) Start(ctx context.Context) error {
 	)
 
 	loaded := s.loadCachedGroups()
+	if s.spacetrack != nil {
+		s.loadCatalogCache()
+	}
 	need := s.groupsNeedingNetwork(loaded)
+	catalogStale := s.spacetrack != nil && s.catalogNeedsNetwork()
 	s.logger.InfoContext(ctx, "TLE cache loaded",
 		"count", s.Count(),
 		"refresh_groups", need,
 	)
+	if st := s.Status(time.Now()); st.Level != TLELevelOK {
+		s.logger.WarnContext(ctx, "TLE cache is outdated, passes may be inaccurate",
+			slog.String("level", string(st.Level)),
+			slog.Any("reasons", st.Reasons),
+			slog.Float64("median_age_h", st.MedianAgeHours),
+		)
+	}
 
-	go s.startUpdater(ctx, need)
+	go s.startUpdater(ctx, need, catalogStale)
 
 	return nil
 }
@@ -303,6 +348,10 @@ func (s *TLEStore) loadGroups(ctx context.Context, groups []string) error {
 // Ключ карты — имя группы в нижнем регистре, значение — сколько TLE прочитано.
 func (s *TLEStore) loadCachedGroups() map[string]int {
 	loaded := make(map[string]int, len(s.config.Groups))
+	meta, metaErr := s.loadCacheMeta()
+	if metaErr != nil {
+		meta = &CacheMeta{}
+	}
 	for _, group := range s.config.Groups {
 		tles, err := s.loadGroupFromCache(group)
 		if err != nil {
@@ -321,6 +370,10 @@ func (s *TLEStore) loadCachedGroups() map[string]int {
 		for _, tle := range tles {
 			s.addInternal(tle, group)
 		}
+		s.setFetch(group, func(f *groupFetch) {
+			f.source = TLESourceCache
+			f.fetchedAt = meta.Groups[strings.ToLower(group)].UpdatedAt
+		})
 		s.mu.Unlock()
 		loaded[strings.ToLower(group)] = len(tles)
 		s.logger.Info("loaded TLE group from cache",
@@ -377,6 +430,10 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 			"group", group,
 			slogKeyError, err,
 		)
+		fetchErr := err.Error()
+		s.mu.Lock()
+		s.setFetch(group, func(f *groupFetch) { f.lastErr = fetchErr })
+		s.mu.Unlock()
 
 		// Fallback на файловый кеш
 		tles, err = s.loadGroupFromCache(group)
@@ -402,11 +459,30 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 		}
 	}
 
+	var cachedAt time.Time
+	if fromCache {
+		if meta, metaErr := s.loadCacheMeta(); metaErr == nil {
+			cachedAt = meta.Groups[strings.ToLower(group)].UpdatedAt
+		}
+	}
+
 	// Добавляем TLE в хранилище
 	s.mu.Lock()
 	for _, tle := range tles {
 		s.addInternal(tle, group)
 	}
+	s.setFetch(group, func(f *groupFetch) {
+		if fromCache {
+			f.source = TLESourceCache
+			if f.fetchedAt.IsZero() {
+				f.fetchedAt = cachedAt
+			}
+			return
+		}
+		f.source = TLESourceCelestrak
+		f.fetchedAt = time.Now()
+		f.lastErr = ""
+	})
 	s.mu.Unlock()
 
 	if !fromCache {
@@ -423,6 +499,13 @@ func (s *TLEStore) LoadGroup(ctx context.Context, group string) error {
 func (s *TLEStore) addInternal(tle *TLE, group string) {
 	if tle == nil {
 		return
+	}
+	if s.namer != nil {
+		if name := s.namer(tle.NoradID, tle.Name); name != tle.Name {
+			renamed := *tle
+			renamed.Name = name
+			tle = &renamed
+		}
 	}
 
 	// Добавляем/обновляем в каталоге
@@ -450,15 +533,25 @@ func (s *TLEStore) addToIndex(index map[string][]int, key string, id int) {
 	index[key] = append(ids, id)
 }
 
-// startUpdater сначала добирает устаревшие группы, затем обновляет каталог по таймеру.
-func (s *TLEStore) startUpdater(ctx context.Context, initial []string) {
+// startUpdater сначала добирает устаревшее, затем обновляет каталог по таймеру.
+// С учёткой Space-Track сеть при старте нужна только для устаревшего файла каталога:
+// группы тогда — запасной путь и сами по себе Celestrak не дёргают.
+func (s *TLEStore) startUpdater(ctx context.Context, initial []string, catalogStale bool) {
 	defer close(s.doneCh)
 
-	if len(initial) > 0 {
+	switch {
+	case s.spacetrack != nil:
+		if catalogStale {
+			s.logger.InfoContext(ctx, "refreshing TLE catalog from network")
+			s.refresh(ctx, initial)
+			s.notifyRefresh()
+		}
+	case len(initial) > 0:
 		s.logger.InfoContext(ctx, "refreshing TLE from network", "groups", initial)
 		if err := s.loadGroups(ctx, initial); err != nil && ctx.Err() == nil {
 			s.logger.WarnContext(ctx, "initial TLE refresh had errors", slogKeyError, err)
 		}
+		s.notifyRefresh()
 	}
 
 	ticker := NewSafeTicker(s.config.UpdateInterval)
@@ -474,11 +567,56 @@ func (s *TLEStore) startUpdater(ctx context.Context, initial []string) {
 			return
 		case <-ticker.C:
 			s.logger.InfoContext(ctx, "starting scheduled TLE update")
-			if err := s.LoadAllGroups(ctx); err != nil && ctx.Err() == nil {
-				s.logger.WarnContext(ctx, "scheduled TLE update had errors", slogKeyError, err)
-			}
+			s.refresh(ctx, s.config.Groups)
+			s.notifyRefresh()
 		}
 	}
+}
+
+// notifyRefresh зовёт колбэк SetOnRefresh, если он задан.
+func (s *TLEStore) notifyRefresh() {
+	if s.onRefresh != nil {
+		s.onRefresh()
+	}
+}
+
+// notifyProgress зовёт колбэк SetOnProgress, если он задан.
+func (s *TLEStore) notifyProgress() {
+	if s.onProgress != nil {
+		s.onProgress()
+	}
+}
+
+// beginLoad включает индикатор загрузки фазы (пачки 0 из total).
+func (s *TLEStore) beginLoad(phase string, total int) {
+	s.mu.Lock()
+	s.loading = true
+	s.loadPhase = phase
+	s.loadDone = 0
+	s.loadTotal = total
+	s.mu.Unlock()
+	s.notifyProgress()
+}
+
+// reportLoadProgress обновляет счётчик завершённых пачек.
+func (s *TLEStore) reportLoadProgress(done, total int) {
+	s.mu.Lock()
+	s.loading = true
+	s.loadDone = done
+	s.loadTotal = total
+	s.mu.Unlock()
+	s.notifyProgress()
+}
+
+// endLoad снимает индикатор загрузки.
+func (s *TLEStore) endLoad() {
+	s.mu.Lock()
+	s.loading = false
+	s.loadPhase = ""
+	s.loadDone = 0
+	s.loadTotal = 0
+	s.mu.Unlock()
+	s.notifyProgress()
 }
 
 // SafeTicker обёртка над time.Ticker для безопасного использования.

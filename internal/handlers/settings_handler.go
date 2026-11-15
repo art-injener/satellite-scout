@@ -83,12 +83,14 @@ func (h *SettingsHandler) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	err := h.store.Update(func(c *config.Config) error {
-		// Полная замена всего конфига, кроме runtime DevMode (его нет в JSON) и пароля мастера:
-		// модалка его не получает, а меняется он только правкой файла.
+		// Полная замена всего конфига, кроме runtime-полей DevMode и SpaceTrack (их нет в JSON)
+		// и пароля мастера: модалка его не получает, а меняется он только правкой файла.
 		dev := c.DevMode
+		spaceTrack := c.SpaceTrack
 		password := c.Server.MasterPassword
 		*c = incoming
 		c.DevMode = dev
+		c.SpaceTrack = spaceTrack
 		c.Server.MasterPassword = password
 		return nil
 	})

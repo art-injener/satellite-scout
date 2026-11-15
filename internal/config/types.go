@@ -1,6 +1,9 @@
 package config
 
-import "time"
+import (
+	"log/slog"
+	"time"
+)
 
 // CurrentVersion — текущая версия схемы файла конфигурации.
 // Используется для миграций: при чтении файла сравниваем с этим значением и при
@@ -38,6 +41,33 @@ type Config struct {
 	// DevMode — режим разработки: шаблоны и статика читаются с диска. В production
 	// (Docker) — embed.FS. Не сериализуется, читается только из env SCOUT_DEV_MODE.
 	DevMode bool `json:"-"`
+
+	// SpaceTrack — учётка Space-Track из окружения или .env. Не сериализуется.
+	SpaceTrack SpaceTrackCredentials `json:"-"`
+}
+
+// SpaceTrackCredentials — логин и пароль Space-Track. Пароль не попадает ни в JSON, ни в лог.
+type SpaceTrackCredentials struct {
+	Identity string
+	Password string
+}
+
+// Enabled сообщает, что пара задана целиком.
+func (c SpaceTrackCredentials) Enabled() bool {
+	return c.Identity != "" && c.Password != ""
+}
+
+// String скрывает учётку при печати через fmt.
+func (c SpaceTrackCredentials) String() string {
+	if c.Enabled() {
+		return "space-track credentials: set"
+	}
+	return "space-track credentials: not set"
+}
+
+// LogValue скрывает учётку в slog: виден только факт, что она задана.
+func (c SpaceTrackCredentials) LogValue() slog.Value {
+	return slog.BoolValue(c.Enabled())
 }
 
 // ServerConfig — настройки HTTP-сервера.

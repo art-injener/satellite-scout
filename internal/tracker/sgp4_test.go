@@ -82,6 +82,27 @@ func TestNewPropagator(t *testing.T) {
 }
 
 // TestNewPropagatorFromParsedTLE проверяет создание Propagator из распарсенного TLE.
+// go-satellite вызывает log.Fatal на буквенном номере: тест падает вместе с процессом, если обхода нет.
+func TestNewPropagator_Alpha5NoradDoesNotExitProcess(t *testing.T) {
+	l1 := makeTLELineTest("1 A0469U 24001A   26316.50000000  .00016717  00000-0  10270-3 0  999")
+	l2 := makeTLELineTest("2 A0469  51.6400 247.4627 0006703 130.5360 325.0288 15.4981557142340")
+	tle, err := ParseTLE([]string{"ALPHA5 SAT", l1, l2})
+	if err != nil {
+		t.Fatalf("ParseTLE: %v", err)
+	}
+	if tle.NoradID != 100469 {
+		t.Fatalf("NoradID = %d, want 100469", tle.NoradID)
+	}
+
+	prop, err := NewPropagator(tle)
+	if err != nil {
+		t.Fatalf("NewPropagator: %v", err)
+	}
+	if _, err := prop.Propagate(tle.Epoch.Add(time.Hour)); err != nil {
+		t.Fatalf("Propagate: %v", err)
+	}
+}
+
 func TestNewPropagatorFromParsedTLE(t *testing.T) {
 	t.Parallel()
 
