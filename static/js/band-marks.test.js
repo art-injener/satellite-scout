@@ -119,6 +119,31 @@ test('RDS station fills transmitter; wfm suggests FM broadcast demod', () => {
     assert.ok(title.indexOf('Положение\tЗемля') > 0, title);
 });
 
+test('demod row joins alternatives with "или" and knows the data profiles', () => {
+    const title = markTitle({
+        center_hz: 436500000, bandwidth_hz: 15000, snr_db: 14,
+        origin: 'satellite', emission: 'pulsed',
+        structure: {
+            modulation: '2fsk', confidence: 0.8, demod: 'fsk9600_g3ruh',
+            demod_alt: ['fsk9600_geoscan'], params: { baud: 9600 },
+        },
+        stats: {},
+    }, null);
+    assert.ok(title.indexOf('Демодулятор\tFSK 9600 G3RUH или FSK 9600 GEOSCAN') > 0, title);
+    const ook = markTitle({
+        center_hz: 433920000, bandwidth_hz: 4000, origin: 'terrestrial', emission: 'pulsed',
+        structure: { modulation: 'ook', demod: 'ook', params: { baud: 2000 } },
+        stats: {},
+    }, null);
+    assert.ok(ook.indexOf('Демодулятор\tOOK') > 0, ook);
+});
+
+test('amateur_data has a service code on the marker', () => {
+    assert.strictEqual(markCode({
+        structure: { modulation: '2fsk', service: 'amateur_data', service_label: 'Радиопередатчик', params: { baud: 9600 } },
+    }), '2FSK 9600/Пер.');
+});
+
 test('transmitter falls back to broadcast service_label when station is empty', () => {
     const title = markTitle({
         center_hz: 104100000, bandwidth_hz: 180000, emission: 'continuous',

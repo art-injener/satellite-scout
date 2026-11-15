@@ -460,7 +460,7 @@
                         <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-marks" aria-pressed="true"
                                 title="Обнаруженные сигналы над водопадом: показать или скрыть. Риски передатчиков на спектре остаются">Маркеры</button>
                         <button type="button" class="ml-spec-mode__btn ml-spec-mode__reset" id="manual-spec-zoom-reset" disabled
-                                title="Вся полоса приёмника. Масштаб — колесом над спектром. Перетаскивание крутит частоту и в увеличении">1:1</button>
+                                title="Вся полоса приёмника. Масштаб — колесом над спектром. Перетаскивание везёт сигнал к полоске демодулятора, частота уходит при отпускании кнопки">1:1</button>
                     </div>
                 </div>
                 <div class="ml-spectrum__scale-wrap">
@@ -518,13 +518,6 @@
                         <ol class="ml-pics__list" id="manual-pics-list" aria-label="Принятые снимки"></ol>
                     </div>
                     <div class="ml-demod__result-view ml-demod__result-view--chart" data-view="chart">
-                        <div class="ml-eye__canvas-wrap">
-                            <div class="ml-eye__overlay" aria-label="Переключатель диаграммы">
-                                <div class="ml-eye__tabs" id="manual-eye-tabs" role="tablist"></div>
-                                <button type="button" class="ml-eye__auto" id="manual-eye-auto" title="Следует за полем «Демодулятор» в настройках">auto</button>
-                            </div>
-                            <canvas id="manual-eye-canvas" class="ml-canvas" role="img" aria-label="Диаграмма качества демодуляции"></canvas>
-                        </div>
                         <div class="ml-demod__profile">
                             <canvas id="manual-pass-profile-canvas" class="ml-canvas" role="img" aria-label="Профиль пролёта: угол места и доплер по времени"></canvas>
                         </div>
@@ -735,6 +728,9 @@
                     <div class="ml-strip__track" id="manual-dm-strip"></div>
                     <span class="ml-strip__axis">сейчас</span>
                 </div>
+                <button class="ml-rx-panel__btn-info" type="button" id="manual-demod-info"
+                        aria-haspopup="dialog" aria-controls="demod-info-modal"
+                        title="Статистика и графики демодулятора: почему нет приёма">Информация</button>
             </div>
 
             <!-- Запись IQ: папка правится, пока не пишем; имя файла (канал + время

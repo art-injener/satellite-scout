@@ -907,8 +907,9 @@
 
 .ml-demod-switch__word--on { opacity: 0; }
 
-.ml-demod-switch:has(input:checked) .ml-demod-switch__word--off { opacity: 0; }
-.ml-demod-switch:has(input:checked) .ml-demod-switch__word--on {
+/* Соседний селектор, не :has: положение видно и там, где :has нет. */
+.ml-demod-switch input:checked ~ .ml-demod-switch__state .ml-demod-switch__word--off { opacity: 0; }
+.ml-demod-switch input:checked ~ .ml-demod-switch__state .ml-demod-switch__word--on {
     opacity: 1;
     color: var(--accent-success);
 }
@@ -928,8 +929,8 @@
     border-color: var(--accent-primary);
 }
 
-.ml-demod-switch:has(input:checked) .ml-demod-switch__track,
-.ml-demod-switch:has(input:checked):hover .ml-demod-switch__track {
+.ml-demod-switch input:checked ~ .ml-demod-switch__track,
+.ml-demod-switch:hover input:checked ~ .ml-demod-switch__track {
     border-color: var(--accent-success);
 }
 
@@ -944,12 +945,12 @@
     transition: transform 0.12s ease;
 }
 
-.ml-demod-switch:has(input:checked) .ml-demod-switch__knob {
+.ml-demod-switch input:checked ~ .ml-demod-switch__track .ml-demod-switch__knob {
     background: var(--accent-success);
     transform: translateX(16px);
 }
 
-.ml-demod-switch:has(input:focus-visible) .ml-demod-switch__track {
+.ml-demod-switch input:focus-visible ~ .ml-demod-switch__track {
     outline: 1px solid var(--border-focus);
     outline-offset: 2px;
 }
@@ -1557,6 +1558,30 @@
 }
 
 .ml-rx-panel__btn-apply:hover:not(:disabled) {
+    background: var(--accent-success);
+    color: var(--bg-primary);
+}
+
+/* Кнопка «Информация» — модалка диагностики демодулятора.
+   Во всю ширину колонки и зелёная, как «Установить». */
+.ml-rx-panel__btn-info {
+    flex-shrink: 0;
+    width: 100%;
+    height: var(--ml-row-h, 30px);
+    border: 1px solid var(--accent-success);
+    color: var(--accent-success);
+    background: transparent;
+    border-radius: 3px;
+    padding: 0 12px;
+    font-family: var(--font-mono);
+    font-size: var(--ml-fs-label, 13px);
+    font-weight: 700;
+    text-transform: uppercase;
+    cursor: pointer;
+    transition: background 0.12s, color 0.12s;
+}
+
+.ml-rx-panel__btn-info:hover {
     background: var(--accent-success);
     color: var(--bg-primary);
 }
@@ -3324,4 +3349,212 @@ table.ml-air__grid tbody tr.is-current {
     .ml-rot__cols {
         gap: 10px;
     }
+}
+
+/* ───────────── Модалка «Информация» по демодулятору ───────────── */
+
+.demod-info {
+    position: fixed;
+    inset: 0;
+    z-index: 1200;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.demod-info[hidden] {
+    display: none;
+}
+
+.demod-info__backdrop {
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+}
+
+.demod-info__window {
+    position: relative;
+    background: var(--bg-primary, #1b232c);
+    color: var(--text-primary, #e6ebf2);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    border-radius: 6px;
+    width: min(90vw, 1100px);
+    max-height: 88vh;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+}
+
+.demod-info__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border-color, rgba(255, 255, 255, 0.08));
+}
+
+.demod-info__title {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--text-heading, #f0f4f8);
+}
+
+.demod-info__close {
+    background: transparent;
+    border: none;
+    color: var(--text-muted, #8a96a4);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 2px 8px;
+    border-radius: 3px;
+}
+
+.demod-info__close:hover {
+    color: var(--text-primary, #e6ebf2);
+    background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+}
+
+.demod-info__header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.demod-info__help-btn {
+    background: transparent;
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.12));
+    color: var(--text-muted, #8a96a4);
+    font-size: 12px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 3px;
+}
+
+.demod-info__help-btn:hover,
+.demod-info__help-btn[aria-expanded="true"] {
+    color: var(--text-primary, #e6ebf2);
+    border-color: var(--accent-color, #5fbcd3);
+}
+
+.demod-info__guide {
+    padding: 10px 12px;
+    background: var(--bg-secondary, #232c36);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+    border-radius: 4px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--text-primary, #e6ebf2);
+}
+
+.demod-info__guide[hidden] {
+    display: none;
+}
+
+.demod-info__guide-lead {
+    margin: 0;
+}
+
+.demod-info__guide-list {
+    margin: 8px 0 0;
+}
+
+.demod-info__guide-list dt {
+    margin-top: 6px;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted, #8a96a4);
+}
+
+.demod-info__guide-list dd {
+    margin: 1px 0 0;
+}
+
+.demod-info__body {
+    padding: 16px 20px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+}
+
+.demod-info__metrics {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 8px;
+}
+
+.demod-info__metric {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 6px 10px;
+    background: var(--bg-secondary, #232c36);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+    border-radius: 4px;
+}
+
+.demod-info__metric-label {
+    font-size: 11px;
+    color: var(--text-muted, #8a96a4);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.demod-info__metric-value {
+    font-family: var(--font-mono, monospace);
+    font-size: 14px;
+    color: var(--text-primary, #e6ebf2);
+}
+
+.demod-info__diag {
+    margin: 0;
+    padding: 8px 12px;
+    border-radius: 4px;
+    font-size: 13px;
+    border-left: 3px solid var(--text-muted, #8a96a4);
+    background: var(--bg-secondary, #232c36);
+}
+
+.demod-info__diag--ok { border-left-color: var(--accent-success, #5fb05f); }
+.demod-info__diag--warn { border-left-color: var(--accent-warning, #e0a040); }
+.demod-info__diag--bad { border-left-color: var(--accent-danger, #e05f5f); }
+.demod-info__diag--idle { border-left-color: var(--text-muted, #8a96a4); }
+
+.demod-info__charts {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 10px;
+}
+
+.demod-info__chart {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.demod-info__chart-title {
+    font-size: 11px;
+    color: var(--text-muted, #8a96a4);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.demod-info__canvas {
+    width: 100%;
+    height: 104px;
+    background: var(--spectrum-instrument-bg, #2a3440);
+    border: 1px solid var(--border-color, rgba(255, 255, 255, 0.06));
+    border-radius: 4px;
+    display: block;
+}
+
+.demod-info__eye .ml-eye__canvas-wrap {
+    height: 220px;
 }

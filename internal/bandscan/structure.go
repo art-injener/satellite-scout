@@ -290,7 +290,7 @@ func applyOrigin(r signalclass.Result, origin string) signalclass.Result {
 			r.Service = signalclass.ServiceSatVoice
 			r.ServiceLabel = satLabel(signalclass.LabelTransmitter, q)
 			r.ServiceBasis = signalclass.BasisSignature
-		case signalclass.Mod2FSK:
+		case signalclass.Mod2FSK, signalclass.ModAFSK, signalclass.ModCW, signalclass.ModOOK:
 			r.Service = signalclass.ServiceSatTx
 			r.ServiceLabel = satLabel(signalclass.LabelTransmitter, q)
 			r.ServiceBasis = signalclass.BasisSignature

@@ -65,6 +65,13 @@
     const MIN_ZOOM_BINS = 32;
     /** Масштаб на пиксель прокрутки колеса: щелчок колеса (100) даёт примерно ×1,2. */
     const WHEEL_ZOOM_RATE = 0.002;
+    /**
+     * Горизонтальной прокруткой считаем жест, у которого смещение по X больше
+     * вертикального в столько раз. Иначе шум второй оси перестраивает приёмник.
+     */
+    const WHEEL_PAN_RATIO = 2;
+    /** Как часто промотка шлёт частоту приёмнику, пока жест ещё идёт. */
+    const SCRUB_TUNE_MS = 150;
     const MARKER_EMPTY = '—';
     /** Допуск наведения: сверх него рассогласование подсвечивается, градусы. */
     const POINTING_TOLERANCE_DEG = 2;
@@ -289,6 +296,19 @@
          * Пока кадр потока не догнал это значение, старый центр регулятор не возвращает.
          */
         this._scrubHz = null;
+        /** Таймер отложенной перестройки: пока идёт, копится последняя частота. */
+        this._scrubTimer = null;
+        /** Раньше этого момента промотка новую частоту не шлёт. */
+        this._scrubNotBefore = 0;
+        /** Жест уже отпущен: догон частоты не ждёт паузу. */
+        this._scrubFlush = false;
+        /** Кнопка ещё зажата: приёмник ждёт отпускания, картинка едет за указателем. */
+        this._scrubHold = false;
+        /** Один кадр экрана на пачку движений указателя, чтобы водопад не дёргался. */
+        this._scrubVisRaf = 0;
+        this._scrubVisBefore = null;
+        /** Последняя линия спектра в долях шкалы, на всю полосу кадра. Для сдвига без нового кадра. */
+        this._lastLine = null;
         this._offAccess = null;
         this._accessPanel = null;
         this._panorama = null;
@@ -297,7 +317,7 @@
         this._demodPanel = null;
         this._tmiTable = null;
         this._gallery = null;
-        this._eyeView = null;
+        this._demodInfoModal = null;
         this._onPanoramaTune = null;
 
         this._activeTab = 'spectrum';
@@ -361,6 +381,15 @@
         this._rxPanelRoot = null;
         /** Поля колонки приёмника, которые «Установить» отправляет на сервер. */
         this._rxFields = null;
+        /** Выключатель демодулятора с сервера: null, пока статус не пришёл. */
+        this._serverDemodOff = null;
+        this._demodHydrated = false;
+        /** Оператор переключил выключатель, и сервер ещё не подтвердил. */
+        this._demodToggleDirty = false;
+        /** Правка канала до первого статуса: уйдёт, когда станет известен выключатель. */
+        this._demodApplyQueued = false;
+        this._rxApplyTimer = null;
+        this._demodApplyTimer = null;
         /** Кнопки −/+ у усиления, сдвига и порога. В режиме просмотра они недоступны. */
         this._rxStepButtons = [];
         this._stepRepeatTimer = null;
@@ -408,7 +437,6 @@
         this._initAirTable();
         this._initProductGallery();
         this._initDemodEvents();
-        this._initEyeConstellation();
         this._initRxPanel();
         this._subscribeState();
     }
@@ -553,9 +581,6 @@
         if (this._activeTab === 'spectrum') {
             if (this._fft) { this._fft._resize(); }
             if (this._wf) { this._wf.refresh(); }
-            if (this._eyeView && typeof this._eyeView.refresh === 'function') {
-                this._eyeView.refresh();
-            }
             if (this._resultView === 'chart' && this._passProfile) {
                 this._passProfile.draw();
             }
@@ -1043,9 +1068,6 @@
         if (view !== 'chart') { return; }
         // Вид «Диаграмма»: глазковая диаграмма и профиль пролёта рядом
         requestAnimationFrame(function() {
-            if (self._eyeView && typeof self._eyeView._resize === 'function') {
-                self._eyeView._resize();
-            }
             if (self._passProfile) { self._passProfile.draw(); }
         });
     };
@@ -1191,21 +1213,30 @@
         this._bindNumericFields();
         this._on(agc, 'click', function() {
             self._setAgc(agc.getAttribute('aria-pressed') !== 'true');
+            self._flushSettings('receiver');
         });
         this._on(this._rxPipelineSelect, 'change', function() {
             self._applyBandwidthLimit();
             self._syncEyeFromPipeline();
+            self._flushSettings('demod');
         });
         this._on(this._rxFields.apply, 'click', function() {
-            self._applyReceiverSettings();
+            self._flushSettings('receiver');
         });
         this._on(this._rxFields.applyDemod, 'click', function() {
             self._syncEyeFromPipeline();
-            self._applyDemodSettings();
+            self._flushSettings('demod');
         });
-        // Ширина столбца на спектре следует за списком сразу, до «Установить».
-        this._on(this._rxFields.bandwidth, 'change', function() { self._syncChannelOverlay(); });
-        this._on(this._rxFields.doppler, 'change', function() { self._syncDopplerEntry(); });
+        // Список и кнопка уходят сразу. Набор числа ждёт паузу, «Установить» отправляет не дожидаясь её.
+        this._on(this._rxFields.span, 'change', function() { self._flushSettings('receiver'); });
+        this._on(this._rxFields.bandwidth, 'change', function() {
+            self._syncChannelOverlay();
+            self._flushSettings('demod');
+        });
+        this._on(this._rxFields.doppler, 'change', function() {
+            self._syncDopplerEntry();
+            self._flushSettings('demod');
+        });
         this._syncDopplerEntry();
 
         this._syncEyeFromPipeline();
@@ -1299,6 +1330,9 @@
             const next = filterNumericText(input.value, spec.kind);
             if (input.value !== next) { input.value = next; }
         });
+        // Усиление — приёмник, сдвиг и порог — демодулятор. Пауза в наборе схлопывает символы в один запрос.
+        const applyKind = spec.kind === 'gain' ? 'receiver' : 'demod';
+        this._on(input, 'input', function() { self._scheduleSettings(applyKind); });
         this._on(input, 'keydown', function(e) { self._onNumericKey(input, spec, e); });
         if (!input.id) { return; }
         this._bindStepButton(document.getElementById(input.id + '-dec'), input, spec, -1);
@@ -1452,6 +1486,33 @@
     };
 
     /**
+     * Отложенная отправка секции. Повторный ввод сбрасывает ожидание, уходит последнее значение.
+     * @param {'receiver'|'demod'} kind
+     */
+    ManualLayout.prototype._scheduleSettings = function(kind) {
+        const key = kind === 'receiver' ? '_rxApplyTimer' : '_demodApplyTimer';
+        const self = this;
+        if (this[key]) { clearTimeout(this[key]); }
+        this[key] = setTimeout(function() {
+            self[key] = null;
+            self._flushSettings(kind);
+        }, ManualLayout.applyDebounceMs);
+    };
+
+    /**
+     * Отправка секции сразу. Сбрасывает ожидающий набор, чтобы он не ушёл вторым запросом.
+     * @param {'receiver'|'demod'} kind
+     */
+    ManualLayout.prototype._flushSettings = function(kind) {
+        const key = kind === 'receiver' ? '_rxApplyTimer' : '_demodApplyTimer';
+        if (this[key]) {
+            clearTimeout(this[key]);
+            this[key] = null;
+        }
+        if (kind === 'receiver') { this._applyReceiverSettings(); } else { this._applyDemodSettings(); }
+    };
+
+    /**
      * «Установить» секции «Приёмник»: частота, полоса и усиление.
      * Демодулятор не трогает. SET на индикаторе по-прежнему шлёт только частоту.
      */
@@ -1497,13 +1558,14 @@
      * Порог сервер держит в dBFS. На экране он в dBm, если усиление уже известно,
      * и переводится по этому усилению, а не по ещё не отправленному.
      */
-    ManualLayout.prototype._applyDemodSettings = function() {
+    ManualLayout.prototype._applyDemodSettings = function(fromQueue) {
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
         if (ac && !ac.canControl()) {
             ac.setNotice('Менять настройки демодулятора можно только в режиме «Контроль».');
             return;
         }
-        if (!this._confirmBreakReception('Смена профиля или полосы канала')) {
+        // Повтор из очереди уже спрашивал, пока статус не пришёл.
+        if (!fromQueue && !this._confirmBreakReception('Смена профиля или полосы канала')) {
             return;
         }
         const path = this._radioPathName();
@@ -1517,6 +1579,12 @@
             return;
         }
         if (this._levelOffset !== null) { squelch -= this._levelOffset; }
+        // Выключенный по умолчанию переключатель ещё не знает сервер. Не гасим им приём.
+        const box = document.getElementById('manual-rx-channel-show');
+        if (box && !this._demodHydrated && !this._demodToggleDirty) {
+            this._demodApplyQueued = true;
+            return;
+        }
 
         const self = this;
         const cal = this._calibrationDb();
@@ -1526,7 +1594,7 @@
             bandwidth_hz: Number(selectedValue(f.bandwidth)),
             squelch_dbfs: Number(squelch.toFixed(1)),
             demod: selectedValue(f.demod),
-            demod_off: !demodChecked(),
+            demod_off: this._demodOffForApply(),
             doppler_norad: this._dopplerNorad(),
             doppler_auto: selectedValue(f.doppler) === 'auto',
             doppler_manual_hz: Math.round(manualHz),
@@ -1618,7 +1686,11 @@
             this._applyReceiverStatus(st.radio_path, this._calibrationDb(), { gain_db: st.gain_db, channel: ch });
             return;
         }
-        if (channelKey(ch) === this._serverChannel) { return; }
+        if (channelKey(ch) === this._serverChannel) {
+            // Настройки те же, но выключатель мог остаться в положении из разметки.
+            this._showDemodSwitch(!!ch.demod_off);
+            return;
+        }
         this._fillReceiverFields({ channel: ch });
     };
 
@@ -1627,6 +1699,32 @@
             ch.doppler_norad || 0, ch.doppler_auto === true ? 1 : ch.doppler_auto === false ? 0 : '',
             ch.doppler_manual_hz].join('|');
     }
+
+    /**
+     * Что писать в demod_off. После статуса это значение сервера, пока оператор сам не переключил.
+     * @returns {boolean}
+     */
+    ManualLayout.prototype._demodOffForApply = function() {
+        if (this._demodToggleDirty) { return !demodChecked(); }
+        if (typeof this._serverDemodOff === 'boolean') { return this._serverDemodOff; }
+        return !demodChecked();
+    };
+
+    /**
+     * Выключатель по статусу сервера. Пока запрос переключения в пути, положение не затирается.
+     * Поле demod_off в ответе пропущено, когда демодулятор включён.
+     * @param {boolean} off
+     */
+    ManualLayout.prototype._showDemodSwitch = function(off) {
+        this._serverDemodOff = !!off;
+        this._demodHydrated = true;
+        // Статус сервера задаёт положение. Свой щелчок до статуса не остаётся на экране.
+        this._demodToggleDirty = false;
+        const box = document.getElementById('manual-rx-channel-show');
+        if (!box) { return; }
+        box.checked = !off;
+        if (this._chanOverlay) { this._chanOverlay.setVisible(box.checked); }
+    };
 
     /** Галочка в заголовке «Демодулятор»: включена, пока сервер не сказал обратное. */
     function demodChecked() {
@@ -1656,6 +1754,13 @@
         const ch = st.channel;
         if (!ch) { return; }
         this._serverChannel = channelKey(ch);
+        this._showDemodSwitch(!!ch.demod_off);
+        if (this._demodApplyQueued) {
+            // Поля оператора важнее пришедшего статуса: уходит его правка и выключатель сервера.
+            this._demodApplyQueued = false;
+            this._applyDemodSettings(true);
+            return;
+        }
         if (f.dopplerHz && typeof ch.doppler_manual_hz === 'number') {
             f.dopplerHz.value = String(ch.doppler_manual_hz);
         }
@@ -1674,11 +1779,7 @@
             selectByValue(f.doppler, 'auto');
         }
         this._syncDopplerEntry();
-        const mark = document.getElementById('manual-rx-channel-show');
-        if (mark) {
-            mark.checked = !ch.demod_off;
-            if (this._chanOverlay) { this._chanOverlay.setVisible(mark.checked); }
-        }
+        this._showDemodSwitch(!!ch.demod_off);
         this._syncChannelOverlay();
     };
 
@@ -1790,19 +1891,33 @@
                 self._tunePending--;
                 self._tuneFlight = false;
                 const queued = self._tuneQueuedMHz;
+                const flush = self._scrubFlush;
+                self._scrubFlush = false;
                 if (typeof queued === 'number' && Math.round(queued * 1e6) !== sentHz) {
+                    // Промотка не шлёт чаще паузы. Отпускание кнопки эту паузу не ждёт.
+                    if (self._scrubHz !== null && !flush && Date.now() < (self._scrubNotBefore || 0)) {
+                        self._armScrubTune();
+                        return;
+                    }
                     self._dispatchTune();
                 }
             });
     };
 
-    /** Регулятор на частоту приёмника из потока, если она уже известна. */
+    /** Регулятор и картинка на частоту приёмника из потока, если она уже известна. */
     ManualLayout.prototype._revertDial = function() {
+        const before = this._specWindow();
         this._scrubHz = null;
         this._tuneQueuedMHz = null;
+        if (this._scrubTimer) {
+            clearTimeout(this._scrubTimer);
+            this._scrubTimer = null;
+        }
         if (this._streamCenterHz === null) { return; }
         this._rxFreqMHz = this._streamCenterHz / 1e6;
         if (this._freqDial) { this._freqDial.setHz(this._streamCenterHz); }
+        this._commitSpecWindow(before);
+        this._repaintSpectrum();
     };
 
     // ── Права на управление приёмником ────────────────────────────────────
@@ -2032,6 +2147,7 @@
             this._stream = null;
         }
         this._streamPath = null;
+        this._lastLine = null;
         this._markerShownMs = null;
         this._showMarker(null);
     };
@@ -2043,6 +2159,11 @@
      */
     ManualLayout.prototype._onStreamFrame = function(frame) {
         const h = frame.header;
+        // Пока кнопку не отпустили, кадр с другой частоты не подменяет картинку:
+        // сигнал должен ехать за указателем, а не прыгать к промежуточной настройке.
+        if (this._scrubHold && this._streamCenterHz && h.centerHz && h.centerHz !== this._streamCenterHz) {
+            return;
+        }
         if (frame.values && frame.values.length > 1) { this._lastBins = frame.values.length; }
         this._applyStreamBand(h.centerHz, h.spanHz);
         this._showRbw(h.spanHz, this._lastBins);
@@ -2062,6 +2183,37 @@
             self._flushPendingFrame();
         });
     };
+
+    /**
+     * Кусок линии под текущее окно. Края за кадром добиваются padValue.
+     * @param {Float32Array|Array} values
+     * @param {?Object} sl
+     * @param {number} padValue
+     */
+    function sliceShown(values, sl, padValue) {
+        if (!sl || !values) { return values; }
+        const src = values.subarray
+            ? values.subarray(sl.start, sl.start + sl.count)
+            : values.slice(sl.start, sl.start + sl.count);
+        let left = sl.padLeft || 0;
+        let right = sl.padRight || 0;
+        if (left < 0) { right += left; left = 0; }
+        if (right < 0) { left += right; right = 0; }
+        if (left < 0) { left = 0; }
+        if (right < 0) { right = 0; }
+        if (!left && !right) { return src; }
+        const n = left + src.length + right;
+        if (typeof values.subarray === 'function') {
+            const out = new values.constructor(n);
+            out.fill(padValue);
+            out.set(src, left);
+            return out;
+        }
+        const out = new Array(n);
+        for (let i = 0; i < n; i++) { out[i] = padValue; }
+        for (let i = 0; i < src.length; i++) { out[left + i] = src[i]; }
+        return out;
+    }
 
     /** Отрисовка последнего отложенного кадра: сглаживание линии, шкала, FFT, водопад. */
     ManualLayout.prototype._flushPendingFrame = function() {
@@ -2087,35 +2239,18 @@
         const toUnit = window.SpectrumStream.dbfsToUnit;
         const line = toUnit(values, range.min, range.max);
         const heldLine = held ? toUnit(held, range.min, range.max) : null;
+        this._lastLine = line;
         // «Спектр» и водопад показывают окно масштаба, «Антенна» — всю полосу
         const win = this._specWindow();
         const sl = win && win.slice && win.slice.start + win.slice.count <= values.length ? win.slice : null;
-        const cut = function(a, padValue) {
-            if (!sl || !a) { return a; }
-            const src = a.subarray ? a.subarray(sl.start, sl.start + sl.count) : a.slice(sl.start, sl.start + sl.count);
-            const left = sl.padLeft || 0;
-            const right = sl.padRight || 0;
-            if (!left && !right) { return src; }
-            const n = left + src.length + right;
-            if (typeof a.subarray === 'function') {
-                const out = new a.constructor(n);
-                out.fill(padValue);
-                out.set(src, left);
-                return out;
-            }
-            const out = new Array(n);
-            for (let i = 0; i < n; i++) { out[i] = padValue; }
-            for (let i = 0; i < src.length; i++) { out[left + i] = src[i]; }
-            return out;
-        };
-        const shownDb = cut(values, -200);
+        const shownDb = sliceShown(values, sl, -200);
         this._cursorTrace = win && win.spanHz > 0
             ? { values: shownDb, centerHz: win.centerHz, spanHz: win.spanHz }
             : null;
         if (this._fft) {
-            if (heldLine) { this._fft.draw(cut(line, 0), cut(heldLine, 0)); } else { this._fft.draw(cut(line, 0)); }
+            if (heldLine) { this._fft.draw(sliceShown(line, sl, 0), sliceShown(heldLine, sl, 0)); } else { this._fft.draw(sliceShown(line, sl, 0)); }
         }
-        if (this._wf) { this._wf.pushLine(cut(line, 0)); }
+        if (this._wf) { this._wf.pushLine(sliceShown(line, sl, 0)); }
         if (this._cursorClientX !== null) { this._paintCursor(); }
         if (this._antFft && this._activeTab === 'antenna') {
             if (heldLine) { this._antFft.draw(line, heldLine); } else { this._antFft.draw(line); }
@@ -2127,7 +2262,7 @@
             let mk;
             if (sl) {
                 // Пик ищем в видимой части. Пустые края (Доплер увёл окно за полосу) не считаем сигналом.
-                const shown = cut(raw, -200);
+                const shown = sliceShown(raw, sl, -200);
                 if ((sl.padLeft || 0) || (sl.padRight || 0)) {
                     mk = window.SpectrumStream.markerReadout(shown, win.centerHz, win.spanHz);
                 } else {
@@ -2142,6 +2277,16 @@
         }
     };
 
+    /** Перерисовать линию спектра из последнего кадра под текущее окно, без новой строки водопада. */
+    ManualLayout.prototype._repaintSpectrum = function() {
+        const line = this._lastLine;
+        const fft = this._fft;
+        if (!line || !fft || typeof fft.draw !== 'function') { return; }
+        const win = this._specWindow();
+        const sl = win && win.slice && win.slice.start + win.slice.count <= line.length ? win.slice : null;
+        fft.draw(sliceShown(line, sl, 0));
+    };
+
     /**
      * Что видно на «Спектре»: центр и полоса графика, срез бинов кадра и центр
      * окна от центра приёмника. Без масштаба — вся полоса приёмника.
@@ -2153,18 +2298,26 @@
         if (!c) { return null; }
         const full = { centerHz: c, spanHz: s > 0 ? s : 0, offsetHz: 0, slice: null };
         if (!(s > 0) || !(this._lastBins > 1) || !window.SpectrumStream) { return full; }
+        const dop = demodChecked() ? (this._dopplerViewHz || 0) : 0;
+        // Промотка ещё не догнана кадром: окно смотрит на намеченную частоту,
+        // пустые края добиваются, пока приёмник не перестроится.
+        const scrubOff = this._scrubHz !== null ? this._scrubHz - c : 0;
+        if (scrubOff) {
+            const span = this._zoom ? this._zoom.spanHz : s;
+            const sl = window.SpectrumStream.shiftedSlice(this._lastBins, s, span, dop + scrubOff);
+            if (!sl) { return full; }
+            return { centerHz: c + dop + scrubOff, spanHz: span, offsetHz: dop + scrubOff, slice: sl };
+        }
         // Увеличение только сужает окно вокруг середины: столбца демодулятора
         // колесо не сдвигает, и после перестройки оно не прыгает обратно.
         if (this._zoom) {
-            const off = demodChecked() ? (this._dopplerViewHz || 0) : 0;
             const sl = window.SpectrumStream.viewSlice(this._lastBins, s, {
-                offsetHz: off, spanHz: this._zoom.spanHz,
+                offsetHz: dop, spanHz: this._zoom.spanHz,
             });
             return { centerHz: c + sl.offsetHz, spanHz: sl.spanHz, offsetHz: sl.offsetHz, slice: sl };
         }
-        const off = demodChecked() ? (this._dopplerViewHz || 0) : 0;
-        if (!off) { return full; }
-        const sl = window.SpectrumStream.shiftedSlice(this._lastBins, s, s, off);
+        if (!dop) { return full; }
+        const sl = window.SpectrumStream.shiftedSlice(this._lastBins, s, s, dop);
         if (!sl) { return full; }
         return { centerHz: c + sl.offsetHz, spanHz: sl.spanHz, offsetHz: sl.offsetHz, slice: sl };
     };
@@ -2184,7 +2337,10 @@
             if (spanMHz) { this._wf._freqSpanMHz = spanMHz; }
         }
         if (this._chanOverlay && typeof this._chanOverlay.setView === 'function') {
-            this._chanOverlay.setView(win.offsetHz, win.slice ? win.spanHz : 0);
+            // Столбец демодулятора остаётся посредине и пока частота только намечена.
+            const dop = demodChecked() ? (this._dopplerViewHz || 0) : 0;
+            const col = this._scrubHz !== null ? dop : win.offsetHz;
+            this._chanOverlay.setView(col, win.slice ? win.spanHz : 0);
         }
         if (this._txMarkers) { this._txMarkers.setView(win.offsetHz, win.slice ? win.spanHz : 0); }
         if (this._bandMarks) { this._bandMarks.setView(win.offsetHz, win.slice ? win.spanHz : 0); }
@@ -2199,6 +2355,15 @@
         const before = this._specWindow();
         this._zoom = view;
         this._showZoom();
+        this._commitSpecWindow(before);
+    };
+
+    /**
+     * Окно спектра уже сменилось. Подписи и водопад переезжают на новую шкалу,
+     * накопленные строки не стираются.
+     * @param {?Object} before — окно до смены
+     */
+    ManualLayout.prototype._commitSpecWindow = function(before) {
         const after = this._specWindow();
         if (!before || !after || (before.centerHz === after.centerHz && before.spanHz === after.spanHz)) { return; }
         this._applySpecView();
@@ -2214,7 +2379,7 @@
 
     /**
      * Колесо над спектром и водопадом: вертикальная прокрутка меняет масштаб
-     * вокруг середины, горизонтальная крутит приёмник на видимые герцы.
+     * вокруг середины, явная горизонтальная крутит приёмник на видимые герцы.
      */
     ManualLayout.prototype._onSpecWheel = function(e) {
         const full = this._streamSpanHz;
@@ -2229,7 +2394,9 @@
         // Строки и страницы прокрутки переводим в пиксели
         const unit = e.deltaMode === 1 ? 16 : (e.deltaMode === 2 ? plotW : 1);
         const SS = window.SpectrumStream;
-        if (Math.abs(e.deltaX) > Math.abs(e.deltaY)) {
+        const ax = Math.abs(e.deltaX || 0);
+        const ay = Math.abs(e.deltaY || 0);
+        if (ax > ay * WHEEL_PAN_RATIO) {
             this._panSpec(e.deltaX * unit * win.spanHz / plotW);
             return;
         }
@@ -2373,8 +2540,23 @@
     };
 
     /**
-     * Перемотка приёмника на dHz от уже намеченной частоты. Регулятор сразу
-     * показывает цель, запрос уходит без ожидания SET.
+     * Насколько можно увести центр картинки от центра кадра, Гц.
+     * Увеличенное окно ездит внутри полосы. На всей полосе любой видимый сигнал
+     * доезжает до центра, дальше кадра двигать некуда.
+     * @param {number} full
+     * @param {number} viewSpan
+     * @returns {number}
+     */
+    function scrubLimitHz(full, viewSpan) {
+        if (!(full > 0)) { return 0; }
+        const view = viewSpan > 0 && viewSpan < full ? viewSpan : full;
+        // Внутри полосы окно ездит до её края. Видимый сигнал при этом доезжает до центра.
+        return Math.max((full - view) / 2, view / 2);
+    }
+
+    /**
+     * Перемотка на dHz от уже намеченной частоты. Картинка едет за указателем,
+     * приёмник получает частоту только когда кнопку отпустили.
      * @param {number} dHz
      */
     ManualLayout.prototype._scrubTune = function(dHz) {
@@ -2385,11 +2567,76 @@
         }
         if (this._scrubHz === null && this._streamCenterHz === null) { return; }
         const base = this._scrubHz !== null ? this._scrubHz : this._streamCenterHz;
-        const next = Math.round(base + dHz);
+        let next = Math.round(base + dHz);
+        if (this._streamCenterHz) {
+            const viewSpan = this._zoom ? this._zoom.spanHz : this._streamSpanHz;
+            const limit = scrubLimitHz(this._streamSpanHz, viewSpan);
+            const dop = demodChecked() ? (this._dopplerViewHz || 0) : 0;
+            let total = dop + (next - this._streamCenterHz);
+            if (total > limit) { total = limit; }
+            if (total < -limit) { total = -limit; }
+            next = Math.round(this._streamCenterHz + (total - dop));
+        }
         if (!(next > 0) || next === base) { return; }
+        if (!this._scrubVisRaf) { this._scrubVisBefore = this._specWindow(); }
         this._scrubHz = next;
         this._rxFreqMHz = next / 1e6;
         if (this._freqDial) { this._freqDial.setHz(next); }
+        this._scheduleScrubVisual();
+        this._armScrubTune();
+    };
+
+    /** Сдвигает линию и водопад один раз за кадр экрана, на последнюю частоту жеста. */
+    ManualLayout.prototype._scheduleScrubVisual = function() {
+        if (this._scrubVisRaf) { return; }
+        const self = this;
+        this._scrubVisRaf = requestAnimationFrame(function() {
+            self._scrubVisRaf = 0;
+            self._flushScrubVisual();
+        });
+    };
+
+    /** Дорисовывает спектр под уже намеченную частоту. */
+    ManualLayout.prototype._flushScrubVisual = function() {
+        const before = this._scrubVisBefore;
+        this._scrubVisBefore = null;
+        if (before) { this._commitSpecWindow(before); }
+        this._repaintSpectrum();
+    };
+
+    /**
+     * Запоминает последнюю частоту промотки и шлёт её не чаще паузы.
+     * Пока кнопка зажата, не шлёт: перестройка посреди жеста подменяет картинку.
+     */
+    ManualLayout.prototype._armScrubTune = function() {
+        if (this._scrubHold) { return; }
+        this._tuneQueuedMHz = this._rxFreqMHz;
+        if (this._scrubTimer) { return; }
+        const wait = Math.max(0, (this._scrubNotBefore || 0) - Date.now());
+        const self = this;
+        this._scrubTimer = setTimeout(function() {
+            self._scrubTimer = null;
+            if (self._scrubHz === null) { return; }
+            self._scrubNotBefore = Date.now() + SCRUB_TUNE_MS;
+            self._requestTune(self._rxFreqMHz);
+        }, wait > 0 ? wait : SCRUB_TUNE_MS);
+    };
+
+    /** Кнопку отпустили: картинка доезжает до точки отпускания, уходит одна частота. */
+    ManualLayout.prototype._endSpecScrub = function() {
+        this._scrubHold = false;
+        if (this._scrubVisRaf) {
+            cancelAnimationFrame(this._scrubVisRaf);
+            this._scrubVisRaf = 0;
+            this._flushScrubVisual();
+        }
+        if (this._scrubTimer) {
+            clearTimeout(this._scrubTimer);
+            this._scrubTimer = null;
+        }
+        if (this._scrubHz === null) { return; }
+        this._scrubFlush = true;
+        this._scrubNotBefore = Date.now() + SCRUB_TUNE_MS;
         this._requestTune(this._rxFreqMHz);
     };
 
@@ -2426,12 +2673,15 @@
             this._showZoom();
         }
         this._applySpecView();
+        // Промотка уже сдвинула историю на намеченную частоту. Кадр со старым
+        // или промежуточным центром её не стирает.
+        const keepHistory = this._scrubHz !== null && !spanChanged;
         if (this._wf && (changed || spanChanged)) {
             if (first) {
                 // Шкала нарисована по заглушке. Первый кадр водопад не чистит,
                 // поэтому подписи частот перерисовываем отдельно.
                 this._wf.refresh();
-            } else {
+            } else if (!keepHistory) {
                 this._wf.clear();
                 if (this._active) { this._wf.start(); }
             }
@@ -2520,9 +2770,10 @@
     };
 
     ManualLayout.prototype._syncEyeFromPipeline = function() {
-        if (!this._eyeView) { return; }
+        // Eye/constellation переехал в модалку «Информация»: модуляцию передаём туда.
+        if (!this._demodInfoModal) { return; }
         const pipeline = this._getPipelineLabel();
-        if (pipeline) { this._eyeView.setModulation(pipeline); }
+        if (pipeline) { this._demodInfoModal.setEyeModulation(pipeline); }
     };
 
     // ── Инициализация виджетов ────────────────────────────────────────────
@@ -2645,7 +2896,11 @@
                 clickTargets: [this._fftCanvas, this._wfCanvas],
                 marginLeft: this._fft ? this._fft._marginLeft : 32,
                 marginRight: this._fft ? this._fft._marginRight : 4,
-                onPan: function(dHz) { self._panSpec(dHz); },
+                onPan: function(dHz) {
+                    self._scrubHold = true;
+                    self._panSpec(dHz);
+                },
+                onPanEnd: function() { self._endSpecScrub(); },
             });
         }
         if (specWrap && typeof window.TxMarkers === 'function') {
@@ -2798,6 +3053,7 @@
 
     /** Выключатель уходит сразу, не дожидаясь «Установить». Без прав переключатель возвращается. */
     ManualLayout.prototype._setDemodOff = function(off) {
+        const self = this;
         const box = document.getElementById('manual-rx-channel-show');
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
         const show = function(on) {
@@ -2810,6 +3066,7 @@
             ac.setNotice('Выключать демодулятор можно только в режиме «Контроль».');
             return;
         }
+        this._demodToggleDirty = true;
         show(!off);
         this._snapZoomToDoppler();
         const path = this._radioPathName();
@@ -2823,6 +3080,7 @@
         })
             .then(function(r) {
                 if (r.ok) { notice(''); return null; }
+                self._demodToggleDirty = false;
                 show(off);
                 if (r.status === 403) {
                     notice('Режим «Контроль» отключён, демодулятор не переключён.');
@@ -2837,6 +3095,7 @@
             })
             .catch(function(err) {
                 show(off);
+                self._demodToggleDirty = false;
                 notice('Демодулятор не переключён: ' + err.message);
             });
     };
@@ -3213,6 +3472,7 @@
     ManualLayout.prototype._initDemodPanel = function() {
         if (typeof window.DemodPanel !== 'function') { return; }
         this._demodPanel = new window.DemodPanel();
+        this._initDemodInfoModal();
         const root = this._layoutRoot || document.getElementById('layout-manual');
         if (!root) { return; }
         const self = this;
@@ -3224,6 +3484,31 @@
             self._toggleFollow(e.detail || {});
         };
         root.addEventListener('panorama:follow', this._onPanoramaFollow);
+    };
+
+    /** Модалка «Информация» по демодулятору: метрики, графики, eye/constellation. */
+    ManualLayout.prototype._initDemodInfoModal = function() {
+        if (typeof window.DemodInfoModal !== 'function') { return; }
+        this._demodInfoModal = new window.DemodInfoModal();
+        const btn = document.getElementById('manual-demod-info');
+        if (btn && this._demodInfoModal) {
+            const self = this;
+            btn.addEventListener('click', function() {
+                if (self._demodInfoModal.isOpen()) { self._demodInfoModal.close(); return; }
+                self._demodInfoModal.open();
+                // Сразу показываем последние известные метрики, иначе пусто до следующего статуса.
+                self._pushDemodInfo();
+            });
+        }
+    };
+
+    /** Передаёт в модалку текущий статус, историю, диагноз и модуляцию для eye. */
+    ManualLayout.prototype._pushDemodInfo = function() {
+        if (!this._demodInfoModal || !this._demodStatus) { return; }
+        const diag = this._demodPanel && this._demodPanel._lastDiag ? this._demodPanel._lastDiag : null;
+        const history = this._demodPanel ? this._demodPanel.getHistory() : null;
+        const modStr = this._demodStatus.demod || '';
+        this._demodInfoModal.update(this._demodStatus, this._levelOffset, history, diag, modStr);
     };
 
     ManualLayout.prototype._initTelemetryTable = function() {
@@ -3298,6 +3583,7 @@
                 self._showChannelStatus(d.data);
                 self._showDoppler(d.data);
                 self._showTxMarkers(d.data);
+                if (self._demodInfoModal && self._demodInfoModal.isOpen()) { self._pushDemodInfo(); }
             }
         });
     };
@@ -3307,15 +3593,6 @@
         const live = this._radioPathName() !== null;
         if (this._tmiTable) { this._tmiTable.setLive(live); }
         if (this._demodPanel) { this._demodPanel.setLive(live); }
-    };
-
-    ManualLayout.prototype._initEyeConstellation = function() {
-        if (typeof window.EyeConstellationView !== 'function') { return; }
-        const self = this;
-        this._eyeView = new window.EyeConstellationView();
-        this._eyeView._onAutoRestore = function() {
-            self._syncEyeFromPipeline();
-        };
     };
 
     // ── Перенастройка канала (клик по TX на панораме → § 4.6) ──────────────
@@ -3614,7 +3891,6 @@
         if (this._passProfile) { this._passProfile.draw(); }
         if (this._passTimeline) { this._passTimeline.draw(); }
         if (this._tmiTable) { this._tmiTable.activate(); }
-        if (this._eyeView) { this._eyeView.activate(); }
         this._refreshActiveTab();
     };
 
@@ -3656,7 +3932,6 @@
         this._setListening(false);
         if (this._panorama) { this._panorama.deactivate(); }
         if (this._tmiTable) { this._tmiTable.deactivate(); }
-        if (this._eyeView) { this._eyeView.deactivate(); }
     };
 
     /** @returns {boolean} */
@@ -3690,7 +3965,7 @@
         if (this._panorama) { this._panorama.refreshAfterThemeChange(); }
         if (this._passProfile) { this._passProfile.refreshAfterThemeChange(); }
         if (this._passTimeline) { this._passTimeline.refreshAfterThemeChange(); }
-        if (this._eyeView) { this._eyeView.refreshAfterThemeChange(); }
+        if (this._demodInfoModal) { this._demodInfoModal.refreshAfterThemeChange(); }
         // Палитра трасс уже переназначена: обновить LED ленты, риски на «Спектре» и маркеры над водопадом
         this._buildTransmittersFromGroup();
         if (this._txMarkers) { this._txMarkers.render(); }
@@ -3787,6 +4062,10 @@
     // ── Очистка ──────────────────────────────────────────────────────────
 
     ManualLayout.prototype.destroy = function() {
+        if (this._rxApplyTimer) { clearTimeout(this._rxApplyTimer); this._rxApplyTimer = null; }
+        if (this._demodApplyTimer) { clearTimeout(this._demodApplyTimer); this._demodApplyTimer = null; }
+        if (this._scrubTimer) { clearTimeout(this._scrubTimer); this._scrubTimer = null; }
+        if (this._scrubVisRaf) { cancelAnimationFrame(this._scrubVisRaf); this._scrubVisRaf = 0; }
         this._stopStepRepeat();
         this._stopSpectrumTimer();
         this._stopStream();
@@ -3843,6 +4122,10 @@
             this._demodPanel.destroy();
             this._demodPanel = null;
         }
+        if (this._demodInfoModal) {
+            this._demodInfoModal.destroy();
+            this._demodInfoModal = null;
+        }
         const root = this._layoutRoot || document.getElementById('layout-manual');
         if (root && this._onPanoramaTune) {
             root.removeEventListener('panorama:tune', this._onPanoramaTune);
@@ -3865,10 +4148,6 @@
             this._gallery.destroy();
             this._gallery = null;
         }
-        if (this._eyeView) {
-            this._eyeView.destroy();
-            this._eyeView = null;
-        }
         if (this._freqDial) {
             this._freqDial.destroy();
             this._freqDial = null;
@@ -3882,6 +4161,9 @@
 
     ManualLayout.makeRecordingName = makeRecordingName;
     ManualLayout.sweepBarModel = sweepBarModel;
+    /** Пауза набора усиления, сдвига и порога, мс. Повторный ввод её сбрасывает. */
+    ManualLayout.applyDebounceMs = 400;
+
     ManualLayout.transmittersFromGroup = transmittersFromGroup;
     ManualLayout.filterNumericText = filterNumericText;
     ManualLayout.stepNumericText = stepNumericText;

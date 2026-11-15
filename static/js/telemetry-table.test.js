@@ -200,7 +200,8 @@ test('telemetryPacket maps a server frame to a table row', () => {
 
 test('telemetryPacket labels the demodulator like the receiver panel, unknown ones by id', () => {
     assert.strictEqual(telemetryPacket(Object.assign({}, beacon, { demod: 'fsk9600_geoscan' })).demod, 'FSK 9600 GEOSCAN');
-    assert.strictEqual(telemetryPacket(Object.assign({}, beacon, { demod: 'bpsk1200' })).demod, 'bpsk1200');
+    assert.strictEqual(telemetryPacket(Object.assign({}, beacon, { demod: 'bpsk1200' })).demod, 'BPSK 1200');
+    assert.strictEqual(telemetryPacket(Object.assign({}, beacon, { demod: 'drm' })).demod, 'drm');
 });
 
 test('telemetryPacket shows hex when the payload is not text', () => {

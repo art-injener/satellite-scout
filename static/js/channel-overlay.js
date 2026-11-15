@@ -78,6 +78,7 @@
      * @param {function(number)} [opts.onTune] — щелчок: абсолютная частота точки, Гц
      * @param {function(number)} [opts.onPan] — перетаскивание по графику: на сколько Гц
      *   сдвинуть видимую часть
+     * @param {function()} [opts.onPanEnd] — кнопку отпустили после сдвига
      */
     function ChannelOverlay(host, opts) {
         this._host = host;
@@ -191,8 +192,12 @@
      * и щелчок по графику его не двигает.
      */
     ChannelOverlay.prototype.setVisible = function(on) {
-        this._shown = on !== false;
-        if (!this._shown) { this._drag = null; }
+        const shown = on !== false;
+        this._shown = shown;
+        // Промотка графика живёт и при скрытом столбце. Статус выключенного
+        // демодулятора приходит каждую секунду и снова прячет столбец: это не
+        // обрывает жест, иначе картинка замирает и частота при отпускании не уходит.
+        if (!shown && this._drag && this._drag.mode !== 'click') { this._drag = null; }
         this.render();
     };
 
@@ -302,6 +307,7 @@
         if (d.target && d.target.releasePointerCapture) {
             try { d.target.releasePointerCapture(e.pointerId); } catch (err) { /* захват уже снят */ }
         }
+        if (d.moved && this._opts.onPanEnd) { this._opts.onPanEnd(); }
         const band = this._band;
         const plot = this._plot();
         if (!band || !plot) { return; }

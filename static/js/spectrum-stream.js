@@ -326,11 +326,23 @@
         const first = Math.round((centerOffsetHz - span / 2 + fullSpanHz / 2) / binHz);
         const srcStart = Math.max(0, Math.min(nBins, first));
         const srcEnd = Math.max(srcStart, Math.min(nBins, first + count));
+        // Окно целиком за полосой даёт отрицательный отступ. Его нельзя класть
+        // индексом в массив: линия в эту сторону перестаёт рисоваться.
+        let padLeft = srcStart - first;
+        let padRight = first + count - srcEnd;
+        if (padLeft < 0) {
+            padRight += padLeft;
+            padLeft = 0;
+        }
+        if (padRight < 0) {
+            padLeft += padRight;
+            padRight = 0;
+        }
         return {
             start: srcStart,
             count: srcEnd - srcStart,
-            padLeft: srcStart - first,
-            padRight: first + count - srcEnd,
+            padLeft: padLeft,
+            padRight: padRight,
             offsetHz: -fullSpanHz / 2 + (first + (count - 1) / 2) * binHz,
             spanHz: span,
         };

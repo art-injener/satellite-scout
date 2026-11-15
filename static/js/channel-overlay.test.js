@@ -259,9 +259,11 @@ test('setView zooms the channel box', () => {
 
 test('drag on the plot pans the window and does not move the channel', () => {
     let changed = 0;
+    let ended = 0;
     const pans = [];
     const ov = makeOverlay(() => { changed++; });
     ov._opts.onPan = (dHz) => { pans.push(dHz); };
+    ov._opts.onPanEnd = () => { ended++; };
     ov.setView(0, 100_000);
     ov.setChannel(0, 2_000);
     ov._drag = { mode: 'click', x0: 500, xLast: 500, moved: false, offset0: 0 };
@@ -270,6 +272,7 @@ test('drag on the plot pans the window and does not move the channel', () => {
     ov._dragEnd({ clientX: 650 });
     // content follows the pointer: dragging right shows lower frequencies
     assert.deepStrictEqual(pans, [-10_000, -5_000]);
+    assert.strictEqual(ended, 1, 'releasing the button ends the gesture');
     assert.strictEqual(changed, 0, 'no channel settings sent');
     ov.destroy();
 });
@@ -304,6 +307,39 @@ test('hidden channel: drag on the plot still pans, click does not move the chann
     listeners.pointerdown(ev(500));
     ov._dragEnd(ev(500));
     assert.strictEqual(changed, 0);
+    ov.destroy();
+});
+
+test('hiding the channel again during a drag keeps the pan', () => {
+    let ended = 0;
+    const pans = [];
+    const listeners = {};
+    global.document = {
+        createElement: () => fakeEl(),
+        addEventListener() {},
+        removeEventListener() {},
+    };
+    const host = fakeEl();
+    host.getBoundingClientRect = () => ({ left: 0, top: 0, width: 1100, height: 200 });
+    const plot = fakeEl();
+    plot.getBoundingClientRect = () => ({ left: 32, top: 0, width: 1000, height: 80 });
+    plot.addEventListener = (type, fn) => { listeners[type] = fn; };
+    const { ChannelOverlay } = require('./channel-overlay.js');
+    const ov = new ChannelOverlay(host, {
+        plotCanvas: plot, clickTargets: [plot], marginLeft: 0, marginRight: 0,
+        onPan: (dHz) => { pans.push(dHz); },
+        onPanEnd: () => { ended++; },
+    });
+    ov.setBand(BAND.centerHz, BAND.spanHz);
+    ov.setView(0, 100_000);
+    ov.setVisible(false);
+    const ev = (x) => ({ clientX: x, button: 0, preventDefault() {}, stopPropagation() {}, currentTarget: plot });
+    listeners.pointerdown(ev(500));
+    ov.setVisible(false);
+    ov._dragMove(ev(520));
+    ov._dragEnd(ev(520));
+    assert.deepStrictEqual(pans, [-2_000]);
+    assert.strictEqual(ended, 1, 'release still ends the gesture');
     ov.destroy();
 });
 

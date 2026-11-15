@@ -179,6 +179,7 @@ type ReceptionStages struct {
 	CarrierHz   float64    `json:"carrier_hz"`             // смещение от центра канала
 	DeviationHz float64    `json:"deviation_hz,omitempty"` // нет — демодулятор её не меряет
 	ClockJitter float64    `json:"clock_jitter"`           // ошибка фазы тактов, доли символа
+	SNRDB       float32   `json:"snr_db,omitempty"`       // превышение сигнала над шумом в полосе; нет — не измерялось
 	Sync        *SyncStats `json:"sync,omitempty"`         // нет — кадры без синхрослова
 }
 
@@ -383,7 +384,8 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		Picture:         st.Picture,
 	}
 	if st.Measured {
-		ev.Reception = &ReceptionStages{CarrierHz: st.CarrierHz, DeviationHz: st.DeviationHz, ClockJitter: st.ClockJitter}
+		ev.Reception = &ReceptionStages{CarrierHz: st.CarrierHz, DeviationHz: st.DeviationHz,
+			ClockJitter: st.ClockJitter, SNRDB: st.SNRDB}
 		if st.SyncCounted {
 			ev.Reception.Sync = &SyncStats{Words: st.SyncWords, BitErrors: st.SyncBitErrors}
 		}

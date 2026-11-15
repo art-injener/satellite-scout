@@ -38,8 +38,15 @@
     // Подписи демодуляторов сервера (internal/sdr.Demods).
     const DEMOD_LABELS = {
         afsk1200: 'AFSK 1200',
+        fsk1200: 'FSK 1200',
+        fsk4800: 'FSK 4800',
         fsk9600_g3ruh: 'FSK 9600 G3RUH',
         fsk9600_geoscan: 'FSK 9600 GEOSCAN',
+        gmsk9600: 'GMSK 9600',
+        ook: 'OOK',
+        bpsk1200: 'BPSK 1200',
+        bpsk9600: 'BPSK 9600',
+        qpsk_ccsds: 'QPSK CCSDS',
         sstv: 'SSTV',
         fm: 'FM',
         wfm: 'FM эфир',
@@ -199,7 +206,7 @@
         }
         if (VOICE_DEMODS[st.demod]) { return { state: 'ok', text: 'Канал открыт, идёт звук' }; }
         if (stages.clock.state === 'bad') {
-            return { state: 'bad', text: 'Нет захвата тактов: проверьте профиль и полосу' };
+            return { state: 'bad', text: 'Нет захвата тактов' };
         }
         if (good === 0) {
             const syncs = rx && rx.sync ? rx.sync.words : null;
@@ -276,6 +283,45 @@
     };
 
     /**
+     * MetricHistory — временной ряд метрик пайплайна за окно windowMs для графиков
+     * модалки «Информация»: уровень, порог, SNR, смещение несущей, джиттер тактов,
+     * кадры good/bad. Точки без reception (сигнал не поднимался) хранят нули мер.
+     * @param {number} windowMs
+     */
+    function MetricHistory(windowMs) {
+        this._window = windowMs;
+        this._items = [];
+    }
+
+    MetricHistory.prototype.push = function(tMs, st, levelOffset) {
+        const rx = st.reception || {};
+        this._items.push({
+            t: tMs,
+            // Выключенный демодулятор или остановленный поток: статус обнулён,
+            // рисовать его нельзя — нули читались бы как полный уровень.
+            off: st.demod_off === true || st.active === false,
+            level: st.level_dbfs,
+            squelch: st.squelch_dbfs,
+            snr: rx.snr_db || 0,
+            carrier: rx.carrier_hz || 0,
+            jitter: rx.clock_jitter || 0,
+            good: st.frames_good,
+            bad: st.frames_bad,
+        });
+    };
+
+    MetricHistory.prototype.clear = function() {
+        this._items = [];
+    };
+
+    /** Точки окна, заканчивающегося в nowMs; старые выпадают. */
+    MetricHistory.prototype.points = function(nowMs) {
+        const start = nowMs - this._window;
+        this._items = this._items.filter(function(it) { return it.t >= start; });
+        return this._items;
+    };
+
+    /**
      * DemodPanel — шапка канала и блок «Обработка».
      * @param {Object} [opts]
      * @param {function(): number} [opts.now] — часы, мс эпохи
@@ -287,6 +333,7 @@
         this._live = false;
         this._counts = { good: 0, bad: 0 };
         this._strip = new FrameStrip(STRIP_WINDOW_MS);
+        this._history = new MetricHistory(STRIP_WINDOW_MS);
 
         this._els = {
             lockHead: document.getElementById('manual-ch-lock'),
@@ -317,6 +364,7 @@
         this._live = live;
         this._counts = { good: 0, bad: 0 };
         this._strip.clear();
+        this._history.clear();
         if (live) {
             this._render(mockStages(false), { state: 'idle', text: 'Ждём состояние приёмника' });
             this._renderStrip();
@@ -336,15 +384,18 @@
         const c = this._counts;
         if (st.frames_good < c.good || st.frames_bad < c.bad) {
             this._strip.clear(); // новый сеанс потока: счётчики начались заново
+            this._history.clear();
         } else {
             this._strip.add('good', now, st.frames_good - c.good);
             this._strip.add('bad', now, st.frames_bad - c.bad);
         }
         c.good = st.frames_good;
         c.bad = st.frames_bad;
+        this._history.push(now, st, levelOffset);
 
         const stages = stagesFromStatus(st, levelOffset);
-        this._render(stages, diagnose(st, stages, now));
+        this._lastDiag = diagnose(st, stages, now);
+        this._render(stages, this._lastDiag);
         // Лента кадров у SSTV и голоса пуста: картинка идёт минуты, звук кадров не даёт.
         if (this._els.stripBox) { this._els.stripBox.hidden = st.demod === 'sstv' || !!VOICE_DEMODS[st.demod]; }
         this._renderStrip();
@@ -367,6 +418,11 @@
 
     DemodPanel.prototype.getChannel = function() {
         return this._channel;
+    };
+
+    /** История метрик за 60 с для графиков модалки «Информация». */
+    DemodPanel.prototype.getHistory = function() {
+        return this._history;
     };
 
     DemodPanel.prototype._renderHeader = function(ch) {
@@ -427,6 +483,7 @@
     DemodPanel.prototype.destroy = function() {
         this._channel = null;
         this._strip.clear();
+        this._history.clear();
     };
 
     if (typeof window !== 'undefined') {
@@ -439,6 +496,7 @@
         module.exports = { // eslint-disable-line no-undef
             DemodPanel: DemodPanel,
             FrameStrip: FrameStrip,
+            MetricHistory: MetricHistory,
             formatFreqMHz: formatFreqMHz,
             formatHz: formatHz,
             demodLabel: demodLabel,

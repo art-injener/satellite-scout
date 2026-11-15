@@ -1,0 +1,123 @@
+{{define "demod-info-modal"}}
+<div class="demod-info" id="demod-info-modal" hidden role="dialog" aria-modal="true" aria-labelledby="demod-info-title">
+    <div class="demod-info__backdrop" data-action="close-demod-info"></div>
+    <div class="demod-info__window" role="document">
+        <header class="demod-info__header">
+            <h2 class="demod-info__title" id="demod-info-title">Информация о демодуляторе</h2>
+            <div class="demod-info__header-actions">
+                <button type="button" class="demod-info__help-btn" id="demod-info-help"
+                        aria-expanded="false" aria-controls="demod-info-guide">Как читать</button>
+                <button type="button" class="demod-info__close" data-action="close-demod-info" aria-label="Закрыть">×</button>
+            </div>
+        </header>
+        <div class="demod-info__body">
+            <section class="demod-info__guide" id="demod-info-guide" hidden>
+                <p class="demod-info__guide-lead">По горизонтали — последние 60 секунд, справа текущий момент. Цифра в правом верхнем углу графика — последнее значение, точное число с единицами — в плашке над графиками. Линии нет, пока демодулятор выключен или уровень ниже порога.</p>
+                <dl class="demod-info__guide-list">
+                    <dt>Уровень</dt>
+                    <dd>Шкала 0…−120 dBFS. Пунктир «порог» — шумодав. Линия выше него — канал открыт.</dd>
+                    <dt>SNR</dt>
+                    <dd>Шкала −10…30 дБ. «VIS −3» — заголовок SSTV ещё читается, «sync −6» — синхроимпульсы.</dd>
+                    <dt>Несущая</dt>
+                    <dd>Шкала −5…+5 кГц, ноль — центр канала. Отклонение линии — уход частоты.</dd>
+                    <dt>Джиттер</dt>
+                    <dd>Шкала 0…50 % символа. Пунктир «захват 12» — граница захвата тактов. Выше неё захвата нет.</dd>
+                    <dt>Кадры</dt>
+                    <dd>Зелёная линия — кадры с верной CRC, красная — с ошибкой. Цифра «верные / с ошибкой».</dd>
+                    <dt>Диаграмма</dt>
+                    <dd>Схема формы сигнала выбранного профиля. Появляется, когда демодулятор включён и канал открыт. Это не измерение.</dd>
+                </dl>
+            </section>
+            <!-- Текущие метрики канала и пайплайна. Заполняет demod-info-modal.js из demod_status. -->
+            <section class="demod-info__metrics" id="demod-info-metrics" aria-label="Текущие метрики">
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Профиль</span>
+                    <span class="demod-info__metric-value" id="demod-info-demod">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Частота</span>
+                    <span class="demod-info__metric-value" id="demod-info-freq">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Полоса канала</span>
+                    <span class="demod-info__metric-value" id="demod-info-bw">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Усиление</span>
+                    <span class="demod-info__metric-value" id="demod-info-gain">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Доплер</span>
+                    <span class="demod-info__metric-value" id="demod-info-doppler">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Порог</span>
+                    <span class="demod-info__metric-value" id="demod-info-squelch">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Уровень</span>
+                    <span class="demod-info__metric-value" id="demod-info-level">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">SNR</span>
+                    <span class="demod-info__metric-value" id="demod-info-snr">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Несущая</span>
+                    <span class="demod-info__metric-value" id="demod-info-carrier">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Такты</span>
+                    <span class="demod-info__metric-value" id="demod-info-clock">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Синхро</span>
+                    <span class="demod-info__metric-value" id="demod-info-sync">—</span>
+                </div>
+                <div class="demod-info__metric">
+                    <span class="demod-info__metric-label">Кадры CRC</span>
+                    <span class="demod-info__metric-value" id="demod-info-frames">—</span>
+                </div>
+            </section>
+
+            <!-- Диагноз «почему нет приёма» — текст из DemodPanel.diagnose. -->
+            <p class="demod-info__diag" id="demod-info-diag" role="status">—</p>
+
+            <!-- Графики метрик за 60 с. Рисует demod-info-modal.js из MetricHistory. -->
+            <section class="demod-info__charts" aria-label="Графики за 60 секунд">
+                <div class="demod-info__chart">
+                    <span class="demod-info__chart-title">Уровень и порог, dBFS</span>
+                    <canvas class="demod-info__canvas" id="demod-info-chart-level" role="img" aria-label="Уровень в полосе канала и порог за 60 секунд"></canvas>
+                </div>
+                <div class="demod-info__chart">
+                    <span class="demod-info__chart-title">SNR, дБ (пороги VIS −3, sync −6)</span>
+                    <canvas class="demod-info__canvas" id="demod-info-chart-snr" role="img" aria-label="Отношение сигнал/шум за 60 секунд"></canvas>
+                </div>
+                <div class="demod-info__chart">
+                    <span class="demod-info__chart-title">Смещение несущей, Гц</span>
+                    <canvas class="demod-info__canvas" id="demod-info-chart-carrier" role="img" aria-label="Смещение несущей от центра канала за 60 секунд"></canvas>
+                </div>
+                <div class="demod-info__chart">
+                    <span class="demod-info__chart-title">Джиттер тактов, % символа</span>
+                    <canvas class="demod-info__canvas" id="demod-info-chart-jitter" role="img" aria-label="Ошибка фазы тактов за 60 секунд"></canvas>
+                </div>
+                <div class="demod-info__chart">
+                    <span class="demod-info__chart-title">Кадры: верные / с ошибкой CRC</span>
+                    <canvas class="demod-info__canvas" id="demod-info-chart-frames" role="img" aria-label="Кадры за 60 секунд"></canvas>
+                </div>
+            </section>
+
+            <!-- Диаграмма качества демодуляции (eye/constellation), перенесена из вкладки «Диаграмма». -->
+            <section class="demod-info__eye" aria-label="Диаграмма демодуляции">
+                <div class="ml-eye__canvas-wrap">
+                    <div class="ml-eye__overlay" aria-label="Переключатель диаграммы">
+                        <div class="ml-eye__tabs" id="demod-info-eye-tabs" role="tablist"></div>
+                        <button type="button" class="ml-eye__auto" id="demod-info-eye-auto" title="Следует за полем «Демодулятор» в настройках">auto</button>
+                    </div>
+                    <canvas id="demod-info-eye-canvas" class="ml-canvas" role="img" aria-label="Диаграмма качества демодуляции"></canvas>
+                </div>
+            </section>
+        </div>
+    </div>
+</div>
+{{end}}

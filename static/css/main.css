@@ -587,6 +587,38 @@ body.mode-manual:not(.station-basic) .right-panel {
     opacity: 0.6;
 }
 
+/* Актуальность TLE: подсветка, когда орбиты устарели */
+.app-header__tle {
+    cursor: help;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
+.app-header__tle.tle-status--ok {
+    color: var(--accent-success);
+}
+
+.app-header__tle.tle-status--warn {
+    color: var(--accent-warning);
+    border-color: var(--accent-warning);
+}
+
+.app-header__tle.tle-status--stale {
+    color: var(--accent-danger);
+    border-color: var(--accent-danger);
+}
+
+.app-header__tle.tle-status--unknown {
+    color: var(--text-muted);
+    opacity: 0.6;
+}
+
+.app-header__tle.tle-status--loading {
+    color: var(--accent-warning);
+    border-color: var(--accent-warning);
+    opacity: 1;
+}
+
 body.station-basic .app-header__mode-toggle__btn {
     pointer-events: none;
     opacity: 0.4;

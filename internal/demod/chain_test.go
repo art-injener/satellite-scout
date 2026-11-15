@@ -295,6 +295,34 @@ func TestChain_ReportsReceptionStages(t *testing.T) {
 	}
 }
 
+func TestChain_ReportsSNR(t *testing.T) {
+	// Beacon at testSNR=20 dB in 15 kHz: AFSK tones are narrow, so the noise floor
+	// by FFT percentile reads clean and SNR lands near the set value.
+	c := NewChain()
+	air := beaconAir(t, testRate, 3, time.Second)
+	s := afskSettings(testOffset, -50)
+	if got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s); len(got) != 3 {
+		t.Fatalf("packets=%d, want 3", len(got))
+	}
+	st := c.Status()
+	if !st.Measured {
+		t.Fatalf("status=%+v, want measured", st)
+	}
+	if st.SNRDB < 14 || st.SNRDB > 26 {
+		t.Errorf("SNR=%.1f dB, want about %.0f", st.SNRDB, testSNR)
+	}
+}
+
+// Without a signal the SNR stays at the floor: measure() runs only on signal blocks.
+func TestChain_SNRUnmeasuredBeforeSignal(t *testing.T) {
+	c := NewChain()
+	run(c, toFrames(beaconAir(t, testRate, 2, time.Second), testRate, sdr.DefaultBlockSize, 0), afskSettings(testOffset, testLevel+20))
+	st := c.Status()
+	if st.Measured || st.SNRDB != 0 {
+		t.Errorf("status=%+v, want not measured and SNR 0 before any signal", st)
+	}
+}
+
 func TestChain_HDLCProfileHasNoSyncCounter(t *testing.T) {
 	c := NewChain()
 	run(c, toFrames(beaconAir(t, testRate, 1, time.Second), testRate, sdr.DefaultBlockSize, 0), afskSettings(testOffset, -50))

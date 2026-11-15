@@ -149,6 +149,8 @@ type Params struct {
 // Service — служба по сигнатуре (SSTV по VIS); пусто, если не совпала.
 // Station — имя из эфира (RDS PS у вещания).
 // Demod — какой профиль приёмника взять для этого сигнала (id как в UI).
+// DemodAlt — кандидаты того же класса, которые по структуре не различить
+// (у 2FSK 9600 — кадровый формат G3RUH или GEOSCAN).
 // RDSParts/RDSHave — сырые сегменты PS между разборами (в JSON не уходят).
 type Result struct {
 	Modulation     string     `json:"modulation"`
@@ -161,6 +163,7 @@ type Result struct {
 	ConfidenceKind string     `json:"confidence_kind,omitempty"`
 	Station        string     `json:"station,omitempty"`
 	Demod          string     `json:"demod,omitempty"`
+	DemodAlt       []string   `json:"demod_alt,omitempty"`
 	RDSParts       [4][2]byte `json:"-"`
 	RDSHave        [4]bool    `json:"-"`
 }
@@ -203,12 +206,14 @@ func ClassifyHint(iq []complex64, rate, widthHintHz float64) Result {
 		}
 	}
 	snr := math.Inf(-1)
+	occ := b.occupied()
 	if a != nil {
-		snr = a.snrDB
+		// Повторная разметка по самой вспышке точнее первой, разбавленной тишиной.
+		snr, occ = a.snrDB, a.occ
 	}
 	return Result{
 		Modulation: ModUndetermined,
-		Params:     Params{OccupiedHz: round10(b.occupied())},
+		Params:     Params{OccupiedHz: round10(occ)},
 		Why:        fmt.Sprintf("SNR %s дБ — мало для разбора", num(snr, 0)),
 	}
 }
@@ -298,34 +303,48 @@ func withDemod(r Result) Result {
 	if r.ConfidenceKind == "" && r.Modulation != "" && r.Modulation != ModUndetermined {
 		r.ConfidenceKind = KindEstimate
 	}
-	if r.Demod != "" {
-		return r
-	}
-	r.Demod = suggestedDemod(r)
+	r.Demod, r.DemodAlt = SuggestedDemod(r)
 	return r
 }
 
-// suggestedDemod — id профиля UI для этого сигнала; пусто, если однозначно не сказать.
-func suggestedDemod(r Result) string {
+// SuggestedDemod — id профиля UI для этого сигнала и кандидаты, которых по структуре
+// не различить; пусто, если однозначно не сказать. Профиль может быть ещё не
+// реализован в цепочке приёма: рекомендация говорит, какой демодулятор нужен.
+// Вызывается и при разборе, и при выдаче участка: служба могла смениться после
+// голосования, пробы или липких SSTV/RDS, и рекомендация обязана следовать за ней.
+func SuggestedDemod(r Result) (string, []string) {
 	switch {
 	case r.Service == sstvService || r.Service == sstvProbable:
-		return "sstv"
+		return "sstv", nil
 	case r.Modulation == ModWFM:
-		return "wfm"
+		return "wfm", nil
 	case r.Modulation == ModFMVoice, r.Modulation == ModFM:
-		return "fm"
+		return "fm", nil
 	case r.Modulation == ModAFSK:
-		return "afsk1200"
+		return "afsk1200", nil
 	case r.Modulation == ModUSB:
-		return "usb"
+		return "usb", nil
 	case r.Modulation == ModLSB:
-		return "lsb"
+		return "lsb", nil
 	case r.Modulation == ModCW:
-		return "cw"
-	case r.Modulation == Mod2FSK && r.Params.Baud == 9600:
-		return "fsk9600_g3ruh"
+		return "cw", nil
+	case r.Modulation == ModOOK:
+		return "ook", nil
+	case r.Modulation == Mod2FSK && r.Params.Baud > 0:
+		switch b := r.Params.Baud; {
+		case b <= 2400:
+			return "fsk1200", nil
+		case b <= 7200:
+			return "fsk4800", nil
+		case b <= 19_200:
+			// Кадровый формат по структуре не читается: G3RUH чаще, GEOSCAN — второй кандидат.
+			return "fsk9600_g3ruh", []string{"fsk9600_geoscan"}
+		default:
+			// Быстрее профилей нет: GSM 270,8 кбод и шире — без рекомендации.
+			return "", nil
+		}
 	default:
-		return ""
+		return "", nil
 	}
 }
 

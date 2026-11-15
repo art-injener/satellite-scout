@@ -4,14 +4,14 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{.Title}}</title>
-    <link rel="stylesheet" href="/static/css/main.css?v=168">
+    <link rel="stylesheet" href="/static/css/main.css?v=169">
     <link id="theme-colorsheet" rel="stylesheet" href="/static/css/colors-{{.Theme}}.css?v=67">
     <link rel="stylesheet" href="/static/css/overlay-panel.css?v=1">
     <link rel="stylesheet" href="/static/css/info-panel.css?v=6">
     <link rel="stylesheet" href="/static/css/right-panel.css?v=56">
     <link rel="stylesheet" href="/static/css/bottom-panel.css?v=10">
     <link rel="stylesheet" href="/static/css/auto-mode.css?v=44">
-    <link rel="stylesheet" href="/static/css/manual-layout.css?v=175">
+    <link rel="stylesheet" href="/static/css/manual-layout.css?v=178">
     <link rel="stylesheet" href="/static/css/map-zoom.css?v=3">
     <link rel="stylesheet" href="/static/css/map-hud.css?v=24">
     <link rel="stylesheet" href="/static/css/settings.css?v=4">
@@ -48,6 +48,9 @@
                     </svg>
                     <span class="app-header__text">Настройки</span>
                 </button>
+                <div class="app-header__section app-header__tle tle-status--unknown" id="tle-status" role="status" aria-live="polite" title="Актуальность TLE">
+                    <span class="app-header__text" id="tle-status-label">TLE …</span>
+                </div>
                 <div class="app-header__section app-header__connection sse-status sse-status--disconnected" id="connection-status" role="status" aria-live="polite" title="Обмен данными с бэкендом">
                     <svg class="app-header__icon app-header__icon--connection" viewBox="0 0 32 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
                         <circle cx="4" cy="12" r="3" stroke="none"/>
@@ -76,6 +79,7 @@
             {{template "tracking-bottom-panel" .}}
         {{end}}
         {{template "settings-modal" .}}
+        {{template "demod-info-modal" .}}
         <!-- Запрос управления приёмником от слейва: видит только мастер, в любом режиме -->
         <div class="access-request" id="access-request-dialog" role="alertdialog" aria-labelledby="access-request-text" hidden>
             <span class="access-request__text" id="access-request-text"></span>
@@ -94,9 +98,10 @@
     <script src="/static/js/earthview.js?v=138"></script>
     <script src="/static/js/skyview.js?v=74"></script>
     <script src="/static/js/satellite-state.js?v=21"></script>
-    <script src="/static/js/sse-client.js?v=11"></script>
+    <script src="/static/js/sse-client.js?v=12"></script>
+    <script src="/static/js/tle-status.js?v=2"></script>
     <script src="/static/js/access-control.js?v=6"></script>
-    <script src="/static/js/spectrum-stream.js?v=9"></script>
+    <script src="/static/js/spectrum-stream.js?v=10"></script>
     <script src="/static/js/audio-player.js?v=1"></script>
     <script src="/static/js/info-panel.js?v=4"></script>
     <script src="/static/js/overlay-panel.js?v=2"></script>
@@ -107,16 +112,17 @@
     <script src="/static/js/pass-profile.js?v=2"></script>
     <script src="/static/js/pass-timeline.js?v=17"></script>
     <script src="/static/js/omni-antenna.js?v=3"></script>
-    <script src="/static/js/demod-panel.js?v=11"></script>
+    <script src="/static/js/demod-panel.js?v=13"></script>
+    <script src="/static/js/demod-info-modal.js?v=5"></script>
     <script src="/static/js/telemetry-table.js?v=7"></script>
     <script src="/static/js/product-gallery.js?v=3"></script>
     <script src="/static/js/eye-constellation.js?v=4"></script>
     <script src="/static/js/freq-dial.js?v=8"></script>
-    <script src="/static/js/channel-overlay.js?v=5"></script>
+    <script src="/static/js/channel-overlay.js?v=6"></script>
     <script src="/static/js/tx-markers.js?v=4"></script>
     <script src="/static/js/band-marks.js?v=22"></script>
     <script src="/static/js/air-table.js?v=6"></script>
-    <script src="/static/js/manual-layout.js?v=98"></script>
+    <script src="/static/js/manual-layout.js?v=100"></script>
     <script src="/static/js/auto-link.js?v=38"></script>
     <script src="/static/js/mode-manager.js?v=3"></script>
     <script src="/static/js/mode-bar.js?v=12"></script>

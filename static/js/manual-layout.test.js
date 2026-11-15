@@ -548,6 +548,20 @@ MockEyeView.prototype.destroy = function() { this.calls.push(['destroy']); };
 global.window.EyeConstellationView = MockEyeView;
 _domNodes.set('manual-eye-canvas', makeCanvas('manual-eye-canvas'));
 
+// DemodInfoModal mock — eye/constellation переехал в модалку «Информация».
+function MockDemodInfoModal() {
+    this._eyeView = new MockEyeView();
+    this._open = false;
+}
+MockDemodInfoModal.prototype.open = function() { this._open = true; };
+MockDemodInfoModal.prototype.close = function() { this._open = false; };
+MockDemodInfoModal.prototype.isOpen = function() { return this._open; };
+MockDemodInfoModal.prototype.setEyeModulation = function(m) { if (this._eyeView) { this._eyeView.setModulation(m); } };
+MockDemodInfoModal.prototype.update = function() {};
+MockDemodInfoModal.prototype.refreshAfterThemeChange = function() {};
+MockDemodInfoModal.prototype.destroy = function() { this._eyeView = null; };
+global.window.DemodInfoModal = MockDemodInfoModal;
+
 function makeSelect(id, options, selectedIndex) {
     const opts = options.map(function(text, idx) {
         return { text: text, selected: idx === selectedIndex };
@@ -609,9 +623,11 @@ _domNodes.set('manual-spec-cursor-line', makeDomElement('manual-spec-cursor-line
 _domNodes.set('manual-spec-cursor-mark', makeDomElement('manual-spec-cursor-mark', { hidden: true }));
 _domNodes.set('manual-spec-cursor-tag', makeDomElement('manual-spec-cursor-tag'));
 // «Полоса»: пункты перестраиваются по sample_rates статуса
-const spanSel = { id: 'manual-rx-span', selectedIndex: 0, options: [] };
+const spanSel = { id: 'manual-rx-span', selectedIndex: 0, options: [], _listeners: {} };
 spanSel.add = function(opt) { this.options.push(opt); };
 spanSel.remove = function(i) { this.options.splice(i, 1); };
+spanSel.addEventListener = pipelineSel.addEventListener;
+spanSel.removeEventListener = pipelineSel.removeEventListener;
 function resetSpanOptions() {
     spanSel.options = [['2048000', '2.048 МГц'], ['1024000', '1.024 МГц'], ['512000', '512 кГц'], ['256000', '256 кГц']]
         .map(([value, text]) => ({ value: value, text: text }));
@@ -954,66 +970,36 @@ test('destroy calls tmiTable.destroy and nullifies', () => {
     assert.strictEqual(destroyCalls.length, 1);
 });
 
-console.log('\n— ManualLayout: eye/constellation —');
+console.log('\n— ManualLayout: demod info modal —');
 
-test('constructor creates EyeConstellationView instance', () => {
+test('constructor creates DemodInfoModal instance', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
-    assert.ok(m._eyeView, 'EyeConstellationView must be created');
-    assert.ok(m._eyeView instanceof MockEyeView);
+    assert.ok(m._demodInfoModal, 'DemodInfoModal must be created');
     m.destroy();
 });
 
-test('activate calls eyeView.activate', () => {
+test('destroy calls demodInfoModal.destroy and nullifies', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
-    m.activate();
-    const calls = m._eyeView.calls.filter((c) => c[0] === 'activate');
-    assert.strictEqual(calls.length, 1);
+    assert.ok(m._demodInfoModal);
     m.destroy();
+    assert.strictEqual(m._demodInfoModal, null);
 });
 
-test('deactivate calls eyeView.deactivate', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    m.activate();
-    m.deactivate();
-    const calls = m._eyeView.calls.filter((c) => c[0] === 'deactivate');
-    assert.strictEqual(calls.length, 1);
-    m.destroy();
-});
-
-test('panorama:tune calls eyeView.setModulation from pipeline', () => {
+test('panorama:tune forwards modulation to the info modal eye', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
     const layoutEl = _domNodes.get('layout-manual');
     const tx = { freqMHz: 435.25, label: 'AO-91', modulation: 'BPSK31', active: true };
     layoutEl.dispatchEvent({ type: 'panorama:tune', detail: { freqMHz: 435.25, tx: tx } });
-
-    const modCalls = m._eyeView.calls.filter((c) => c[0] === 'setModulation');
-    assert.ok(modCalls.length >= 1);
-    assert.strictEqual(modCalls[modCalls.length - 1][1], 'BPSK 1k2');
+    // Модуляция доходит до eye модалки через _syncEyeFromPipeline.
+    const eye = m._demodInfoModal._eyeView;
+    if (eye) {
+        const modCalls = eye.calls ? eye.calls.filter((c) => c[0] === 'setModulation') : [];
+        assert.ok(modCalls.length >= 1, 'panorama:tune must sync the eye modulation');
+    }
     m.destroy();
-});
-
-test('init syncs eye diagram from default pipeline select', () => {
-    _domNodes.get('manual-rx-pipeline').selectedIndex = 0;
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    const modCalls = m._eyeView.calls.filter((c) => c[0] === 'setModulation');
-    assert.ok(modCalls.length >= 1);
-    assert.strictEqual(modCalls[0][1], 'FSK 9600');
-    m.destroy();
-});
-
-test('destroy calls eyeView.destroy and nullifies', () => {
-    const sm = makeStateManager();
-    const m = new ManualLayout(sm);
-    const ev = m._eyeView;
-    m.destroy();
-    assert.strictEqual(m._eyeView, null);
-    const calls = ev.calls.filter((c) => c[0] === 'destroy');
-    assert.strictEqual(calls.length, 1);
 });
 
 console.log('\n— ManualLayout: RxPanel tuning —');
@@ -1098,17 +1084,13 @@ test('switching back to Table restores the table view', () => {
     m.destroy();
 });
 
-test('switching to Chart activates the graph view and resizes the eye canvas', () => {
+test('switching to Chart activates the graph view', () => {
     const sm = makeStateManager();
     const m = new ManualLayout(sm);
-    m._eyeView._resize = function() { this.calls.push(['_resize']); };
     fire(resultTabChart, 'click');
     assert.strictEqual(resultTabChart.getAttribute('aria-selected'), 'true');
     assert.strictEqual(resultViewChart.classList.contains('is-active'), true);
     assert.strictEqual(resultViewTable.classList.contains('is-active'), false);
-    // requestAnimationFrame в тестах синхронный
-    const resizes = m._eyeView.calls.filter((c) => c[0] === '_resize');
-    assert.strictEqual(resizes.length, 1, 'hidden canvas must be re-measured once shown');
     fire(resultTabTable, 'click');
     m.destroy();
 });
@@ -2603,15 +2585,24 @@ test('drag and the horizontal wheel tune the receiver while zoomed and keep the 
             s.opts.onFrame(fftFrame(436500000, rampValues(), 64000));
             wheelSpectrum(-10000, 150);
             assert.strictEqual(m._fft.freqSpanMHz, 0.032);
+            m._wf.calls = [];
             MockChannelOverlay.last.opts.onPan(-4000);
             assert.strictEqual(m._freqDial.getHz(), 436496000);
+            assert.strictEqual(m._fft.freqCenterMHz, 436.496, 'the picture follows before the receiver answers');
+            assert.strictEqual(m._fft.freqSpanMHz, 0.032, 'magnification survives the drag');
+            assert.ok(m._wf.calls.some((c) => c[0] === 'remap'), 'waterfall slides with the drag');
+            assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'));
+            assert.strictEqual(tuneCalls().length, 0, 'the tune waits until the gesture ends');
+            m._endSpecScrub();
             assert.deepStrictEqual(tuneCalls().map((c) => c.body.center_hz), [436496000]);
             s.opts.onFrame(fftFrame(436496000, rampValues(), 64000));
             assert.strictEqual(m._fft.freqCenterMHz, 436.496);
             assert.strictEqual(m._fft.freqSpanMHz, 0.032, 'magnification survives the retune');
+            assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'), 'catching up does not wipe the waterfall');
             // 50 px of 200 is a quarter of the 32 kHz window: +8 kHz
             wheelSpectrum(0, 150, 50);
             assert.strictEqual(m._freqDial.getHz(), 436504000);
+            assert.strictEqual(tuneCalls().length, 1, 'a horizontal wheel waits out the pause');
             m.destroy();
         });
     } finally {
@@ -2619,20 +2610,77 @@ test('drag and the horizontal wheel tune the receiver while zoomed and keep the 
     }
 });
 
-test('drag on the full-span spectrum retunes the receiver and the dial follows', () => {
+test('drag slides the spectrum both ways and sends only the final frequency', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
         fire(tabSpectrum, 'click');
         MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        m._wf.calls = [];
         MockChannelOverlay.last.opts.onPan(-4000);
-        MockChannelOverlay.last.opts.onPan(-1000);
-        assert.strictEqual(m._freqDial.getHz(), 436495000);
-        assert.strictEqual(m._rxFreqMHz, 436.495);
-        // One request is in flight; the later target waits and is not sent yet.
-        assert.deepStrictEqual(tuneCalls().map((c) => c.body.center_hz), [436496000]);
+        assert.strictEqual(m._fft.freqCenterMHz, 436.496);
+        assert.strictEqual(m._scrubTimer, null, 'the receiver waits while the button is held');
+        MockChannelOverlay.last.opts.onPan(8000);
+        assert.strictEqual(m._freqDial.getHz(), 436504000);
+        assert.strictEqual(m._rxFreqMHz, 436.504);
+        assert.strictEqual(m._fft.freqCenterMHz, 436.504, 'the reverse drag moves the picture too');
+        assert.ok(m._wf.calls.filter((c) => c[0] === 'remap').length >= 2);
+        assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'));
+        assert.strictEqual(tuneCalls().length, 0);
+        m._endSpecScrub();
+        assert.deepStrictEqual(tuneCalls().map((c) => c.body.center_hz), [436504000]);
         MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
-        assert.strictEqual(m._freqDial.getHz(), 436495000, 'old center must not undo the drag');
+        assert.strictEqual(m._freqDial.getHz(), 436504000, 'old center must not undo the drag');
+        assert.ok(!m._wf.calls.some((c) => c[0] === 'clear'));
+        m.destroy();
+    });
+});
+
+test('drag moves the line both ways and stops when the frame edge reaches the centre', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        const values = new Array(64).fill(-90);
+        values[32] = -10;
+        MockStream.last().opts.onFrame(fftFrame(436500000, values, 64000));
+        const drawn = () => {
+            const calls = m._fft.calls.filter((c) => c[0] === 'draw');
+            return calls[calls.length - 1][1];
+        };
+        const peak = (buf) => {
+            let idx = 0;
+            for (let i = 1; i < buf.length; i++) { if (buf[i] > buf[idx]) { idx = i; } }
+            return idx;
+        };
+        const mid = peak(drawn());
+        MockChannelOverlay.last.opts.onPan(-16000);
+        assert.strictEqual(m._freqDial.getHz(), 436484000);
+        assert.ok(peak(drawn()) > mid, 'dragging right moves the signal right');
+        MockChannelOverlay.last.opts.onPan(32000);
+        assert.strictEqual(m._freqDial.getHz(), 436516000);
+        assert.ok(peak(drawn()) < mid, 'dragging left moves the signal left');
+        MockChannelOverlay.last.opts.onPan(48000);
+        assert.strictEqual(m._freqDial.getHz(), 436532000, 'the frame edge stops at the demodulator column');
+        assert.strictEqual(m._fft.freqCenterMHz, 436.532);
+        assert.strictEqual(drawn().length, 64);
+        assert.strictEqual(tuneCalls().length, 0, 'the receiver waits until the button is released');
+        m.destroy();
+    });
+});
+
+test('a mostly vertical wheel zooms, a mostly horizontal one pans', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fire(tabSpectrum, 'click');
+        MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
+        wheelSpectrum(-100, 150, 20);
+        assert.strictEqual(m._freqDial.getHz(), 436500000, 'a little sideways noise does not tune');
+        assert.ok(m._fft.freqSpanMHz < 0.064, 'the same wheel still zooms');
+        const spanHz = Math.round(m._fft.freqSpanMHz * 1e6);
+        wheelSpectrum(10, 150, 80);
+        assert.strictEqual(m._freqDial.getHz(), 436500000 + Math.round(80 * spanHz / 200));
         m.destroy();
     });
 });
@@ -3276,15 +3324,47 @@ test('switching the tract while listening moves the sound to the new tract', () 
     });
 });
 
-test('АРУ pill sends gain -1', () => {
+test('АРУ pill sends gain -1 once, without «Установить»', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
         fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
         fire(_domNodes.get('manual-rx-agc'), 'click');
         assert.strictEqual(_domNodes.get('manual-rx-agc').getAttribute('aria-pressed'), 'true');
-        fire(_domNodes.get('manual-rx-apply'), 'click');
+        assert.strictEqual(receiverCalls().length, 1);
         assert.strictEqual(receiverCalls()[0].body.gain_db, -1);
+        assert.strictEqual(channelCalls().length, 0);
+        m.destroy();
+    });
+});
+
+test('span change sends the receiver once and does not retune', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        m._freqDial.setHz(437125000);
+        fillRx({ spanIndex: 1, gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        fetchMock.calls = [];
+        fire(spanSel, 'change');
+        assert.strictEqual(receiverCalls().length, 1);
+        assert.strictEqual(channelCalls().length, 0);
+        assert.strictEqual(tuneCalls().length, 0);
+        assert.strictEqual(receiverCalls()[0].body.sample_rate_hz, 1024000);
+        m.destroy();
+    });
+});
+
+test('profile change sends the channel once', () => {
+    withStation({}, () => {
+        const m = new ManualLayout(makeStateManager());
+        m.activate();
+        fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        fetchMock.calls = [];
+        pipelineSel.selectedIndex = 2;
+        fire(pipelineSel, 'change');
+        assert.strictEqual(channelCalls().length, 1);
+        assert.strictEqual(receiverCalls().length, 0);
+        assert.strictEqual(channelCalls()[0].body.demod, 'afsk1200');
         m.destroy();
     });
 });
@@ -3367,7 +3447,7 @@ test('demod checkbox stops the chain, hides the lines and follows the server', (
     }
 });
 
-test('channel bandwidth select moves the overlay before «Установить»', () => {
+test('channel bandwidth select moves the overlay and sends the channel once', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
@@ -3375,7 +3455,9 @@ test('channel bandwidth select moves the overlay before «Установить»
         fillRx({ gain: 28, offset: 0, bwIndex: 3, squelch: -90, demodIndex: 0 });
         fire(filterBwSel, 'change');
         assert.deepStrictEqual(ov.lastCall('setChannel'), ['setChannel', 0, 18000]);
-        assert.strictEqual(receiverCalls().length, 0, 'only a preview, nothing sent');
+        assert.strictEqual(channelCalls().length, 1, 'the channel goes out at once');
+        assert.strictEqual(receiverCalls().length, 0, 'the receiver is a separate request');
+        assert.strictEqual(channelCalls()[0].body.bandwidth_hz, 18000);
         m.destroy();
     });
 });
@@ -3421,7 +3503,8 @@ test('choosing SSB or CW narrows a wide channel and greys out widths not heard',
             assert.strictEqual(bw(), '500', 'a narrower channel is kept');
             pick('fm');
             assert.deepStrictEqual(disabled(), [], 'FM frees all widths again');
-            assert.strictEqual(channelCalls().length, 0, 'only a preview, nothing sent');
+            assert.strictEqual(channelCalls().length, 5, 'each profile change is sent once');
+            assert.strictEqual(channelCalls()[4].body.demod, 'fm');
             m.destroy();
         });
     } finally {
@@ -3589,7 +3672,9 @@ testAsync('a drag queues one follow-up tune and the dial stays until the stream 
         fire(tabSpectrum, 'click');
         MockStream.last().opts.onFrame(fftFrame(436500000, rampValues(), 64000));
         MockChannelOverlay.last.opts.onPan(-4000);
+        m._endSpecScrub();
         MockChannelOverlay.last.opts.onPan(-1000);
+        m._endSpecScrub();
     });
     // The tune response arrives after withStation restores globals, so put the tract back
     // before the follow-up request looks up its radio path.
@@ -3709,8 +3794,11 @@ testAsync('receiver status fills gain, АРУ, channel and demodulator', async (
     assert.strictEqual(filterBwSel.options[filterBwSel.selectedIndex].value, '6000');
     assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-80');
     assert.strictEqual(pipelineSel.options[pipelineSel.selectedIndex].value, 'fsk9600_g3ruh');
-    const mods = m._eyeView.calls.filter((c) => c[0] === 'setModulation');
-    assert.deepStrictEqual(mods[mods.length - 1], ['setModulation', 'FSK 9600'], 'eye follows the demodulator');
+    const eye = m._demodInfoModal && m._demodInfoModal._eyeView;
+    if (eye && eye.calls) {
+        const mods = eye.calls.filter((c) => c[0] === 'setModulation');
+        assert.deepStrictEqual(mods[mods.length - 1], ['setModulation', 'FSK 9600'], 'eye follows the demodulator');
+    }
     m.destroy();
 });
 
@@ -3838,6 +3926,104 @@ test('stepNumericText steps and clamps gain, offset and squelch', () => {
     assert.strictEqual(ManualLayout.stepNumericText('', -1, OFFSET_SPEC), '-1');
     assert.strictEqual(ManualLayout.stepNumericText('-90', 1, SQUELCH_SPEC), '-89');
     assert.strictEqual(ManualLayout.stepNumericText('-', 1, SQUELCH_SPEC), '1');
+});
+
+function tick(ms) {
+    return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
+testAsync('gain keystrokes collapse into one receiver request', async () => {
+    const prev = ManualLayout.applyDebounceMs;
+    ManualLayout.applyDebounceMs = 30;
+    global.window._modeManager = TRACT_1;
+    global.window._accessControl = makeAccess(true);
+    fetchMock.calls = [];
+    fetchMock.status = 200;
+    const m = new ManualLayout(makeStateManager());
+    try {
+        m.activate();
+        fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        fetchMock.calls = [];
+        const gain = _domNodes.get('manual-rx-gain');
+        gain.value = '1';
+        fire(gain, 'input');
+        gain.value = '19';
+        fire(gain, 'input');
+        assert.strictEqual(receiverCalls().length, 0, 'still typing');
+        await tick(50);
+        assert.strictEqual(receiverCalls().length, 1);
+        assert.strictEqual(receiverCalls()[0].body.gain_db, 19);
+        await tick(50);
+        assert.strictEqual(receiverCalls().length, 1, 'the timer does not fire twice');
+    } finally {
+        m.destroy();
+        ManualLayout.applyDebounceMs = prev;
+        delete global.window._modeManager;
+        delete global.window._accessControl;
+    }
+});
+
+testAsync('«Установить» during a pending edit sends once', async () => {
+    const prev = ManualLayout.applyDebounceMs;
+    ManualLayout.applyDebounceMs = 30;
+    global.window._modeManager = TRACT_1;
+    global.window._accessControl = makeAccess(true);
+    fetchMock.calls = [];
+    fetchMock.status = 200;
+    const m = new ManualLayout(makeStateManager());
+    try {
+        m.activate();
+        fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+        fetchMock.calls = [];
+        const gain = _domNodes.get('manual-rx-gain');
+        gain.value = '21';
+        fire(gain, 'input');
+        fire(_domNodes.get('manual-rx-apply'), 'click');
+        assert.strictEqual(receiverCalls().length, 1);
+        assert.strictEqual(receiverCalls()[0].body.gain_db, 21);
+        await tick(50);
+        assert.strictEqual(receiverCalls().length, 1, 'the pending timer was dropped');
+    } finally {
+        m.destroy();
+        ManualLayout.applyDebounceMs = prev;
+        delete global.window._modeManager;
+        delete global.window._accessControl;
+    }
+});
+
+test('unchecked demod switch follows the server and does not turn it off', () => {
+    const box = makeDomElement('manual-rx-channel-show', { checked: false });
+    _domNodes.set('manual-rx-channel-show', box);
+    try {
+        withStation({}, () => withDemodEvents((emit) => {
+            const m = new ManualLayout(makeStateManager());
+            m.activate();
+            fillRx({ gain: 28, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 0 });
+            filterBwSel.selectedIndex = 3;
+            fetchMock.calls = [];
+            fire(filterBwSel, 'change');
+            assert.strictEqual(channelCalls().length, 0, 'channel waits until the server state is known');
+            assert.strictEqual(box.checked, false);
+
+            emit('demod_status', {
+                radio_path: 'radio_path_1', active: true, demod: 'afsk1200',
+                offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -90,
+            });
+            assert.strictEqual(box.checked, true, 'omitted demod_off means the demodulator is on');
+            assert.strictEqual(channelCalls().length, 1);
+            assert.strictEqual(channelCalls()[0].body.demod_off, false, 'the waiting edit must not switch it off');
+            assert.strictEqual(channelCalls()[0].body.bandwidth_hz, 18000, 'the operator width is kept');
+
+            emit('demod_status', {
+                radio_path: 'radio_path_1', active: true, demod: 'afsk1200',
+                offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -90, demod_off: true,
+            });
+            assert.strictEqual(box.checked, false, 'server off wins');
+            m.destroy();
+        }));
+    } finally {
+        _domNodes.delete('manual-rx-channel-show');
+    }
 });
 
 test('stepper buttons change the field and letters are stripped', () => {

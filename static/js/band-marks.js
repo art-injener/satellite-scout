@@ -38,6 +38,7 @@
         sstv_probable: 'SSTV?',
         broadcast: 'Радио',
         amateur_voice: 'Пер.',
+        amateur_data: 'Пер.',
         ism_burst: 'Брел',
         lora: 'LoRa',
         gsm_base: 'GSM',
@@ -137,14 +138,21 @@
     /** Подписи профилей приёмника в карточке (как в панели демода). */
     const DEMOD_LABEL = {
         wfm: 'FM эфир',
-        fm: 'ЧМ',
+        fm: 'FM',
         usb: 'USB',
         lsb: 'LSB',
         cw: 'CW',
         sstv: 'SSTV',
         afsk1200: 'AFSK 1200',
+        fsk1200: 'FSK 1200',
+        fsk4800: 'FSK 4800',
         fsk9600_g3ruh: 'FSK 9600 G3RUH',
         fsk9600_geoscan: 'FSK 9600 GEOSCAN',
+        gmsk9600: 'GMSK 9600',
+        ook: 'OOK',
+        bpsk1200: 'BPSK 1200',
+        bpsk9600: 'BPSK 9600',
+        qpsk_ccsds: 'QPSK CCSDS',
     };
 
     /** Имя КА, иначе NORAD, иначе RDS/станция из структуры, иначе прочерк. */
@@ -168,11 +176,16 @@
         return '—';
     }
 
-    /** Рекомендуемый демодулятор из structure.demod; нет — прочерк. */
+    /** Рекомендуемый демодулятор из structure.demod; неразличимые кандидаты — через «или». */
     function demodText(sig) {
-        const id = sig && sig.structure && sig.structure.demod;
+        const st = sig && sig.structure;
+        const id = st && st.demod;
         if (!id) { return '—'; }
-        return DEMOD_LABEL[id] || id;
+        const label = typeof window !== 'undefined' && window.demodLabel ? window.demodLabel(id) : (DEMOD_LABEL[id] || id);
+        const alts = (st.demod_alt || []).map(function(a) {
+            return typeof window !== 'undefined' && window.demodLabel ? window.demodLabel(a) : (DEMOD_LABEL[a] || a);
+        });
+        return alts.length ? label + ' или ' + alts.join(', ') : label;
     }
 
     /** Местные часы «HH:MM:SS»; нулевое или пустое — прочерк. */

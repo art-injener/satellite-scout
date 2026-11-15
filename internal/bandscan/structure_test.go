@@ -327,3 +327,66 @@ func TestTracker_SSTVServiceSticksAfterVIS(t *testing.T) {
 		t.Fatalf("structure %+v, want sticky SSTV Robot 36", s)
 	}
 }
+
+// Липкий SSTV после VIS: служба держится, а рекомендация демодулятора не отстаёт
+// от последнего голоса «голая ЧМ» — иначе карточка советует ЧМ при службе SSTV.
+func TestTracker_StickySSTVKeepsSSTVDemod(t *testing.T) {
+	tr := NewTracker()
+	feed(tr, t0, t0+uint64(sliceMs)+stepMs, testCenter, steadyAt(testCenter+100_000))
+	id := segID(t, tr)
+	vis := signalclass.Result{Modulation: signalclass.ModFM, Service: "sstv", ServiceLabel: "SSTV, Robot 36", Demod: "sstv"}
+	plain := signalclass.Result{Modulation: signalclass.ModFM, Demod: "fm"}
+	tr.SetStructure(id, vis)
+	tr.SetStructure(id, plain)
+	tr.SetStructure(id, plain)
+	s := only(t, tr.Signals(nil)).Structure
+	if s == nil || s.Service != "sstv" {
+		t.Fatalf("structure %+v, want sticky sstv", s)
+	}
+	if s.Demod != "sstv" {
+		t.Fatalf("demod %q, want sstv при службе sstv", s.Demod)
+	}
+}
+
+// Голосование: служба большинства и демодулятор последнего голоса не разъезжаются —
+// демодулятор пересчитывается по итоговой строке.
+func TestTracker_VoteServiceAndDemodStayConsistent(t *testing.T) {
+	tr := NewTracker()
+	feed(tr, t0, t0+uint64(sliceMs)+stepMs, testCenter, steadyAt(testCenter+100_000))
+	id := segID(t, tr)
+	vis := signalclass.Result{Modulation: signalclass.ModFM, Service: "sstv", ServiceLabel: "SSTV, Robot 36", Demod: "sstv"}
+	plain := signalclass.Result{Modulation: signalclass.ModFM, Demod: "fm"}
+	tr.SetStructure(id, vis)
+	tr.SetStructure(id, vis)
+	tr.SetStructure(id, plain)
+	s := only(t, tr.Signals(nil)).Structure
+	if s == nil || s.Service != "sstv" {
+		t.Fatalf("structure %+v, want majority sstv", s)
+	}
+	if s.Demod != "sstv" {
+		t.Fatalf("demod %q, want sstv при службе большинства sstv", s.Demod)
+	}
+}
+
+// КА с AFSK, CW или OOK — тоже передатчик КА, а не пустой вид.
+func TestTracker_SatelliteAFSKCWAndOOKAreSatTx(t *testing.T) {
+	for _, mod := range []string{signalclass.ModAFSK, signalclass.ModCW, signalclass.ModOOK} {
+		t.Run(mod, func(t *testing.T) {
+			tr := NewTracker()
+			freq := func(ms uint64) float64 { return testCenter + 100_000 - 150*float64(ms-t0)/1000 }
+			expected := func(ms uint64) []Expected {
+				return []Expected{{NoradID: 53385, UUID: "tx1", FreqHz: freq(ms)}}
+			}
+			peaks := func(ms uint64) []Peak { return []Peak{carrier(freq(ms), 12_000, 14)} }
+			feed(tr, t0, t0+3_000, testCenter, peaks)
+			id := segID(t, tr)
+			tr.Signals(expected(t0 + 2_000)) // опорная точка слежения за Доплером
+			feed(tr, t0+2_000, t0+20_000, testCenter, peaks)
+			tr.SetStructure(id, signalclass.Result{Modulation: mod, Params: signalclass.Params{OccupiedHz: 12_000, Baud: 1200}})
+			s := only(t, tr.Signals(expected(t0 + 20_000)))
+			if s.Origin != OriginSatellite || s.Structure == nil || s.Structure.Service != signalclass.ServiceSatTx {
+				t.Fatalf("origin %q structure %+v, want sat_tx", s.Origin, s.Structure)
+			}
+		})
+	}
+}

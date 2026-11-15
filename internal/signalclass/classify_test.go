@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/cmplx"
 	"math/rand/v2"
+	"slices"
 	"testing"
 
 	"github.com/art-injener/satellite-scout/internal/dsp"
@@ -558,6 +559,78 @@ func TestClassify_WideFMPilotSetsBroadcast(t *testing.T) {
 	}
 	if res.Service != ServiceBroadcast || res.ServiceLabel != LabelBroadcast {
 		t.Fatalf("service %q/%q, want broadcast/%s", res.Service, res.ServiceLabel, LabelBroadcast)
+	}
+}
+
+// Рекомендация демодулятора по модуляции и службе: каждый известный вид сигнала
+// даёт профиль приёмника, у 2FSK 9600 — оба кандидата кадрового формата.
+func TestSuggestedDemod_Profiles(t *testing.T) {
+	cases := []struct {
+		name     string
+		r        Result
+		want     string
+		wantAlts []string
+	}{
+		{"sstv service", Result{Modulation: ModFM, Service: sstvService}, "sstv", nil},
+		{"sstv probable", Result{Modulation: ModFM, Service: sstvProbable}, "sstv", nil},
+		{"wfm", Result{Modulation: ModWFM}, "wfm", nil},
+		{"fm voice", Result{Modulation: ModFMVoice}, "fm", nil},
+		{"fm", Result{Modulation: ModFM}, "fm", nil},
+		{"afsk", Result{Modulation: ModAFSK}, "afsk1200", nil},
+		{"usb", Result{Modulation: ModUSB}, "usb", nil},
+		{"lsb", Result{Modulation: ModLSB}, "lsb", nil},
+		{"cw", Result{Modulation: ModCW}, "cw", nil},
+		{"ook", Result{Modulation: ModOOK, Params: Params{Baud: 2000}}, "ook", nil},
+		{"2fsk 1200", Result{Modulation: Mod2FSK, Params: Params{Baud: 1200}}, "fsk1200", nil},
+		{"2fsk 2400", Result{Modulation: Mod2FSK, Params: Params{Baud: 2400}}, "fsk1200", nil},
+		{"2fsk 4800", Result{Modulation: Mod2FSK, Params: Params{Baud: 4800}}, "fsk4800", nil},
+		{"2fsk 9600", Result{Modulation: Mod2FSK, Params: Params{Baud: 9600}}, "fsk9600_g3ruh", []string{"fsk9600_geoscan"}},
+		{"2fsk faster than any profile", Result{Modulation: Mod2FSK, Params: Params{Baud: 270833}}, "", nil},
+		{"unknown", Result{Modulation: ModUnknown}, "", nil},
+		{"undetermined", Result{Modulation: ModUndetermined}, "", nil},
+		{"lfm", Result{Modulation: ModLFM}, "", nil},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, alts := SuggestedDemod(c.r)
+			if got != c.want {
+				t.Errorf("demod %q, want %q", got, c.want)
+			}
+			if !slices.Equal(alts, c.wantAlts) {
+				t.Errorf("alts %v, want %v", alts, c.wantAlts)
+			}
+		})
+	}
+}
+
+// Разбор ставит рекомендацию сразу: у OOK и медленного FSK она не пустая.
+func TestClassify_DemodFilled(t *testing.T) {
+	if res := Classify(noisy(ook(int(testRate/2), 2000), 20, 8000, 71), testRate); res.Demod != "ook" {
+		t.Errorf("ook: demod %q, want ook", res.Demod)
+	}
+	if res := Classify(noisy(gfsk(int(testRate/2), 4800, 2400), 20, 12_000, 72), testRate); res.Demod != "fsk4800" {
+		t.Errorf("gfsk 4800: demod %q, want fsk4800", res.Demod)
+	}
+	res := Classify(noisy(gfsk(int(testRate/2), 9600, 3000), 20, 18_000, 73), testRate)
+	if res.Demod != "fsk9600_g3ruh" || len(res.DemodAlt) != 1 || res.DemodAlt[0] != "fsk9600_geoscan" {
+		t.Errorf("gfsk 9600: demod %q alt %v, want fsk9600_g3ruh + geoscan", res.Demod, res.DemodAlt)
+	}
+}
+
+// При «не определено» занятая полоса берётся из повторной разметки по вспышке,
+// а не из разбавленной тишиной разметки всего отрезка.
+func TestClassify_UndeterminedOccupiedFromBurst(t *testing.T) {
+	n := int(2 * testRate)
+	pkt := int(testRate)
+	x := make([]complex64, n)
+	copy(x[(n-pkt)/2:], ook(pkt, 2000))
+	res := Classify(noisy(x, 8, 8000, 74), testRate)
+	t.Logf("mod %q occupied %.0f why %s", res.Modulation, res.Params.OccupiedHz, res.Why)
+	if res.Modulation != ModUndetermined {
+		t.Fatalf("modulation %q, want undetermined", res.Modulation)
+	}
+	if w := res.Params.OccupiedHz; w < 1500 || w > 16_000 {
+		t.Errorf("occupied %.0f Hz, want a plausible burst band", w)
 	}
 }
 

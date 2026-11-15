@@ -520,6 +520,9 @@ func (t *Tracker) list(expected []Expected, maxAgeMs uint64) []Signal {
 		var structure *signalclass.Result
 		if raw := s.structureForClient(t.nowMs); raw != nil {
 			shown := applyOrigin(*raw, origin)
+			// Служба могла смениться после голосования, пробы или липких SSTV/RDS:
+			// рекомендация демодулятора считается по итоговой строке, а не по голосу.
+			shown.Demod, shown.DemodAlt = signalclass.SuggestedDemod(shown)
 			structure = &shown
 		}
 		sig := Signal{

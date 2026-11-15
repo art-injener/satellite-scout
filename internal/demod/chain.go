@@ -3,6 +3,7 @@ package demod
 import (
 	"math"
 	"math/cmplx"
+	"slices"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
@@ -203,6 +204,9 @@ type Status struct {
 	SyncCounted   bool    // выделитель кадров считает синхрослова
 	SyncWords     int
 	SyncBitErrors int
+	// SNRDB — превышение сигнала над шумом в полосе канала, дБ. 0 — не измерялось:
+	// меряется только на блоке с уровнем выше порога, как и прочие меры хода приёма.
+	SNRDB float32
 
 	// Picture — картинка, которая сейчас проявляется; nil — её нет. Не меняется после выдачи.
 	Picture *PictureProgress
@@ -221,6 +225,78 @@ type PictureProgress struct {
 	ModeName string `json:"mode_name"`
 	Lines    int    `json:"lines"`
 	Height   int    `json:"height"`
+}
+
+// channelNoise оценивает SNR блока канала через спектр: шум — нижний перцентиль
+// мощностей бинов внутри полосы пропускания, сигнал — сумма бинов минус шум.
+// Окно сглаживает утечку сильных тонов в соседние бины, коэффициент усиления окна
+// сокращается в отношении сигнал/шум. Работает в горутине потока цепочки.
+type channelNoise struct {
+	spec   *dsp.Spectrum
+	window []float64
+	buf    []complex64
+	size   int
+}
+
+// ensure подбирает размер БПФ под длину блока канала: степень двойки от 256 до 1024,
+// не больше числа отсчётов в блоке. Спектр и окно перестраиваются при смене размера.
+func (n *channelNoise) ensure(blockLen int) {
+	size := 256
+	for size*2 <= 1024 && size*2 <= blockLen {
+		size *= 2
+	}
+	if n.size == size && n.spec != nil {
+		return
+	}
+	n.size = size
+	n.spec = dsp.NewSpectrum(size)
+	n.window = dsp.MakeWindowCoeffs(size, dsp.WindowBlackmanHarris)
+	n.buf = make([]complex64, size)
+}
+
+// snrDB возвращает превышение сигнала над шумом в полосе пропускания passbandHz, дБ.
+// Блок идёт на частоте rate. 0 — блок слишком мал или полоса не видна.
+// Шум — 20-й перцентиль мощностей бинов внутри полосы, сигнал — сумма бинов минус шум.
+func (n *channelNoise) snrDB(ch []complex64, rate, passbandHz float64) float32 {
+	n.ensure(len(ch))
+	if n.spec == nil || len(ch) < n.size || passbandHz <= 0 || rate <= 0 {
+		return 0
+	}
+	copy(n.buf, ch[:n.size])
+	dsp.ApplyWindow(n.buf, n.window)
+	bins := n.spec.PowerSpectrum(n.buf)
+
+	binHz := rate / float64(n.size)
+	half := int(math.Round(passbandHz / 2 / binHz))
+	center := n.size / 2
+	lo := max(0, center-half)
+	hi := min(n.size, center+half)
+	if hi <= lo {
+		return 0
+	}
+	inBand := make([]float64, 0, hi-lo)
+	var total float64
+	for i := lo; i < hi; i++ {
+		inBand = append(inBand, bins[i])
+		total += bins[i]
+	}
+	slices.Sort(inBand)
+	// 20-й перцентиль — плотность шума: узкие тоны (AFSK, SSTV) его не поднимают,
+	// у широкого FSK он всё же ближе к шуму, чем медиана.
+	noiseDensity := inBand[len(inBand)/5]
+	noisePower := noiseDensity * float64(len(inBand))
+	if noisePower <= 0 {
+		return 0
+	}
+	signal := total - noisePower
+	if signal <= 0 {
+		return 0
+	}
+	snr := 10 * math.Log10(signal/noisePower)
+	if snr < 0 {
+		return 0
+	}
+	return float32(snr)
 }
 
 // Chain — цепочка приёма одного канала: выделение канала из полосы приёмника
@@ -253,6 +329,8 @@ type Chain struct {
 	audio   []float32
 
 	dopplerHz float64
+
+	noise channelNoise // оценка SNR по спектру блока канала
 }
 
 // NewChain создаёт цепочку; фильтры строятся по первому блоку.
@@ -393,6 +471,7 @@ func (c *Chain) measure(ch []complex64) {
 	st := &c.status
 	st.Measured = true
 	st.CarrierHz = cmplx.Phase(sum) * c.outRate / (2 * math.Pi)
+	st.SNRDB = c.noise.snrDB(ch, c.outRate, st.PassbandHz)
 	if m, ok := c.demod.(clockMeter); ok {
 		st.ClockJitter = m.ClockJitter()
 	}
@@ -474,4 +553,5 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 	m.PassbandHz = 2 * cutoff
 	m.Measured, m.CarrierHz, m.DeviationHz, m.ClockJitter = false, 0, 0, 0
 	m.SyncCounted, m.SyncWords, m.SyncBitErrors = false, 0, 0
+	m.SNRDB = 0
 }

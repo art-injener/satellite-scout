@@ -349,6 +349,15 @@ test('shiftedSlice keeps the requested center and pads the side that left the ba
     assert.ok(Math.abs(over.offsetHz - 24000) < 1000);
 });
 
+test('shiftedSlice stays drawable a full span past either edge', () => {
+    [FULL, -FULL].forEach((off) => {
+        const sl = shiftedSlice(4096, FULL, FULL, off);
+        assert.ok(sl.padLeft >= 0, 'padLeft ' + off);
+        assert.ok(sl.padRight >= 0, 'padRight ' + off);
+        assert.strictEqual(sl.padLeft + sl.count + sl.padRight, 4096);
+    });
+});
+
 // ── Long-lived request ────────────────────────────────────────────────
 
 /** fetch double: every call returns a body the test feeds chunk by chunk. */

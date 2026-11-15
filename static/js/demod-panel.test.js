@@ -48,7 +48,7 @@ global.document = {
 global.window = {};
 
 const {
-    DemodPanel, formatFreqMHz, formatHz, demodLabel, stagesFromStatus, diagnose, FrameStrip,
+    DemodPanel, formatFreqMHz, formatHz, demodLabel, stagesFromStatus, diagnose, FrameStrip, MetricHistory,
 } = require('./demod-panel.js');
 
 let passed = 0;
@@ -87,7 +87,15 @@ test('formatHz switches to kHz and keeps the sign', () => {
 test('demodLabel names known demodulators and returns the id for others', () => {
     assert.strictEqual(demodLabel('afsk1200'), 'AFSK 1200');
     assert.strictEqual(demodLabel('fsk9600_geoscan'), 'FSK 9600 GEOSCAN');
-    assert.strictEqual(demodLabel('gmsk9600'), 'gmsk9600');
+    assert.strictEqual(demodLabel('fsk9600_g3ruh'), 'FSK 9600 G3RUH');
+    assert.strictEqual(demodLabel('fsk4800'), 'FSK 4800');
+    assert.strictEqual(demodLabel('fsk1200'), 'FSK 1200');
+    assert.strictEqual(demodLabel('gmsk9600'), 'GMSK 9600');
+    assert.strictEqual(demodLabel('ook'), 'OOK');
+    assert.strictEqual(demodLabel('bpsk1200'), 'BPSK 1200');
+    assert.strictEqual(demodLabel('bpsk9600'), 'BPSK 9600');
+    assert.strictEqual(demodLabel('qpsk_ccsds'), 'QPSK CCSDS');
+    assert.strictEqual(demodLabel('drm'), 'drm');
 });
 
 const status = {
@@ -192,7 +200,7 @@ test('diagnose names the first stage that fails', () => {
     assert.strictEqual(d({ reception: Object.assign({}, status.reception, { carrier_hz: 5200 }) }).text,
         'Несущая ушла на +5,2 кГц от центра канала: поправьте сдвиг');
     assert.strictEqual(d({ reception: Object.assign({}, status.reception, { clock_jitter: 0.3 }) }).text,
-        'Нет захвата тактов: проверьте профиль и полосу');
+        'Нет захвата тактов');
     assert.strictEqual(d({ frames_good: 0, frames_bad: 0,
         reception: Object.assign({}, status.reception, { sync: { words: 0, bit_errors: 0 } }) }).text,
     'Такты есть, синхрослово не найдено');
@@ -390,5 +398,54 @@ test('stage names, frames row and strip switch with the profile', () => {
     panel.destroy();
 });
 
-console.log(`\n${passed} passed, ${failed} failed\n`);
+test('MetricHistory keeps 60 s of points and drops older ones', () => {
+    const h = new MetricHistory(60000);
+    h.push(1000, withStatus({ level_dbfs: -50, squelch_dbfs: -90, reception: { snr_db: 18, carrier_hz: -1200, clock_jitter: 0.04 } }), null);
+    h.push(31000, withStatus({ level_dbfs: -52, squelch_dbfs: -90, reception: { snr_db: 17, carrier_hz: -1100, clock_jitter: 0.05 } }), null);
+    h.push(61000, withStatus({ level_dbfs: -48, squelch_dbfs: -90, reception: { snr_db: 19, carrier_hz: -1300, clock_jitter: 0.03 } }), null);
+    const pts = h.points(61000);
+    assert.strictEqual(pts.length, 3);
+    assert.deepStrictEqual(pts.map((p) => p.t), [1000, 31000, 61000]);
+    assert.strictEqual(pts[2].level, -48);
+    assert.strictEqual(pts[2].snr, 19);
+    assert.strictEqual(pts[2].carrier, -1300);
+    assert.strictEqual(pts[2].jitter, 0.03);
+    assert.strictEqual(h.points(70000).length, 2);
+});
+
+test('MetricHistory treats missing reception as zero measures', () => {
+    const h = new MetricHistory(60000);
+    h.push(1000, withStatus({ level_dbfs: -60, squelch_dbfs: -90, reception: undefined }), null);
+    const pts = h.points(1000);
+    assert.strictEqual(pts.length, 1);
+    assert.strictEqual(pts[0].snr, 0);
+    assert.strictEqual(pts[0].carrier, 0);
+    assert.strictEqual(pts[0].jitter, 0);
+});
+
+test('MetricHistory marks points taken while the demodulator is off', () => {
+    const h = new MetricHistory(60000);
+    h.push(1000, withStatus({ demod_off: true, active: true, level_dbfs: 0 }), null);
+    assert.strictEqual(h.points(1000)[0].off, true, 'off demodulator must not be plotted');
+    h.push(2000, withStatus({ active: false }), null);
+    assert.strictEqual(h.points(2000)[1].off, true, 'stopped stream must not be plotted');
+    h.push(3000, status, null);
+    assert.strictEqual(h.points(3000)[2].off, false, 'live reception is plotted');
+});
+
+test('live panel records history on applyStatus', () => {
+    const panel = new DemodPanel({ now: () => 12000 });
+    panel.setLive(true);
+    panel.applyStatus(withStatus({ frames_good: 0, frames_bad: 0, last_packet_ms: 0 }), null);
+    panel.applyStatus(withStatus({ frames_good: 2, frames_bad: 1 }), null);
+    const pts = panel.getHistory().points(12000);
+    assert.strictEqual(pts.length, 2);
+    assert.strictEqual(pts[1].good, 2);
+    assert.strictEqual(pts[1].bad, 1);
+    panel.applyStatus(withStatus({ frames_good: 0, frames_bad: 0 }), null);
+    assert.strictEqual(panel.getHistory().points(12000).length, 1);
+    panel.destroy();
+});
+
+console.log(`\n${passed} ${failed > 0 ? 'failed' : 'passed'}\n`);
 process.exit(failed > 0 ? 1 : 0);
