@@ -13,6 +13,23 @@ DEAD,1,,437.000,,FM,,re-entered,X
 MULTI,61781,,435.400/436.210/10460.000,,FM,,active,REOO-1
 `
 
+func TestParseAMSAT_ActiveFileWithoutStatusColumn(t *testing.T) {
+	const activeOnly = `name,norad_id,uplink,downlink,beacon,mode,callsign,satnogs_id
+SO-50,27607,145.850,436.795,,FM,,IRES-1
+AISat,40054,,2259.000,437.505,FM CW*,DP0AIS,ZRIM-1
+`
+	src, err := ParseAMSAT(strings.NewReader(activeOnly))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if so50 := src.Transmitters(27607); len(so50) != 1 || so50[0].FreqHz != 436_795_000 {
+		t.Fatalf("SO-50 = %+v", so50)
+	}
+	if aisat := src.Transmitters(40054); len(aisat) != 2 {
+		t.Fatalf("AISat = %+v, want downlink + beacon", aisat)
+	}
+}
+
 func TestParseAMSAT_ActiveDownlinksAndBeacon(t *testing.T) {
 	src, err := ParseAMSAT(strings.NewReader(amsatSample))
 	if err != nil {

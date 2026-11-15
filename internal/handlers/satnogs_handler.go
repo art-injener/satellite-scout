@@ -12,6 +12,7 @@ import (
 type SatNOGSProvider interface {
 	GetAllTransmitters(noradID int) []satnogs.Transmitter
 	GetPrimaryTransmitter(noradID int) *satnogs.TransmitterSummary
+	RequestFetch(noradIDs []int)
 }
 
 // SatNOGSHandler — REST-обработчик /api/satnogs/* для UI-расширений
@@ -36,9 +37,8 @@ type SatNOGSTransmittersResponse struct {
 // GetTransmitters обрабатывает GET /api/satnogs/transmitters/{norad}.
 // Возвращает primary-передатчик (для подписи в таблице) + полный массив (для dropdown).
 //
-// Данные читаются только из кеша SatNOGSService (метод неблокирующий).
-// Если в кеше промах — возвращается пустой массив; параллельно сервис ставит NORAD в очередь fetch,
-// и при следующем запросе данные уже будут готовы.
+// Данные читаются из кеша (неблокирующе). Промах — пустой массив и постановка NORAD
+// в очередь fetch; при следующем запросе данные уже могут быть готовы.
 func (h *SatNOGSHandler) GetTransmitters(w http.ResponseWriter, r *http.Request) {
 	noradStr := r.PathValue("norad")
 	noradID, err := strconv.Atoi(noradStr)
@@ -49,6 +49,7 @@ func (h *SatNOGSHandler) GetTransmitters(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
+	h.provider.RequestFetch([]int{noradID})
 	transmitters := h.provider.GetAllTransmitters(noradID)
 	if transmitters == nil {
 		transmitters = []satnogs.Transmitter{}

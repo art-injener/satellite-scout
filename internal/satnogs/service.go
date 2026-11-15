@@ -32,6 +32,14 @@ const (
 	// данных по всем остальным. Старт запросов всё равно сериализуется rate-limit
 	// клиента, но сами запросы выполняются с перекрытием.
 	DefaultWorkers = 4
+
+	// DefaultCircuitTrip — сколько подряд таймаутов/отмен открывают паузу на весь клиент.
+	// На сети, где db.satnogs.org обрезает большие ответы, без паузы воркеры по 12 с
+	// висят на каждом NORAD из пробелов.
+	DefaultCircuitTrip = 5
+
+	// DefaultCircuitPause — сколько не ходить в SatNOGS после срабатывания автомата.
+	DefaultCircuitPause = 15 * time.Minute
 )
 
 // fetcher — узкий интерфейс HTTP-клиента, нужный сервису.
@@ -45,6 +53,7 @@ type cacheEntry struct {
 	transmitters []Transmitter       // Полный список ответа SatNOGS.
 	primary      *TransmitterSummary // Выбранный «главный» передатчик (или nil).
 	fetchedAt    time.Time           // Время последней удачной/неудачной попытки.
+	lastOK       time.Time           // Время последней удачной загрузки (для файла кеша).
 	fetching     bool                // Запрос на загрузку поставлен в очередь / в работе.
 	lastErr      error               // Последняя ошибка fetch (nil при успехе).
 	failCount    int                 // Счётчик последовательных неудач (сбрасывается при успехе).
@@ -82,10 +91,11 @@ func retryDelay(base time.Duration, failCount int) time.Duration {
 // Service — координатор асинхронной загрузки и кеширования передатчиков SatNOGS.
 //
 // Принцип работы:
-//   - GetPrimaryTransmitter / GetAllTransmitters — неблокирующие, читают только из кеша.
-//   - При промахе кеша или истечении TTL вызов автоматически ставит NORAD в очередь fetch.
-//   - Run() — фоновая горутина-воркер, читает очередь и вызывает HTTP-клиент.
-//   - Graceful degradation: при ошибке API лог-warning, кеш помечается lastErr,
+//   - GetPrimaryTransmitter / GetAllTransmitters — неблокирующие, только чтение кеша.
+//   - RequestFetch ставит NORAD в очередь (пробелы плана частот, явный API).
+//   - Run() — фоновые воркеры, HTTP-клиент.
+//   - При серии таймаутов открывается пауза на весь клиент (circuit breaker).
+//   - Graceful degradation: при ошибке API кеш помечается lastErr,
 //     повторная попытка не раньше DefaultRetryAfter.
 type Service struct {
 	client     fetcher
@@ -93,10 +103,19 @@ type Service struct {
 	retryAfter time.Duration
 	workers    int
 
+	circuitTrip  int
+	circuitPause time.Duration
+
 	mu    sync.RWMutex
 	cache map[int]*cacheEntry
 
 	fetchQueue chan int
+
+	circuitFails     int       // подряд идущие таймауты/отмены по всем NORAD
+	circuitOpenUntil time.Time // до этого момента новые fetch не ставим
+
+	diskPath string     // файл кеша передатчиков; пусто — только память
+	saveMu   sync.Mutex // запись файла по одной
 
 	logger *slog.Logger
 }
@@ -105,13 +124,15 @@ type Service struct {
 // client — реализация HTTP-клиента (обычно *Client из этого же пакета).
 func NewService(client fetcher) *Service {
 	return &Service{
-		client:     client,
-		cacheTTL:   DefaultCacheTTL,
-		retryAfter: DefaultRetryAfter,
-		workers:    DefaultWorkers,
-		cache:      make(map[int]*cacheEntry),
-		fetchQueue: make(chan int, fetchQueueSize),
-		logger:     slog.Default(),
+		client:       client,
+		cacheTTL:     DefaultCacheTTL,
+		retryAfter:   DefaultRetryAfter,
+		workers:      DefaultWorkers,
+		circuitTrip:  DefaultCircuitTrip,
+		circuitPause: DefaultCircuitPause,
+		cache:        make(map[int]*cacheEntry),
+		fetchQueue:   make(chan int, fetchQueueSize),
+		logger:       slog.Default(),
 	}
 }
 
@@ -136,6 +157,18 @@ func (s *Service) WithRetryAfter(d time.Duration) *Service {
 func (s *Service) WithWorkers(n int) *Service {
 	if n > 0 {
 		s.workers = n
+	}
+	return s
+}
+
+// WithCircuitBreaker задаёт порог подряд идущих таймаутов и длительность паузы.
+// Неположительные значения игнорируются.
+func (s *Service) WithCircuitBreaker(trip int, pause time.Duration) *Service {
+	if trip > 0 {
+		s.circuitTrip = trip
+	}
+	if pause > 0 {
+		s.circuitPause = pause
 	}
 	return s
 }
@@ -191,65 +224,37 @@ func (s *Service) worker(ctx context.Context) {
 }
 
 // GetPrimaryTransmitter возвращает primary-передатчик из кеша.
-// Никогда не блокирует: на промахе ставит NORAD в очередь и возвращает nil.
-// Когда фоновая загрузка завершится, следующий вызов вернёт данные.
+// Неблокирующий: сеть не трогает. Промах или устаревшая запись — sticky/nil;
+// догрузка только через RequestFetch.
 func (s *Service) GetPrimaryTransmitter(noradID int) *TransmitterSummary {
 	if noradID <= 0 {
 		return nil
 	}
 
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	entry := s.cache[noradID]
-	var primary *TransmitterSummary
-	fresh := false
-	if entry != nil {
-		fresh = entry.isFresh(s.cacheTTL)
-		primary = entry.primary
+	if entry == nil {
+		return nil
 	}
-	s.mu.RUnlock()
-
-	if entry != nil && fresh {
-		return primary
-	}
-
-	s.maybeEnqueue(noradID)
-
-	if entry != nil {
-		// Возвращаем последний известный primary, даже если запись устарела.
-		// Это даёт «sticky» поведение: пока новый fetch в работе, UI показывает старое значение,
-		// а не пустую заглушку.
-		return primary
-	}
-	return nil
+	return entry.primary
 }
 
 // GetAllTransmitters возвращает копию полного списка передатчиков из кеша.
-// Поведение аналогично GetPrimaryTransmitter — неблокирующее.
+// Неблокирующий, без постановки в очередь fetch.
 func (s *Service) GetAllTransmitters(noradID int) []Transmitter {
 	if noradID <= 0 {
 		return nil
 	}
 
 	s.mu.RLock()
+	defer s.mu.RUnlock()
 	entry := s.cache[noradID]
-	var out []Transmitter
-	fresh := false
-	if entry != nil {
-		fresh = entry.isFresh(s.cacheTTL)
-		if len(entry.transmitters) > 0 {
-			out = make([]Transmitter, len(entry.transmitters))
-			copy(out, entry.transmitters)
-		}
-	}
-	s.mu.RUnlock()
-
-	if entry == nil {
-		s.maybeEnqueue(noradID)
+	if entry == nil || len(entry.transmitters) == 0 {
 		return nil
 	}
-	if !fresh {
-		s.maybeEnqueue(noradID)
-	}
+	out := make([]Transmitter, len(entry.transmitters))
+	copy(out, entry.transmitters)
 	return out
 }
 
@@ -267,6 +272,7 @@ func (s *Service) RequestFetch(noradIDs []int) {
 // maybeEnqueue — общая точка решения «нужно ли просить fetch для этого NORAD».
 //
 // Условия для постановки в очередь:
+//   - автомат не на паузе;
 //   - запись отсутствует в кеше; или
 //   - запись устарела (старше cacheTTL) и не помечена ошибкой; или
 //   - запись с ошибкой и retryAfter уже прошёл.
@@ -279,6 +285,10 @@ func (s *Service) maybeEnqueue(noradID int) {
 
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if !s.circuitOpenUntil.IsZero() && time.Now().Before(s.circuitOpenUntil) {
+		return
+	}
 
 	// Перечитываем под write-lock — состояние могло измениться.
 	cur, ok := s.cache[noradID]
@@ -318,9 +328,16 @@ func (s *Service) maybeEnqueue(noradID int) {
 	}
 }
 
-// fetchOne делает один HTTP-запрос и обновляет кеш.
+// fetchOne делает один HTTP-запрос и обновляет кеш, удачный ответ сохраняет в файл.
 // Не возвращает ошибку — все ошибки логируются и сохраняются в cacheEntry.lastErr.
 func (s *Service) fetchOne(ctx context.Context, noradID int) {
+	if s.updateEntry(ctx, noradID) {
+		s.saveDiskCache()
+	}
+}
+
+// updateEntry запрашивает передатчики и обновляет запись кеша. true — ответ удачный.
+func (s *Service) updateEntry(ctx context.Context, noradID int) bool {
 	transmitters, err := s.client.FetchTransmitters(ctx, noradID)
 	now := time.Now().UTC()
 
@@ -338,20 +355,56 @@ func (s *Service) fetchOne(ctx context.Context, noradID int) {
 	if err != nil {
 		entry.lastErr = err
 		entry.failCount++
-
+		s.noteCircuitLocked(err)
 		s.logFetchError(noradID, err, entry.failCount)
-		return
+		return false
 	}
 
 	entry.lastErr = nil
+	entry.lastOK = now
 	entry.failCount = 0
 	entry.transmitters = transmitters
 	entry.primary = SelectPrimary(transmitters)
+	s.circuitFails = 0
 	s.logger.DebugContext(ctx, "satnogs: fetched transmitters",
 		slog.Int("norad_id", noradID),
 		slog.Int("count", len(transmitters)),
 		slog.Bool("has_primary", entry.primary != nil),
 	)
+	return true
+}
+
+// noteCircuitLocked учитывает таймаут в автомате паузы. Вызывать под s.mu.
+func (s *Service) noteCircuitLocked(err error) {
+	if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) {
+		return
+	}
+	trip := s.circuitTrip
+	if trip <= 0 {
+		trip = DefaultCircuitTrip
+	}
+	pause := s.circuitPause
+	if pause <= 0 {
+		pause = DefaultCircuitPause
+	}
+	s.circuitFails++
+	if s.circuitFails < trip {
+		return
+	}
+	s.circuitOpenUntil = time.Now().Add(pause)
+	s.circuitFails = 0
+	s.logger.Warn("satnogs: circuit open after timeouts",
+		slog.Int("trip", trip),
+		slog.Duration("pause", pause),
+		slog.Time("until", s.circuitOpenUntil),
+	)
+}
+
+// CircuitOpen сообщает, что новые fetch сейчас отбрасываются из-за паузы после таймаутов.
+func (s *Service) CircuitOpen() bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return !s.circuitOpenUntil.IsZero() && time.Now().Before(s.circuitOpenUntil)
 }
 
 // logFetchError выбирает уровень лога в зависимости от типа ошибки.

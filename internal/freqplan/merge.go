@@ -44,7 +44,7 @@ func Merge(passes []Pass, sources []Source) []Entry {
 }
 
 // collect сливает передатчики NORAD из источников; уже занятая частота
-// (в допуске nearHz) не перекрывается более слабым источником.
+// (в допуске NearHz) не перекрывается более слабым источником.
 func collect(noradID int, sources []Source) []Tx {
 	var out []Tx
 	for _, src := range sources {
@@ -66,7 +66,7 @@ func collect(noradID int, sources []Source) []Tx {
 
 func covered(have []Tx, freqHz int64) bool {
 	for _, tx := range have {
-		if math.Abs(float64(tx.FreqHz-freqHz)) <= nearHz {
+		if math.Abs(float64(tx.FreqHz-freqHz)) <= NearHz {
 			return true
 		}
 	}

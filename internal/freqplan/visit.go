@@ -80,11 +80,11 @@ func passOverlaps(aos, los, startMs, endMs int64) bool {
 
 func closestSighting(sights []Sighting, freqHz int64) (Sighting, bool) {
 	var best Sighting
-	bestDist := float64(nearHz) + 1
+	bestDist := float64(NearHz) + 1
 	found := false
 	for _, s := range sights {
 		d := math.Abs(float64(s.CenterHz - freqHz))
-		if d <= nearHz && d < bestDist {
+		if d <= NearHz && d < bestDist {
 			best, bestDist, found = s, d, true
 		}
 	}

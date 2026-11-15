@@ -2,6 +2,7 @@ package freqplan
 
 import (
 	"encoding/csv"
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -10,6 +11,9 @@ import (
 
 // SourceAMSAT — зеркало JE9PEL/AMSAT (palewire CSV).
 const SourceAMSAT = "amsat"
+
+// ErrAMSATColumns — в CSV нет обязательных колонок norad_id и downlink.
+var ErrAMSATColumns = errors.New("freqplan: amsat: need norad_id, downlink columns")
 
 // amsatActive — статусы, которые берём в план.
 var amsatActive = map[string]bool{
@@ -33,6 +37,7 @@ func (a *AMSAT) Transmitters(noradID int) []Tx {
 // ParseAMSAT читает CSV зеркала (amsat-active / amsat-all).
 // Колонки: name, norad_id, uplink, downlink, beacon, mode, callsign, status, …
 // В план идут downlink и beacon активных КА; диапазон «a-b» — середина.
+// В amsat-active колонки status нет: там все строки активные.
 func ParseAMSAT(r io.Reader) (*AMSAT, error) {
 	cr := csv.NewReader(r)
 	cr.ReuseRecord = true
@@ -41,8 +46,8 @@ func ParseAMSAT(r io.Reader) (*AMSAT, error) {
 		return nil, fmt.Errorf("freqplan: amsat header: %w", err)
 	}
 	col := amsatColumns(header)
-	if col.norad < 0 || col.downlink < 0 || col.status < 0 {
-		return nil, fmt.Errorf("freqplan: amsat: need norad_id, downlink, status columns")
+	if col.norad < 0 || col.downlink < 0 {
+		return nil, ErrAMSATColumns
 	}
 	out := &AMSAT{byNorad: make(map[int][]Tx)}
 	for {
@@ -53,8 +58,7 @@ func ParseAMSAT(r io.Reader) (*AMSAT, error) {
 		if err != nil {
 			return nil, fmt.Errorf("freqplan: amsat row: %w", err)
 		}
-		status := strings.ToLower(strings.TrimSpace(cell(row, col.status)))
-		if !amsatActive[status] {
+		if col.status >= 0 && !amsatActive[strings.ToLower(strings.TrimSpace(cell(row, col.status)))] {
 			continue
 		}
 		norad, err := strconv.Atoi(strings.TrimSpace(cell(row, col.norad)))

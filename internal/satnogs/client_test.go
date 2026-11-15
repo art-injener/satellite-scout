@@ -3,6 +3,7 @@ package satnogs
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -73,6 +74,32 @@ func TestClient_FetchTransmitters_Success(t *testing.T) {
 	}
 	if transmitters[0].Baud == nil || *transmitters[0].Baud != 1200.0 {
 		t.Errorf("Baud = %v, want 1200.0", transmitters[0].Baud)
+	}
+}
+
+// A response cut off by network filtering freezes the TCP connection; with
+// connection reuse every following request hangs on it until timeout.
+func TestClient_FetchTransmitters_NewConnectionPerRequest(t *testing.T) {
+	var conns atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(fixtureISS))
+	}))
+	server.Config.ConnState = func(_ net.Conn, state http.ConnState) {
+		if state == http.StateNew {
+			conns.Add(1)
+		}
+	}
+	server.Start()
+	defer server.Close()
+
+	c := NewClient(WithBaseURL(server.URL), WithRateLimit(0))
+	for range 3 {
+		if _, err := c.FetchTransmitters(context.Background(), 25544); err != nil {
+			t.Fatalf("FetchTransmitters() error = %v", err)
+		}
+	}
+	if got := conns.Load(); got != 3 {
+		t.Fatalf("connections = %d, want 3 (one per request)", got)
 	}
 }
 

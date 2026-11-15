@@ -6,8 +6,8 @@ const (
 	SourceSatNOGS = "satnogs"
 )
 
-// nearHz — допуск «тот же канал»: 5 кГц (типичная сетка ЧМ / уход записи).
-const nearHz = 5_000
+// NearHz — допуск «тот же канал»: 5 кГц (типичная сетка ЧМ / уход записи).
+const NearHz = 5_000
 
 // Pass — пролёт КА в окне горизонта (достаточно NORAD, имени и AOS/LOS).
 type Pass struct {

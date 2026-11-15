@@ -86,7 +86,7 @@ func waitFor(t *testing.T, timeout time.Duration, cond func() bool) {
 	t.Fatalf("condition not met within %v", timeout)
 }
 
-func TestService_GetPrimary_CacheMissEnqueuesAndReturnsNil(t *testing.T) {
+func TestService_GetPrimary_DoesNotEnqueue(t *testing.T) {
 	mock := newMockFetcher()
 	mock.results[25544] = []Transmitter{
 		{Alive: true, Status: "active", DownlinkLow: ptrInt64(145_825_000), Mode: "FM"},
@@ -96,18 +96,20 @@ func TestService_GetPrimary_CacheMissEnqueuesAndReturnsNil(t *testing.T) {
 	defer stop()
 
 	if got := svc.GetPrimaryTransmitter(25544); got != nil {
-		t.Errorf("first call = %v, want nil (cache miss, async fetch enqueued)", got)
+		t.Errorf("first call = %v, want nil (cache miss, no auto-fetch)", got)
 	}
-	waitFor(t, 500*time.Millisecond, func() bool {
-		return mock.callCount() == 1
-	})
+	time.Sleep(50 * time.Millisecond)
+	if n := mock.callCount(); n != 0 {
+		t.Fatalf("network calls = %d, want 0 without RequestFetch", n)
+	}
+
+	svc.RequestFetch([]int{25544})
 	waitFor(t, 500*time.Millisecond, func() bool {
 		return svc.GetPrimaryTransmitter(25544) != nil
 	})
-
 	got := svc.GetPrimaryTransmitter(25544)
 	if got == nil {
-		t.Fatal("after fetch, GetPrimaryTransmitter() = nil")
+		t.Fatal("after RequestFetch, GetPrimaryTransmitter() = nil")
 	}
 	if got.FreqMHz != "145.825" {
 		t.Errorf("FreqMHz = %q, want 145.825", got.FreqMHz)
@@ -123,10 +125,9 @@ func TestService_GetPrimary_CacheHitNoExtraFetch(t *testing.T) {
 	stop := runService(svc)
 	defer stop()
 
-	svc.GetPrimaryTransmitter(1)
+	svc.RequestFetch([]int{1})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 
-	// Несколько hot-вызовов — fetch не должен повторяться.
 	for range 5 {
 		_ = svc.GetPrimaryTransmitter(1)
 	}
@@ -135,7 +136,7 @@ func TestService_GetPrimary_CacheHitNoExtraFetch(t *testing.T) {
 	}
 }
 
-func TestService_GetPrimary_TTLExpiryRefetches(t *testing.T) {
+func TestService_GetPrimary_TTLExpiryNeedsRequestFetch(t *testing.T) {
 	mock := newMockFetcher()
 	mock.results[1] = []Transmitter{
 		{Alive: true, Status: "active", DownlinkLow: ptrInt64(145_800_000), Mode: "FM"},
@@ -144,14 +145,17 @@ func TestService_GetPrimary_TTLExpiryRefetches(t *testing.T) {
 	stop := runService(svc)
 	defer stop()
 
-	svc.GetPrimaryTransmitter(1)
+	svc.RequestFetch([]int{1})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 
-	// Ждём истечения TTL.
 	time.Sleep(80 * time.Millisecond)
-
-	// Запрос после TTL — должен поставить новый fetch в очередь.
 	_ = svc.GetPrimaryTransmitter(1)
+	time.Sleep(30 * time.Millisecond)
+	if got := mock.callCount(); got != 1 {
+		t.Fatalf("Get after TTL triggered fetch: callCount=%d, want 1", got)
+	}
+
+	svc.RequestFetch([]int{1})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 2 })
 }
 
@@ -164,15 +168,15 @@ func TestService_GetPrimary_StaleEntryReturnedWhileRefetching(t *testing.T) {
 	stop := runService(svc)
 	defer stop()
 
-	svc.GetPrimaryTransmitter(1)
+	svc.RequestFetch([]int{1})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
-	time.Sleep(40 * time.Millisecond) // TTL истёк.
+	time.Sleep(40 * time.Millisecond)
 
-	// Ставим задержку на следующий fetch — пока он идёт, должны вернуть старое значение.
 	mock.mu.Lock()
 	mock.delay = 200 * time.Millisecond
 	mock.mu.Unlock()
 
+	svc.RequestFetch([]int{1})
 	got := svc.GetPrimaryTransmitter(1)
 	if got == nil {
 		t.Fatal("expected stale primary while refetching, got nil")
@@ -182,30 +186,24 @@ func TestService_GetPrimary_StaleEntryReturnedWhileRefetching(t *testing.T) {
 	}
 }
 
-func TestService_GetPrimary_GracefulDegradationOnError(t *testing.T) {
+func TestService_RequestFetch_GracefulDegradationOnError(t *testing.T) {
 	mock := newMockFetcher()
 	mock.errors[42] = errors.New("network down")
 	svc := NewService(mock).WithRetryAfter(100 * time.Millisecond)
 	stop := runService(svc)
 	defer stop()
 
-	if got := svc.GetPrimaryTransmitter(42); got != nil {
-		t.Errorf("first call = %v, want nil", got)
-	}
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 
-	// Сразу после ошибки — повторно fetch не вызывается (ждём retryAfter).
-	for range 3 {
-		_ = svc.GetPrimaryTransmitter(42)
-	}
+	svc.RequestFetch([]int{42})
 	time.Sleep(20 * time.Millisecond)
 	if got := mock.callCount(); got != 1 {
 		t.Errorf("callCount = %d, want 1 (no retry within retryAfter)", got)
 	}
 
-	// После retryAfter — следующая попытка разрешена.
 	time.Sleep(120 * time.Millisecond)
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 2 })
 }
 
@@ -234,16 +232,14 @@ func TestService_RequestFetch_DedupsConcurrentRequests(t *testing.T) {
 	stop := runService(svc)
 	defer stop()
 
-	// Десять параллельных запросов на тот же NORAD.
 	var wg sync.WaitGroup
 	for range 10 {
 		wg.Go(func() {
-			svc.GetPrimaryTransmitter(1)
+			svc.RequestFetch([]int{1})
 		})
 	}
 	wg.Wait()
 
-	// Первая постановка fetch-а блокирует остальные через флаг fetching.
 	waitFor(t, 1*time.Second, func() bool { return mock.callCount() >= 1 })
 	if got := mock.callCount(); got != 1 {
 		t.Errorf("callCount = %d, want 1 (dedup via fetching flag)", got)
@@ -257,8 +253,6 @@ func TestService_WorkersProcessConcurrently(t *testing.T) {
 			{Alive: true, Status: "active", DownlinkLow: ptrInt64(145_800_000), Mode: "FM"},
 		}
 	}
-	// Каждый запрос «висит» 80мс. При одном воркере 4 запроса заняли бы ~320мс,
-	// при пуле из 4 воркеров они выполняются параллельно (~80мс).
 	mock.delay = 80 * time.Millisecond
 
 	svc := NewService(mock).WithWorkers(4)
@@ -270,7 +264,6 @@ func TestService_WorkersProcessConcurrently(t *testing.T) {
 	waitFor(t, 1*time.Second, func() bool { return mock.callCount() == 4 })
 	elapsed := time.Since(start)
 
-	// Порог с запасом: явно меньше последовательного исполнения (320мс).
 	if elapsed > 250*time.Millisecond {
 		t.Errorf("elapsed = %v, want < 250ms (workers must run in parallel)", elapsed)
 	}
@@ -289,13 +282,13 @@ func TestService_GetAllTransmitters(t *testing.T) {
 	if got := svc.GetAllTransmitters(1); got != nil {
 		t.Errorf("first call = %v, want nil (miss)", got)
 	}
+	svc.RequestFetch([]int{1})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 
 	all := svc.GetAllTransmitters(1)
 	if len(all) != 2 {
 		t.Fatalf("len(all) = %d, want 2", len(all))
 	}
-	// Возвращаемое значение должно быть копией (мутация не влияет на кеш).
 	all[0].UUID = "MUTATED"
 	all2 := svc.GetAllTransmitters(1)
 	if all2[0].UUID == "MUTATED" {
@@ -327,7 +320,6 @@ func TestService_RunStopsOnContextCancel(t *testing.T) {
 	cancel()
 	select {
 	case <-done:
-		// OK
 	case <-time.After(1 * time.Second):
 		t.Error("Run() did not return after ctx cancel")
 	}
@@ -342,27 +334,22 @@ func TestService_ProgressiveBackoffOnRepeatedFailures(t *testing.T) {
 	stop := runService(svc)
 	defer stop()
 
-	// Первый fetch — failCount=1, retry delay = baseRetry (50ms).
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 
-	// Ждём чуть больше baseRetry (50ms) — вторая попытка разрешена (failCount=1).
 	time.Sleep(baseRetry + 20*time.Millisecond)
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 2 })
 
-	// Теперь failCount=2 → delay = 2 * baseRetry = 100ms.
-	// Через 50ms — retry ещё не разрешён.
 	time.Sleep(baseRetry + 10*time.Millisecond)
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	time.Sleep(20 * time.Millisecond)
 	if got := mock.callCount(); got != 2 {
 		t.Errorf("callCount = %d, want 2 (should wait for progressive delay)", got)
 	}
 
-	// Дожидаемся оставшейся части (100ms - уже прошло ~60ms, ждём ещё ~60ms).
 	time.Sleep(baseRetry + 20*time.Millisecond)
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 3 })
 }
 
@@ -375,14 +362,12 @@ func TestService_FailCountResetsOnSuccess(t *testing.T) {
 	stop := runService(svc)
 	defer stop()
 
-	// Два неудачных fetch — failCount = 2.
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 1 })
 	time.Sleep(baseRetry + 10*time.Millisecond)
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 2 })
 
-	// Теперь «чиним» API — следующий fetch успешен.
 	mock.mu.Lock()
 	delete(mock.errors, 42)
 	mock.results[42] = []Transmitter{
@@ -390,15 +375,45 @@ func TestService_FailCountResetsOnSuccess(t *testing.T) {
 	}
 	mock.mu.Unlock()
 
-	// Ждём прогрессивный delay (2*baseRetry = 60ms).
 	time.Sleep(2*baseRetry + 20*time.Millisecond)
-	_ = svc.GetPrimaryTransmitter(42)
+	svc.RequestFetch([]int{42})
 	waitFor(t, 500*time.Millisecond, func() bool { return mock.callCount() == 3 })
 
-	// Проверяем что failCount сбросился — primary доступен.
 	waitFor(t, 500*time.Millisecond, func() bool {
 		return svc.GetPrimaryTransmitter(42) != nil
 	})
+}
+
+func TestService_CircuitOpensAfterTimeouts(t *testing.T) {
+	mock := newMockFetcher()
+	for _, id := range []int{1, 2, 3} {
+		mock.errors[id] = context.DeadlineExceeded
+	}
+	svc := NewService(mock).
+		WithRetryAfter(time.Hour).
+		WithCircuitBreaker(3, 200*time.Millisecond)
+	stop := runService(svc)
+	defer stop()
+
+	svc.RequestFetch([]int{1, 2, 3})
+	waitFor(t, time.Second, func() bool { return mock.callCount() == 3 })
+	waitFor(t, time.Second, func() bool { return svc.CircuitOpen() })
+
+	svc.RequestFetch([]int{4})
+	time.Sleep(50 * time.Millisecond)
+	if got := mock.callCount(); got != 3 {
+		t.Fatalf("callCount = %d, want 3 while circuit open", got)
+	}
+
+	waitFor(t, time.Second, func() bool { return !svc.CircuitOpen() })
+	mock.mu.Lock()
+	mock.errors[4] = nil
+	mock.results[4] = []Transmitter{
+		{Alive: true, Status: "active", DownlinkLow: ptrInt64(145_800_000), Mode: "FM"},
+	}
+	mock.mu.Unlock()
+	svc.RequestFetch([]int{4})
+	waitFor(t, time.Second, func() bool { return mock.callCount() == 4 })
 }
 
 func TestRetryDelay(t *testing.T) {

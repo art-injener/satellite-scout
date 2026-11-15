@@ -25,6 +25,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/freqplan"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/products"
+	"github.com/art-injener/satellite-scout/internal/registry"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/sdr/chipdrivers/rtlsdr"
@@ -41,6 +42,12 @@ const slogKeyError = "error"
 // productsDir — каталог принятых картинок, рядом с конфигом по умолчанию.
 const productsDir = "data/products"
 
+// satnogsCachePath — передатчики SatNOGS на диске: частоты есть сразу после рестарта, даже без сети.
+const satnogsCachePath = "data/satnogs_transmitters.json"
+
+// tleStatusInterval — как часто пересылать актуальность TLE: возраст растёт и без новых загрузок.
+const tleStatusInterval = time.Hour
+
 // app собирает все ключевые модули приложения в одном месте.
 type app struct {
 	cfg         *config.Config
@@ -52,6 +59,8 @@ type app struct {
 	sseHub   *handlers.SSEHub                   // рассылка real-time данных
 	access   *access.Manager                    // роли: мастер и зрители
 	tleStore *tracker.TLEStore                  // хранилище TLE
+	registry *registry.Registry                 // реестр КА: карточки, орбиты, передатчики
+	bands    registry.Bands                     // диапазоны приёмников радиотрактов
 	tracking *services.SatelliteTrackingService // отслеживание спутников
 	pass     *services.PassService              // расчёт пролётов
 	exclude  *exclude.Store                     // исключённые NORAD ID
@@ -68,6 +77,8 @@ type app struct {
 
 	freqPlanMu sync.Mutex
 	freqPlan   []freqplan.Entry // последний план частот для журнала визитов
+
+	tleStatusKick chan struct{} // внеочередная отправка tle_status, см. kickTLEStatus
 }
 
 // setupLogger — стандартный логгер без сторонних зависимостей.
@@ -116,8 +127,16 @@ func NewApp(configStore *config.Store) *app {
 	// Выбор источника шаблонов и статики.
 	templates, static := resolveAssets(cfg.DevMode)
 
+	// Реестр КА получает итог каждого прохода каталога: элементы, sonik и даты схода SATCAT.
+	// Он же даёт имена КА, которые Space-Track ещё не опознал.
+	reg := openRegistry()
 	// Хранилище TLE с автообновлением.
-	tleStore := tracker.NewTLEStore(cfg.TLEStoreConfig())
+	tleStore := tracker.NewTLEStore(cfg.TLEStoreConfig(),
+		append(tleSourceOptions(cfg.SpaceTrack),
+			tracker.WithCatalogSink(registrySink(reg)),
+			tracker.WithNamer(reg.DisplayName),
+			tracker.WithComposition(reg.CatalogCompositionIDs),
+		)...)
 	// SSEHub - eдиная точка рассылки данных для UI
 	sseHub := handlers.NewSSEHub()
 
@@ -144,8 +163,11 @@ func NewApp(configStore *config.Store) *app {
 		slog.Int("count", len(excludeStore.List())),
 	)
 
-	// Расчёт и кеширование пролётов.
-	passService := services.NewPassService(tleStore, observer).WithExcluder(excludeStore)
+	// Расчёт и кеширование пролётов. Вместе с исключёнными отсекаются сошедшие с орбиты КА
+	// и те, которые станция не услышит. Диапазоны трактов берутся на старте.
+	bands := stationBands(cfg.Station.RadioPaths)
+	passService := services.NewPassService(tleStore, observer).
+		WithExcluder(passExcluder{manual: excludeStore, reg: reg, bands: bands})
 
 	// Пролёты для авто-трекинга и список исключений.
 	trackingService.SetPassProvider(passService)
@@ -213,6 +235,8 @@ func NewApp(configStore *config.Store) *app {
 		sseHub:      sseHub,
 		access:      accessManager,
 		tleStore:    tleStore,
+		registry:    reg,
+		bands:       bands,
 		tracking:    trackingService,
 		pass:        passService,
 		exclude:     excludeStore,
@@ -244,10 +268,15 @@ func (a *app) Run() error {
 		return listenErr
 	}
 
-	// TLEStore — фоновое обновление орбит.
+	// TLEStore — фоновое обновление орбит; устаревшие TLE не останавливают сервер, их видно в шапке.
+	// Состав GP берётся из реестра: curated/HA/AMSAT должны быть на диске до первого прохода.
+	a.seedCompositionBeforeCatalog(ctx)
+	refreshed := a.watchTLERefresh()
 	if startErr := a.tleStore.Start(ctx); startErr != nil {
 		slog.Error("failed to start TLE store", slogKeyError, startErr)
 	}
+	a.syncRegistryOrbits(ctx)
+	go a.publishTLEStatus(ctx, refreshed)
 	go a.sseHub.Run(ctx)
 	a.setupClientState()
 
@@ -290,6 +319,10 @@ func (a *app) shutdown(server *http.Server) {
 
 	a.tleStore.Stop()
 	slog.Info("TLE store stopped")
+
+	if err := a.registry.Close(); err != nil {
+		slog.Error("failed to close registry", slogKeyError, err)
+	}
 
 	// Ждём, пока SSE Hub отключит всех клиентов (горутина уже получила отмену ctx).
 	select {
@@ -352,7 +385,8 @@ func (a *app) startSatNOGS(ctx context.Context) {
 	satnogsClient := satnogs.NewClient(clientOpts...)
 	a.satnogs = satnogs.NewService(satnogsClient).
 		WithCacheTTL(a.cfg.SatNOGS.CacheTTL.Duration()).
-		WithWorkers(a.cfg.SatNOGS.Workers)
+		WithWorkers(a.cfg.SatNOGS.Workers).
+		WithDiskCache(satnogsCachePath)
 	go a.satnogs.Run(ctx)
 	a.satnogsAdapter = newSatnogsTransmitterAdapter(a.satnogs)
 	a.wireFreqPlanProvider()
@@ -361,6 +395,52 @@ func (a *app) startSatNOGS(ctx context.Context) {
 	// Имитация приёма в таблице передатчиков (пакеты, уровень, SNR, lock) пока выключена.
 	// txCycleMock := services.NewTxCycleMock(a.sseHub, a.tracking, a.satnogsAdapter, services.DefaultTxCycleInterval)
 	// go txCycleMock.Run(ctx)
+}
+
+// watchTLERefresh подписывается на фоновые загрузки TLE. Вызывать до tleStore.Start.
+// Новые орбиты помечают кеш пролётов устаревшим: пересчёт идёт в фоне.
+func (a *app) watchTLERefresh() <-chan struct{} {
+	a.tleStatusKick = make(chan struct{}, 1)
+	a.tleStore.SetOnProgress(func() { a.kickTLEStatus() })
+	a.tleStore.SetOnRefresh(func() {
+		a.syncRegistryOrbits(context.Background())
+		a.kickTLEStatus()
+		if a.pass != nil {
+			a.pass.MarkStale()
+		}
+	})
+	return a.tleStatusKick
+}
+
+// kickTLEStatus просит publishTLEStatus отправить статус сейчас, не дожидаясь таймера.
+func (a *app) kickTLEStatus() {
+	select {
+	case a.tleStatusKick <- struct{}{}:
+	default:
+	}
+}
+
+// publishTLEStatus шлёт в SSE событие tle_status: сразу, после каждой загрузки и раз в tleStatusInterval.
+func (a *app) publishTLEStatus(ctx context.Context, refreshed <-chan struct{}) {
+	ticker := time.NewTicker(tleStatusInterval)
+	defer ticker.Stop()
+	for {
+		now := time.Now()
+		payload, err := json.Marshal(struct {
+			tracker.TLEStatus
+
+			TS int64 `json:"ts"`
+		}{TLEStatus: a.tleStore.Status(now), TS: now.UTC().UnixMilli()})
+		if err == nil {
+			a.sseHub.Broadcast("tle_status", payload)
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		case <-refreshed:
+		}
+	}
 }
 
 // startHotReload подписывается на изменения конфига: при правке наблюдателя
@@ -433,6 +513,20 @@ func newServer(cfg *config.Config, handler http.Handler) *http.Server {
 		Handler:     handler,
 		ReadTimeout: 15 * time.Second,
 		IdleTimeout: 120 * time.Second,
+	}
+}
+
+// tleSourceOptions включает Space-Track и каталог sonik, если учётка задана.
+// Без учётки элементы идут только из Celestrak по группам, как раньше.
+func tleSourceOptions(creds config.SpaceTrackCredentials) []tracker.TLEStoreOption {
+	if !creds.Enabled() {
+		slog.Info("space-track credentials not set, source skipped")
+		return nil
+	}
+	slog.Info("space-track enabled: catalog from composition and fresh sonik launches")
+	return []tracker.TLEStoreOption{
+		tracker.WithSpaceTrackClient(tracker.NewSpaceTrackClient(creds.Identity, creds.Password)),
+		tracker.WithSonikClient(tracker.NewSonikClient()),
 	}
 }
 

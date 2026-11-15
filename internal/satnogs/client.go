@@ -114,9 +114,17 @@ func WithBaseURL(baseURL string) Option {
 }
 
 // NewClient создаёт клиент SatNOGS с дефолтными значениями и применяет опции.
+//
+// Каждый запрос идёт по новому соединению. Сетевая блокировка обрывает большие
+// ответы (например, МКС) и замораживает TCP-соединение; при переиспользовании
+// соединения все следующие запросы висят на нём до таймаута.
 func NewClient(opts ...Option) *Client {
+	transport, _ := http.DefaultTransport.(*http.Transport) //nolint:errcheck // стандартный транспорт всегда *http.Transport
+	transport = transport.Clone()
+	transport.DisableKeepAlives = true
+
 	c := &Client{
-		httpClient: &http.Client{Timeout: DefaultTimeout},
+		httpClient: &http.Client{Timeout: DefaultTimeout, Transport: transport},
 		baseURL:    DefaultBaseURL,
 		rateLimit:  DefaultRateLimit,
 		maxRetries: DefaultMaxRetries,

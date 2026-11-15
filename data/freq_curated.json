@@ -78,6 +78,22 @@
       "mode": "SSTV",
       "kind": "sstv",
       "note": "QMR-KWT-2"
+    },
+    {
+      "norad_id": 57166,
+      "name": "METEOR-M2-3",
+      "freq_hz": 137900000,
+      "mode": "LRPT",
+      "kind": "weather",
+      "note": "LRPT 72/80 кбит/с"
+    },
+    {
+      "norad_id": 59051,
+      "name": "METEOR-M2-4",
+      "freq_hz": 137900000,
+      "mode": "LRPT",
+      "kind": "weather",
+      "note": "LRPT 72/80 кбит/с"
     }
   ]
 }

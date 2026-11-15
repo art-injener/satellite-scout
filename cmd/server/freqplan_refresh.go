@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log/slog"
+	"math"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/freqplan"
@@ -16,7 +17,15 @@ const (
 	freqPlanPath    = "data/freq_plan.csv"
 	freqVisitsPath  = "data/freq_visits.csv"
 	freqAMSATCache  = "data/amsat_active.csv"
+	freqHACache     = "data/heavensabove_amateur.html"
 	freqPlanEvery   = 5 * time.Minute
+
+	// freqFetchTimeout — без сети загрузка не должна держать план: дальше идёт кеш на диске.
+	freqFetchTimeout = 15 * time.Second
+	// passCheckHorizon — страница Heavens-Above покрывает сутки пролётов.
+	passCheckHorizon = 24 * time.Hour
+	// haLocationTolDeg — страница посчитана для других координат, если они расходятся сильнее.
+	haLocationTolDeg = 0.01
 )
 
 // startFreqPlan периодически собирает план частот на час вперёд и пишет CSV.
@@ -26,10 +35,11 @@ func (a *app) startFreqPlan(ctx context.Context) {
 		slog.ErrorContext(ctx, "freqplan: curated", slogKeyError, err)
 		return
 	}
+	a.seedRegistry(ctx, curated)
 	// План обогащает ленту панорамы и ожидаемые TX (даже без SatNOGS).
 	a.wireFreqPlanProvider()
 	go func() {
-		a.refreshFreqPlan(ctx, curated)
+		a.refreshFreqPlan(ctx)
 		t := time.NewTicker(freqPlanEvery)
 		defer t.Stop()
 		for {
@@ -37,7 +47,7 @@ func (a *app) startFreqPlan(ctx context.Context) {
 			case <-ctx.Done():
 				return
 			case <-t.C:
-				a.refreshFreqPlan(ctx, curated)
+				a.refreshFreqPlan(ctx)
 			}
 		}
 	}()
@@ -58,7 +68,7 @@ func (a *app) wireFreqPlanProvider() {
 	})
 }
 
-func (a *app) refreshFreqPlan(ctx context.Context, curated *freqplan.Curated) {
+func (a *app) refreshFreqPlan(ctx context.Context) {
 	if a.pass == nil {
 		return
 	}
@@ -68,18 +78,28 @@ func (a *app) refreshFreqPlan(ctx context.Context, curated *freqplan.Curated) {
 		return
 	}
 	passes := toFreqPasses(raw)
-	sources := []freqplan.Source{curated}
-	if a.satnogsAdapter != nil {
-		ids := uniqueNorads(passes)
-		a.satnogsAdapter.RequestFetch(ids)
-		sources = append(sources, satnogsFreqSource(a.satnogsAdapter))
+	obs := a.configStore.Get().Station.Observer
+	haURL := freqplan.HeavensAboveURL(obs.Lat, obs.Lon)
+	haCtx, haCancel := context.WithTimeout(ctx, freqFetchTimeout)
+	ha, err := freqplan.FetchHeavensAbove(haCtx, nil, haURL, freqHACache, freqplan.DefaultHeavensAboveTTL)
+	haCancel()
+	if err != nil {
+		slog.WarnContext(ctx, "freqplan: heavens-above", slogKeyError, err)
 	}
-	if amsat, err := freqplan.FetchAMSAT(ctx, nil, "", freqAMSATCache, freqplan.DefaultAMSATTTL); err != nil {
-		slog.WarnContext(ctx, "freqplan: amsat", slogKeyError, err)
-	} else {
-		sources = append(sources, amsat)
+	a.checkPassesAgainstHA(ctx, ha, obs.Lat, obs.Lon)
+	amsatCtx, amsatCancel := context.WithTimeout(ctx, freqFetchTimeout)
+	amsat, amsatErr := freqplan.FetchAMSAT(amsatCtx, nil, "", freqAMSATCache, freqplan.DefaultAMSATTTL)
+	amsatCancel()
+	if amsatErr != nil {
+		slog.WarnContext(ctx, "freqplan: amsat", slogKeyError, amsatErr)
 	}
-	entries := freqplan.Merge(passes, sources)
+	ids := uniqueNorads(passes)
+	// Сначала HA/AMSAT/sonik в реестр, затем SatNOGS только по пробелам (ADR-011).
+	a.feedRegistry(ctx, ha, err, amsat, amsatErr, ids)
+	// Новые сведения о живости меняют отбор КА в пролётах.
+	a.pass.InvalidateCache()
+	// Приоритет на близкой частоте задаёт реестр: curated, Heavens-Above, AMSAT, sonik, SatNOGS.
+	entries := freqplan.Merge(passes, []freqplan.Source{bandSource{src: a.registry, bands: a.bands}})
 	if err := freqplan.WritePlan(freqPlanPath, entries); err != nil {
 		slog.WarnContext(ctx, "freqplan: write", slogKeyError, err)
 		return
@@ -132,6 +152,56 @@ func (a *app) onSweepDwellEnd(pathID string, w sweep.Window, startMs, endMs int6
 	}
 }
 
+// checkPassesAgainstHA сверяет наши пролёты на сутки с Heavens-Above и обновляет статус TLE.
+// Без сети работает по кешу страницы; нет будущих пролётов в кеше, значит нет и сверки.
+func (a *app) checkPassesAgainstHA(ctx context.Context, ha *freqplan.HeavensAbove, lat, lon float64) {
+	if a.tleStore == nil {
+		return
+	}
+	now := time.Now()
+	var check *tracker.PassCheck
+	if ref := haRefPasses(ha, lat, lon, now, now.Add(passCheckHorizon)); len(ref) > 0 {
+		ours, err := a.pass.GetAllGroupsPasses(int(passCheckHorizon.Hours()), services.DefaultMinElevation)
+		if err != nil {
+			slog.WarnContext(ctx, "pass check: passes", slogKeyError, err)
+			return
+		}
+		c := tracker.ComparePasses(ours, ref)
+		if c.Matched > 0 {
+			c.Source = freqplan.SourceHeavensAbove
+			c.CheckedAt = now
+			check = &c
+		}
+		attrs := []any{
+			slog.Int("reference", len(ref)),
+			slog.Int("matched", c.Matched),
+			slog.Float64("median_drift_s", c.MedianDriftS),
+		}
+		if c.ISSDriftS != nil {
+			attrs = append(attrs, slog.Float64("iss_drift_s", *c.ISSDriftS))
+		}
+		slog.InfoContext(ctx, "pass check vs heavens-above", attrs...)
+	}
+	a.tleStore.SetPassCheck(check)
+	a.kickTLEStatus()
+}
+
+// haRefPasses — пролёты страницы в окне [from, to], если она посчитана для координат станции.
+func haRefPasses(ha *freqplan.HeavensAbove, lat, lon float64, from, to time.Time) []tracker.RefPass {
+	haLat, haLon, ok := ha.Location()
+	if !ok || math.Abs(haLat-lat) > haLocationTolDeg || math.Abs(haLon-lon) > haLocationTolDeg {
+		return nil
+	}
+	var out []tracker.RefPass
+	for _, p := range ha.Passes() {
+		if p.Start.Before(from) || p.End.After(to) {
+			continue
+		}
+		out = append(out, tracker.RefPass{NoradID: p.NoradID, Start: p.Start, End: p.End})
+	}
+	return out
+}
+
 func toFreqPasses(in []*tracker.Pass) []freqplan.Pass {
 	out := make([]freqplan.Pass, 0, len(in))
 	for _, p := range in {
@@ -156,33 +226,4 @@ func uniqueNorads(passes []freqplan.Pass) []int {
 		out = append(out, p.NoradID)
 	}
 	return out
-}
-
-// satnogsFreqSource — активные downlink SatNOGS как Source плана частот.
-func satnogsFreqSource(p services.TransmitterProvider) freqplan.Source {
-	return freqplan.ProviderFunc(func(noradID int) []freqplan.Tx {
-		list := p.GetTransmitters(noradID)
-		if len(list) == 0 {
-			return nil
-		}
-		out := make([]freqplan.Tx, 0, len(list))
-		for _, tx := range list {
-			if tx.FreqHz <= 0 {
-				continue
-			}
-			out = append(out, freqplan.Tx{
-				UUID: tx.UUID, Name: tx.Description, FreqHz: tx.FreqHz,
-				Mode: firstNonEmpty(tx.Mode, tx.Modulation), Baud: tx.Baud,
-				Source: freqplan.SourceSatNOGS,
-			})
-		}
-		return out
-	})
-}
-
-func firstNonEmpty(a, b string) string {
-	if a != "" {
-		return a
-	}
-	return b
 }
