@@ -30,6 +30,11 @@ go.work.sum
 # env file
 .env
 
+# Локальный бинарник сборки и следы учётки
+/server
+/empty
+*.tmp
+
 # Editor/IDE
 .idea/
 .vscode/
@@ -50,9 +55,10 @@ docs/archive/
 /.claude/launch.json
 /.claude/settings.local.json
 
-# Large IQ/SigMF downloads (local only); keep inventory
+# Large IQ/SigMF downloads (local only); keep inventory and regression manifest
 data/recordings/*
 !data/recordings/SOURCES.txt
+!data/recordings/manifest.json
 
 # Картинки, принятые демодулятором
 data/products/

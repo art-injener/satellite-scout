@@ -1,8 +1,7 @@
 {
   "_version": 1,
   "server": {
-    "port": "8080",
-    "master_password": ""
+    "port": "8080"
   },
   "ui": {
     "theme": "default",
@@ -50,7 +49,9 @@
           "driver": "simulated",
           "label": "Replay Geoscan-Edelveis (fsk9600_geoscan)",
           "imitator": {
-            "replay": "data/recordings/pe0sat-geoscan/geoscan_edelveis_2022-11-24_57600.sigmf-meta"
+            "replay": "data/recordings/pe0sat-geoscan/geoscan_edelveis_2022-11-24_57600.sigmf-meta",
+            "norad_id": 53385,
+            "sat_name": "GEOSCAN-EDELVEIS"
           }
         }
       },
