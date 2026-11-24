@@ -6,91 +6,105 @@ import (
 )
 
 const (
-	// fskClockGain — доля ошибки фазы символа, снимаемая на каждом переходе уровня.
-	fskClockGain = 0.3
-	// Уровни 1 и 0 следят за выходом в отсчётах решения: к значению за пределами уровня
-	// подтягиваются быстро, к значению внутри медленно спадают. Порог устанавливается
-	// за несколько десятков символов, то есть в преамбуле.
-	fskLevelAttack = 1.0 / 4
-	fskLevelDecay  = 1.0 / 64
-	// fskSwingGain — вес символа в оценке девиации: около 256 символов памяти.
-	fskSwingGain = 1.0 / 256
-	// fskHistLen — окно последних символов для быстрого восстановления порога после шума,
-	// FM-кликов или скачка сдвига несущей.
-	fskHistLen = 10
-	// fskHistSpanMin — минимальный размах частоты в окне (в долях девиации),
-	// отличающий двухпозиционный FSK от несущей и длинной серии одинаковых бит.
-	fskHistSpanMin = 0.8
-	// fskBimodalMargin — отступ от середины окна (доля размаха), за которым символ
-	// считается уверенным уровнем 0 или 1 при проверке бимодальности окна.
-	fskBimodalMargin = 0.15
-	// fskBimodalMinPerSide — минимум символов в нижней и верхней частях окна.
-	fskBimodalMinPerSide = 2
-	// fskBimodalMinCross — минимум переходов через середину окна.
-	fskBimodalMinCross = 1
-	// fskLevelOutlierMargin — насколько уровень high или low может отстоять за пределами
-	// бимодального окна (в долях его размаха), прежде чем считаться артефактом шума/клика.
+	// Параметры тактовой петли Gardner TED (как в gr-satellites symbol_sync_ff,
+	// с прореживанием до <= 10 отсч./символ) и адаптивного порога решения.
+	fskMaxSPS             = 10.0
+	fskClkBW              = 0.035
+	fskClkDamping         = 1.0
+	fskClkTEDGain         = 1.47
+	fskClkLimit           = 0.004
+	fskTEDClamp           = 1.5
+	fskLevelAttack        = 1.0 / 4
+	fskLevelDecay         = 1.0 / 64
+	fskSwingGain          = 1.0 / 256
+	fskHistLen            = 10
+	fskHistSpanMin        = 0.8
+	fskBimodalMargin      = 0.15
+	fskBimodalMinPerSide  = 2
+	fskBimodalMinCross    = 1
 	fskLevelOutlierMargin = 1.2
+	// Общая константа для mfsk.go.
+	fskClockGain = 0.3
 )
 
-// FSKDemod — некогерентный демодулятор двухпозиционной FM (FSK, GFSK, GMSK): частотный
-// дискриминатор, усреднение по длине символа, цифровая ФАПЧ тактовой частоты по переходам.
-// Остаток несущей сдвигает выход дискриминатора, поэтому порог решения следит за серединой
-// между уровнями 1 и 0 по принятым символам и быстро перепривязывается, если после шума,
-// FM-кликов или большого сдвига несущей порог оказался на краю или вне глаза.
-// На входе — IQ уже выделенного канала, на выходе — уровни линии 0/1 (до дескремблера).
-// Состояние сохраняется между вызовами Demodulate. Не потокобезопасен.
+// FSKDemod — гибрид: квадратурный дискриминатор + boxcar + адаптивный порог решения
+// с бимодальной перепривязкой (нулевая задержка для коротких вспышек) +
+// тактовая синхронизация Gardner TED с кубическим интерполятором (по gr-satellites).
 type FSKDemod struct {
 	prev     complex128
 	havePrev bool
-	norm     float64 // перевод радиан на отсчёт в доли девиации
+	norm     float64
 
-	ring []float64 // выход дискриминатора в окне усреднения
-	sum  float64
-	pos  int
+	ring       []float64
+	sum        float64
+	pos        int
+	decim      int
+	decimPhase int
 
-	high, low float64 // уровни 1 и 0
-	threshold float64 // середина между уровнями
-	frozen    bool    // внешняя заморозка адаптации на хвосте шумоподавителя
-
-	yHist     [fskHistLen]float64 // последние отсчёты решения для быстрого восстановления порога
+	high, low float64
+	threshold float64
+	frozen    bool
+	yHist     [fskHistLen]float64
 	histPos   int
 	histCount int
 
-	clock     float64 // фаза символа в долях: отсчёт решения на переходе через 1
-	clockStep float64
-	lastHigh  bool
-	jitter    float64 // средняя ошибка фазы тактов на переходах, доли символа
+	interp    [4]float64
+	omega     float64
+	omegaMin  float64
+	omegaMax  float64
+	alpha     float64
+	beta      float64
+	countdown float64
+	wantMid   bool
+	midSym    float64
+	prevSym   float64
+	haveSym   bool
 
+	lastHigh    bool
+	jitter      float64
 	deviationHz float64
-	swing       float64 // среднее отклонение частоты от порога в середине символа, доли девиации
+	swing       float64
 }
 
 // NewFSKDemod создаёт демодулятор; cfg.SampleRate — частота дискретизации канала.
 func NewFSKDemod(cfg FSKConfig) *FSKDemod {
-	window := max(int(math.Round(cfg.SampleRate/cfg.Baud)), 1)
+	rawSPS := cfg.SampleRate / cfg.Baud
+	window := max(int(math.Round(rawSPS)), 1)
+	decim := 1
+	if rawSPS > fskMaxSPS {
+		decim = int(math.Ceil(rawSPS / fskMaxSPS))
+	}
+	sps := rawSPS / float64(decim)
+
+	denom := 1.0 + 2.0*fskClkDamping*fskClkBW + fskClkBW*fskClkBW
+	alpha := (4.0 * fskClkDamping * fskClkBW) / (denom * fskClkTEDGain) * sps
+	beta := (4.0 * fskClkBW * fskClkBW) / (denom * fskClkTEDGain) * sps
+
 	return &FSKDemod{
 		norm:        cfg.SampleRate / (twoPi * cfg.DeviationHz),
 		ring:        make([]float64, window),
-		clockStep:   cfg.Baud / cfg.SampleRate,
+		decim:       decim,
+		omega:       sps,
+		omegaMin:    sps * (1.0 - fskClkLimit),
+		omegaMax:    sps * (1.0 + fskClkLimit),
+		alpha:       alpha,
+		beta:        beta,
+		countdown:   0.5 * sps,
+		wantMid:     true,
 		jitter:      jitterNoLock,
 		deviationHz: cfg.DeviationHz,
 	}
 }
 
-// SetFreeze замораживает или размораживает адаптацию порогов решения (например,
-// на хвосте удержания шумоподавителя, когда в канале остался шум).
+// SetFreeze замораживает или размораживает адаптацию порогов и тактовой петли.
 func (d *FSKDemod) SetFreeze(freeze bool) { d.frozen = freeze }
 
-// DeviationHz — принятая девиация: среднее отклонение мгновенной частоты от порога
-// в середине символа. Уровни решения для этого не годятся: усреднение по символу
-// держит их внутри глаза. Гауссово сглаживание даёт чуть меньше девиации передатчика.
+// DeviationHz — принятая девиация по середине символа до сглаживания.
 func (d *FSKDemod) DeviationHz() float64 {
 	return d.swing * d.deviationHz
 }
 
-// ClockJitter — средняя ошибка фазы тактов на переходах уровня, в долях символа:
-// у захваченного сигнала доли процента, на шуме около четверти символа.
+// ClockJitter — средняя ошибка фазы тактов на переходах уровня, в долях символа.
 func (d *FSKDemod) ClockJitter() float64 { return d.jitter }
 
 // Demodulate дописывает в dst принятые уровни линии и возвращает расширенный срез.
@@ -99,8 +113,6 @@ func (d *FSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
 	for _, s := range iq {
 		x := complex128(s)
 		if !d.havePrev {
-			// Без предыдущего отсчёта разность фаз с нулём даёт выброс и портит преамбулу
-			// на большом окне (низкая скорость, много отсчётов на символ).
 			d.prev, d.havePrev = x, true
 			continue
 		}
@@ -110,43 +122,83 @@ func (d *FSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
 		d.sum += f - d.ring[d.pos]
 		d.ring[d.pos] = f
 		d.pos = (d.pos + 1) % len(d.ring)
-		y := d.sum / nWin
 
-		// Переход уровня должен приходиться на середину между отсчётами решения.
-		high := y > d.threshold
+		d.decimPhase++
+		if d.decimPhase < d.decim {
+			continue
+		}
+		d.decimPhase = 0
+
+		y := d.sum / nWin
+		d.interp[0], d.interp[1], d.interp[2], d.interp[3] = d.interp[1], d.interp[2], d.interp[3], y
+
+		cur := d.interp[2] - d.threshold
+		high := cur > 0
 		if high != d.lastHigh {
-			d.jitter = trackJitter(d.jitter, d.clock)
-			d.clock += fskClockGain * (0.5 - d.clock)
+			rem := d.countdown - 1.0
+			phase := 1.0 - rem/d.omega
+			if d.wantMid {
+				phase = 0.5 - rem/d.omega
+			}
+			prev := d.interp[1] - d.threshold
+			if denom := math.Abs(cur) + math.Abs(prev); denom > 0 {
+				phase -= (math.Abs(cur) / denom) / d.omega
+			}
+			for phase < 0 {
+				phase += 1.0
+			}
+			for phase >= 1 {
+				phase -= 1.0
+			}
+			d.jitter = trackJitter(d.jitter, phase)
 			d.lastHigh = high
 		}
 
-		d.clock += d.clockStep
-		if d.clock < 1 {
-			continue
-		}
-		d.clock--
+		d.countdown -= 1.0
+		for d.countdown <= 0 {
+			t := clampFloat(1.0+d.countdown, 0, 1)
+			val := cubicInterp(d.interp, t)
+			if d.wantMid {
+				d.midSym = val
+				d.wantMid = false
+				d.countdown += 0.5 * d.omega
+				continue
+			}
 
-		if d.frozen {
-			d.histCount = 0
-		} else {
-			high = d.adaptLevels(y, high)
-		}
+			rawSym := val
+			if d.frozen {
+				d.histCount = 0
+			} else {
+				d.adaptLevels(rawSym)
+			}
 
-		// Окно усреднения сейчас лежит на символе: его середина — середина символа.
-		mid := d.ring[(d.pos+len(d.ring)/2)%len(d.ring)]
-		d.swing += fskSwingGain * (math.Abs(mid-d.threshold) - d.swing)
-		bit := byte(0)
-		if high {
-			bit = 1
+			sym := rawSym - d.threshold
+			mid := d.midSym - d.threshold
+			if d.haveSym && !d.frozen {
+				amp := max(math.Abs(sym), math.Abs(d.prevSym), 1.0)
+				tedErr := clampFloat((sym-d.prevSym)*mid/(amp*amp), -fskTEDClamp, fskTEDClamp)
+				d.omega = clampFloat(d.omega-d.beta*tedErr, d.omegaMin, d.omegaMax)
+				d.countdown -= d.alpha * tedErr
+			}
+			d.prevSym = sym
+			d.haveSym = true
+
+			midIdx := (d.pos + len(d.ring)/2) % len(d.ring)
+			d.swing += fskSwingGain * (math.Abs(d.ring[midIdx]-d.threshold) - d.swing)
+
+			bit := byte(0)
+			if sym > 0 {
+				bit = 1
+			}
+			dst = append(dst, bit)
+			d.wantMid = true
+			d.countdown += 0.5 * d.omega
 		}
-		dst = append(dst, bit)
 	}
 	return dst
 }
 
-// adaptLevels обновляет уровни 1/0 и при необходимости перепривязывает порог к бимодальному
-// окну последних символов, если один из уровней ушёл далеко после шума, кликов или сдвига несущей.
-func (d *FSKDemod) adaptLevels(y float64, high bool) bool {
+func (d *FSKDemod) adaptLevels(y float64) {
 	d.yHist[d.histPos] = y
 	d.histPos = (d.histPos + 1) % fskHistLen
 	if d.histCount < fskHistLen {
@@ -158,11 +210,11 @@ func (d *FSKDemod) adaptLevels(y float64, high bool) bool {
 	d.threshold = (d.high + d.low) / 2
 
 	if d.histCount < fskHistLen {
-		return high
+		return
 	}
 	lo, hi, ok := d.bimodalWindow()
 	if !ok {
-		return high
+		return
 	}
 	margin := fskLevelOutlierMargin * (hi - lo)
 	changed := false
@@ -176,13 +228,9 @@ func (d *FSKDemod) adaptLevels(y float64, high bool) bool {
 	}
 	if changed {
 		d.threshold = 0.5 * (d.high + d.low)
-		return y > d.threshold
 	}
-	return high
 }
 
-// bimodalWindow проверяет, что последние fskHistLen отсчётов решения образуют
-// устойчивый двухпозиционный глаз (достаточный размах, символы по обе стороны и переходы).
 func (d *FSKDemod) bimodalWindow() (float64, float64, bool) {
 	start := d.histPos
 	lo, hi := d.yHist[start], d.yHist[start]
@@ -223,7 +271,14 @@ func (d *FSKDemod) bimodalWindow() (float64, float64, bool) {
 	return lo, hi, true
 }
 
-// trackLevel подтягивает уровень к отсчёту: быстро, если отсчёт за уровнем, иначе медленно.
+func cubicInterp(h [4]float64, t float64) float64 {
+	a0 := -0.5*h[0] + 1.5*h[1] - 1.5*h[2] + 0.5*h[3]
+	a1 := h[0] - 2.5*h[1] + 2.0*h[2] - 0.5*h[3]
+	a2 := -0.5*h[0] + 0.5*h[2]
+	a3 := h[1]
+	return ((a0*t+a1)*t+a2)*t + a3
+}
+
 func trackLevel(level, y float64, outside bool) float64 {
 	if outside {
 		return level + fskLevelAttack*(y-level)
