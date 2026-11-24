@@ -26,6 +26,9 @@ const (
 	ModWFM          = "wfm"          // широкая ЧМ
 	ModAFSK         = "afsk"         // тоны поверх ЧМ
 	Mod2FSK         = "2fsk"         // двухпозиционная ЧМ, в том числе GFSK и GMSK
+	ModBPSK         = "bpsk"         // двоичная фазовая манипуляция
+	ModQPSK         = "qpsk"         // квадратурная фазовая манипуляция
+	ModAM           = "am"           // амплитудная модуляция с несущей
 	ModLFM          = "lfm"          // линейная частотная модуляция
 	ModUSB          = "usb"          // верхняя боковая
 	ModLSB          = "lsb"          // нижняя боковая
@@ -205,6 +208,11 @@ func ClassifyHint(iq []complex64, rate, widthHintHz float64) Result {
 	if a != nil && a.snrDB >= MinSNRDB {
 		return withDemod(withSSTV(a, a.tree()))
 	}
+	if a != nil && a.snrDB >= minWeakSNRDB {
+		if r, weak := a.weakCoherent(); weak {
+			return withDemod(withSSTV(a, r))
+		}
+	}
 	if a != nil && a.snrDB >= minFSKSNRDB {
 		if r, weak := a.weakFSK(); weak {
 			return withDemod(withSSTV(a, r))
@@ -229,7 +237,7 @@ func TagBroadcast(r Result, centerHz float64) Result {
 	return Resolve(r, signals.Input{CenterHz: centerHz}, nil, 0)
 }
 
-// tree — дерево признаков: ЛЧМ, широкая ЧМ по ширине, затем «есть/нет», постоянная или меняющаяся.
+// tree — дерево признаков: ЛЧМ, широкая ЧМ по ширине, «есть/нет», AM, PSK, затем постоянная или меняющаяся.
 func (a *analysis) tree() Result {
 	if r, ok := a.lfm(); ok {
 		return r
@@ -241,6 +249,12 @@ func (a *analysis) tree() Result {
 		return a.wideFM()
 	}
 	if r, keyed := a.keyed(); keyed {
+		return r
+	}
+	if r, ok := a.am(); ok {
+		return r
+	}
+	if r, ok := a.psk(pskMinRatio); ok {
 		return r
 	}
 	if k := localKappa(a.on, a.rate, a.nz); k < constKappa {
@@ -335,27 +349,50 @@ func SuggestedDemod(r Result) (string, []string) {
 		return "cw", nil
 	case r.Modulation == ModOOK:
 		return "ook", nil
+	case r.Modulation == ModAM:
+		return "am", nil
+	case r.Modulation == ModQPSK:
+		return "qpsk_ccsds", nil
+	case r.Modulation == ModBPSK:
+		return suggestedBPSKDemod(r.Params.Baud)
 	case r.Modulation == Mod2FSK && r.Params.Baud > 0:
-		switch b := r.Params.Baud; {
-		case b <= 1800:
-			return "fsk1200", nil
-		case b <= 3600:
-			return "gmsk2400_usp", []string{"gmsk2400"}
-		case b <= 7200:
-			return "fsk4800", []string{
-				"fsk4800_ax100", "gmsk4800_usp", "gmsk4800_ax100", "gmsk4800", "gfsk4800", "rs41",
-			}
-		case b <= 19_200:
-			// Кадровый формат по структуре не читается: отдаём всё кадровое семейство скорости.
-			return "fsk9600_g3ruh", []string{
-				"fsk9600_geoscan", "fsk9600_ax100_rs", "gmsk9600_usp", "gmsk9600_ax100",
-				"gmsk9600_ax100_rs", "gmsk9600", "gfsk9600", "m10",
-			}
-		default:
-			// Быстрее профилей нет: GSM 270,8 кбод и шире — без рекомендации.
-			return "", nil
+		return suggested2FSKDemod(r.Params.Baud)
+	default:
+		return "", nil
+	}
+}
+
+func suggestedBPSKDemod(b float64) (string, []string) {
+	switch {
+	case b <= 0:
+		return "bpsk1200", []string{"bpsk9600"}
+	case b <= 3600:
+		return "bpsk1200", nil
+	case b <= 19_200:
+		return "bpsk9600", nil
+	default:
+		return "", nil
+	}
+}
+
+func suggested2FSKDemod(b float64) (string, []string) {
+	switch {
+	case b <= 1800:
+		return "fsk1200", nil
+	case b <= 3600:
+		return "gmsk2400_usp", []string{"gmsk2400"}
+	case b <= 7200:
+		return "fsk4800", []string{
+			"fsk4800_ax100", "gmsk4800_usp", "gmsk4800_ax100", "gmsk4800", "gfsk4800", "rs41",
+		}
+	case b <= 19_200:
+		// Кадровый формат по структуре не читается: отдаём всё кадровое семейство скорости.
+		return "fsk9600_g3ruh", []string{
+			"fsk9600_geoscan", "fsk9600_ax100_rs", "gmsk9600_usp", "gmsk9600_ax100",
+			"gmsk9600_ax100_rs", "gmsk9600", "gfsk9600", "m10",
 		}
 	default:
+		// Быстрее профилей нет: GSM 270,8 кбод и шире — без рекомендации.
 		return "", nil
 	}
 }
@@ -591,9 +628,11 @@ func (a *analysis) keyed() (Result, bool) {
 	on := true
 	var runs []float64
 	var onZ []complex64
+	var offP []float64
 	for i, v := range a.p {
 		if v < lowT {
 			off++
+			offP = append(offP, v)
 		}
 		if v > highT {
 			onZ = append(onZ, a.z[i])
@@ -610,6 +649,11 @@ func (a *analysis) keyed() (Result, bool) {
 	}
 	offShare := float64(off) / float64(len(a.p))
 	if offShare < minOffShare || transitions < minTransitions || len(onZ) < 64 {
+		return Result{}, false
+	}
+	// В выключенном состоянии передатчик реально гасит несущую до шума,
+	// в отличие от минимумов амплитудной модуляции AM с несущей.
+	if len(offP) > 0 && quantile(offP, 0.5)-a.nz > keyedMaxOffResidue*(high-a.nz) {
 		return Result{}, false
 	}
 	kOn := kappa(onZ, a.nz)

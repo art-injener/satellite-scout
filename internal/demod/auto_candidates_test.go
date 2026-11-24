@@ -110,3 +110,33 @@ func TestBuildCandidates_DefaultIncludesAllFrameProfiles(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildCandidates_IncludesSSTVAndCWOnlyWithHints(t *testing.T) {
+	noHints := BuildCandidates(CandidateHints{})
+	if slices.Contains(noHints, DemodSSTV) || slices.Contains(noHints, "cw") {
+		t.Fatalf("default candidates without hints must not include sstv/cw: %v", noHints)
+	}
+
+	withTX := BuildCandidates(CandidateHints{
+		TXHints: []TXHint{
+			{Mode: "SSTV"},
+			{Mode: "GMSK USP", Baud: 9600},
+			{Mode: "CW"},
+		},
+	})
+	for _, want := range []string{"gmsk9600_usp", DemodSSTV, "cw"} {
+		if !slices.Contains(withTX, want) {
+			t.Errorf("missing %q in hinted candidates %v", want, withTX)
+		}
+	}
+
+	withAirCW := BuildCandidates(CandidateHints{AirMode: "cw"})
+	if !slices.Contains(withAirCW, "cw") {
+		t.Errorf("expected cw when AirMode=cw, got %v", withAirCW)
+	}
+
+	withBlindSSTV := BuildCandidates(CandidateHints{Blind: DemodSSTV})
+	if !slices.Contains(withBlindSSTV, DemodSSTV) {
+		t.Errorf("expected sstv when Blind=sstv, got %v", withBlindSSTV)
+	}
+}

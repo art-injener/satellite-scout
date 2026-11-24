@@ -326,10 +326,12 @@ type StatusEvent struct {
 	// TxMarkers — передатчики КА группы в окне приёмника, частота с Доплером; нет — поток не идёт.
 	TxMarkers []TxMarker `json:"tx_markers,omitempty"`
 	// Режим «Авто»: фаза подбора и закреплённый профиль (demod остаётся "auto").
-	AutoLocked     string   `json:"auto_locked,omitempty"`
-	AutoPhase      string   `json:"auto_phase,omitempty"` // search | locked
-	AutoCandidates int      `json:"auto_candidates,omitempty"`
-	AutoIDs        []string `json:"auto_ids,omitempty"` // кандидаты в работе
+	AutoLocked     string              `json:"auto_locked,omitempty"`
+	AutoPhase      string              `json:"auto_phase,omitempty"` // search | locked
+	AutoCandidates int                 `json:"auto_candidates,omitempty"`
+	AutoIDs        []string            `json:"auto_ids,omitempty"`       // кандидаты в работе
+	AutoStats      []AutoCandidateStat `json:"auto_stats,omitempty"`     // сводка по активным кандидатам
+	DroppedFrames  uint64              `json:"dropped_frames,omitempty"` // пропуски IQ-фреймов в кольце
 }
 
 // ReceptionStages — по одной мере на этап приёма: несущая, такты, синхрослова, FEC.
@@ -359,27 +361,29 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 	chain := NewChain()
 	auto := NewAutoPicker()
 	var (
-		cs          sdr.ChannelSettings
-		freq        uint64
-		lastStatus  time.Time
-		lastDropLog time.Time
-		lastDropped uint64
-		picture     pictureState
-		demodOff    bool
-		st          Status // состояние после последнего принятого блока
+		cs           sdr.ChannelSettings
+		freq         uint64
+		lastStatus   time.Time
+		lastDropLog  time.Time
+		lastDropped  uint64
+		droppedTotal uint64
+		picture      pictureState
+		demodOff     bool
+		st           Status // состояние после последнего принятого блока
 	)
 	dc := s.dropCounter()
 	for f := range frames {
 		if dc != nil {
-			if dropped := dc.DroppedFrames(pathID, frames); dropped > lastDropped {
+			droppedTotal = dc.DroppedFrames(pathID, frames)
+			if droppedTotal > lastDropped {
 				now := s.now()
 				if lastDropLog.IsZero() || now.Sub(lastDropLog) >= dropLogInterval {
 					slog.Warn("demod: IQ frames dropped",
 						slog.String("radio_path", pathID),
-						slog.Uint64("dropped_delta", dropped-lastDropped),
-						slog.Uint64("dropped_total", dropped),
+						slog.Uint64("dropped_delta", droppedTotal-lastDropped),
+						slog.Uint64("dropped_total", droppedTotal),
 					)
-					lastDropped = dropped
+					lastDropped = droppedTotal
 					lastDropLog = now
 				}
 			}
@@ -402,17 +406,19 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 				chain.sstvVISOnly = true
 				auto = NewAutoPicker()
 				demodOff = true
-				s.sendStatus(pathID, true, freq, cs, Status{}, s.bandMarkers(f.CenterHz, f.SampleRate))
+				s.sendStatus(pathID, true, freq, cs,
+					Status{DroppedFrames: droppedTotal}, s.bandMarkers(f.CenterHz, f.SampleRate))
 				lastStatus = s.now()
 			} else if now := s.now(); now.Sub(lastStatus) >= statusInterval {
-				s.sendStatus(pathID, true, freq, cs, Status{}, s.bandMarkers(f.CenterHz, f.SampleRate))
+				s.sendStatus(pathID, true, freq, cs,
+					Status{DroppedFrames: droppedTotal}, s.bandMarkers(f.CenterHz, f.SampleRate))
 				lastStatus = now
 			}
 			continue
 		}
 		demodOff = false
 		if cs.Demod == DemodAuto {
-			st = s.runAuto(pathID, f, cs, freq, auto)
+			st = s.runAuto(pathID, f, cs, freq, auto, &picture)
 		} else {
 			auto = NewAutoPicker()
 			doppler := s.applyDoppler(chain, cs, freq)
@@ -429,11 +435,13 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 			st = chain.Status()
 			st.DopplerHz = doppler
 		}
+		st.DroppedFrames = droppedTotal
 		if now := s.now(); lastStatus.IsZero() || now.Sub(lastStatus) >= statusInterval {
 			s.sendStatus(pathID, true, freq, cs, st, s.bandMarkers(f.CenterHz, f.SampleRate))
 			lastStatus = now
 		}
 	}
+	st.DroppedFrames = droppedTotal
 	s.sendStatus(pathID, false, freq, cs, st, nil)
 	if picture.id != "" {
 		// Поток закрылся посреди картинки: сохраняется то, что успело проявиться.
@@ -441,8 +449,16 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 	}
 }
 
-// runAuto — один блок в режиме подбора профиля: кандидаты, CRC, телеметрия от победителя.
-func (s *Service) runAuto(pathID string, f sdr.IQFrame, cs sdr.ChannelSettings, freq uint64, auto *AutoPicker) Status {
+// runAuto — один блок в режиме подбора профиля: кандидаты, CRC, телеметрия от победителя,
+// а также картинки SSTV и звук CW при закреплении на некадровом профиле.
+func (s *Service) runAuto(
+	pathID string,
+	f sdr.IQFrame,
+	cs sdr.ChannelSettings,
+	freq uint64,
+	auto *AutoPicker,
+	picture *pictureState,
+) Status {
 	hints := s.autoHints(pathID, cs, freq)
 	key := autoConfigKey(cs.DopplerNorad, freq, cs.BandwidthHz, hints)
 	cands := BuildCandidates(hints)
@@ -461,6 +477,12 @@ func (s *Service) runAuto(pathID string, f sdr.IQFrame, cs sdr.ChannelSettings, 
 		evCS := cs
 		evCS.Demod = tp.Profile
 		s.emitTelemetry(pathID, evCS, tp.Packet)
+	}
+	s.publishAudio(pathID, f.TimestampMs, freq, auto.Audio())
+	s.publishPictures(pathID, freq, f.TimestampMs, auto.Pictures(), picture)
+	if picture.id != "" && st.Picture == nil {
+		s.finishPicture(picture.id, nil)
+		picture.id = ""
 	}
 	return st
 }
@@ -723,7 +745,14 @@ func (s *Service) sendStatus(pathID string, active bool, freq uint64, cs sdr.Cha
 
 // noteAirVoice — при открытом пороге голоса/CW пишем kind=voice в эфир (кадров нет).
 func (s *Service) noteAirVoice(pathID string, ev StatusEvent) {
-	if !ev.Active || !ev.SquelchOpen || ev.DemodOff || !voiceDemod(ev.Demod) {
+	if !ev.Active || !ev.SquelchOpen || ev.DemodOff {
+		return
+	}
+	effDemod := ev.Demod
+	if effDemod == DemodAuto && ev.AutoPhase == "locked" && ev.AutoLocked != "" {
+		effDemod = ev.AutoLocked
+	}
+	if !voiceDemod(effDemod) {
 		return
 	}
 	norad := ev.DopplerNorad
@@ -732,12 +761,13 @@ func (s *Service) noteAirVoice(pathID string, ev StatusEvent) {
 		ts = uint64(s.now().UnixMilli()) //nolint:gosec // UnixMilli > 0
 	}
 	s.noteAir(pathID, ev.FrequencyHz, AirNote{
-		Kind: payload.KindVoice, Summary: payload.Label(payload.KindVoice), Decoder: ev.Demod,
+		Kind: payload.KindVoice, Summary: payload.Label(payload.KindVoice), Decoder: effDemod,
 		TimestampMs: ts, NoradID: norad, CountFrame: false,
 	})
 }
 
 func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings, st Status) StatusEvent {
+	dropped := st.DroppedFrames
 	if cs.DemodOff {
 		st = Status{}
 	}
@@ -770,6 +800,8 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		AutoPhase:       st.AutoPhase,
 		AutoCandidates:  st.AutoCandidates,
 		AutoIDs:         st.AutoIDs,
+		AutoStats:       st.AutoStats,
+		DroppedFrames:   dropped,
 	}
 	if st.Measured {
 		ev.Reception = &ReceptionStages{CarrierHz: st.CarrierHz, DeviationHz: st.DeviationHz,

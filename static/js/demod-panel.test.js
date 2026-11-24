@@ -100,12 +100,12 @@ test('demodLabel names known demodulators and returns the id for others', () => 
     assert.strictEqual(demodLabel('drm'), 'drm');
 });
 
-test('pipelineFromStatus lists auto candidates and locked profile', () => {
+test('pipelineFromStatus shows search and locked auto status', () => {
     assert.strictEqual(pipelineFromStatus({ demod: 'afsk1200' }), 'AFSK 1200');
     assert.strictEqual(pipelineFromStatus({
         demod: 'auto', auto_phase: 'search',
         auto_ids: ['fsk9600_g3ruh', 'fsk9600_geoscan', 'afsk1200'],
-    }), 'Проба — FSK 9600 G3RUH · FSK 9600 GEOSCAN · AFSK 1200');
+    }), 'Подбор ...');
     assert.strictEqual(pipelineFromStatus({
         demod: 'auto', auto_phase: 'locked', auto_locked: 'fsk9600_geoscan',
         auto_ids: ['fsk9600_g3ruh', 'fsk9600_geoscan'],
@@ -121,9 +121,8 @@ test('applyStatus writes auto pipeline into the header', () => {
         frames_good: 0, frames_bad: 0, squelch_open: false,
         level_dbfs: -90, squelch_dbfs: -95,
     }, null);
-    assert.strictEqual(nodes.get('manual-ch-pipeline').textContent,
-        'Проба — AFSK 1200 · FSK 9600 G3RUH');
-    assert.ok(nodes.get('manual-dm-diag').textContent.indexOf('Проба') >= 0);
+    assert.strictEqual(nodes.get('manual-ch-pipeline').textContent, 'Подбор ...');
+    assert.strictEqual(nodes.get('manual-dm-diag').textContent, 'Подбор ...');
     panel.applyStatus({
         active: true, supported: true, demod: 'auto', demod_off: false,
         auto_phase: 'locked', auto_locked: 'afsk1200', auto_ids: ['afsk1200'],
@@ -509,6 +508,49 @@ test('live panel records history on applyStatus', () => {
     panel.applyStatus(withStatus({ frames_good: 0, frames_bad: 0 }), null);
     assert.strictEqual(panel.getHistory().points(12000).length, 1);
     panel.destroy();
+});
+
+test('diagnose renders per-candidate auto_stats in search phase', () => {
+    const st = {
+        active: true, supported: true, demod: 'auto', demod_off: false,
+        auto_phase: 'search',
+        auto_ids: ['fsk9600_geoscan', 'gmsk9600_usp', 'afsk1200'],
+        auto_stats: [
+            { id: 'fsk9600_geoscan', sync_words: 3, good: 0, bad: 2 },
+            { id: 'gmsk9600_usp', sync_words: 1, good: 0, bad: 0 },
+        ],
+        frames_good: 0, frames_bad: 2, squelch_open: true,
+        level_dbfs: -55, squelch_dbfs: -90,
+    };
+    const d = diagnose(st, stagesFromStatus(st, null), 12000);
+    assert.strictEqual(d.state, 'warn');
+    assert.ok(d.text.indexOf('FSK 9600 GEOSCAN') >= 0, d.text);
+    assert.ok(d.text.indexOf('синхро 3') >= 0, d.text);
+    assert.ok(d.text.indexOf('CRC 0/2') >= 0, d.text);
+    assert.ok(d.text.indexOf('GMSK 9600 USP') >= 0, d.text);
+});
+
+test('diagnose warns when dropped_frames is positive', () => {
+    const st = withStatus({ dropped_frames: 12 });
+    const d = diagnose(st, stagesFromStatus(st, null), 12000);
+    assert.strictEqual(d.state, 'warn');
+    assert.ok(d.text.indexOf('пропуски IQ: 12') >= 0, d.text);
+});
+
+test('auto locked on sstv or cw switches stages and diagnosis', () => {
+    const stSSTV = Object.assign({}, sstvStatus, {
+        demod: 'auto', auto_phase: 'locked', auto_locked: 'sstv',
+    });
+    const stagesSSTV = stagesFromStatus(stSSTV, null);
+    assert.strictEqual(stagesSSTV.clock.name, 'VIS');
+    assert.strictEqual(stagesSSTV.frames.hidden, true);
+
+    const stCW = Object.assign({}, voiceStatus, {
+        demod: 'auto', auto_phase: 'locked', auto_locked: 'cw',
+    });
+    const stagesCW = stagesFromStatus(stCW, null);
+    assert.strictEqual(stagesCW.clock.name, 'Звук');
+    assert.strictEqual(stagesCW.frames.hidden, true);
 });
 
 console.log(`\n${passed} ${failed > 0 ? 'failed' : 'passed'}\n`);

@@ -1,7 +1,8 @@
 {
   "_version": 1,
   "server": {
-    "port": "8080"
+    "port": "8080",
+    "master_password": "6S5NRXCOYTJRTZBIO7LBY7HIHU"
   },
   "ui": {
     "theme": "default",
@@ -9,11 +10,6 @@
   },
   "tle": {
     "cache_dir": "data/tle_cache",
-    "groups": [
-      "stations",
-      "amateur",
-      "cubesat"
-    ],
     "update_interval": "6h",
     "max_tle_age_days": 7
   },

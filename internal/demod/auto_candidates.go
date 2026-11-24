@@ -29,10 +29,11 @@ type CandidateHints struct {
 
 // BuildCandidates собирает id по приоритету: принято, обнаружено, карточка,
 // заявлено по всем передатчикам на частоте, затем остальные кадровые профили.
+// Некадровые профили (sstv, cw) добавляются только при наличии явной подсказки.
 func BuildCandidates(h CandidateHints) []string {
 	limit := h.Max
 	var out []string
-	add := func(ids ...string) {
+	add := func(allowNonFrame bool, ids ...string) {
 		for _, id := range ids {
 			if limit > 0 && len(out) >= limit {
 				return
@@ -40,7 +41,7 @@ func BuildCandidates(h CandidateHints) []string {
 			if id == "" || id == DemodAuto {
 				continue
 			}
-			if !isFrameProfile(id) {
+			if !allowedAutoCandidate(id, allowNonFrame) {
 				continue
 			}
 			if slices.Contains(out, id) {
@@ -49,17 +50,26 @@ func BuildCandidates(h CandidateHints) []string {
 			out = append(out, id)
 		}
 	}
-	add(h.Accepted)
-	add(h.Blind)
-	add(h.BlindAlt...)
-	add(h.CardProfile)
-	add(Candidates(h.Mode, h.Baud)...)
+	add(true, h.Accepted)
+	add(true, h.Blind)
+	add(true, h.BlindAlt...)
+	add(true, h.CardProfile)
+	add(true, Candidates(h.Mode, h.Baud)...)
 	for _, tx := range h.TXHints {
-		add(Candidates(tx.Mode, tx.Baud)...)
+		add(true, Candidates(tx.Mode, tx.Baud)...)
 	}
-	add(Candidates(h.AirMode, h.AirBaud)...)
-	add(ImplementedFrameProfiles()...)
+	add(true, Candidates(h.AirMode, h.AirBaud)...)
+	add(false, ImplementedFrameProfiles()...)
 	return out
+}
+
+// isAutoNonFrameProfile — некадровые профили, которые режим «Авто» может подобрать по подсказке.
+func isAutoNonFrameProfile(id string) bool {
+	return id == DemodSSTV || id == DemodCW
+}
+
+func allowedAutoCandidate(id string, allowNonFrame bool) bool {
+	return isFrameProfile(id) || (allowNonFrame && isAutoNonFrameProfile(id))
 }
 
 // ImplementedFrameProfiles — профили с выделителем кадров в цепочке (порядок метаданных).

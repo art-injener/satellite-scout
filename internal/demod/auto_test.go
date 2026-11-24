@@ -1,10 +1,15 @@
 package demod
 
 import (
+	"math"
+	"math/cmplx"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/modem"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sstv"
 )
 
 func TestAutoPicker_LocksAfterTwoGoodFrames(t *testing.T) {
@@ -214,5 +219,164 @@ func TestAutoPicker_StrongFECProfilesLockOnSingleFrame(t *testing.T) {
 				t.Fatalf("got %d packets, want 1 without duplicates across equivalent pipelines", len(pkts))
 			}
 		})
+	}
+}
+
+func TestAutoPicker_SearchReportsPerCandidateStats(t *testing.T) {
+	// Single AFSK frame is below autoNeedGoodHDLC (2), so AutoPicker stays in search
+	// and must report per-candidate stats for the candidate that decoded a frame.
+	air := beaconAirOf(t, testRate, 1, time.Second, "afsk1200")
+	frames := toFrames(air, testRate, sdr.DefaultBlockSize, 0)
+
+	picker := NewAutoPicker()
+	clock := time.Unix(4_000, 0)
+	picker.now = func() time.Time { return clock }
+	picker.Configure("search-stats", []string{"fsk9600_geoscan", "afsk1200"})
+
+	cs := sdr.ChannelSettings{
+		OffsetHz: testOffset, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: DemodAuto,
+	}
+	var lastSt Status
+	for _, f := range frames {
+		clock = clock.Add(time.Millisecond)
+		_, st := picker.Process(f, cs, 0)
+		lastSt = st
+	}
+	if lastSt.AutoPhase != "search" {
+		t.Fatalf("phase=%q, want search after 1 HDLC frame", lastSt.AutoPhase)
+	}
+	idx := slices.IndexFunc(lastSt.AutoStats, func(s AutoCandidateStat) bool {
+		return s.ID == "afsk1200" && s.Good >= 1
+	})
+	if idx < 0 {
+		t.Fatalf("auto_stats=%+v, want afsk1200 with good>=1", lastSt.AutoStats)
+	}
+}
+
+func TestAutoPicker_LocksOnSSTVByVIS(t *testing.T) {
+	src := sstv.TestPattern(320, 240)
+	frames := toFrames(sstvAir(t, src, sstv.Robot36, 20), sstvRate, 8192, 0)
+
+	picker := NewAutoPicker()
+	clock := time.Unix(5_000, 0)
+	picker.now = func() time.Time { return clock }
+	picker.Configure("sstv-tx", []string{"fsk9600_geoscan", "gmsk9600_usp", DemodSSTV})
+
+	cs := sdr.ChannelSettings{
+		OffsetHz: 20_000, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: DemodAuto,
+	}
+	events := make([]sstv.Event, 0, 8)
+	var lockedAt int
+	for i, f := range frames {
+		clock = clock.Add(time.Duration(len(f.Samples)) * time.Second / sstvRate)
+		_, st := picker.Process(f, cs, 0)
+		events = append(events, picker.Pictures()...)
+		if st.AutoPhase == "locked" && lockedAt == 0 {
+			lockedAt = i + 1
+		}
+	}
+	if picker.Locked() != DemodSSTV {
+		t.Fatalf("locked = %q, want %q", picker.Locked(), DemodSSTV)
+	}
+	var hasStart, hasDone bool
+	for _, e := range events {
+		if e.Kind == sstv.EventStart && e.Mode.ID == "robot36" {
+			hasStart = true
+		}
+		if e.Kind == sstv.EventDone {
+			hasDone = true
+		}
+	}
+	if !hasStart || !hasDone {
+		t.Fatalf("sstv events start=%v done=%v, want full Robot36 picture via AutoPicker", hasStart, hasDone)
+	}
+}
+
+func cwAir(rate float64, offsetHz, snrDB float64, text string, sec float64) []complex64 {
+	n := int(rate * sec)
+	m := modem.NewOOK(modem.OOKConfig{SampleRate: rate, Baud: modem.CWBaud(18)})
+	var clean []complex64
+	for len(clean) < n {
+		clean = m.Modulate(clean, modem.MorseLevels(text))
+	}
+	clean = clean[:n]
+	ch := modem.NewChannel(modem.ChannelConfig{
+		SampleRate:       rate,
+		OffsetHz:         func(time.Duration) float64 { return offsetHz },
+		SNRdB:            snrDB,
+		NoiseBandwidthHz: 15_000,
+		Seed:             31,
+	})
+	return ch.Process(nil, clean)
+}
+
+func TestAutoPicker_LocksOnCWAndIgnoresCarrierAndNoise(t *testing.T) {
+	const rate = 256_000.0
+	air := cwAir(rate, 20_000, 18, "CQ CQ DE RS0SIM K ", 3.0)
+	frames := toFrames(air, rate, 8192, 0)
+
+	picker := NewAutoPicker()
+	clock := time.Unix(6_000, 0)
+	picker.now = func() time.Time { return clock }
+	picker.Configure("cw-tx", []string{"fsk9600_g3ruh", "cw"})
+
+	cs := sdr.ChannelSettings{
+		OffsetHz: 20_000, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: DemodAuto,
+	}
+	var audioSamples int
+	for _, f := range frames {
+		clock = clock.Add(time.Duration(len(f.Samples)) * time.Second / rate)
+		_, _ = picker.Process(f, cs, 0)
+		audioSamples += len(picker.Audio())
+	}
+	if picker.Locked() != "cw" {
+		t.Fatalf("locked = %q, want cw", picker.Locked())
+	}
+	if audioSamples == 0 {
+		t.Fatal("expected CW audio output after locking on cw")
+	}
+
+	// Plain carrier must not trigger CW lock.
+	carrierClean := make([]complex64, int(rate*2.0))
+	for i := range carrierClean {
+		carrierClean[i] = complex64(cmplx.Rect(1, 2*math.Pi*20_000*float64(i)/rate))
+	}
+	ch := modem.NewChannel(modem.ChannelConfig{
+		SampleRate: rate, SNRdB: 20, NoiseBandwidthHz: 15_000, Seed: 33,
+	})
+	carrierFrames := toFrames(ch.Process(nil, carrierClean), rate, 8192, 0)
+	picker2 := NewAutoPicker()
+	picker2.now = func() time.Time { return clock }
+	picker2.Configure("cw-carrier", []string{"fsk9600_g3ruh", "cw"})
+	for _, f := range carrierFrames {
+		clock = clock.Add(time.Duration(len(f.Samples)) * time.Second / rate)
+		picker2.Process(f, cs, 0)
+	}
+	if picker2.Locked() == "cw" {
+		t.Fatal("plain carrier must not lock on cw")
+	}
+}
+
+func TestAutoPicker_FrameProfileBeatsCWHint(t *testing.T) {
+	air := beaconAirOf(t, testRate, 1, time.Second, "fsk9600_geoscan")
+	frames := toFrames(air, testRate, sdr.DefaultBlockSize, 0)
+
+	picker := NewAutoPicker()
+	clock := time.Unix(7_000, 0)
+	picker.now = func() time.Time { return clock }
+	picker.Configure("mixed-tx", []string{"fsk9600_geoscan", "cw"})
+
+	cs := sdr.ChannelSettings{
+		OffsetHz: testOffset, BandwidthHz: sdr.MaxChannelBandwidthHz, SquelchDBFS: -90, Demod: DemodAuto,
+	}
+	for _, f := range frames {
+		clock = clock.Add(time.Millisecond)
+		_, st := picker.Process(f, cs, 0)
+		if st.AutoPhase == "locked" {
+			break
+		}
+	}
+	if picker.Locked() != "fsk9600_geoscan" {
+		t.Fatalf("locked = %q, want fsk9600_geoscan (frame profile must win over cw)", picker.Locked())
 	}
 }

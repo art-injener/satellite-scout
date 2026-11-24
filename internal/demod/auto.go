@@ -2,12 +2,14 @@ package demod
 
 import (
 	"log/slog"
+	"slices"
 	"strconv"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/m10"
 	"github.com/art-injener/satellite-scout/internal/modem"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sstv"
 )
 
 // Окна автоподбора по умолчанию.
@@ -148,7 +150,8 @@ func newSharedLineDemod(key demodKey, id string, midRate float64) lineDemod {
 // AutoPicker — параллельный подбор кадрового профиля на одном общем канале 64 кГц.
 // Децимация IQ выполняется один раз на блок, линейные демодуляторы расшарены по скоростям
 // и питают все активные дефреймеры одновременно без жёсткого лимита кандидатов.
-// Успешный выбор помнится по ключу условий и восстанавливается при возврате на тот же передатчик.
+// Поддерживаются некадровые кандидаты sstv (по заголовку VIS) и cw (по телеграфным посылкам).
+// Успешный выбор кадрового профиля помнится по ключу условий и восстанавливается при возврате.
 type AutoPicker struct {
 	window time.Duration
 	review time.Duration
@@ -162,6 +165,13 @@ type AutoPicker struct {
 	g3ruh      modem.G3RUHDescrambler
 	deframers  map[pipelineSig]deframer
 	hits       map[string][]time.Time
+
+	sstvRx      pictureRx
+	cwDet       *cwDetector
+	pictures    []sstv.Event
+	lastPicture *PictureProgress
+	hasPicture  bool
+	audio       []float32
 
 	pinned       string
 	lastGood     time.Time
@@ -237,7 +247,7 @@ func (a *AutoPicker) Configure(key string, candidates []string) {
 		return
 	}
 
-	if a.key != "" && a.pinned != "" {
+	if a.key != "" && a.pinned != "" && !isAutoNonFrameProfile(a.pinned) {
 		a.remember(a.key, a.pinned)
 	}
 	a.key = key
@@ -247,7 +257,16 @@ func (a *AutoPicker) Configure(key string, candidates []string) {
 	a.demods = make(map[demodKey]lineDemod)
 	a.g3ruh = modem.G3RUHDescrambler{}
 	a.demodRate = 0
+	a.sstvRx = nil
+	a.cwDet = nil
+	a.pictures = nil
+	a.lastPicture = nil
+	a.hasPicture = false
+	a.audio = nil
 	for _, id := range a.candidates {
+		if isAutoNonFrameProfile(id) {
+			continue
+		}
 		sig := autoSpecFor(id).sig()
 		if a.deframers[sig] == nil {
 			if df := newProfileDeframer(id); df != nil {
@@ -283,6 +302,9 @@ func (a *AutoPicker) configureSameKey(key string, candidates []string) {
 	keepSig := make(map[pipelineSig]bool, len(a.candidates))
 	for _, id := range a.candidates {
 		keepID[id] = true
+		if isAutoNonFrameProfile(id) {
+			continue
+		}
 		sig := autoSpecFor(id).sig()
 		keepSig[sig] = true
 		a.ensureDeframer(id, sig)
@@ -296,6 +318,14 @@ func (a *AutoPicker) configureSameKey(key string, candidates []string) {
 		if !keepID[id] {
 			delete(a.hits, id)
 		}
+	}
+	if !keepID[DemodSSTV] {
+		a.sstvRx = nil
+		a.lastPicture = nil
+		a.hasPicture = false
+	}
+	if !keepID[DemodCW] {
+		a.cwDet = nil
 	}
 	if a.pinned != "" && !keepID[a.pinned] {
 		a.pinned = ""
@@ -339,6 +369,22 @@ func (a *AutoPicker) Candidates() []string {
 	return append([]string(nil), a.candidates...)
 }
 
+// Pictures — события картинок SSTV последнего блока в режиме «Авто».
+func (a *AutoPicker) Pictures() []sstv.Event {
+	if a == nil {
+		return nil
+	}
+	return a.pictures
+}
+
+// Audio — звук последнего блока (SSTV или CW) в режиме «Авто».
+func (a *AutoPicker) Audio() []float32 {
+	if a == nil {
+		return nil
+	}
+	return a.audio
+}
+
 type taggedPacket struct {
 	Profile string
 	Packet  Packet
@@ -352,6 +398,8 @@ func (a *AutoPicker) Process(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz 
 		st.AutoPhase = "search"
 		return nil, st
 	}
+	a.pictures = a.pictures[:0]
+	a.audio = a.audio[:0]
 	now := a.now()
 	if a.pinned != "" {
 		return a.processPinned(f, base, dopplerHz, now)
@@ -366,6 +414,22 @@ func (a *AutoPicker) ensureDemodRate(midRate float64) {
 	a.demodRate = midRate
 	a.demods = make(map[demodKey]lineDemod)
 	a.g3ruh = modem.G3RUHDescrambler{}
+	a.sstvRx = nil
+	a.cwDet = nil
+}
+
+func (a *AutoPicker) ensureSSTVRx() pictureRx {
+	if a.sstvRx == nil && a.frontend.midRate > 0 {
+		a.sstvRx = newSSTVRxVISOnly(a.frontend.midRate / 2)
+	}
+	return a.sstvRx
+}
+
+func (a *AutoPicker) ensureCWDet() *cwDetector {
+	if a.cwDet == nil && a.frontend.midRate > 0 {
+		a.cwDet = newCWDetector(a.frontend.midRate)
+	}
+	return a.cwDet
 }
 
 func (a *AutoPicker) lineDemod(spec autoProfileSpec, id string) lineDemod {
@@ -393,7 +457,8 @@ func (a *AutoPicker) deframerFor(id string, sig pipelineSig) deframer {
 func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz float64, now time.Time) ([]taggedPacket, Status) {
 	id := a.pinned
 	spec := autoSpecFor(id)
-	fr := a.frontend.process(f, base, dopplerHz, spec.need32)
+	need32 := spec.need32 || id == DemodSSTV
+	fr := a.frontend.process(f, base, dopplerHz, need32)
 	a.ensureDemodRate(a.frontend.midRate)
 
 	st := Status{
@@ -404,17 +469,38 @@ func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 	}
 
 	var out []taggedPacket
-	df := a.deframerFor(id, spec.sig())
-	dem := a.lineDemod(spec, id)
-	if fr.open && dem != nil && df != nil {
-		out = a.runPinnedBlock(id, spec, dem, df, fr, f, base, now, &st)
-	} else if df != nil {
-		st.Good, st.Bad = df.Good(), df.Bad()
+	switch id {
+	case DemodSSTV:
+		if rx := a.ensureSSTVRx(); rx != nil {
+			evs := rx.Push(fr.ch32)
+			a.applySSTVEvents(evs, rx, fr.open, now, &st)
+		}
+		if fr.above {
+			a.frontend.measureCarrierSNR(fr.ch64, &st)
+		}
+	case DemodCW:
+		if det := a.ensureCWDet(); det != nil {
+			a.audio = append(a.audio[:0], det.PushAudio(fr.ch64, a.frontend.midRate, fr.open)...)
+		}
+		if fr.open {
+			a.lastGood = now
+		}
+		if fr.above {
+			a.frontend.measureCarrierSNR(fr.ch64, &st)
+		}
+	default:
+		df := a.deframerFor(id, spec.sig())
+		dem := a.lineDemod(spec, id)
+		if fr.open && dem != nil && df != nil {
+			out = a.runPinnedBlock(id, spec, dem, df, fr, f, base, now, &st)
+		} else if df != nil {
+			st.Good, st.Bad = df.Good(), df.Bad()
+		}
 	}
 	a.frontend.updatePrev(fr.ch64)
 
 	fillAutoStatus(&st, a.pinned, "locked", a.candidates)
-	if !a.lastGood.IsZero() && now.Sub(a.lastGood) >= a.review {
+	if !a.hasPicture && !a.lastGood.IsZero() && now.Sub(a.lastGood) >= a.review {
 		prev := a.pinned
 		a.forget(a.key)
 		a.unpin()
@@ -425,6 +511,36 @@ func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		fillAutoStatus(&st, "", "search", a.candidates)
 	}
 	return out, st
+}
+
+func (a *AutoPicker) applySSTVEvents(evs []sstv.Event, rx pictureRx, open bool, now time.Time, st *Status) {
+	a.pictures = append(a.pictures[:0], evs...)
+	for _, e := range evs {
+		switch e.Kind {
+		case sstv.EventDone:
+			a.hasPicture = false
+			a.lastPicture = nil
+			a.lastGood = now
+		case sstv.EventStart, sstv.EventLines:
+			a.hasPicture = true
+			a.lastGood = now
+			a.lastPicture = &PictureProgress{
+				Mode:     e.Mode.ID,
+				ModeName: e.Mode.Name,
+				Lines:    e.Lines,
+				Height:   e.Mode.Height,
+			}
+		}
+	}
+	if a.hasPicture {
+		a.lastGood = now
+	}
+	st.Picture = a.lastPicture
+	st.Good = rx.Done()
+	a.audio = append(a.audio[:0], rx.Audio()...)
+	if !open {
+		clear(a.audio)
+	}
 }
 
 func (a *AutoPicker) runPinnedBlock(
@@ -470,11 +586,15 @@ func (a *AutoPicker) runPinnedBlock(
 }
 
 func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz float64, now time.Time) ([]taggedPacket, Status) {
-	need32 := false
-	for _, id := range a.candidates {
-		if autoSpecFor(id).need32 {
-			need32 = true
-			break
+	hasSSTV := candidateHas(a.candidates, DemodSSTV)
+	hasCW := candidateHas(a.candidates, DemodCW)
+	need32 := hasSSTV
+	if !need32 {
+		for _, id := range a.candidates {
+			if !isAutoNonFrameProfile(id) && autoSpecFor(id).need32 {
+				need32 = true
+				break
+			}
 		}
 	}
 	fr := a.frontend.process(f, base, dopplerHz, need32)
@@ -486,8 +606,37 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		PassbandHz:   a.frontend.passbandHz,
 		LastPacketMs: a.lastPacketMs,
 	}
+
+	// SSTV декодер слушает канал непрерывно (без порога), чтобы не сдвигать фазу развёртки.
+	var sstvEvs []sstv.Event
+	sstvStarted := false
+	if hasSSTV {
+		if rx := a.ensureSSTVRx(); rx != nil {
+			sstvEvs = rx.Push(fr.ch32)
+			for _, e := range sstvEvs {
+				if e.Kind == sstv.EventStart {
+					sstvStarted = true
+					break
+				}
+			}
+		}
+	}
+
 	if !fr.open {
+		if sstvStarted && a.sstvRx != nil {
+			a.pinned = DemodSSTV
+			a.lastGood = now
+			a.applySSTVEvents(sstvEvs, a.sstvRx, fr.open, now, &st)
+			slog.Info("demod auto: locked",
+				slog.String("key", a.key),
+				slog.String("profile", DemodSSTV),
+			)
+			a.frontend.updatePrev(fr.ch64)
+			fillAutoStatus(&st, DemodSSTV, "locked", a.candidates)
+			return nil, st
+		}
 		a.frontend.updatePrev(fr.ch64)
+		st.AutoStats = a.collectAutoStats()
 		fillAutoStatus(&st, "", "search", a.candidates)
 		return nil, st
 	}
@@ -501,9 +650,13 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 	var out []taggedPacket
 	var primaryDem lineDemod
 	var primaryDF deframer
+	bestGood, bestSync, bestBad := -1, -1, -1
 	lockedID := ""
 
 	for _, id := range a.candidates {
+		if isAutoNonFrameProfile(id) {
+			continue
+		}
 		spec := autoSpecFor(id)
 		sig := spec.sig()
 		if seenSig[sig] {
@@ -542,16 +695,23 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 			inBits = g3ruhBits
 		}
 
-		if primaryDem == nil {
-			primaryDem, primaryDF = dem, df
-		}
-
 		a.frameBuf = df.Push(a.frameBuf[:0], inBits)
 		for _, p := range buildPackets(f.TimestampMs, freqHz, a.frameBuf) {
 			out = append(out, taggedPacket{Profile: id, Packet: p})
 			a.noteHit(id, now)
 			a.lastPacketMs = f.TimestampMs
 		}
+
+		good, bad := df.Good(), df.Bad()
+		syncWords := 0
+		if sc, okSync := df.(syncCounter); okSync {
+			syncWords = sc.SyncWords()
+		}
+		if primaryDem == nil || isBetterCandidate(good, syncWords, bad, bestGood, bestSync, bestBad) {
+			primaryDem, primaryDF = dem, df
+			bestGood, bestSync, bestBad = good, syncWords, bad
+		}
+
 		if lockedID == "" {
 			if hits := a.hitsInWindow(id, now); hits >= needGoodFor(id) {
 				lockedID = id
@@ -568,8 +728,30 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		}
 	}
 
+	// Некадровые кандидаты закрепляются только если ни один кадровый профиль не победил.
+	if lockedID == "" && sstvStarted && a.sstvRx != nil {
+		lockedID = DemodSSTV
+		a.pinned = DemodSSTV
+		a.lastGood = now
+		a.applySSTVEvents(sstvEvs, a.sstvRx, fr.open, now, &st)
+		slog.Info("demod auto: locked",
+			slog.String("key", a.key),
+			slog.String("profile", DemodSSTV),
+		)
+	} else if lockedID == "" && hasCW {
+		if det := a.ensureCWDet(); det != nil && det.PushSearch(fr.ch64, a.frontend.midRate) {
+			lockedID = DemodCW
+			a.pinned = DemodCW
+			a.lastGood = now
+			slog.Info("demod auto: locked",
+				slog.String("key", a.key),
+				slog.String("profile", DemodCW),
+			)
+		}
+	}
+
 	st.LastPacketMs = a.lastPacketMs
-	if primaryDem != nil && primaryDF != nil {
+	if !isAutoNonFrameProfile(lockedID) && primaryDem != nil && primaryDF != nil {
 		fillProfileMetrics(&st, primaryDem, primaryDF, fr.above)
 	}
 	if fr.above {
@@ -581,8 +763,75 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		fillAutoStatus(&st, lockedID, "locked", a.candidates)
 		return out, st
 	}
+	st.AutoStats = a.collectAutoStats()
 	fillAutoStatus(&st, "", "search", a.candidates)
 	return out, st
+}
+
+func isBetterCandidate(good, syncWords, bad, bestGood, bestSync, bestBad int) bool {
+	if good != bestGood {
+		return good > bestGood
+	}
+	if syncWords != bestSync {
+		return syncWords > bestSync
+	}
+	return bad > bestBad
+}
+
+const maxAutoStats = 8
+
+// collectAutoStats собирает компактную сводку по уникальным кадровым кандидатам
+// с ненулевой активностью (синхрослова или кадры) для диагностики в фазе подбора.
+func (a *AutoPicker) collectAutoStats() []AutoCandidateStat {
+	seen := make(map[pipelineSig]bool, len(a.candidates))
+	var stats []AutoCandidateStat
+	for _, id := range a.candidates {
+		if isAutoNonFrameProfile(id) {
+			continue
+		}
+		sig := autoSpecFor(id).sig()
+		if seen[sig] {
+			continue
+		}
+		seen[sig] = true
+		df := a.deframers[sig]
+		if df == nil {
+			continue
+		}
+		good, bad := df.Good(), df.Bad()
+		syncWords := 0
+		if sc, ok := df.(syncCounter); ok {
+			syncWords = sc.SyncWords()
+		}
+		if good == 0 && bad == 0 && syncWords == 0 {
+			continue
+		}
+		stats = append(stats, AutoCandidateStat{
+			ID:        id,
+			SyncWords: syncWords,
+			Good:      good,
+			Bad:       bad,
+		})
+	}
+	if len(stats) == 0 {
+		return nil
+	}
+	slices.SortStableFunc(stats, func(x, y AutoCandidateStat) int {
+		switch {
+		case x.Good != y.Good:
+			return y.Good - x.Good
+		case x.SyncWords != y.SyncWords:
+			return y.SyncWords - x.SyncWords
+		case x.Bad != y.Bad:
+			return y.Bad - x.Bad
+		default:
+			return 0
+		}
+	})
+	if len(stats) > maxAutoStats {
+		stats = stats[:maxAutoStats]
+	}
+	return stats
 }
 
 func fillProfileMetrics(st *Status, dem lineDemod, df deframer, above bool) {
@@ -661,8 +910,17 @@ func (a *AutoPicker) unpin() {
 	a.demods = make(map[demodKey]lineDemod)
 	a.g3ruh = modem.G3RUHDescrambler{}
 	a.demodRate = 0
+	a.sstvRx = nil
+	a.cwDet = nil
+	a.lastPicture = nil
+	a.hasPicture = false
+	a.pictures = nil
+	a.audio = nil
 	a.deframers = make(map[pipelineSig]deframer, len(a.candidates))
 	for _, id := range a.candidates {
+		if isAutoNonFrameProfile(id) {
+			continue
+		}
 		sig := autoSpecFor(id).sig()
 		if a.deframers[sig] == nil {
 			if df := newProfileDeframer(id); df != nil {
@@ -673,12 +931,7 @@ func (a *AutoPicker) unpin() {
 }
 
 func candidateHas(ids []string, id string) bool {
-	for _, x := range ids {
-		if x == id {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(ids, id)
 }
 
 func slicesEqual(a, b []string) bool {

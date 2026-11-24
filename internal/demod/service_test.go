@@ -17,6 +17,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/rfprofile"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/sstv"
 	"github.com/art-injener/satellite-scout/internal/usp"
 )
 
@@ -688,5 +689,55 @@ func TestService_DropCounterPolledAndThrottled(t *testing.T) {
 	svc.Run("radio_path_0", ch)
 	if dc.calls == 0 {
 		t.Fatal("expected Service.Run to poll DropCounter")
+	}
+	statuses := sink.ofType(EventStatus)
+	if len(statuses) == 0 {
+		t.Fatal("expected at least one demod_status event")
+	}
+	got, _ := statuses[0]["dropped_frames"].(float64)
+	if got != 5 {
+		t.Fatalf("status dropped_frames = %v, want 5", statuses[0]["dropped_frames"])
+	}
+}
+
+type airHintStub struct {
+	demod string
+	alt   []string
+	mode  string
+	baud  float64
+	ok    bool
+}
+
+func (a airHintStub) AirHint(_ string, _ uint64) (string, []string, string, float64, bool) {
+	return a.demod, a.alt, a.mode, a.baud, a.ok
+}
+
+func TestService_RunAutoPublishesSSTVProduct(t *testing.T) {
+	store, err := products.NewStore(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sink := &sinkStub{}
+	s := sdr.ChannelSettings{OffsetHz: 20_000, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: DemodAuto}
+	svc := NewService(&channelsStub{s: s}, sink.emit).
+		WithProducts(store).
+		WithAirHints(airHintStub{demod: DemodSSTV, ok: true})
+	ch := make(chan sdr.IQFrame, 16)
+	go func() {
+		for _, f := range toFrames(sstvAir(t, sstv.TestPattern(320, 240), sstv.Robot36, 25), sstvRate, 8192, 0) {
+			f.CenterHz = 437_605_000
+			ch <- f
+		}
+		close(ch)
+	}()
+	svc.Run("radio_path_0", ch)
+
+	evs := sink.ofType(EventProduct)
+	if len(evs) < 2 {
+		t.Fatalf("product events=%d, want SSTV product events via Auto", len(evs))
+	}
+	last := evs[len(evs)-1]
+	if last["done"] != true || last["mode"] != "robot36" {
+		t.Fatalf("last product=%v, want done robot36", last)
 	}
 }

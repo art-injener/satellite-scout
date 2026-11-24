@@ -60,6 +60,21 @@ func fmAudio(audio []float32, devHz float64) []complex64 {
 	return modem.NewFM(modem.FMConfig{SampleRate: testRate, DeviationHz: devHz}).Modulate(nil, audio)
 }
 
+func amAudio(audio []float32, depth float64) []complex64 {
+	return normalize(modem.NewAM(modem.AMConfig{SampleRate: testRate, Depth: depth}).Modulate(nil, audio))
+}
+
+func bpsk(baud float64) []complex64 {
+	n := int(testRate / 2)
+	m := modem.NewBPSK(modem.BPSKConfig{SampleRate: testRate, Baud: baud})
+	return m.Modulate(nil, prbs(int(float64(n)/testRate*baud)+8))[:n]
+}
+
+func qpsk(n int, baud float64) []complex64 {
+	m := modem.NewQPSK(modem.QPSKConfig{SampleRate: testRate, Baud: baud})
+	return m.Modulate(nil, prbs(2*(int(float64(n)/testRate*baud)+8)))[:n]
+}
+
 func tone(n int, hz float64) []float32 {
 	out := make([]float32, n)
 	for i := range out {
@@ -173,6 +188,10 @@ func testSignals() []testSignal {
 		{"afsk 1200", afsk(half), 12_000, ModAFSK},
 		{"gfsk 4800", gfsk(half, 4800, 2400), 12_000, Mod2FSK},
 		{"gfsk 9600", gfsk(half, 9600, 3000), 18_000, Mod2FSK},
+		{"bpsk 1200", bpsk(1200), 3000, ModBPSK},
+		{"bpsk 9600", bpsk(9600), 18_000, ModBPSK},
+		{"qpsk 9600", qpsk(half, 9600), 18_000, ModQPSK},
+		{"am tone", amAudio(tone(half, 1000), 0.7), 6000, ModAM},
 		{"usb voice", voice(half, 300, 2), 3000, ModUSB},
 		{"lsb voice", conj(voice(half, 300, 3)), 3000, ModLSB},
 	}
@@ -591,6 +610,11 @@ func TestSuggestedDemod_Profiles(t *testing.T) {
 			"gmsk9600_ax100_rs", "gmsk9600", "gfsk9600", "m10",
 		}},
 		{"2fsk faster than any profile", Result{Modulation: Mod2FSK, Params: Params{Baud: 270833}}, "", nil},
+		{"bpsk 1200", Result{Modulation: ModBPSK, Params: Params{Baud: 1200}}, "bpsk1200", nil},
+		{"bpsk 9600", Result{Modulation: ModBPSK, Params: Params{Baud: 9600}}, "bpsk9600", nil},
+		{"bpsk unknown baud", Result{Modulation: ModBPSK}, "bpsk1200", []string{"bpsk9600"}},
+		{"qpsk", Result{Modulation: ModQPSK, Params: Params{Baud: 9600}}, "qpsk_ccsds", nil},
+		{"am", Result{Modulation: ModAM}, "am", nil},
 		{"unknown", Result{Modulation: ModUnknown}, "", nil},
 		{"undetermined", Result{Modulation: ModUndetermined}, "", nil},
 		{"lfm", Result{Modulation: ModLFM}, "", nil},
@@ -686,5 +710,87 @@ func TestClassify_ShortBurstDilutedInSilenceBeforeWelch(t *testing.T) {
 	if res.Modulation != Mod2FSK || res.Params.Baud != 9600 {
 		t.Errorf("diluted short burst got %q %.0f baud, want 2fsk 9600 (why: %s)",
 			res.Modulation, res.Params.Baud, res.Why)
+	}
+}
+
+func TestClassify_BPSKBaudAndDemod(t *testing.T) {
+	for _, tc := range []struct {
+		baud      float64
+		noiseBW   float64
+		wantDemod string
+	}{
+		{1200, 3000, "bpsk1200"},
+		{9600, 18_000, "bpsk9600"},
+	} {
+		res := Classify(noisy(bpsk(tc.baud), 16, tc.noiseBW, 91), testRate)
+		if res.Modulation != ModBPSK {
+			t.Errorf("bpsk %.0f: got %q, want %q (why: %s)", tc.baud, res.Modulation, ModBPSK, res.Why)
+		}
+		if res.Params.Baud != tc.baud {
+			t.Errorf("bpsk %.0f: baud=%.0f, want %.0f (why: %s)", tc.baud, res.Params.Baud, tc.baud, res.Why)
+		}
+		if res.Demod != tc.wantDemod {
+			t.Errorf("bpsk %.0f: demod=%q, want %q", tc.baud, res.Demod, tc.wantDemod)
+		}
+	}
+}
+
+func TestClassify_QPSKBaudAndDemod(t *testing.T) {
+	half := int(testRate / 2)
+	res := Classify(noisy(qpsk(half, 9600), 16, 18_000, 93), testRate)
+	if res.Modulation != ModQPSK {
+		t.Fatalf("qpsk 9600: got %q, want %q (why: %s)", res.Modulation, ModQPSK, res.Why)
+	}
+	if res.Params.Baud != 9600 {
+		t.Errorf("qpsk 9600: baud=%.0f, want 9600 (why: %s)", res.Params.Baud, res.Why)
+	}
+	if res.Demod != "qpsk_ccsds" {
+		t.Errorf("qpsk 9600: demod=%q, want qpsk_ccsds", res.Demod)
+	}
+}
+
+func TestClassify_WeakCoherentSignalsBelow10dB(t *testing.T) {
+	half := int(testRate / 2)
+	cases := []struct {
+		name    string
+		iq      []complex64
+		snr     float64
+		noiseBW float64
+		want    string
+	}{
+		{"carrier 7dB", carrier(half, 300), 7, 500, ModCarrier},
+		{"bpsk 1200 7dB", bpsk(1200), 7, 3000, ModBPSK},
+		{"bpsk 9600 8dB", bpsk(9600), 8, 18_000, ModBPSK},
+		{"cw 8dB", cw(2*int(testRate), 18), 8, 500, ModCW},
+	}
+	for i, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			res := Classify(noisy(tc.iq, tc.snr, tc.noiseBW, uint64(400+i)), testRate)
+			if res.Modulation != tc.want {
+				t.Errorf("%s: got %q, want %q (why: %s)", tc.name, res.Modulation, tc.want, res.Why)
+			}
+		})
+	}
+}
+
+func compressVoice(a []float32) []float32 {
+	out := make([]float32, len(a))
+	for i, v := range a {
+		out[i] = float32(math.Tanh(3.0 * float64(v)))
+	}
+	return out
+}
+
+func TestClassify_AMVoiceAndDemod(t *testing.T) {
+	half := int(testRate / 2)
+	v := compressVoice(realPart(voice(half, 0, 5)))
+	for _, snr := range []float64{25, 18} {
+		res := Classify(noisy(amAudio(v, 0.8), snr, 6000, 97), testRate)
+		if res.Modulation != ModAM {
+			t.Errorf("am voice %.0f dB: got %q, want %q (why: %s)", snr, res.Modulation, ModAM, res.Why)
+		}
+		if res.Demod != "am" {
+			t.Errorf("am voice %.0f dB: demod=%q, want am", snr, res.Demod)
+		}
 	}
 }

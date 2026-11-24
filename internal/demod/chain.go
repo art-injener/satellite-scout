@@ -110,10 +110,10 @@ type audioRx interface {
 // что слышно; fineTaps — длина точного фильтра, 0 — fineTaps.
 // midHz — желаемая частота после грубого фильтра; 0 — midRateHz.
 type profile struct {
-	fineDecim   int
-	fineTaps    int
-	midHz       float64
-	newDemod    func(rate float64) lineDemod
+	fineDecim int
+	fineTaps  int
+	midHz     float64
+	newDemod  func(rate float64) lineDemod
 	// newDemodBaud — линия со скоростью из ChannelSettings.Baud; baud уже > 0 (дефолт подставлен).
 	newDemodBaud func(rate, baud float64) lineDemod
 	newDeframer  func() deframer
@@ -365,10 +365,20 @@ type Status struct {
 	PassbandHz float64
 
 	// Поля режима «Авто» (Demod=auto): фаза подбора и закреплённый профиль.
-	AutoLocked     string   // id профиля после победы по CRC; пусто — подбор
-	AutoPhase      string   // "search" | "locked"
-	AutoCandidates int      // число кандидатов в текущем подборе
-	AutoIDs        []string // id кандидатов (порядок подбора)
+	AutoLocked     string              // id профиля после победы по CRC; пусто — подбор
+	AutoPhase      string              // "search" | "locked"
+	AutoCandidates int                 // число кандидатов в текущем подборе
+	AutoIDs        []string            // id кандидатов (порядок подбора)
+	AutoStats      []AutoCandidateStat // сводка по активным кандидатам в фазе подбора
+	DroppedFrames  uint64              // накопленные пропуски IQ-фреймов в кольце подписки
+}
+
+// AutoCandidateStat — компактная сводка по одному кандидату режима «Авто».
+type AutoCandidateStat struct {
+	ID        string `json:"id"`
+	SyncWords int    `json:"sync_words,omitempty"`
+	Good      int    `json:"good,omitempty"`
+	Bad       int    `json:"bad,omitempty"`
 }
 
 // PictureProgress — ход картинки в приёме.

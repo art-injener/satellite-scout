@@ -95,8 +95,29 @@
         });
     }
 
+    /** Эффективный профиль: при закреплённом «Авто» используется выбранный профиль. */
+    function effectiveDemod(st) {
+        if (st && st.demod === 'auto' && st.auto_phase === 'locked' && st.auto_locked) {
+            return st.auto_locked;
+        }
+        return st ? st.demod : '';
+    }
+
+    /** Компактная сводка по кандидатам режима «Авто» с ненулевой активностью. */
+    function formatAutoStats(stats) {
+        if (!Array.isArray(stats) || !stats.length) { return ''; }
+        const shown = stats.slice(0, 3).map(function(it) {
+            const parts = [];
+            if (it.sync_words > 0) { parts.push('синхро ' + it.sync_words); }
+            if (it.good > 0 || it.bad > 0) { parts.push('CRC ' + (it.good || 0) + '/' + (it.bad || 0)); }
+            return demodLabel(it.id) + (parts.length ? ': ' + parts.join(', ') : '');
+        });
+        if (stats.length > 3) { shown.push('+' + (stats.length - 3)); }
+        return shown.join(' · ');
+    }
+
     /**
-     * Строка pipeline в блоке «Обработка»: при «Авто» — проба кандидатов или выбранный профиль.
+     * Строка pipeline в блоке «Обработка»: при «Авто» — статус подбора или подобранный профиль.
      * @param {Object} st — demod_status
      */
     function pipelineFromStatus(st) {
@@ -105,12 +126,7 @@
         if (st.auto_phase === 'locked' && st.auto_locked) {
             return 'Выбран ' + demodLabel(st.auto_locked);
         }
-        const ids = Array.isArray(st.auto_ids) ? st.auto_ids : [];
-        if (ids.length) {
-            return 'Проба — ' + ids.map(demodLabel).join(' · ');
-        }
-        const n = typeof st.auto_candidates === 'number' ? st.auto_candidates : 0;
-        return n > 0 ? ('Проба — ' + n) : 'Проба…';
+        return 'Подбор ...';
     }
 
     /** Уровень в dBm по поправке тракта, без неё — в dBFS; минус типографский. */
@@ -240,8 +256,9 @@
             }
         }
 
-        if (st.demod === 'sstv') { return sstvStages(st, out); }
-        if (VOICE_DEMODS[st.demod]) { return voiceStages(st, out); }
+        const eff = effectiveDemod(st);
+        if (eff === 'sstv') { return sstvStages(st, out); }
+        if (VOICE_DEMODS[eff]) { return voiceStages(st, out); }
 
         const good = st.frames_good;
         const bad = st.frames_bad;
@@ -254,6 +271,15 @@
         return out;
     }
 
+    /** Добавляет предупреждение о пропусках IQ в диагноз при активном приёме. */
+    function withDropWarning(st, res) {
+        if (!st || !st.active || st.demod_off || !(st.dropped_frames > 0)) {
+            return res;
+        }
+        const state = res.state === 'bad' ? 'bad' : 'warn';
+        return { state: state, text: res.text + ' · пропуски IQ: ' + st.dropped_frames };
+    }
+
     /**
      * Диагноз: первый этап, на котором приём обрывается, или итог приёма.
      * @param {Object} st — событие сервера
@@ -261,6 +287,10 @@
      * @param {number} nowMs — текущее время, мс эпохи
      */
     function diagnose(st, stages, nowMs) {
+        return withDropWarning(st, diagnoseBase(st, stages, nowMs));
+    }
+
+    function diagnoseBase(st, stages, nowMs) {
         const good = st.frames_good;
         const age = st.last_packet_ms ? ', последний ' + formatAge(nowMs - st.last_packet_ms) + ' назад' : '';
         const rx = st.reception;
@@ -271,12 +301,11 @@
             if (st.auto_phase === 'locked' && st.auto_locked) {
                 return { state: 'ok', text: 'Выбран ' + demodLabel(st.auto_locked) };
             }
-            const ids = Array.isArray(st.auto_ids) ? st.auto_ids : [];
-            const list = ids.length ? ids.map(demodLabel).join(' · ') : '';
-            return {
-                state: 'warn',
-                text: list ? ('Проба — ' + list) : 'Проба…',
-            };
+            const statsText = formatAutoStats(st.auto_stats);
+            if (statsText) {
+                return { state: 'warn', text: statsText };
+            }
+            return { state: 'warn', text: 'Подбор ...' };
         }
         if (st.demod === 'sstv') { return diagnoseSSTV(st); }
         if (!st.squelch_open) {
@@ -483,7 +512,8 @@
             this._els.pipeline.textContent = pipelineFromStatus(st);
         }
         // Лента кадров у SSTV и голоса пуста: картинка идёт минуты, звук кадров не даёт.
-        if (this._els.stripBox) { this._els.stripBox.hidden = st.demod === 'sstv' || !!VOICE_DEMODS[st.demod]; }
+        const eff = effectiveDemod(st);
+        if (this._els.stripBox) { this._els.stripBox.hidden = eff === 'sstv' || !!VOICE_DEMODS[eff]; }
         this._renderStrip();
     };
 

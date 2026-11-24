@@ -327,9 +327,9 @@
      * @returns {?Object}
      */
     /**
-     * Подпись канала при профиле «Авто»: проба кандидатов или выбранный профиль.
+     * Подпись канала при профиле «Авто»: статус подбора или подобранный профиль.
      * @param {object} st — demod_status
-     * @param {function(string): string} [nameOf] — id профиля → подпись
+     * @param {function(string): string} [nameOf] — id профиля, возвращает подпись
      */
     function autoDemodStatusLabel(st, nameOf) {
         if (!st || st.demod !== 'auto') { return ''; }
@@ -337,12 +337,7 @@
         if (st.auto_phase === 'locked' && st.auto_locked) {
             return 'Выбран ' + label(st.auto_locked);
         }
-        const ids = Array.isArray(st.auto_ids) ? st.auto_ids : [];
-        if (ids.length) {
-            return 'Проба — ' + ids.map(label).join(' · ');
-        }
-        const n = typeof st.auto_candidates === 'number' ? st.auto_candidates : 0;
-        return n > 0 ? ('Проба — ' + n) : 'Проба…';
+        return 'Подбор ...';
     }
 
     function autoRxMatchTx(noradId, centerHz, markers) {

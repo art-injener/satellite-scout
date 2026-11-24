@@ -308,11 +308,12 @@ func applyOrigin(r signalclass.Result, origin string) signalclass.Result {
 		}
 		q := origin == OriginSatelliteProbable
 		switch r.Modulation {
-		case signalclass.ModFMVoice:
+		case signalclass.ModFMVoice, signalclass.ModAM:
 			r.Service = signalclass.ServiceSatVoice
 			r.ServiceLabel = satLabel(signalclass.LabelTransmitter, q)
 			r.ServiceBasis = signalclass.BasisSignature
-		case signalclass.Mod2FSK, signalclass.ModAFSK, signalclass.ModCW, signalclass.ModOOK:
+		case signalclass.Mod2FSK, signalclass.ModAFSK, signalclass.ModBPSK, signalclass.ModQPSK,
+			signalclass.ModCW, signalclass.ModOOK:
 			r.Service = signalclass.ServiceSatTx
 			r.ServiceLabel = satLabel(signalclass.LabelTransmitter, q)
 			r.ServiceBasis = signalclass.BasisSignature
