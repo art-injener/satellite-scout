@@ -44,31 +44,59 @@
         return { key: p.name, value: p.unit ? p.value + ' ' + p.unit : p.value };
     }
 
+    /** Подпись kind из ADR-009 §7.2 для колонки «Тип». */
+    function kindLabel(kind) {
+        switch (kind) {
+            case 'beacon': return 'Маяк ТМИ';
+            case 'text': return 'Сообщение';
+            case 'image': return 'Снимок';
+            case 'file': return 'Файл';
+            case 'position': return 'Навигация';
+            case 'sonde': return 'Зонд';
+            case 'unknown': return 'Неизвестно';
+            default: return kind ? String(kind) : '—';
+        }
+    }
+
     /**
-     * Строка таблицы из кадра SSE `telemetry`: отправитель в колонке канала, демодулятор.
+     * Строка таблицы из кадра SSE `telemetry`: отправитель в колонке канала, демодулятор, тип.
      * Разобранная телеметрия: в строке ключевые поля, все поля с получателем и hex — в details.
-     * Без разбора: получатель и данные параметрами; не текстовые данные показываются в hex.
+     * Без разбора: получатель и данные параметрами; hex — у unknown и в модалке.
      * @param {Object} ev — событие сервера (internal/demod.TelemetryEvent)
      */
     function telemetryPacket(ev) {
         const pkt = {
             time: timeOf(new Date(ev.timestamp_ms)),
             crc: 'OK',
-            channelLabel: ev.src,
+            channelLabel: ev.src || '—',
             channelFreqMHz: ev.frequency_hz / 1e6,
             demod: demodLabel(ev.demod),
+            kind: kindLabel(ev.kind),
         };
         const parsed = ev.params || [];
         if (parsed.length > 0) {
             pkt.params = parsed.filter(function(p) { return p.key; }).map(paramEntry);
             pkt.details = parsed.map(paramEntry).concat([
-                { key: 'кому', value: ev.dest },
+                { key: 'тип', value: pkt.kind },
+                { key: 'декодер', value: ev.decoder || '' },
+                { key: 'кому', value: ev.dest || '' },
                 { key: 'hex', value: ev.info_hex || '' },
             ]);
             return pkt;
         }
+        if (ev.kind === 'image' || ev.kind === 'unknown') {
+            pkt.params = [{ key: 'сводка', value: ev.summary || pkt.kind }];
+            if (ev.info_hex) {
+                pkt.details = [
+                    { key: 'тип', value: pkt.kind },
+                    { key: 'декодер', value: ev.decoder || '' },
+                    { key: 'hex', value: ev.info_hex },
+                ];
+            }
+            return pkt;
+        }
         const data = ev.info ? { key: 'данные', value: ev.info } : { key: 'hex', value: ev.info_hex || '' };
-        pkt.params = [{ key: 'кому', value: ev.dest }, data];
+        pkt.params = [{ key: 'кому', value: ev.dest || '' }, data];
         return pkt;
     }
 
@@ -152,6 +180,7 @@
      * @param {string} [pkt.channelLabel]
      * @param {number} [pkt.channelFreqMHz]
      * @param {string} [pkt.demod] — подпись демодулятора, принявшего кадр
+     * @param {string} [pkt.kind] — тип полезной нагрузки (колонка «Тип»)
      * @param {Array<{key:string,value:string}>} [pkt.params] — параметры пакета
      * @param {Array<{key:string,value:string}>} [pkt.details] — все параметры: строка открывает их по клику
      */
@@ -177,6 +206,10 @@
         const tdDemod = document.createElement('td');
         tdDemod.textContent = pkt.demod || '—';
         tr.appendChild(tdDemod);
+
+        const tdKind = document.createElement('td');
+        tdKind.textContent = pkt.kind || '—';
+        tr.appendChild(tdKind);
 
         const time = pkt.time || timeNow();
         const tdTime = document.createElement('td');

@@ -93,7 +93,46 @@
         gain: { kind: 'gain', step: 0.1, min: 0, max: 49.6, decimals: 1 },
         dopplerHz: { kind: 'offset', step: 1, decimals: 0 },
         squelch: { kind: 'squelch', step: 1, decimals: 1 },
+        baud: { kind: 'gain', step: 1, min: 50, max: 100000, decimals: 0 },
     };
+
+    /**
+     * Заполняет select профилей демодулятора из ответа /api/sdr/demod-profiles.
+     * @param {HTMLSelectElement} sel
+     * @param {Array<{id:string,label:string}>} profiles
+     * @param {string} [keepId]
+     */
+    function fillDemodProfileSelect(sel, profiles, keepId) {
+        if (!sel || !Array.isArray(profiles) || !profiles.length) { return; }
+        const prev = keepId || selectedValue(sel) || 'auto';
+        sel.innerHTML = '';
+        if (sel.options && sel.options.length) {
+            sel.options.length = 0;
+        }
+        for (let i = 0; i < profiles.length; i++) {
+            const p = profiles[i];
+            if (!p || !p.id) { continue; }
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = p.label || p.id;
+            if (typeof sel.appendChild === 'function') {
+                sel.appendChild(opt);
+            } else if (sel.options && typeof sel.options.add === 'function') {
+                sel.options.add(opt);
+            } else if (sel.options) {
+                sel.options[sel.options.length] = opt;
+            }
+        }
+        if (!selectByValue(sel, prev)) {
+            selectByValue(sel, 'auto');
+        }
+    }
+
+    /** Профиль с гибкой скоростью: поле Baud видно в панели. */
+    function profileBaudFlexible(byId, id) {
+        const p = byId && byId[id];
+        return !!(p && p.baud_flexible);
+    }
 
     /**
      * Оставляет в строке только цифры числа.
@@ -232,6 +271,99 @@
     }
 
     /**
+     * Строка статуса «Авто приём»: имя TX, частота, i/N, остаток стоянки.
+     * @param {?Object} st — sweep_state
+     * @param {number} nowMs
+     * @returns {string}
+     */
+    function autoRxStatusModel(st, nowMs) {
+        if (!st || !st.running || st.policy !== 'tx') { return ''; }
+        const wins = st.windows || [];
+        const n = wins.length;
+        if (!n) { return ''; }
+        const win = wins[st.index] || {};
+        const name = win.label || 'TX';
+        const end = st.window_end_ms || nowMs;
+        const left = Math.max(0, Math.ceil((end - nowMs) / 1000));
+        return name + ' · ' + sweepMHzText(win.center_hz) +
+            ' · ' + (st.index + 1) + '/' + n +
+            ' · осталось ' + formatMinSec(left);
+    }
+
+    /**
+     * NORAD текущей цели «Авто приём» из окна обхода; 0 — не Авто / нет цели.
+     * @param {?Object} st
+     * @param {boolean} autoRx
+     * @returns {number}
+     */
+    function autoRxTargetNorad(st, autoRx) {
+        if (!autoRx || !st || !st.running || st.policy !== 'tx') { return 0; }
+        const win = (st.windows || [])[st.index];
+        return win && win.norad_id > 0 ? win.norad_id : 0;
+    }
+
+    /**
+     * Доплер текущей цели hop по маркерам на спектре, Гц.
+     * Без этого при выключенном демодуляторе LO на номинале, а риска TX — уже
+     * со сдвигом Доплера, и «середина» с маркером расходятся на десятки кГц.
+     * При нескольких TX одного NORAD — маркер ближе к center_hz окна (не первый в списке).
+     * @param {number} noradId
+     * @param {number} centerHz — center_hz окна hop
+     * @param {Array} markers — _txMarkList
+     * @returns {number}
+     */
+    function autoRxDopplerFromMarkers(noradId, centerHz, markers) {
+        const m = autoRxMatchTx(noradId, centerHz, markers);
+        if (!m || !(m.freqHz > 0) || !(m.nominalHz > 0)) { return 0; }
+        return m.freqHz - m.nominalHz;
+    }
+
+    /**
+     * Маркер TX цели hop: тот же NORAD, номинал ближе всего к center_hz окна.
+     * Без подходящего маркера — null (профиль демода не трогаем).
+     * @param {number} noradId
+     * @param {number} centerHz
+     * @param {Array} markers — _txMarkList
+     * @returns {?Object}
+     */
+    /**
+     * Подпись канала при профиле «Авто»: проба кандидатов или выбранный профиль.
+     * @param {object} st — demod_status
+     * @param {function(string): string} [nameOf] — id профиля → подпись
+     */
+    function autoDemodStatusLabel(st, nameOf) {
+        if (!st || st.demod !== 'auto') { return ''; }
+        const label = typeof nameOf === 'function' ? nameOf : function(id) { return id; };
+        if (st.auto_phase === 'locked' && st.auto_locked) {
+            return 'Выбран ' + label(st.auto_locked);
+        }
+        const ids = Array.isArray(st.auto_ids) ? st.auto_ids : [];
+        if (ids.length) {
+            return 'Проба — ' + ids.map(label).join(' · ');
+        }
+        const n = typeof st.auto_candidates === 'number' ? st.auto_candidates : 0;
+        return n > 0 ? ('Проба — ' + n) : 'Проба…';
+    }
+
+    function autoRxMatchTx(noradId, centerHz, markers) {
+        if (!(noradId > 0) || !Array.isArray(markers) || !markers.length) { return null; }
+        let best = null;
+        let bestDist = Infinity;
+        for (let i = 0; i < markers.length; i++) {
+            const m = markers[i];
+            if (!m || m.noradId !== noradId) { continue; }
+            const nom = m.nominalHz > 0 ? m.nominalHz : 0;
+            if (!(nom > 0)) { continue; }
+            const dist = Math.abs(nom - (centerHz || 0));
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = m;
+            }
+        }
+        return best;
+    }
+
+    /**
      * @param {SatelliteStateManager} stateManager
      */
     function ManualLayout(stateManager) {
@@ -315,7 +447,6 @@
         this._passProfile = null;
         this._passTimeline = null;
         this._demodPanel = null;
-        this._tmiTable = null;
         this._gallery = null;
         this._demodInfoModal = null;
         this._onPanoramaTune = null;
@@ -363,9 +494,22 @@
         this._sweepFreqEl = null;
         this._sweepPathEl = null;
         this._sweepProgressEl = null;
+        /** «Авто приём»: обход крутит тюнер на Спектре; ручная настройка приёмника закрыта. */
+        this._autoRx = false;
+        this._autoRxIncludeAir = false;
+        this._autoRxEl = null;
+        this._autoRxAirEl = null;
+        this._autoRxStatusEl = null;
+        /** center_hz и ключ последнего применённого hop (norad:center:modulation). */
+        this._autoRxCenterHz = 0;
+        this._autoRxApplyKey = '';
+        /** Последний offset_hz с сервера: при «Авто приёме» не затирать наведение на вспышку. */
+        this._channelOffsetHz = 0;
         this._resultTabButtons = [];
         this._resultViews = [];
         this._resultView = 'table';
+        /** Участки «Эфира» во вкладке «Таблица»: band_signals + Кадры/Данные из telemetry. */
+        this._airSignals = [];
         /** Запись IQ: элементы секции «Данные», папка и текущий файл (null — не пишем). */
         this._rec = null;
 
@@ -379,7 +523,7 @@
         this._squelchInput = null;
         this._rxPipelineSelect = null;
         this._rxPanelRoot = null;
-        /** Поля колонки приёмника, которые «Установить» отправляет на сервер. */
+        /** Поля колонки приёмника и демодулятора (отправка на сервер). */
         this._rxFields = null;
         /** Выключатель демодулятора с сервера: null, пока статус не пришёл. */
         this._serverDemodOff = null;
@@ -435,7 +579,6 @@
         this._initPassTimeline();
         this._detectAntennaView();
         this._initDemodPanel();
-        this._initTelemetryTable();
         this._initAirTable();
         this._initProductGallery();
         this._initDemodEvents();
@@ -451,11 +594,11 @@
         this._handlers.push([el, type, fn]);
     };
 
-    // ── Вкладки: Спектр (HOLD) | Антенна | Панорама (SWEEP) ───────────────
+    // ── Вкладки: Спектр (HOLD) | Антенна ───────────────────────────────────
     //
+    // «Панорама» скрыта: позже отдельный независимый режим. Обход на Спектре
+    // ведёт «Авто приём» (_ensureSweep), без визита на панораму.
     // Активная вкладка между сессиями не сохраняется, вход открывает «Спектр».
-    // Обход запускает кнопка «Старт». «Спектр» и «Антенна» обход останавливают:
-    // приёмник в один момент либо смотрит панораму, либо стоит на канале.
 
     ManualLayout.prototype._initTabs = function() {
         const tabbar = document.getElementById('manual-tabbar');
@@ -481,11 +624,12 @@
     };
 
     /**
-     * Выбор вкладки оператором: «Панорама» показывает снимки окон обхода,
-     * «Спектр» и «Антенна» — поток приёмника. Приёмник переход не трогает.
-     * @param {string} tabId — 'panorama' | 'spectrum' | 'antenna'
+     * Выбор вкладки оператором: «Спектр» и «Антенна». «Панорама» скрыта и
+     * сюда не пускаем: обход не завязан на её UI.
+     * @param {string} tabId — 'spectrum' | 'antenna' | (игнор: 'panorama')
      */
     ManualLayout.prototype._selectTab = function(tabId) {
+        if (tabId === 'panorama') { return; }
         if (tabId === 'antenna') {
             this._enterAntenna();
             return;
@@ -773,7 +917,7 @@
         this._tuneChannel(detail);
     };
 
-    /** Снять сопровождение: клиентски + POST + сброс подсветки. */
+    /** Снять сопровождение: клиентски + POST + сброс подсветки. Вид не меняем. */
     ManualLayout.prototype._clearFollow = function() {
         this._followFreq = null;
         if (this._panorama && typeof this._panorama.setFollowedFreq === 'function') {
@@ -783,7 +927,6 @@
             this._sm.clearTrackingSatellite();
         }
         this._postTrackingReset();
-        this._setView('panorama');
     };
 
     /** Печатает заданное положение в поля цели (обновляется стрелками и SET). */
@@ -799,7 +942,7 @@
     };
 
     /**
-     * Передатчики ленты — downlink из SatNOGS у КА группы (поле transmitters
+     * Передатчики ленты — downlink из реестра у КА группы (поле transmitters
      * в satellite_group_update). Нет данных — список пуст. Передатчик КА,
      * который ещё не поднялся над горизонтом, показан молчащим.
      * @param {?Object} group
@@ -817,7 +960,7 @@
                 const tx = txs[j];
                 if (!(tx.freq_hz > 0)) { continue; }
                 // В ленте только имя КА: частота и модуляция — соседние колонки.
-                // Длинный description SatNOGS («Mode U - … AX.25…») уходит в подсказку.
+                // Длинное description из первоисточника («Mode U - … AX.25…») уходит в подсказку.
                 list.push({
                     uuid: tx.uuid,
                     noradId: sat.norad_id,
@@ -1156,7 +1299,8 @@
         if (next === 'spectrum') {
             if (this._panorama) { this._panorama.deactivate(); }
             this._stopPanoramaFeed();
-            if (this._sweepRunning()) { this._postSweep(false); }
+            // При «Авто приёме» обход остаётся: Спектр и «Эфир» едут за тюнером.
+            if (this._sweepRunning() && !this._autoRx) { this._postSweep(false); }
             if (this._active) {
                 this._startSpectrumTimer();
                 if (this._wf) { this._wf.start(); }
@@ -1200,10 +1344,12 @@
             bandwidth: document.getElementById('manual-rx-filter-bw'),
             squelch: this._squelchInput,
             demod: this._rxPipelineSelect,
+            baud: document.getElementById('manual-rx-baud'),
+            baudField: document.getElementById('manual-rx-baud-field'),
             doppler: document.getElementById('manual-rx-doppler-mode'),
-            apply: document.getElementById('manual-rx-apply'),
             applyDemod: document.getElementById('manual-demod-apply'),
         };
+        this._demodProfilesById = {};
         this._dopplerNow = document.getElementById('manual-rx-doppler-now');
         const self = this;
         const agc = this._rxFields.agc;
@@ -1213,23 +1359,42 @@
         this._showMarker(null);
 
         this._bindNumericFields();
+        this._loadDemodProfiles();
         this._on(agc, 'click', function() {
             self._setAgc(agc.getAttribute('aria-pressed') !== 'true');
             self._flushSettings('receiver');
         });
         this._on(this._rxPipelineSelect, 'change', function() {
+            self._prepareAutoChannel();
             self._applyBandwidthLimit();
+            self._syncBaudField();
             self._syncEyeFromPipeline();
+            self._applyAccess();
             self._flushSettings('demod');
-        });
-        this._on(this._rxFields.apply, 'click', function() {
-            self._flushSettings('receiver');
         });
         this._on(this._rxFields.applyDemod, 'click', function() {
             self._syncEyeFromPipeline();
             self._flushSettings('demod');
         });
-        // Список и кнопка уходят сразу. Набор числа ждёт паузу, «Установить» отправляет не дожидаясь её.
+        this._autoRxEl = document.getElementById('manual-rx-auto');
+        this._autoRxAirEl = document.getElementById('manual-rx-auto-air');
+        this._autoRxStatusEl = document.getElementById('manual-rx-auto-status');
+        if (this._autoRxEl) {
+            this._on(this._autoRxEl, 'click', function() { self._toggleAutoRx(); });
+        }
+        if (this._autoRxAirEl) {
+            try {
+                this._autoRxAirEl.checked = localStorage.getItem('ux.autoRxIncludeAir') === '1';
+            } catch (e) { /* нет storage */ }
+            this._autoRxIncludeAir = !!this._autoRxAirEl.checked;
+            this._on(this._autoRxAirEl, 'change', function() {
+                self._autoRxIncludeAir = !!self._autoRxAirEl.checked;
+                try {
+                    localStorage.setItem('ux.autoRxIncludeAir', self._autoRxIncludeAir ? '1' : '0');
+                } catch (err) { /* нет storage */ }
+            });
+        }
+        // Полоса и АРУ уходят сразу; набор усиления ждёт паузу.
         this._on(this._rxFields.span, 'change', function() { self._flushSettings('receiver'); });
         this._on(this._rxFields.bandwidth, 'change', function() {
             self._syncChannelOverlay();
@@ -1243,6 +1408,7 @@
 
         this._syncEyeFromPipeline();
         this._applyBandwidthLimit();
+        this._renderAutoRx();
     };
 
     /**
@@ -1280,7 +1446,9 @@
     ManualLayout.prototype._dopplerNorad = function() {
         const f = this._rxFields;
         if (!f || selectedValue(f.doppler) !== 'auto') { return 0; }
-        return this._chanNorad || this._serverDopplerNorad || 0;
+        // 0 на hop «Эфир» должен уйти на сервер: иначе || подставит старый NORAD с TX.
+        if (this._chanNorad != null) { return this._chanNorad; }
+        return this._serverDopplerNorad || 0;
     };
 
     /** Поправка Доплера из статуса: подпись, столбец и середина графика. */
@@ -1301,13 +1469,13 @@
         }
     };
 
-    /** «Вручную» показывает герцы оператора, «Авто» — живую поправку. */
+    /** «Ручн.» — степпер в герцах; «Авто» — живая поправка. Unit «Гц» не показываем: узкая колонка. */
     ManualLayout.prototype._syncDopplerEntry = function() {
         const manual = !this._rxFields || selectedValue(this._rxFields.doppler) !== 'auto';
         const step = document.getElementById('manual-rx-doppler-step');
         const unit = document.getElementById('manual-rx-doppler-unit');
         if (step) { step.hidden = !manual; }
-        if (unit) { unit.hidden = !manual; }
+        if (unit) { unit.hidden = true; }
         if (this._dopplerNow) { this._dopplerNow.hidden = manual; }
     };
 
@@ -1319,9 +1487,61 @@
     ManualLayout.prototype._bindNumericFields = function() {
         const f = this._rxFields;
         if (!f) { return; }
-        const keys = ['gain', 'dopplerHz', 'squelch'];
+        const keys = ['gain', 'dopplerHz', 'squelch', 'baud'];
         for (let i = 0; i < keys.length; i++) {
             this._bindNumericField(f[keys[i]], NUMERIC_FIELDS[keys[i]]);
+        }
+    };
+
+    /** Каталог профилей с сервера → селектор и подписи панели «Обработка». */
+    ManualLayout.prototype._loadDemodProfiles = function() {
+        const self = this;
+        if (typeof fetch !== 'function') {
+            this._syncBaudField();
+            return;
+        }
+        fetch('/api/sdr/demod-profiles', { credentials: 'same-origin' })
+            .then(function(r) { return r.ok ? r.json() : Promise.reject(new Error('profiles')); })
+            .then(function(list) {
+                self._applyDemodProfiles(list);
+            })
+            .catch(function() {
+                self._syncBaudField();
+            });
+    };
+
+    ManualLayout.prototype._applyDemodProfiles = function(list) {
+        const byId = {};
+        const labels = {};
+        if (Array.isArray(list)) {
+            for (let i = 0; i < list.length; i++) {
+                const p = list[i];
+                if (!p || !p.id) { continue; }
+                byId[p.id] = p;
+                labels[p.id] = p.label || p.id;
+            }
+        }
+        this._demodProfilesById = byId;
+        if (typeof window !== 'undefined' && window.DemodPanel && typeof window.DemodPanel.setLabels === 'function') {
+            window.DemodPanel.setLabels(labels);
+        }
+        fillDemodProfileSelect(this._rxPipelineSelect, list, selectedValue(this._rxPipelineSelect));
+        this._syncBaudField();
+        this._syncEyeFromPipeline();
+    };
+
+    /** Показать поле Baud только для baud_flexible; подставить дефолт профиля при пустом. */
+    ManualLayout.prototype._syncBaudField = function() {
+        const f = this._rxFields;
+        if (!f || !f.baudField) { return; }
+        const id = selectedValue(f.demod);
+        const flex = profileBaudFlexible(this._demodProfilesById, id);
+        f.baudField.hidden = !flex;
+        if (!flex || !f.baud) { return; }
+        const p = this._demodProfilesById[id];
+        if (f.baud.value === '' || f.baud.value === '0') {
+            const defBaud = p && p.baud > 0 ? p.baud : (id === 'ook' ? 480 : 9600);
+            f.baud.value = String(Math.round(defBaud));
         }
     };
 
@@ -1515,13 +1735,17 @@
     };
 
     /**
-     * «Установить» секции «Приёмник»: частота, полоса и усиление.
+     * Настройки приёмника: частота, полоса и усиление (полоса/АРУ сразу, усиление после паузы).
      * Демодулятор не трогает. SET на индикаторе по-прежнему шлёт только частоту.
      */
     ManualLayout.prototype._applyReceiverSettings = function() {
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
         if (ac && !ac.canControl()) {
             ac.setNotice('Менять настройки приёмника можно только в режиме «Контроль».');
+            return;
+        }
+        if (this._autoRx) {
+            if (ac) { ac.setNotice('При «Авто приёме» частоту и усиление задаёт обход.'); }
             return;
         }
         const path = this._radioPathName();
@@ -1590,17 +1814,24 @@
 
         const self = this;
         const cal = this._calibrationDb();
-        postSettings(ac, '/api/sdr/channel', {
+        const demodId = selectedValue(f.demod);
+        const body = {
             radio_path: path,
-            offset_hz: 0,
+            // При «Авто приёме» сервер наводит Offset на пик вспышки — сохраняем его.
+            offset_hz: this._autoRx ? Math.round(this._channelOffsetHz || 0) : 0,
             bandwidth_hz: Number(selectedValue(f.bandwidth)),
             squelch_dbfs: Number(squelch.toFixed(1)),
-            demod: selectedValue(f.demod),
+            demod: demodId,
             demod_off: this._demodOffForApply(),
             doppler_norad: this._dopplerNorad(),
             doppler_auto: selectedValue(f.doppler) === 'auto',
             doppler_manual_hz: Math.round(manualHz),
-        }, 'Настройки демодулятора не применены', function(b) {
+        };
+        if (profileBaudFlexible(this._demodProfilesById, demodId) && f.baud) {
+            const baud = Number(f.baud.value);
+            if (isFinite(baud) && baud > 0) { body.baud = baud; }
+        }
+        postSettings(ac, '/api/sdr/channel', body, 'Настройки демодулятора не применены', function(b) {
             if (b && b.status && self._radioPathName() === path) {
                 self._applyReceiverStatus(path, cal, b.status, 'demod');
             }
@@ -1677,11 +1908,13 @@
      */
     ManualLayout.prototype._followServerChannel = function(st) {
         if (typeof st.offset_hz !== 'number' && typeof st.bandwidth_hz !== 'number') { return; }
+        if (typeof st.offset_hz === 'number') { this._channelOffsetHz = st.offset_hz; }
         const ch = {
             offset_hz: st.offset_hz, bandwidth_hz: st.bandwidth_hz, squelch_dbfs: st.squelch_dbfs,
             demod: st.demod, demod_off: !!st.demod_off, doppler_norad: st.doppler_norad || 0,
             doppler_auto: typeof st.doppler_auto === 'boolean' ? st.doppler_auto : null,
             doppler_manual_hz: typeof st.doppler_manual_hz === 'number' ? st.doppler_manual_hz : null,
+            baud: typeof st.baud === 'number' ? st.baud : 0,
         };
         if (typeof st.gain_db === 'number' && st.gain_db !== this._serverGain) {
             // Порог в dBm зависит от усиления, поэтому канал заполняется заново вместе с ним.
@@ -1699,7 +1932,7 @@
     function channelKey(ch) {
         return [ch.offset_hz, ch.bandwidth_hz, ch.squelch_dbfs, ch.demod, ch.demod_off ? 1 : 0,
             ch.doppler_norad || 0, ch.doppler_auto === true ? 1 : ch.doppler_auto === false ? 0 : '',
-            ch.doppler_manual_hz].join('|');
+            ch.doppler_manual_hz, ch.baud || 0].join('|');
     }
 
     /**
@@ -1755,6 +1988,7 @@
         if (part === 'receiver') { return; }
         const ch = st.channel;
         if (!ch) { return; }
+        if (typeof ch.offset_hz === 'number') { this._channelOffsetHz = ch.offset_hz; }
         this._serverChannel = channelKey(ch);
         this._showDemodSwitch(!!ch.demod_off);
         if (this._demodApplyQueued) {
@@ -1771,6 +2005,10 @@
             f.squelch.value = String(Number((ch.squelch_dbfs + (this._levelOffset || 0)).toFixed(1)));
         }
         if (ch.demod && selectByValue(f.demod, ch.demod)) { this._syncEyeFromPipeline(); }
+        if (f.baud && typeof ch.baud === 'number' && ch.baud > 0) {
+            f.baud.value = String(Math.round(ch.baud));
+        }
+        this._syncBaudField();
         this._applyBandwidthLimit();
         this._serverDopplerNorad = ch.doppler_norad || 0;
         // Явный doppler_auto с сервера задаёт режим. Старый статус без поля режим не трогает:
@@ -1783,6 +2021,7 @@
         this._syncDopplerEntry();
         this._showDemodSwitch(!!ch.demod_off);
         this._syncChannelOverlay();
+        this._applyAccess();
     };
 
     /**
@@ -1829,6 +2068,12 @@
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
         if (ac && !ac.canControl()) {
             ac.setNotice('Перестраивать приёмник можно только в режиме «Контроль».');
+            this._tuneQueuedMHz = null;
+            this._revertDial();
+            return false;
+        }
+        if (this._autoRx) {
+            if (ac) { ac.setNotice('При «Авто приёме» частоту задаёт обход.'); }
             this._tuneQueuedMHz = null;
             this._revertDial();
             return false;
@@ -1958,23 +2203,63 @@
         }
     };
 
-    /** Без прав регулятор и поля приёмника только показывают его настройки. */
+    /**
+     * Профиль «Авто»: полоса канала под кадровые профили до 9600 (18 кГц).
+     * Поля залочены — значение ставит код, не оператор.
+     */
+    ManualLayout.prototype._prepareAutoChannel = function() {
+        const f = this._rxFields;
+        if (!f || !f.demod || selectedValue(f.demod) !== 'auto') { return; }
+        if (f.bandwidth) { selectByValue(f.bandwidth, '18000'); }
+        if (f.doppler) { selectByValue(f.doppler, 'auto'); }
+        this._syncDopplerEntry();
+    };
+
+    /** Без прав или при «Авто приёме» поля приёмника только показывают настройки. */
     ManualLayout.prototype._applyAccess = function() {
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
-        const readOnly = !!ac && !ac.canControl();
+        const noControl = !!ac && !ac.canControl();
+        const rxLocked = noControl || !!this._autoRx;
+        const demodLocked = noControl;
         if (this._freqDial && typeof this._freqDial.setReadOnly === 'function') {
-            this._freqDial.setReadOnly(readOnly);
+            this._freqDial.setReadOnly(rxLocked);
         }
         const f = this._rxFields || {};
+        const rxKeys = { span: 1, gain: 1, agc: 1 };
         for (const key in f) {
-            if (f[key]) { f[key].disabled = readOnly; }
+            if (!f[key]) { continue; }
+            f[key].disabled = rxKeys[key] ? rxLocked : demodLocked;
+        }
+        // При «Автоприёме» профиль всегда «Авто» и руками не переключается.
+        if (this._autoRx && f.demod) {
+            selectByValue(f.demod, 'auto');
+            f.demod.disabled = true;
+        }
+        // Профиль «Авто»: полосу, порог и Доплер задаёт подбор/hop — руками не крутим.
+        const autoProfile = !!(f.demod && selectedValue(f.demod) === 'auto');
+        if (autoProfile) {
+            this._prepareAutoChannel();
+            ['bandwidth', 'squelch', 'doppler', 'dopplerHz', 'applyDemod'].forEach(function(key) {
+                if (f[key]) { f[key].disabled = true; }
+            });
         }
         const buttons = this._rxStepButtons || [];
         for (let b = 0; b < buttons.length; b++) {
-            if (buttons[b]) { buttons[b].disabled = readOnly; }
+            const btn = buttons[b];
+            if (!btn) { continue; }
+            const id = btn.id || '';
+            if (id.indexOf('gain') >= 0) {
+                btn.disabled = rxLocked;
+            } else if (autoProfile && (id.indexOf('squelch') >= 0 || id.indexOf('doppler') >= 0)) {
+                btn.disabled = true;
+            } else {
+                btn.disabled = demodLocked;
+            }
         }
-        if (readOnly) { this._stopStepRepeat(); }
+        if (rxLocked || autoProfile) { this._stopStepRepeat(); }
+        this._syncDopplerEntry();
         this._renderSweepBar();
+        this._renderAutoRx();
     };
 
     // ── Поток спектра ─────────────────────────────────────────────────────
@@ -2250,11 +2535,13 @@
             ? { values: shownDb, centerHz: win.centerHz, spanHz: win.spanHz }
             : null;
         if (this._fft) {
+            this._fft.squelchDb = this._squelchDbForSpectrum();
             if (heldLine) { this._fft.draw(sliceShown(line, sl, 0), sliceShown(heldLine, sl, 0)); } else { this._fft.draw(sliceShown(line, sl, 0)); }
         }
         if (this._wf) { this._wf.pushLine(sliceShown(line, sl, 0)); }
         if (this._cursorClientX !== null) { this._paintCursor(); }
         if (this._antFft && this._activeTab === 'antenna') {
+            this._antFft.squelchDb = this._squelchDbForSpectrum();
             if (heldLine) { this._antFft.draw(line, heldLine); } else { this._antFft.draw(line); }
             this._drawExpectedFreq(this._antFft, this._expectedFreqMHz());
         }
@@ -2300,7 +2587,7 @@
         if (!c) { return null; }
         const full = { centerHz: c, spanHz: s > 0 ? s : 0, offsetHz: 0, slice: null };
         if (!(s > 0) || !(this._lastBins > 1) || !window.SpectrumStream) { return full; }
-        const dop = demodChecked() ? (this._dopplerViewHz || 0) : 0;
+        const dop = this._viewDopplerHz();
         // Промотка ещё не догнана кадром: окно смотрит на намеченную частоту,
         // пустые края добиваются, пока приёмник не перестроится.
         const scrubOff = this._scrubHz !== null ? this._scrubHz - c : 0;
@@ -2340,7 +2627,7 @@
         }
         if (this._chanOverlay && typeof this._chanOverlay.setView === 'function') {
             // Столбец демодулятора остаётся посредине и пока частота только намечена.
-            const dop = demodChecked() ? (this._dopplerViewHz || 0) : 0;
+            const dop = this._viewDopplerHz();
             const col = this._scrubHz !== null ? dop : win.offsetHz;
             this._chanOverlay.setView(col, win.slice ? win.spanHz : 0);
         }
@@ -2573,7 +2860,7 @@
         if (this._streamCenterHz) {
             const viewSpan = this._zoom ? this._zoom.spanHz : this._streamSpanHz;
             const limit = scrubLimitHz(this._streamSpanHz, viewSpan);
-            const dop = demodChecked() ? (this._dopplerViewHz || 0) : 0;
+            const dop = this._viewDopplerHz();
             let total = dop + (next - this._streamCenterHz);
             if (total > limit) { total = limit; }
             if (total < -limit) { total = -limit; }
@@ -2652,7 +2939,7 @@
         if (!centerHz) { return; }
         const first = this._streamCenterHz === null;
         const changed = centerHz !== this._streamCenterHz;
-        // «Полоса» следует только за сменой в потоке, чтобы не сбить выбор до «Установить»
+        // «Полоса» следует только за сменой в потоке, чтобы не сбить выбор оператора
         const spanChanged = spanHz > 0 && spanHz !== this._streamSpanHz;
         const centerMHz = centerHz / 1e6;
         if (this._antFft) {
@@ -2667,7 +2954,7 @@
         // Масштаб переживает перестройку: окно остаётся той же ширины и снова
         // по центру частоты приёмника, чтобы в увеличении можно было крутить приёмник.
         if (changed && !first && !spanChanged && this._zoom) {
-            const off = demodChecked() ? (this._dopplerViewHz || 0) : 0;
+            const off = this._viewDopplerHz();
             this._zoom = { offsetHz: off, spanHz: this._zoom.spanHz };
         }
         if (spanChanged && !first && this._zoom) {
@@ -2712,6 +2999,18 @@
     };
 
     /**
+     * Порог шумоподавления в единицах шкалы спектра (dBm при известной калибровке).
+     * null — статуса ещё нет, линию не рисуем.
+     */
+    ManualLayout.prototype._squelchDbForSpectrum = function() {
+        const st = this._demodStatus;
+        if (!st || typeof st.squelch_dbfs !== 'number' || !isFinite(st.squelch_dbfs)) {
+            return null;
+        }
+        return st.squelch_dbfs + (this._levelOffset || 0);
+    };
+
+    /**
      * Цифры пика под индикатором частоты; полоса амплитуды — шкала −120…0 dBFS
      * и в dBm: она показывает запас до перегрузки АЦП.
      * Единицы стоят в разметке, здесь только числа: крупные цифры не прыгают.
@@ -2740,12 +3039,13 @@
         if (!sel || !modulation) { return; }
         const target = String(modulation).trim().toLowerCase();
         const targetKey = target.replace(/\s+/g, '');
+        // afsk раньше fsk: иначе «AFSK 1200» цепляется за подпись «FSK 1200».
         const families = ['bpsk', 'afsk', 'gmsk', 'qpsk', 'fsk'];
         for (let i = 0; i < sel.options.length; i++) {
             const opt = sel.options[i];
             if (!opt.text) { continue; }
             const optKey = opt.text.toLowerCase().replace(/\s+/g, '');
-            if (optKey === targetKey || targetKey.indexOf(optKey) >= 0 || optKey.indexOf(targetKey) >= 0) {
+            if (optKey === targetKey) {
                 sel.selectedIndex = i;
                 return;
             }
@@ -2758,6 +3058,15 @@
                     sel.selectedIndex = j;
                     return;
                 }
+            }
+        }
+        for (let i = 0; i < sel.options.length; i++) {
+            const opt = sel.options[i];
+            if (!opt.text) { continue; }
+            const optKey = opt.text.toLowerCase().replace(/\s+/g, '');
+            if (targetKey.indexOf(optKey) >= 0 || optKey.indexOf(targetKey) >= 0) {
+                sel.selectedIndex = i;
+                return;
             }
         }
     };
@@ -3012,6 +3321,8 @@
         const group = this._sm && typeof this._sm.getSatelliteGroup === 'function' ? this._sm.getSatelliteGroup() : null;
         this._txMarkList = window.TxMarkers.markersWithLabels(st.tx_markers, this._txList, group);
         this._txMarkers.setMarkers(this._txMarkList);
+        // Маркеры позже окна: Доплер шкалы и профиль демода под TX цели hop.
+        if (this._autoRx) { this._syncAutoRxTarget(); }
     };
 
     /**
@@ -3033,7 +3344,6 @@
             this._setRxPipeline(m.tx.modulation);
             this._applyBandwidthLimit();
         }
-        if (this._tmiTable) { this._tmiTable.setChannel(m.label, freqMHz); }
         this._chanLabel = m.label;
         this._chanFreqMHz = freqMHz;
         this._chanNorad = m.noradId;
@@ -3071,6 +3381,15 @@
         this._demodToggleDirty = true;
         show(!off);
         this._snapZoomToDoppler();
+        // Включение: синхронизируем канал с UI. Один POST /demod не меняет поле Demod —
+        // иначе на сервере остаётся старый профиль, а в селекторе уже «Авто».
+        if (!off && this._rxFields) {
+            if (this._autoRx && this._rxFields.demod) {
+                selectByValue(this._rxFields.demod, 'auto');
+            }
+            this._prepareAutoChannel();
+            this._applyDemodSettings();
+        }
         const path = this._radioPathName();
         if (!path || typeof fetch !== 'function') { return; }
         const notice = function(text) { if (ac) { ac.setNotice(text); } };
@@ -3159,13 +3478,27 @@
         }
     };
 
+    /**
+     * Сдвиг шкалы спектра под Доплер: при включённом демодуляторе — с сервера;
+     * в «Авто приём» без демода — с маркера текущей цели hop (LO на номинале).
+     * @returns {number}
+     */
+    ManualLayout.prototype._viewDopplerHz = function() {
+        if (demodChecked()) { return this._dopplerViewHz || 0; }
+        if (!this._autoRx) { return 0; }
+        const norad = autoRxTargetNorad(this._sweep, true);
+        const win = this._sweep && (this._sweep.windows || [])[this._sweep.index];
+        const centerHz = win && win.center_hz > 0 ? win.center_hz : 0;
+        return autoRxDopplerFromMarkers(norad, centerHz, this._txMarkList);
+    };
+
     /** Включение демодулятора возвращает увеличенный график на частоту Доплера. */
     ManualLayout.prototype._snapZoomToDoppler = function() {
         if (!this._zoom) {
             this._applySpecView();
             return;
         }
-        const off = this._dopplerViewHz || 0;
+        const off = this._viewDopplerHz();
         if (this._zoom.offsetHz === off) {
             this._applySpecView();
             return;
@@ -3173,16 +3506,107 @@
         this._setZoom({ offsetHz: off, spanHz: this._zoom.spanHz });
     };
 
+    /**
+     * Цель hop «Авто приём» → NORAD канала / участок эфира, Доплер и профиль демода.
+     * TX: профиль «Авто». Эфир: demod/baud с классификатора (OOK/зонды — сразу профиль).
+     */
+    ManualLayout.prototype._syncAutoRxTarget = function() {
+        if (!this._autoRx || !this._sweep) { return; }
+        const win = (this._sweep.windows || [])[this._sweep.index] || {};
+        const centerHz = win.center_hz > 0 ? win.center_hz : 0;
+        const norad = autoRxTargetNorad(this._sweep, this._autoRx);
+        const air = !!win.air || (!norad && centerHz > 0);
+        if (!norad && !air) { return; }
+
+        const f = this._rxFields;
+        const prevNorad = this._chanNorad;
+        const prevCenter = this._autoRxCenterHz || 0;
+        this._autoRxCenterHz = centerHz;
+
+        let demodId = 'auto';
+        if (air) {
+            this._chanNorad = 0;
+            this._chanLabel = win.label || 'Эфир';
+            if (centerHz > 0) { this._chanFreqMHz = centerHz / 1e6; }
+            if (f) {
+                selectByValue(f.doppler, 'manual');
+                this._syncDopplerEntry();
+            }
+            // Линия без кадра (OOK/зонды) — сразу профиль; иначе «Авто» с подсказкой structure.
+            demodId = win.demod || 'auto';
+            if (f && f.demod) {
+                selectByValue(f.demod, demodId);
+                if (demodId === 'auto') { this._prepareAutoChannel(); }
+            }
+            if (f && f.baud && win.baud > 0) {
+                f.baud.value = String(Math.round(win.baud));
+            }
+            if (this._demodPanel) {
+                this._demodPanel.setChannel({
+                    freqMHz: centerHz / 1e6,
+                    label: this._chanLabel,
+                    modulation: win.label || demodId,
+                    active: true,
+                });
+            }
+            this._applyBandwidthLimit();
+            this._syncEyeFromPipeline();
+            this._syncChannelOverlay();
+        } else {
+            this._chanNorad = norad;
+            if (f) {
+                selectByValue(f.doppler, 'auto');
+                this._syncDopplerEntry();
+            }
+            const m = autoRxMatchTx(norad, centerHz, this._txMarkList);
+            if (m) {
+                if (m.label) { this._chanLabel = m.label; }
+                if (m.nominalHz > 0) { this._chanFreqMHz = m.nominalHz / 1e6; }
+                if (this._demodPanel && m.tx) { this._demodPanel.setChannel(m.tx); }
+                if (f && f.demod) {
+                    selectByValue(f.demod, 'auto');
+                    this._prepareAutoChannel();
+                }
+                this._applyBandwidthLimit();
+                this._syncEyeFromPipeline();
+                this._syncChannelOverlay();
+            }
+        }
+
+        const hopChanged = norad !== prevNorad || centerHz !== prevCenter || air;
+        const applyKey = (air ? 'air' : norad) + ':' + centerHz + ':' + demodId;
+        const keyChanged = applyKey !== this._autoRxApplyKey;
+        const demodBox = document.getElementById('manual-rx-channel-show');
+        const canApply = air || this._dopplerNorad();
+        if ((hopChanged || keyChanged) && canApply && demodBox && demodBox.checked) {
+            this._autoRxApplyKey = applyKey;
+            this._applyDemodSettings();
+        }
+        this._applySpecView();
+    };
+
     /** Подпись канала на спектре: имя профиля. Цвет — открыт ли порог. */
     ManualLayout.prototype._showChannelStatus = function(st) {
         if (!this._chanOverlay || !st) { return; }
-        let label = st.demod || '';
         const sel = this._rxPipelineSelect;
-        if (sel && sel.options) {
+        const nameOf = function(id) {
+            if (!sel || !sel.options) { return id; }
             for (let i = 0; i < sel.options.length; i++) {
-                if (sel.options[i].value === st.demod && sel.options[i].text) {
-                    label = String(sel.options[i].text).replace(/\s*\(AX\.25\)$/, '').trim();
-                    break;
+                if (sel.options[i].value === id && sel.options[i].text) {
+                    return String(sel.options[i].text).replace(/\s*\(AX\.25\)$/, '').trim();
+                }
+            }
+            return id;
+        };
+        let label = autoDemodStatusLabel(st, nameOf);
+        if (!label) {
+            label = st.demod || '';
+            if (sel && sel.options) {
+                for (let i = 0; i < sel.options.length; i++) {
+                    if (sel.options[i].value === st.demod && sel.options[i].text) {
+                        label = String(sel.options[i].text).replace(/\s*\(AX\.25\)$/, '').trim();
+                        break;
+                    }
                 }
             }
         }
@@ -3335,6 +3759,20 @@
         }
         this._sweep = st || null;
         this._sweepEmptyText = st ? '' : (emptyText || '');
+        // «Авто приём» = обход policy=tx на сервере (после перезагрузки страницы тоже).
+        const wasAuto = !!this._autoRx;
+        this._autoRx = !!(st && st.running && st.policy === 'tx');
+        if (wasAuto && !this._autoRx) {
+            this._clearAutoRxHop();
+        }
+        if (wasAuto !== this._autoRx) {
+            this._applyAccess();
+        } else {
+            this._renderAutoRx();
+        }
+        if (this._autoRx) {
+            this._syncAutoRxTarget();
+        }
         const p = this._panorama;
         if (p && typeof p.setSweepState === 'function') {
             p.setSweepState(st || { running: false, windows: [], index: 0, cycle: 0 });
@@ -3371,7 +3809,12 @@
     ManualLayout.prototype._startSweepTimer = function() {
         if (this._sweepTimer) { return; }
         const self = this;
-        this._sweepTimer = setInterval(function() { self._renderSweepBar(); }, 1000);
+        // Шапка панорамы и строка «Авто приём» считают «осталось» от Date.now —
+        // без тика подпись замирает до следующего sweep_state.
+        this._sweepTimer = setInterval(function() {
+            self._renderSweepBar();
+            self._renderAutoRx();
+        }, 1000);
     };
 
     ManualLayout.prototype._stopSweepTimer = function() {
@@ -3382,22 +3825,62 @@
     };
 
     /**
+     * Состояние обхода текущего тракта. На «Спектре» без визита на «Панораму»
+     * ещё не загружено — тогда GET /api/sdr/sweep.
+     * @param {function(?Object)} done — состояние или null
+     */
+    ManualLayout.prototype._ensureSweep = function(done) {
+        const path = this._radioPathName();
+        const finish = function(st) { if (done) { done(st); } };
+        if (!path || typeof fetch !== 'function') { finish(null); return; }
+        if (this._sweep) { finish(this._sweep); return; }
+        const self = this;
+        fetch('/api/sdr/sweep?radio_path=' + encodeURIComponent(path), { credentials: 'same-origin' })
+            .then(function(r) {
+                if (r.status === 404) { return null; }
+                return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status));
+            })
+            .then(function(st) {
+                if (self._radioPathName() !== path) { finish(null); return; }
+                // Пока ждали ответ, состояние мог выставить тумблер или SSE — не затираем.
+                if (self._sweep) { finish(self._sweep); return; }
+                if (!st) {
+                    self._applySweepState(null, 'Обход не настроен: нет диапазонов sweep у тракта');
+                    finish(null);
+                    return;
+                }
+                self._applySweepState(st);
+                finish(st);
+            })
+            .catch(function(err) {
+                if (self._radioPathName() === path && !self._sweep) {
+                    self._applySweepState(null, 'Обход недоступен: ' + err.message);
+                }
+                finish(self._sweep || null);
+            });
+    };
+
+    /**
      * Поставить обход в running. Без подтверждения: вызов уже решил, что режим меняется.
      * @param {boolean} running
      * @param {function()} [done]
+     * @param {string} [policy] — «tx» для Авто приёма; иначе survey
      */
-    ManualLayout.prototype._postSweep = function(running, done) {
+    ManualLayout.prototype._postSweep = function(running, done, policy) {
         const path = this._radioPathName();
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
         const notice = function(text) { if (ac) { ac.setNotice(text); } };
         const finish = function() { if (done) { done(); } };
         if (!this._sweep || !path || typeof fetch !== 'function') { finish(); return; }
         const self = this;
+        const body = { radio_path: path, running: !!running };
+        if (running && policy) { body.policy = policy; }
+        if (running && policy === 'tx' && this._autoRxIncludeAir) { body.include_air = true; }
         fetch('/api/sdr/sweep', {
             method: 'POST',
             credentials: 'same-origin',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ radio_path: path, running: !!running }),
+            body: JSON.stringify(body),
         })
             .then(function(r) {
                 if (r.status === 403 && ac) { ac.refresh(); }
@@ -3433,6 +3916,96 @@
             return;
         }
         this._postSweep(running);
+    };
+
+    /** Подпись, доступность тумблера «Авто приём» и строка текущей цели. */
+    ManualLayout.prototype._renderAutoRx = function() {
+        const btn = this._autoRxEl;
+        if (btn) {
+            const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+            const readOnly = !!ac && !ac.canControl();
+            const on = !!this._autoRx;
+            btn.setAttribute('aria-pressed', on ? 'true' : 'false');
+            btn.disabled = readOnly;
+            btn.title = readOnly
+                ? 'Включать «Авто приём» можно только в режиме «Контроль»'
+                : 'Обход TX над горизонтом: настройка на частоту передатчика и стоянка';
+        }
+        if (this._autoRxStatusEl) {
+            this._autoRxStatusEl.textContent = this._autoRx
+                ? autoRxStatusModel(this._sweep, Date.now())
+                : '';
+        }
+    };
+
+    /** Сброс следа hop при выключении «Авто приём». */
+    ManualLayout.prototype._clearAutoRxHop = function() {
+        this._autoRxCenterHz = 0;
+        this._autoRxApplyKey = '';
+        this._channelOffsetHz = 0;
+    };
+
+    /**
+     * Тумблер «Авто приём»: обход по TX плана (policy=tx), Спектр остаётся
+     * открытым, ручная настройка приёмника закрыта. Профиль демода ставит hop.
+     */
+    ManualLayout.prototype._toggleAutoRx = function() {
+        const ac = (typeof window !== 'undefined') ? window._accessControl : null;
+        if (ac && !ac.canControl()) {
+            ac.setNotice('Включать «Авто приём» можно только в режиме «Контроль».');
+            return;
+        }
+        const path = this._radioPathName();
+        if (!path || typeof fetch !== 'function') { return; }
+        if (this._autoRx) {
+            this._autoRx = false;
+            this._clearAutoRxHop();
+            // Выкл обхода: демод гасится, в селекторе остаётся «Авто» (и на сервере).
+            if (this._rxFields && this._rxFields.demod) {
+                selectByValue(this._rxFields.demod, 'auto');
+                this._prepareAutoChannel();
+            }
+            this._applyAccess();
+            this._setDemodOff(true);
+            if (this._sweepRunning()) { this._postSweep(false); }
+            return;
+        }
+        const self = this;
+        this._ensureSweep(function(st) {
+            if (!st) {
+                if (ac) {
+                    ac.setNotice(self._sweepEmptyText ||
+                        'Обход не настроен: нет диапазонов у тракта.');
+                }
+                return;
+            }
+            if (self._isRecording()) {
+                if (!self._confirm('Идёт запись IQ. Обход перестроит приёмник, и запись остановится. Продолжить?')) {
+                    return;
+                }
+                self._stopRecording();
+            }
+            if (!self._confirmBreakReception('Обход')) {
+                return;
+            }
+            self._autoRx = true;
+            if (self._rxFields && self._rxFields.demod) {
+                selectByValue(self._rxFields.demod, 'auto');
+            }
+            self._applyAccess();
+            // Канал с auto — только если демод уже включён (галочка есть и нажата).
+            const box = document.getElementById('manual-rx-channel-show');
+            if (box && box.checked) {
+                self._applyDemodSettings();
+            }
+            self._postSweep(true, function() {
+                if (self._autoRx && !self._sweepRunning()) {
+                    self._autoRx = false;
+                    self._clearAutoRxHop();
+                    self._applyAccess();
+                }
+            }, 'tx');
+        });
     };
 
     ManualLayout.prototype._initPassProfile = function() {
@@ -3513,11 +4086,6 @@
         this._demodInfoModal.update(this._demodStatus, this._levelOffset, history, diag, modStr);
     };
 
-    ManualLayout.prototype._initTelemetryTable = function() {
-        if (typeof window.TelemetryTable !== 'function') { return; }
-        this._tmiTable = new window.TelemetryTable();
-    };
-
     /** Имя КА по NORAD из текущей группы (маркеры и таблица «Эфир»). */
     ManualLayout.prototype._satNameOf = function(noradId) {
         const group = this._sm && typeof this._sm.getSatelliteGroup === 'function'
@@ -3525,34 +4093,194 @@
         return window.TxMarkers ? window.TxMarkers.satNames(group)[noradId] || null : null;
     };
 
-    /** Таблицы «Эфир»: панорама (markRows) и спектр (hearRows). */
+    /** Таблицы «Эфир»: панорама (markRows, клик настраивает) и спектр (hearRows, только чтение). */
     ManualLayout.prototype._initAirTable = function() {
         if (typeof window.AirTable !== 'function') { return; }
         const self = this;
         const nameOf = function(noradId) { return self._satNameOf(noradId); };
-        const onPick = function(sig) { self._pickBandSignal(sig); };
         const panBody = document.getElementById('manual-air-tbody');
         if (panBody) {
-            this._airTable = new window.AirTable(panBody, { onPick: onPick, nameOf: nameOf });
+            this._airTable = new window.AirTable(panBody, {
+                onPick: function(sig) { self._pickBandSignal(sig); },
+                nameOf: nameOf,
+            });
         }
         const specBody = document.getElementById('manual-spec-air-tbody');
         if (specBody) {
             const hear = window.BandMarks && typeof window.BandMarks.hearRows === 'function'
                 ? window.BandMarks.hearRows : null;
+            // Без onPick: tune только с маркеров над водопадом, не из таблицы.
             this._specAirTable = new window.AirTable(specBody, {
-                onPick: onPick, nameOf: nameOf, rowsFn: hear,
+                nameOf: nameOf,
+                rowsFn: hear,
+                onOpenPayload: function(sig) { self._openHearPayload(sig); },
             });
+        }
+        this._bindHearPayloadModal();
+    };
+
+    /** Закрытие модалки «Кадр» (крестик, фон, Escape) — один раз на сессию layout. */
+    ManualLayout.prototype._bindHearPayloadModal = function() {
+        if (this._hearPayloadBound) { return; }
+        const modal = document.getElementById('manual-tmi-details');
+        if (!modal) { return; }
+        const self = this;
+        this._onHearPayloadClick = function(e) {
+            const closer = e.target && e.target.closest
+                ? e.target.closest('[data-action="close"]') : null;
+            if (closer && modal.contains(closer)) { self._closeHearPayload(); }
+        };
+        this._onHearPayloadKey = function(e) {
+            if (e.key === 'Escape') { self._closeHearPayload(); }
+        };
+        modal.addEventListener('click', this._onHearPayloadClick);
+        document.addEventListener('keydown', this._onHearPayloadKey);
+        this._hearPayloadModal = modal;
+        this._hearPayloadBound = true;
+    };
+
+    ManualLayout.prototype._closeHearPayload = function() {
+        if (this._hearPayloadModal) {
+            this._hearPayloadModal.classList.add('modal--hidden');
         }
     };
 
     /**
-     * Таблицы «Эфир» повторяют список сервера: час памяти, на каждом проходе
-     * обновляется та же строка. Отметки на графике панорама копит отдельно, по окнам.
+     * Модалка «Кадр» для ячейки «Данные» в «Эфире»: поля telemetry + простая визуализация.
+     * @param {Object} sig
+     */
+    ManualLayout.prototype._openHearPayload = function(sig) {
+        this._bindHearPayloadModal();
+        const modal = this._hearPayloadModal || document.getElementById('manual-tmi-details');
+        const titleEl = document.getElementById('manual-tmi-details-title');
+        const tbody = document.getElementById('manual-tmi-details-tbody');
+        const viz = document.getElementById('manual-tmi-details-viz');
+        if (!modal || !tbody) { return; }
+        const BM = typeof window !== 'undefined' ? window.BandMarks : null;
+        const kindLabel = (sig && sig.hear_kind)
+            || (BM && typeof BM.formatHearData === 'function'
+                ? BM.formatHearData({
+                    kind: sig && sig.last_kind,
+                    info_hex: sig && sig.last_info_hex,
+                }) : '')
+            || (sig && sig.last_summary) || 'Кадр';
+        const kind = kindLabel === '—' ? 'Кадр' : kindLabel;
+        const freq = sig && sig.center_hz
+            ? ((sig.center_hz / 1e6).toFixed(4) + ' МГц') : '';
+        if (titleEl) {
+            titleEl.textContent = [kind, freq].filter(Boolean).join(' · ');
+        }
+        tbody.textContent = '';
+        let details = (sig && sig.hear_details) || [];
+        if (!details.length && BM && typeof BM.lastPayloadEvent === 'function'
+            && typeof BM.payloadDetails === 'function') {
+            const ev = BM.lastPayloadEvent(sig);
+            if (ev) { details = BM.payloadDetails(ev); }
+        }
+        if (!details.length && sig && (sig.last_kind || sig.last_summary || sig.last_decoder)) {
+            details = [
+                { key: 'тип', value: kind },
+                { key: 'декодер', value: sig.last_decoder || '—' },
+                { key: 'сводка', value: sig.last_summary || '—' },
+            ];
+        }
+        if (sig && sig.last_rx_ms && details.length) {
+            const d = new Date(sig.last_rx_ms);
+            const p = function(n) { return n < 10 ? '0' + n : String(n); };
+            details = details.concat([{
+                key: 'обновлён',
+                value: p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()),
+            }]);
+        }
+        for (let i = 0; i < details.length; i++) {
+            const tr = document.createElement('tr');
+            const tdKey = document.createElement('td');
+            tdKey.className = 'ml-tmi-details__key';
+            tdKey.textContent = details[i].key;
+            tr.appendChild(tdKey);
+            const tdVal = document.createElement('td');
+            tdVal.className = 'ml-tmi-details__val';
+            tdVal.textContent = details[i].value;
+            tr.appendChild(tdVal);
+            tbody.appendChild(tr);
+        }
+        this._paintHearPayloadViz(viz, sig);
+        modal.classList.remove('modal--hidden');
+    };
+
+    /**
+     * Простая графика в модалке: ключевые числа маяка шкалами; снимок — подсказка.
+     * @param {?HTMLElement} viz
+     * @param {Object} sig
+     */
+    ManualLayout.prototype._paintHearPayloadViz = function(viz, sig) {
+        if (!viz) { return; }
+        viz.textContent = '';
+        const BM = typeof window !== 'undefined' ? window.BandMarks : null;
+        const ev = (sig && sig.hear_ev)
+            || (BM && typeof BM.lastPayloadEvent === 'function' ? BM.lastPayloadEvent(sig) : null);
+        if (!ev) {
+            viz.hidden = true;
+            return;
+        }
+        if (ev.kind === 'image') {
+            viz.hidden = false;
+            viz.className = 'ml-tmi-details__viz ml-tmi-details__viz--note';
+            const p = document.createElement('p');
+            p.textContent = (ev.summary || 'Кусок снимка') +
+                '. Собранная картинка — на вкладке «Снимки», когда заработает сборщик.';
+            viz.appendChild(p);
+            return;
+        }
+        const keys = (ev.params || []).filter(function(p) { return p && p.key; });
+        if (ev.kind !== 'beacon' || !keys.length) {
+            viz.hidden = true;
+            return;
+        }
+        viz.hidden = false;
+        viz.className = 'ml-tmi-details__viz';
+        let maxAbs = 0;
+        const nums = [];
+        for (let i = 0; i < keys.length && i < 6; i++) {
+            const num = parseFloat(String(keys[i].value).replace(',', '.'));
+            nums.push(num);
+            if (isFinite(num) && Math.abs(num) > maxAbs) { maxAbs = Math.abs(num); }
+        }
+        if (maxAbs <= 0) { maxAbs = 1; }
+        for (let i = 0; i < keys.length && i < 6; i++) {
+            const p = keys[i];
+            const row = document.createElement('div');
+            row.className = 'ml-tmi-details__bar';
+            const name = document.createElement('span');
+            name.className = 'ml-tmi-details__bar-name';
+            name.textContent = p.name || p.id || '';
+            row.appendChild(name);
+            const track = document.createElement('span');
+            track.className = 'ml-tmi-details__bar-track';
+            const fill = document.createElement('span');
+            fill.className = 'ml-tmi-details__bar-fill';
+            const num = nums[i];
+            const pct = isFinite(num) ? Math.max(4, Math.min(100, 100 * Math.abs(num) / maxAbs)) : 0;
+            fill.style.width = pct + '%';
+            track.appendChild(fill);
+            row.appendChild(track);
+            const val = document.createElement('span');
+            val.className = 'ml-tmi-details__bar-val';
+            val.textContent = p.unit ? (p.value + ' ' + p.unit) : String(p.value);
+            row.appendChild(val);
+            viz.appendChild(row);
+        }
+    };
+
+    /**
+     * Таблицы «Эфир» — зеркало band_signals (кадры/голос уже на бэке).
      * @param {Array} signals
      */
     ManualLayout.prototype._setAirSignals = function(signals) {
-        if (this._airTable) { this._airTable.setSignals(signals); }
-        if (this._specAirTable) { this._specAirTable.setSignals(signals); }
+        const next = Array.isArray(signals) ? signals.slice() : [];
+        this._airSignals = next;
+        if (this._airTable) { this._airTable.setSignals(next); }
+        if (this._specAirTable) { this._specAirTable.setSignals(next); }
     };
 
     ManualLayout.prototype._initProductGallery = function() {
@@ -3575,14 +4303,18 @@
             }
             const path = self._radioPathName();
             if (!path || !d.data || d.data.radio_path !== path) { return; }
-            if (d.event === 'telemetry' && self._tmiTable) {
-                self._tmiTable.addTelemetry(d.data);
-            } else if (d.event === 'band_signals') {
-                if (self._bandMarks) { self._bandMarks.setSignals(d.data.signals, d.data.timestamp_ms); }
+            if (d.event === 'band_signals') {
+                // Ось спектра/панорамы — только свежие (HoldMs); таблица «Эфир» — полный час.
+                const all = d.data.signals;
+                const nowMs = d.data.timestamp_ms;
+                const BM = typeof window !== 'undefined' ? window.BandMarks : null;
+                const axis = BM && typeof BM.freshSignals === 'function'
+                    ? BM.freshSignals(all, nowMs) : all;
+                if (self._bandMarks) { self._bandMarks.setSignals(axis, nowMs); }
                 if (self._panorama && typeof self._panorama.setSignals === 'function') {
-                    self._panorama.setSignals(d.data.signals);
+                    self._panorama.setSignals(axis);
                 }
-                self._setAirSignals(d.data.signals);
+                self._setAirSignals(all);
             } else if (d.event === 'sweep_state') {
                 self._applySweepState(d.data);
             } else if (d.event === 'demod_status') {
@@ -3599,10 +4331,9 @@
         });
     };
 
-    /** Живой приём, когда у станции есть радиотракт; без него таблица и панель на mock. */
+    /** Живой приём, когда у станции есть радиотракт; без него панель демода на mock. */
     ManualLayout.prototype._applyLiveDemod = function() {
         const live = this._radioPathName() !== null;
-        if (this._tmiTable) { this._tmiTable.setLive(live); }
         if (this._demodPanel) { this._demodPanel.setLive(live); }
     };
 
@@ -3637,9 +4368,6 @@
         }
 
         const label = tx ? (tx.label || 'Unknown') : 'Unknown';
-        if (this._tmiTable) {
-            this._tmiTable.setChannel(label, freqMHz);
-        }
         this._chanLabel = label;
         this._chanFreqMHz = freqMHz;
         const prevNorad = this._chanNorad;
@@ -3687,6 +4415,16 @@
             this._unsubscribers.push(this._sm.subscribe(SE.SATELLITE_GROUP_UPDATE, function() {
                 self._buildTransmittersFromGroup();
                 self._syncPassTimeline();
+            }));
+        }
+        if (SE.SAT_RADIO) {
+            this._unsubscribers.push(this._sm.subscribe(SE.SAT_RADIO, function() {
+                if (self._airTable && self._airSignals) {
+                    self._airTable.setSignals(self._airSignals);
+                }
+                if (self._specAirTable && self._airSignals) {
+                    self._specAirTable.setSignals(self._airSignals);
+                }
             }));
         }
         this._buildTransmittersFromGroup();
@@ -3895,13 +4633,14 @@
                 self.refresh();
             });
         });
-        // Вход открывает «Спектр»; приёмник при этом не перестраивается
+        // Вход открывает «Спектр»; приёмник при этом не перестраивается.
+        // GET sweep сразу: «Авто приём» восстанавливается с бэка после перезагрузки.
         this._showTab('spectrum');
         this._setView('spectrum');
         this._startSweepTimer();
+        this._ensureSweep();
         if (this._passProfile) { this._passProfile.draw(); }
         if (this._passTimeline) { this._passTimeline.draw(); }
-        if (this._tmiTable) { this._tmiTable.activate(); }
         this._refreshActiveTab();
     };
 
@@ -3919,6 +4658,11 @@
             self._refreshActiveTab();
             if (self._stream) { self._startStream(); }
             if (self._active && self._view === 'panorama') { self._startPanoramaFeed(); }
+            else if (self._active) {
+                // Новый тракт — своё состояние обхода («Авто приём» с бэка).
+                self._sweep = null;
+                self._ensureSweep();
+            }
             if (self._audio && self._audio.isPlaying()) { self._setListening(true); }
         });
         this._unsubscribers.push(this._offRadioPath);
@@ -3942,7 +4686,6 @@
         this._stopSweepTimer();
         this._setListening(false);
         if (this._panorama) { this._panorama.deactivate(); }
-        if (this._tmiTable) { this._tmiTable.deactivate(); }
     };
 
     /** @returns {boolean} */
@@ -4103,6 +4846,16 @@
             this._specAirTable.destroy();
             this._specAirTable = null;
         }
+        if (this._hearPayloadModal && this._onHearPayloadClick) {
+            this._hearPayloadModal.removeEventListener('click', this._onHearPayloadClick);
+        }
+        if (this._onHearPayloadKey) {
+            document.removeEventListener('keydown', this._onHearPayloadKey);
+        }
+        this._hearPayloadModal = null;
+        this._onHearPayloadClick = null;
+        this._onHearPayloadKey = null;
+        this._hearPayloadBound = false;
         if (this._accessPanel) {
             this._accessPanel.destroy();
             this._accessPanel = null;
@@ -4155,10 +4908,7 @@
             this._passTimeline.destroy();
         }
         this._passTimeline = null;
-        if (this._tmiTable) {
-            this._tmiTable.destroy();
-            this._tmiTable = null;
-        }
+        this._airSignals = [];
         if (this._gallery) {
             this._gallery.destroy();
             this._gallery = null;
@@ -4176,18 +4926,29 @@
 
     ManualLayout.makeRecordingName = makeRecordingName;
     ManualLayout.sweepBarModel = sweepBarModel;
+    ManualLayout.autoRxStatusModel = autoRxStatusModel;
+    ManualLayout.autoRxTargetNorad = autoRxTargetNorad;
+    ManualLayout.autoRxDopplerFromMarkers = autoRxDopplerFromMarkers;
+    ManualLayout.autoRxMatchTx = autoRxMatchTx;
+    ManualLayout.autoDemodStatusLabel = autoDemodStatusLabel;
     /** Пауза набора усиления, сдвига и порога, мс. Повторный ввод её сбрасывает. */
     ManualLayout.applyDebounceMs = 400;
 
     ManualLayout.transmittersFromGroup = transmittersFromGroup;
     ManualLayout.filterNumericText = filterNumericText;
     ManualLayout.stepNumericText = stepNumericText;
+    ManualLayout.fillDemodProfileSelect = fillDemodProfileSelect;
+    ManualLayout.profileBaudFlexible = profileBaudFlexible;
 
     if (typeof window !== 'undefined') {
         window.ManualLayout = ManualLayout;
     }
 
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
-        module.exports = { ManualLayout: ManualLayout }; // eslint-disable-line no-undef
+        module.exports = {
+            ManualLayout: ManualLayout,
+            fillDemodProfileSelect: fillDemodProfileSelect,
+            profileBaudFlexible: profileBaudFlexible,
+        }; // eslint-disable-line no-undef
     }
 })();

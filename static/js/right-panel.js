@@ -133,6 +133,11 @@
                 sm.subscribe(window.StateEventType.SHOW_ALL_MODE_CHANGE, function() {
                     self._render();
                 });
+                if (window.StateEventType.SAT_RADIO) {
+                    sm.subscribe(window.StateEventType.SAT_RADIO, function() {
+                        self._render();
+                    });
+                }
             }
         } else {
             this._syncThTrackEye();
@@ -225,6 +230,7 @@
             const name = this._escapeHtml(sat.sat_name || String(sat.norad_id));
             const alias = sat.sat_alias ? this._escapeHtml(sat.sat_alias) : '';
             const norad = String(sat.norad_id);
+            const rxLine = this._rxStatsLine(sat.norad_id);
 
             const col3 = this._renderCol3Html(sat.aos, sat.los);
 
@@ -243,10 +249,12 @@
                 (trackVisible ? ' title="Трасса на карте и в небе: видна"' : ' title="Трасса скрыта"') +
                 '>' + trackIcon + '</td>' +
                 '<td class="pc-name-cell' + (alias ? ' pc-name-cell--alias' : '') + '"' +
-                    ' title="' + norad + ' — ' + name + (alias ? ' (' + alias + ')' : '') + '">' +
+                    ' title="' + norad + ' — ' + name + (alias ? ' (' + alias + ')' : '') +
+                    (rxLine ? ' · ' + rxLine : '') + '">' +
                     '<div class="pc-sat-name">' + name + '</div>' +
                     (alias ? '<div class="pc-sat-alias">(' + alias + ')</div>' : '') +
                     '<div class="pc-sat-norad">' + norad + '</div>' +
+                    (rxLine ? '<div class="pc-sat-rx">' + this._escapeHtml(rxLine) + '</div>' : '') +
                 '</td>' +
                 '<td class="pc-tx-cell' + txHtml.cellClass + '"' + txHtml.titleAttr + '>' + txHtml.body + '</td>' +
                 '<td class="pc-azel-cell">' +
@@ -902,6 +910,25 @@
         return (hh < 10 ? '0' : '') + hh + ':' +
                (mm < 10 ? '0' : '') + mm + ':' +
                (ss < 10 ? '0' : '') + ss;
+    };
+
+    /** Счётчики радиопрофиля: «слыш. N · кадры M»; пусто — нет данных. */
+    RightPanelTable.prototype._rxStatsLine = function(noradId) {
+        const sm = window._stateManager;
+        if (!sm || typeof sm.getSatRadio !== 'function') { return ''; }
+        const radio = sm.getSatRadio(noradId);
+        if (!radio) { return ''; }
+        const heard = radio.heard
+            ? (Array.isArray(radio.tx)
+                ? radio.tx.reduce(function(n, tx) { return n + (tx && tx.visits_with_energy ? tx.visits_with_energy : 0); }, 0)
+                : 0)
+            : 0;
+        const frames = Number(radio.frames_total) || 0;
+        if (!heard && !frames) { return ''; }
+        const parts = [];
+        if (heard) { parts.push('слыш. ' + heard); }
+        if (frames) { parts.push('кадры ' + frames); }
+        return parts.join(' · ');
     };
 
     RightPanelTable.prototype._escapeHtml = function(str) {

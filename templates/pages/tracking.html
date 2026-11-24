@@ -220,7 +220,8 @@
     <div class="ml-tabbar" id="manual-tabbar" role="tablist" aria-orientation="vertical">
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="spectrum" aria-selected="true">Спектр</button>
         <button type="button" class="ml-tabbar__btn" role="tab" data-tab="antenna" aria-selected="false">Антенна</button>
-        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="panorama" aria-selected="false">Панорама</button>
+        <!-- Панорама скрыта: позже отдельный независимый режим, не влияет на Спектр/Авто приём. -->
+        <button type="button" class="ml-tabbar__btn" role="tab" data-tab="panorama" aria-selected="false" hidden>Панорама</button>
     </div>
 
     <!-- Лента передатчиков: подписи к таймлайну и панораме, на «Спектре» —
@@ -476,53 +477,34 @@
                     <div class="ml-cursor__tag" id="manual-spec-cursor-tag"></div>
                 </div>
             </section>
-            <!-- «Эфир» под спектром: live band_signals, сжатые столбцы HEAR -->
-            <section class="ml-panel ml-air ml-air--spectrum" id="manual-spec-air">
-                <div class="ml-air__toolbar">
-                    <span class="ml-panel__title">Эфир</span>
-                </div>
-                <div class="ml-air__scroll">
-                    <table class="ml-air__grid">
-                        <thead>
-                            <tr>
-                                <th>Передатчик</th>
-                                <th>Частота·полоса</th>
-                                <th>Уровень</th>
-                                <th>Сигнал</th>
-                                <th>Вид·положение</th>
-                                <th>Демод</th>
-                                <th>В эфире</th>
-                                <th>Кадры</th>
-                                <th>Данные</th>
-                            </tr>
-                        </thead>
-                        <tbody id="manual-spec-air-tbody"></tbody>
-                    </table>
-                </div>
-            </section>
             <div class="ml-demod__body" id="manual-demod-grid">
                 <div class="ml-demod__col ml-demod__col--result">
                     <div class="ml-demod__result-head">
                         <div class="ml-demod__result-tabs" id="manual-result-tabs" role="tablist">
+                            <!-- «Таблица» = Эфир (band_signals + Кадры/Данные из telemetry) -->
                             <button type="button" class="ml-demod__result-tab" role="tab" data-view="table" aria-selected="true">Таблица</button>
                             <button type="button" class="ml-demod__result-tab" role="tab" data-view="chart" aria-selected="false">Диаграмма</button>
                             <button type="button" class="ml-demod__result-tab" role="tab" data-view="pictures" aria-selected="false">Снимки</button>
                         </div>
                     </div>
                     <div class="ml-demod__result-view is-active" data-view="table">
-                        <div class="ml-tmi__scroll" id="manual-tmi-scroll">
-                            <table class="ml-tmi__table">
+                        <div class="ml-air__scroll" id="manual-spec-air-scroll">
+                            <table class="ml-air__grid">
                                 <thead>
                                     <tr>
-                                        <th class="ml-tmi__th">Канал</th>
-                                        <th class="ml-tmi__th">Демодулятор</th>
-                                        <th class="ml-tmi__th">Время</th>
-                                        <th class="ml-tmi__th">Frame#</th>
-                                        <th class="ml-tmi__th">CRC</th>
-                                        <th class="ml-tmi__th">Параметры</th>
+                                        <th>Передатчик</th>
+                                        <th>Частота·полоса</th>
+                                        <th>Уровень</th>
+                                        <th>Сигнал</th>
+                                        <th>Вид</th>
+                                        <th>Демод</th>
+                                        <th>В эфире</th>
+                                        <th>Кадры</th>
+                                        <th>Данные</th>
+                                        <th>Обновлён</th>
                                     </tr>
                                 </thead>
-                                <tbody id="manual-tmi-tbody"></tbody>
+                                <tbody id="manual-spec-air-tbody"></tbody>
                             </table>
                         </div>
                     </div>
@@ -552,7 +534,8 @@
     </div>
 
     <!-- Колонка приёмника: дисплей частоты и уровней, регуляторы.
-         У секции «Приёмник» и у секции «Демодулятор» своя кнопка «Установить».
+         Полоса / усиление / АРУ уходят сами; частота — SET на диске.
+         «Установить» только у демодулятора. «Авто приём» — состояние с бэка (sweep policy=tx).
          Видна на «Спектре» и «Антенне»: настраивать можно, не уходя от наведения. -->
     <section class="ml-panel ml-ctl" id="manual-rx-panel">
         <div class="ml-panel__body ml-ctl__body">
@@ -602,7 +585,17 @@
                         <button type="button" class="ml-rx-panel__pill" id="manual-rx-agc" aria-pressed="false">АРУ</button>
                     </div>
                 </div>
-                <button class="ml-rx-panel__btn-apply" type="button" id="manual-rx-apply">Установить</button>
+                <!-- Обход TX плана: tune на частоту передатчика и стоянка; профиль демода ставит hop. -->
+                <div class="ml-rx-auto-row">
+                    <button type="button" class="ml-rx-panel__pill" id="manual-rx-auto"
+                            aria-pressed="false"
+                            title="Обход TX над горизонтом: настройка на частоту передатчика и стоянка">Авто приём</button>
+                    <label class="ml-rx-auto-air" title="К обходу TX добавить сигналы из эфира (обнаружитель и классификатор)">
+                        <input type="checkbox" id="manual-rx-auto-air">
+                        +эфир
+                    </label>
+                </div>
+                <span class="ml-rx-auto-status" id="manual-rx-auto-status" aria-live="polite"></span>
             </div>
 
             <div class="ml-ctl__section">
@@ -653,23 +646,20 @@
                 <label class="ml-rx-panel__field">
                     <span class="ml-rx-panel__label">Профиль</span>
                     <select class="ml-demod__pipeline-sel" id="manual-rx-pipeline">
-                        <option value="fsk9600_g3ruh">FSK 9600 (G3RUH)</option>
-                        <option value="fsk9600_geoscan">FSK 9600 (GEOSCAN)</option>
-                        <option value="fsk4800">FSK 4800</option>
-                        <option value="fsk1200">FSK 1200</option>
-                        <option value="gmsk9600">GMSK 9600</option>
-                        <option value="afsk1200" selected>AFSK 1200 (AX.25)</option>
-                        <option value="bpsk1200">BPSK 1k2</option>
-                        <option value="bpsk9600">BPSK 9k6</option>
-                        <option value="qpsk_ccsds">QPSK (CCSDS)</option>
-                        <option value="cw">CW</option>
-                        <option value="fm">FM (голос)</option>
-                        <option value="wfm">FM (эфир)</option>
-                        <option value="usb">USB (SSB)</option>
-                        <option value="lsb">LSB (SSB)</option>
-                        <option value="ook">OOK</option>
-                        <option value="sstv">SSTV</option>
+                        <option value="auto" selected>Авто</option>
+                        <option value="afsk1200">AFSK 1200</option>
                     </select>
+                </label>
+                <label class="ml-rx-panel__field" id="manual-rx-baud-field" hidden>
+                    <span class="ml-rx-panel__label" title="Символьная скорость для профилей с гибким baud">Скорость, бод</span>
+                    <span class="ml-rx-panel__controls">
+                        <span class="ml-rx-stepper">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-baud-dec" aria-label="Меньше">−</button>
+                            <input class="ml-rx-panel__input" id="manual-rx-baud" type="text" inputmode="decimal"
+                                   autocomplete="off" spellcheck="false" value="480">
+                            <button type="button" class="ml-rx-stepper__btn" id="manual-rx-baud-inc" aria-label="Больше">+</button>
+                        </span>
+                    </span>
                 </label>
                 <label class="ml-rx-panel__field">
                     <span class="ml-rx-panel__label">Полоса канала</span>
@@ -698,14 +688,16 @@
                     <label class="ml-rx-panel__label" for="manual-rx-doppler-mode"
                            title="Авто — по орбите выбранного спутника. Вручную — поправка в герцах">Доплер</label>
                     <div class="ml-rx-panel__controls">
-                        <select class="ml-rx-panel__sel" id="manual-rx-doppler-mode">
-                            <option value="off">Вручную</option>
+                        <select class="ml-rx-panel__sel" id="manual-rx-doppler-mode"
+                                title="Авто — по орбите. Ручн. — поправка в герцах">
+                            <option value="off">Ручн.</option>
                             <option value="auto" selected>Авто</option>
                         </select>
                         <span class="ml-rx-stepper" id="manual-rx-doppler-step" hidden>
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-dec" aria-label="Меньше">−</button>
                             <input class="ml-rx-panel__input" id="manual-rx-doppler-val" type="text" inputmode="numeric"
-                                   autocomplete="off" spellcheck="false" value="0">
+                                   autocomplete="off" spellcheck="false" value="0"
+                                   title="Поправка Доплера, Гц" aria-label="Поправка Доплера, Гц">
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-doppler-val-inc" aria-label="Больше">+</button>
                         </span>
                         <span class="ml-rx-panel__unit" id="manual-rx-doppler-unit" hidden>Гц</span>
@@ -823,7 +815,7 @@
     </div>
 </div>
 
-<!-- Все параметры принятого кадра (telemetry-table.js): открывается кликом по строке таблицы ТМИ -->
+<!-- Все параметры принятого кадра: модалка деталей (пока не подключена к строкам «Эфира») -->
 <div id="manual-tmi-details" class="modal modal--hidden ml-tmi-details" role="dialog" aria-labelledby="manual-tmi-details-title" aria-modal="true">
     <div class="modal__backdrop" data-action="close"></div>
     <div class="modal__box">
@@ -831,6 +823,7 @@
             <h2 class="ml-tmi-details__title" id="manual-tmi-details-title">Кадр</h2>
             <button type="button" class="ml-tmi-details__close" data-action="close" aria-label="Закрыть">×</button>
         </header>
+        <div class="ml-tmi-details__viz" id="manual-tmi-details-viz" hidden></div>
         <div class="ml-tmi-details__scroll">
             <table class="ml-tmi-details__table">
                 <tbody id="manual-tmi-details-tbody"></tbody>

@@ -4,9 +4,8 @@
  * Единый список передатчиков всех КА группы (UI-заголовок «Передатчики»):
  * на каждой строке — частота, модуляция, водопад, доплер.
  *
- * Источники данных:
- *  - Список передатчиков — REST `GET /api/satnogs/transmitters/{norad}`.
- *  - Состав группы — SSE-событие `satellite_group_update`.
+ * Источник: SSE `satellite_group_update` — состав группы и `transmitters[]`
+ * из локального реестра (`scout.db`), без REST к внешним API.
  */
 
 (function() {
@@ -72,18 +71,18 @@
         return (v / 1e6).toFixed(3);
     }
 
-    /** Преобразование SatNOGS-передатчика в строку UI; null для неактивных. */
-    /** В SSE уже есть намёк на TX (primary), а строк в auto-link ещё нет. */
+    /** В SSE уже есть намёк на TX (primary / transmitters[]), а строк в auto-link ещё нет. */
     function satHasTxHint(sat) {
         if (!sat) { return false; }
+        if (Array.isArray(sat.transmitters) && sat.transmitters.length > 0) { return true; }
         if (sat.freq_mhz && String(sat.freq_mhz).trim()) { return true; }
         if (typeof sat.tx_count === 'number' && sat.tx_count > 0) { return true; }
         return false;
     }
 
     /**
-     * Нужен повторный fetch SatNOGS: в группе есть КА с freq/tx_count,
-     * но для них ещё нет строк передатчиков (типичный промах кеша при старте).
+     * Нужна пересборка строк: в группе есть КА с TX в SSE, а строк для них ещё нет
+     * (реестр подтянулся после первого пустого group_update).
      */
     function groupNeedsTxReload(satellites, rows) {
         const withRows = new Set();
@@ -99,17 +98,20 @@
         return false;
     }
 
-    function txFromSatnogs(sat, t) {
-        if (!t || !t.alive) { return null; }
-        if (t.status && String(t.status).toLowerCase() !== 'active') { return null; }
-        const dl = Number(t.downlink_low) || 0;
+    /**
+     * Строка UI из элемента transmitters[] в satellite_group_update.
+     * Бэкенд уже отфильтровал неактивные; здесь только freq_hz > 0.
+     */
+    function txFromGroupTx(sat, t) {
+        if (!t) { return null; }
+        const dl = Number(t.freq_hz) || 0;
         if (dl <= 0) { return null; }
         const norad = Number(sat.norad_id) || 0;
         const uuid = t.uuid || '';
         const f = freqMHz(dl);
-        const mode = t.mode || '';
+        const mode = (t.modulation || t.mode || '').trim();
         const baud = formatBaud(t.baud);
-        const modulation = baud ? `${mode} ${baud}`.trim() : mode;
+        const label = mode || (baud ? baud : '');
         return {
             id: `tx-${norad}-${uuid || Math.random().toString(36).slice(2, 8)}`,
             uuid: uuid || '',
@@ -117,14 +119,14 @@
             satLabel: sat.sat_name || `NORAD ${norad}`,
             freqHz: dl,
             freqMHz: f,
-            mode: modulation,
+            mode: label,
             description: t.description || '',
         };
     }
 
     /**
-     * Строка TX из primary (REST) или намёка SSE — когда полный список пуст,
-     * но частота уже известна (иначе auto-link и tx_cycle остаются пустыми).
+     * Строка TX из primary-намёка SSE — когда transmitters[] пуст,
+     * но частота уже известна (иначе auto-link остаётся пустым).
      */
     function txFromPrimaryHint(sat, primary) {
         const norad = Number(sat && sat.norad_id) || 0;
@@ -146,6 +148,23 @@
             mode: mode,
             description: p.description || '',
         };
+    }
+
+    /** Все строки TX одного КА из payload satellite_group_update. */
+    function txRowsFromGroupSat(sat) {
+        const out = [];
+        if (!sat) { return out; }
+        const list = Array.isArray(sat.transmitters) ? sat.transmitters : [];
+        for (let i = 0; i < list.length; i++) {
+            const row = txFromGroupTx(sat, list[i]);
+            if (row) { out.push(row); }
+        }
+        out.sort((a, b) => a.freqHz - b.freqHz);
+        if (out.length === 0) {
+            const fallback = txFromPrimaryHint(sat, null);
+            if (fallback) { out.push(fallback); }
+        }
+        return out;
     }
 
     /**
@@ -492,7 +511,7 @@
 
             /** Текущие строки/колонки передатчиков. */
             this._rows = [];
-            /** Кеш ответов SatNOGS: norad → Promise<rows>. */
+            /** Кеш строк TX по NORAD (из последнего group_update). */
             this._txCache = new Map();
             /** Версия группы — защита от гонки async-запросов. */
             this._groupVersion = 0;
@@ -647,15 +666,9 @@
          */
         _softGroupUpdate(data) {
             const sats = data.satellites || [];
-            // SSE уже отдал freq/mod, а первый REST к SatNOGS был пустым (кеш
-            // ещё не прогрелся) — сбрасываем пустой кеш и догружаем строки TX.
+            // Реестр отдал transmitters[] после пустого первого снимка — пересобираем строки.
             if (groupNeedsTxReload(sats, this._rows)) {
-                for (let i = 0; i < sats.length; i++) {
-                    const sat = sats[i];
-                    if (satHasTxHint(sat)) {
-                        this._txCache.delete(sat.norad_id);
-                    }
-                }
+                this._txCache.clear();
                 this._rebuildFromGroup(sats);
                 return;
             }
@@ -1399,7 +1412,7 @@
             return row;
         }
 
-        // ----- SatNOGS API -----
+        // ----- TX из SSE группы (реестр) -----
 
         _fetchTxForSat(sat) {
             const norad = Number(sat.norad_id) || 0;
@@ -1407,43 +1420,12 @@
             if (this._txCache.has(norad)) {
                 return this._txCache.get(norad);
             }
-            const p = fetch(`/api/satnogs/transmitters/${norad}`, {
-                headers: { 'Accept': 'application/json' },
-                credentials: 'same-origin',
-            }).then((resp) => {
-                if (!resp.ok) {
-                    if (resp.status !== 404) {
-                        console.warn(`[OverviewLink] SatNOGS ${norad}: HTTP ${resp.status}`);
-                    }
-                    return [];
-                }
-                return resp.json();
-            }).then((data) => {
-                const out = [];
-                if (data && Array.isArray(data.transmitters)) {
-                    for (const t of data.transmitters) {
-                        const row = txFromSatnogs(sat, t);
-                        if (row) { out.push(row); }
-                    }
-                    out.sort((a, b) => a.freqHz - b.freqHz);
-                }
-                // Полный список пуст — берём primary из REST или freq из SSE.
-                if (out.length === 0) {
-                    const fallback = txFromPrimaryHint(sat, data && data.primary);
-                    if (fallback) {
-                        out.push(fallback);
-                    } else {
-                        // Нет даже primary: не кешируем пустоту (ждём прогрев SatNOGS).
-                        this._txCache.delete(norad);
-                    }
-                }
-                return out;
-            }).catch((err) => {
-                console.warn(`[OverviewLink] SatNOGS ${norad} fetch failed:`, err);
-                this._txCache.delete(norad);
-                const fallback = txFromPrimaryHint(sat, null);
-                return fallback ? [fallback] : [];
-            });
+            const rows = txRowsFromGroupSat(sat);
+            // Пустой снимок не кешируем: следующий group_update может уже нести transmitters[].
+            if (rows.length === 0) {
+                return Promise.resolve([]);
+            }
+            const p = Promise.resolve(rows);
             this._txCache.set(norad, p);
             return p;
         }
@@ -1652,7 +1634,8 @@
         STRIP_CAPACITY,
         groupFingerprint,
         txListFingerprint,
-        txFromSatnogs,
+        txFromGroupTx,
+        txRowsFromGroupSat,
         txFromPrimaryHint,
         satHasTxHint,
         groupNeedsTxReload,

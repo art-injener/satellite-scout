@@ -48,7 +48,7 @@ global.document = {
 global.window = {};
 
 const {
-    DemodPanel, formatFreqMHz, formatHz, demodLabel, stagesFromStatus, diagnose, FrameStrip, MetricHistory,
+    DemodPanel, formatFreqMHz, formatHz, demodLabel, pipelineFromStatus, stagesFromStatus, diagnose, FrameStrip, MetricHistory,
 } = require('./demod-panel.js');
 
 let passed = 0;
@@ -92,10 +92,47 @@ test('demodLabel names known demodulators and returns the id for others', () => 
     assert.strictEqual(demodLabel('fsk1200'), 'FSK 1200');
     assert.strictEqual(demodLabel('gmsk9600'), 'GMSK 9600');
     assert.strictEqual(demodLabel('ook'), 'OOK');
+    assert.strictEqual(demodLabel('rs41'), 'RS41');
+    assert.strictEqual(demodLabel('m10'), 'M10');
     assert.strictEqual(demodLabel('bpsk1200'), 'BPSK 1200');
     assert.strictEqual(demodLabel('bpsk9600'), 'BPSK 9600');
     assert.strictEqual(demodLabel('qpsk_ccsds'), 'QPSK CCSDS');
     assert.strictEqual(demodLabel('drm'), 'drm');
+});
+
+test('pipelineFromStatus lists auto candidates and locked profile', () => {
+    assert.strictEqual(pipelineFromStatus({ demod: 'afsk1200' }), 'AFSK 1200');
+    assert.strictEqual(pipelineFromStatus({
+        demod: 'auto', auto_phase: 'search',
+        auto_ids: ['fsk9600_g3ruh', 'fsk9600_geoscan', 'afsk1200'],
+    }), 'Проба — FSK 9600 G3RUH · FSK 9600 GEOSCAN · AFSK 1200');
+    assert.strictEqual(pipelineFromStatus({
+        demod: 'auto', auto_phase: 'locked', auto_locked: 'fsk9600_geoscan',
+        auto_ids: ['fsk9600_g3ruh', 'fsk9600_geoscan'],
+    }), 'Выбран FSK 9600 GEOSCAN');
+});
+
+test('applyStatus writes auto pipeline into the header', () => {
+    const panel = new DemodPanel();
+    panel.setLive(true);
+    panel.applyStatus({
+        active: true, supported: true, demod: 'auto', demod_off: false,
+        auto_phase: 'search', auto_ids: ['afsk1200', 'fsk9600_g3ruh'],
+        frames_good: 0, frames_bad: 0, squelch_open: false,
+        level_dbfs: -90, squelch_dbfs: -95,
+    }, null);
+    assert.strictEqual(nodes.get('manual-ch-pipeline').textContent,
+        'Проба — AFSK 1200 · FSK 9600 G3RUH');
+    assert.ok(nodes.get('manual-dm-diag').textContent.indexOf('Проба') >= 0);
+    panel.applyStatus({
+        active: true, supported: true, demod: 'auto', demod_off: false,
+        auto_phase: 'locked', auto_locked: 'afsk1200', auto_ids: ['afsk1200'],
+        frames_good: 2, frames_bad: 0, squelch_open: true,
+        level_dbfs: -50, squelch_dbfs: -90,
+    }, null);
+    assert.strictEqual(nodes.get('manual-ch-pipeline').textContent, 'Выбран AFSK 1200');
+    assert.strictEqual(nodes.get('manual-dm-diag').textContent, 'Выбран AFSK 1200');
+    panel.destroy();
 });
 
 const status = {
@@ -115,6 +152,7 @@ const status = {
         carrier_hz: -1800,
         deviation_hz: 2400,
         clock_jitter: 0.04,
+        snr_db: 18,
         sync: { words: 218, bit_errors: 133 },
     },
 };
@@ -125,7 +163,9 @@ function withStatus(patch) {
 
 test('stagesFromStatus fills every stage of a good reception', () => {
     const s = stagesFromStatus(status, null);
-    assert.deepStrictEqual(s.signal, { state: 'ok', value: '−52.3 dBFS', sub: 'порог −90.0 dBFS' });
+    assert.deepStrictEqual(s.signal, {
+        state: 'ok', value: 'СШ 18 дБ', sub: '−52.3 dBFS · порог −90.0 dBFS',
+    });
     assert.deepStrictEqual(s.carrier, { state: 'ok', value: '−1,8 кГц', sub: 'девиация 2,4 кГц' });
     assert.deepStrictEqual(s.clock, { state: 'ok', value: 'захват', sub: 'джиттер 4 %' });
     // 133 bad bits in 218 sync words of 32 bits.
@@ -133,10 +173,33 @@ test('stagesFromStatus fills every stage of a good reception', () => {
     assert.deepStrictEqual(s.frames, { state: 'ok', value: '181 / 37', sub: 'CRC верна / нет' });
 });
 
+test('stagesFromStatus shows FEC corrections on frames stage', () => {
+    const s = stagesFromStatus(withStatus({
+        reception: Object.assign({}, status.reception, { fec: { corrected: 3 } }),
+    }), null);
+    assert.strictEqual(s.frames.sub, 'CRC верна / нет · FEC 3');
+});
+
 test('stagesFromStatus shows dBm with calibration', () => {
     const s = stagesFromStatus(status, -32);
-    assert.strictEqual(s.signal.value, '−84 dBm');
-    assert.strictEqual(s.signal.sub, 'порог −122 dBm');
+    assert.strictEqual(s.signal.value, 'СШ 18 дБ');
+    assert.strictEqual(s.signal.sub, '−84 dBm · порог −122 dBm');
+});
+
+test('closed squelch labels channel power as noise not signal', () => {
+    const s = stagesFromStatus(withStatus({ squelch_open: false }), null);
+    assert.deepStrictEqual(s.signal, {
+        state: 'idle', value: 'шум', sub: '−52.3 dBFS · порог −90.0 dBFS',
+    });
+});
+
+test('open squelch without SNR keeps level as the main value', () => {
+    const s = stagesFromStatus(withStatus({
+        reception: { carrier_hz: 0, clock_jitter: 0.04 },
+    }), null);
+    assert.deepStrictEqual(s.signal, {
+        state: 'ok', value: '−52.3 dBFS', sub: 'порог −90.0 dBFS',
+    });
 });
 
 test('carrier beyond a quarter of the channel warns', () => {
@@ -163,6 +226,7 @@ test('before any signal the measured stages are idle', () => {
         squelch_open: false, frames_good: 0, frames_bad: 0, last_packet_ms: 0, reception: undefined,
     }), null);
     assert.strictEqual(s.signal.state, 'idle');
+    assert.strictEqual(s.signal.value, 'шум');
     for (const k of ['carrier', 'clock', 'sync', 'frames']) {
         assert.strictEqual(s[k].state, 'idle', k);
         assert.strictEqual(s[k].value, '—', k);
@@ -271,7 +335,7 @@ test('live mode keeps live stages on channel change', () => {
     panel.applyStatus(status, null);
     panel.setChannel({ freqMHz: 145.825, label: 'SCOUT', modulation: 'AFSK 1200', active: true });
     assert.strictEqual(nodes.get('manual-ch-name').textContent, 'SCOUT');
-    assert.strictEqual(nodes.get('manual-st-signal-val').textContent, '−52.3 dBFS', 'channel change keeps live stages');
+    assert.strictEqual(nodes.get('manual-st-signal-val').textContent, 'СШ 18 дБ', 'channel change keeps live stages');
     panel.destroy();
 });
 

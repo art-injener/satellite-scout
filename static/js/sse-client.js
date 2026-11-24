@@ -230,6 +230,11 @@ class SSEClient {
             }
         });
 
+        // Радиопрофиль КА (действующий демод, счётчики слышали/кадры).
+        this._eventSource.addEventListener('sat_radio', (e) => {
+            this._handleEvent('sat_radio', e);
+        });
+
         // Передача управления приёмником: разбирает access-control.js.
         for (const name of SSEClient.ACCESS_EVENTS) {
             this._eventSource.addEventListener(name, (e) => {
@@ -321,6 +326,11 @@ class SSEClient {
                 break;
             case 'satellite_group_update':
                 this._stateManager.setSatelliteGroup(data);
+                break;
+            case 'sat_radio':
+                if (this._stateManager && typeof this._stateManager.applySatRadioUpdate === 'function') {
+                    this._stateManager.applySatRadioUpdate(data);
+                }
                 break;
             case 'client_state_restore':
                 this._handleClientStateRestore(data);

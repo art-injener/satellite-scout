@@ -341,12 +341,23 @@
     font-variant-numeric: tabular-nums;
 }
 
+/* Счётчики радиопрофиля: слышали / кадры */
+.pc-sat-rx {
+    font-size: 11px;
+    font-weight: 400;
+    color: var(--text-muted);
+    white-space: nowrap;
+    line-height: 1.25;
+    opacity: 0.9;
+}
+
 .pc-row--active .pc-sat-name {
     color: var(--accent-primary);
 }
 
 .pc-row--active .pc-sat-alias,
-.pc-row--active .pc-sat-norad {
+.pc-row--active .pc-sat-norad,
+.pc-row--active .pc-sat-rx {
     color: var(--accent-primary);
     opacity: 0.7;
 }

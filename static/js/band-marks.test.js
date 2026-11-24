@@ -7,7 +7,12 @@
 'use strict';
 
 const assert = require('assert');
-const { markCode, markKind, markTitle, markSummary, hearRows, clusterAt, leaderAnchor, pickBandwidth, openCardSignals } = require('./band-marks.js');
+const {
+    AXIS_HOLD_MS, freshSignals,
+    markCode, markKind, markTitle, markSummary, hearRows, clusterAt, leaderAnchor,
+    pickBandwidth, openCardSignals, formatHearData, matchHearSignal, applyHearTelemetry,
+    hearDataCell, payloadDetails, lastPayloadEvent,
+} = require('./band-marks.js');
 
 let passed = 0;
 let failed = 0;
@@ -31,6 +36,22 @@ const BEACON = {
     origin: 'satellite', emission: 'pulsed', hint: 'Люб. 70 см',
     stats: { first_seen_ms: 1669299700000, observed_s: 300, on_s: 41, bursts: 29, period_s: 10.1, drift_hz_s: -162 },
 };
+
+console.log('\n— freshSignals —');
+
+test('axis keeps only last_seen within HoldMs; table list is unfiltered elsewhere', () => {
+    const now = 1_000_000;
+    const list = [
+        { id: 'fresh', last_seen_ms: now - 1_000 },
+        { id: 'edge', last_seen_ms: now - AXIS_HOLD_MS },
+        { id: 'stale', last_seen_ms: now - AXIS_HOLD_MS - 1 },
+        { id: 'missing', last_seen_ms: 0 },
+    ];
+    const got = freshSignals(list, now).map((s) => s.id);
+    assert.deepStrictEqual(got, ['fresh', 'edge']);
+    assert.strictEqual(freshSignals(null, now).length, 0);
+    assert.deepStrictEqual(freshSignals(list, 0).map((s) => s.id), list.map((s) => s.id));
+});
 
 console.log('\n— markCode —');
 
@@ -101,7 +122,35 @@ test('card lists the agreed air fields; emission and features stay off', () => {
     ].join('\n'));
 });
 
-test('hearRows: nine HEAR columns, frames and data are dashes', () => {
+test('demodText prefers sat_radio effective demod and shows declared if different', () => {
+    global.window = global.window || {};
+    global.window._stateManager = {
+        getSatRadio(norad) {
+            if (norad !== 57172) { return null; }
+            return {
+                norad_id: 57172,
+                tx: [{
+                    freq_hz: 401_025_000,
+                    effective_demod: 'fsk2400',
+                    declared_differs: true,
+                    declared_mode: 'AFSK',
+                    declared_baud: 1200,
+                }],
+            };
+        },
+    };
+    const rows = hearRows({
+        center_hz: 401_025_000, norad_id: 57172, bandwidth_hz: 12000, snr_db: 12,
+        structure: { modulation: '2fsk', demod: 'fsk9600_g3ruh', params: { baud: 2400 } },
+        stats: {},
+    }, null);
+    const demod = rows.find((r) => r[0] === 'Демод');
+    assert.ok(demod, 'demod column');
+    assert.ok(String(demod[1]).indexOf('заявлено') >= 0, demod[1]);
+    delete global.window._stateManager;
+});
+
+test('hearRows: HEAR columns; compact Signal/Вид; frames/data from server', () => {
     const rows = hearRows({
         center_hz: 436198200, bandwidth_hz: 18000, snr_db: 14.2,
         origin: 'satellite', emission: 'pulsed',
@@ -110,18 +159,139 @@ test('hearRows: nine HEAR columns, frames and data are dashes', () => {
             service: 'sat_tx', service_label: 'ТМИ', params: { baud: 9600 },
         },
         stats: { on_s: 41 },
+        frames_good: 3,
+        last_kind: 'beacon',
+        last_rx_ms: Date.UTC(2026, 0, 1, 12, 4, 1),
     }, 'GEOSCAN');
     assert.deepStrictEqual(rows.map((r) => r[0]), [
-        'Передатчик', 'Частота·полоса', 'Уровень', 'Сигнал', 'Вид·положение',
-        'Демод', 'В эфире', 'Кадры', 'Данные',
+        'Передатчик', 'Частота·полоса', 'Уровень', 'Сигнал', 'Вид',
+        'Демод', 'В эфире', 'Кадры', 'Данные', 'Обновлён',
     ]);
     assert.strictEqual(rows[0][1], 'GEOSCAN');
     assert.ok(rows[1][1].indexOf('436.1982 МГц') === 0 && rows[1][1].indexOf('18 кГц') > 0, rows[1][1]);
     assert.strictEqual(rows[2][1], '14.2 дБ');
-    assert.ok(rows[3][1].indexOf('·') > 0, rows[3][1]);
-    assert.ok(rows[4][1].indexOf('ТМИ') >= 0 && rows[4][1].indexOf('Космос') >= 0, rows[4][1]);
+    assert.strictEqual(rows[3][1].type, 'tip');
+    assert.ok(String(rows[3][1].text).indexOf('2FSK') >= 0 && String(rows[3][1].text).indexOf('80') >= 0, rows[3][1].text);
+    assert.ok(rows[4][1].indexOf('Пер.') >= 0 && rows[4][1].indexOf('Косм.') >= 0, rows[4][1]);
+    assert.strictEqual(rows[7][1], '3 · OK');
+    assert.deepStrictEqual(rows[8][1], { type: 'payload', label: 'Маяк ТМИ' });
+    assert.notStrictEqual(rows[9][1], '—');
+});
+
+test('hearRows Обновлён falls back to last_seen_ms', () => {
+    const rows = hearRows({
+        center_hz: 145800000, bandwidth_hz: 12000, stats: {},
+        last_seen_ms: Date.UTC(2026, 0, 1, 15, 30, 0),
+    }, null);
+    assert.notStrictEqual(rows[9][1], '—');
+});
+
+test('hearRows Signal and Demod tip cells keep a full title', () => {
+    const rows = hearRows({
+        center_hz: 436198200, bandwidth_hz: 18000, snr_db: 14,
+        structure: {
+            modulation: '2fsk', confidence: 0.8, demod: 'fsk9600_g3ruh',
+            demod_alt: ['fsk9600_geoscan'], params: { baud: 9600 },
+        },
+        stats: {},
+    }, null);
+    const signal = rows[3][1];
+    const demod = rows[5][1];
+    assert.strictEqual(signal.type, 'tip');
+    assert.ok(String(signal.title).indexOf('·') > 0, signal.title);
+    assert.strictEqual(demod.type, 'tip');
+    assert.ok(String(demod.title).indexOf('или') > 0, demod.title);
+});
+
+test('hearRows shows Голос from last_kind', () => {
+    const rows = hearRows({
+        center_hz: 145800000, bandwidth_hz: 15000, last_kind: 'voice', frames_good: 0,
+        stats: {},
+    }, null);
+    assert.deepStrictEqual(rows[8][1], { type: 'payload', label: 'Голос' });
     assert.strictEqual(rows[7][1], '—');
-    assert.strictEqual(rows[8][1], '—');
+});
+
+test('hearRows shows frames and data cell after applyHearTelemetry', () => {
+    const sig = {
+        id: 's1', center_hz: 436200000, bandwidth_hz: 20000, origin: 'satellite',
+        structure: { modulation: '2fsk', service: 'sat_tx', service_label: 'ТМИ', params: {} },
+        stats: {},
+    };
+    applyHearTelemetry(sig, {
+        kind: 'beacon', summary: 'Маяк ТМИ · RS23S', frequency_hz: 436200000,
+        decoder: 'geoscan.beacon', src: 'RS23S',
+        params: [{ key: true, name: 'U', value: '7.4', unit: 'В' }],
+    });
+    const rows = hearRows(sig, null);
+    assert.strictEqual(rows[7][1], '1 · OK');
+    assert.deepStrictEqual(rows[8][1], { type: 'payload', label: 'Маяк ТМИ' });
+    assert.ok(sig.hear_details.some((r) => r.key === 'U'));
+    applyHearTelemetry(sig, { kind: 'beacon', summary: 'Маяк ТМИ · RS23S' });
+    assert.strictEqual(hearRows(sig, null)[7][1], '2 · OK');
+});
+
+test('line telemetry shows Линия and hex in payload details', () => {
+    const sig = { id: 's1', center_hz: 434419000, bandwidth_hz: 20000, stats: {} };
+    applyHearTelemetry(sig, {
+        kind: 'line', summary: 'Линия', info_hex: 'aa55cc33deadbeef',
+        frequency_hz: 434419000, demod: 'ook',
+    });
+    assert.strictEqual(sig.hear_kind, 'Линия · 8 б');
+    assert.deepStrictEqual(hearDataCell(sig), { type: 'payload', label: 'Линия · 8 б' });
+    assert.ok(sig.hear_details.some((r) => r.key === 'hex' && r.value === 'aa55cc33deadbeef'));
+    assert.ok(sig.hear_details.some((r) => r.key === 'байты' && r.value === '8'));
+    assert.ok(sig.hear_details.some((r) => r.key === 'замечание'));
+});
+
+test('band_signals last payload fills data cell and modal rows', () => {
+    const sig = {
+        id: 's1', center_hz: 435446900, bandwidth_hz: 12000,
+        frames_good: 229, last_kind: 'line', last_summary: 'Линия', last_decoder: 'line',
+        last_info_hex: 'aa55cc33deadbeef', stats: {},
+    };
+    assert.deepStrictEqual(hearDataCell(sig), { type: 'payload', label: 'Линия · 8 б' });
+    const ev = lastPayloadEvent(sig);
+    assert.ok(ev);
+    const rows = payloadDetails(ev);
+    assert.ok(rows.some((r) => r.key === 'hex' && r.value === 'aa55cc33deadbeef'));
+    assert.ok(rows.some((r) => r.key === 'декодер' && r.value === 'line'));
+});
+
+test('hexToAsciiPreview keeps printable runs', () => {
+    const { hexToAsciiPreview } = require('./band-marks.js');
+    // "HELLO" + 0x00 + "!"
+    assert.strictEqual(hexToAsciiPreview('48454c4c4f0021'), 'HELLO.!');
+    assert.strictEqual(hexToAsciiPreview('00010203'), '');
+});
+
+test('applyHearTelemetry copies sat binding from telemetry event', () => {
+    const sig = { id: 's1', center_hz: 436200000, bandwidth_hz: 20000, stats: {} };
+    applyHearTelemetry(sig, {
+        kind: 'beacon', norad_id: 53385, sat_name: 'GEOSCAN-EDELVEIS', sat_source: 'sigmf',
+    });
+    assert.strictEqual(sig.norad_id, 53385);
+    assert.strictEqual(sig.sat_name, 'GEOSCAN-EDELVEIS');
+    assert.strictEqual(sig.sat_source, 'sigmf');
+});
+
+test('matchHearSignal prefers in-band, else within 50 kHz', () => {
+    const a = { id: 'a', center_hz: 436000000, bandwidth_hz: 20000 };
+    const b = { id: 'b', center_hz: 437000000, bandwidth_hz: 20000 };
+    assert.strictEqual(matchHearSignal([a, b], 436005000).id, 'a');
+    assert.strictEqual(matchHearSignal([a, b], 436040000).id, 'a');
+    assert.strictEqual(matchHearSignal([a, b], 500000000), null);
+});
+
+test('formatHearData is kind label only', () => {
+    assert.strictEqual(formatHearData({ kind: 'image', summary: 'Снимок: кусок 1' }), 'Снимок');
+    assert.strictEqual(formatHearData({ kind: 'text', summary: 'CQ DE R1ABC' }), 'Сообщение');
+    assert.strictEqual(formatHearData({ kind: 'sonde', summary: 'Зонд · K1930293' }), 'Зонд');
+    assert.strictEqual(formatHearData({ kind: 'voice' }), 'Голос');
+    assert.strictEqual(formatHearData({
+        kind: 'beacon',
+        params: [{ key: true, name: 'U', value: '7.4', unit: 'В' }],
+    }), 'Маяк ТМИ');
 });
 
 test('RDS station fills transmitter; wfm suggests FM broadcast demod', () => {
@@ -197,9 +367,13 @@ test('time column merges first and last; removed rows stay gone', () => {
     assert.ok(ground.indexOf('Излучение') < 0);
     assert.ok(ground.indexOf('Признаки') < 0);
 
+    // Сырой NORAD без имени — не подпись передатчика (колонка «—»).
     assert.ok(markTitle({
         center_hz: 1e8, bandwidth_hz: 800, norad_id: 25544, stats: {}, last_seen_ms: 0,
-    }, null).indexOf('Передатчик\tNORAD 25544') === 0);
+    }, null).indexOf('Передатчик\t—') === 0);
+    assert.ok(markTitle({
+        center_hz: 1e8, bandwidth_hz: 800, norad_id: 25544, sat_name: 'ISS', stats: {}, last_seen_ms: 0,
+    }, null).indexOf('Передатчик\tISS') === 0);
 
     const same = markTitle({
         center_hz: 1e8, bandwidth_hz: 1e3, snr_db: 3,
@@ -244,14 +418,14 @@ test('SSTV keeps its label; marker code stays short', () => {
     }, null).indexOf('Вид передачи\tSSTV?') > 0);
 });
 
-test('signature and probe stages stay on the service row', () => {
+test('service row shows the label without a basis suffix', () => {
     const row = (structure) => markTitle({
         center_hz: 145500000, bandwidth_hz: 12500, structure: structure, stats: {},
     }, null).split('\n').find((l) => l.startsWith('Вид передачи\t')).split('\t')[1];
     assert.strictEqual(row({
         modulation: 'fm_voice', service: 'amateur_voice', service_label: 'Радиопередатчик',
         service_basis: 'signature', params: {},
-    }), 'Радиопередатчик, по признакам');
+    }), 'Радиопередатчик');
     assert.strictEqual(markCode({
         structure: {
             modulation: 'fm_voice', service: 'amateur_voice', service_label: 'Радиопередатчик',
@@ -261,13 +435,13 @@ test('signature and probe stages stay on the service row', () => {
     assert.strictEqual(row({
         modulation: 'ook', service: 'ism_burst', service_label: 'Датчик или брелок',
         service_basis: 'signature', params: { baud: 2000 },
-    }), 'Датчик или брелок, по признакам');
+    }), 'Датчик или брелок');
     assert.strictEqual(markCode({
         structure: { modulation: 'ook', service: 'ism_burst', service_basis: 'signature', params: { baud: 2000 } },
     }), 'OOK 2000/Брел');
     assert.strictEqual(row({
         modulation: 'lfm', service: 'lora', service_label: 'LoRa', service_basis: 'probe', params: {},
-    }), 'LoRa, проба сошлась');
+    }), 'LoRa');
     assert.strictEqual(markCode({
         structure: { modulation: '2fsk', service: 'sat_tx', service_label: 'Радиопередатчик', params: { baud: 9600 } },
     }), '2FSK 9600/Пер.');

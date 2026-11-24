@@ -208,6 +208,7 @@
     --spectrum-axis-text:  #e4e8ec;
     --spectrum-trace:      #d5dde4;
     --spectrum-crosshair:  #e8ca52;
+    --spectrum-squelch:     #e09040; /* порог шумоподавления на спектре */
     --spectrum-hold-trace: #5ec8ff; /* удержание пика под линией спектра */
     --spectrum-peak-label: #ffffff;
     --spectrum-text:       #708898;

@@ -7,6 +7,19 @@
     const connectionStatusEl = document.getElementById('connection-status');
     const connectionStatusLabel = document.getElementById('connection-status-label');
 
+    /** Стартовый снимок радиопрофилей КА (GET /api/sat-radio). */
+    function hydrateSatRadio(sm) {
+        if (!sm || typeof sm.setSatRadioSnapshot !== 'function') { return; }
+        fetch('/api/sat-radio')
+            .then(function(r) { return r.ok ? r.json() : null; })
+            .then(function(data) {
+                if (data && Array.isArray(data.satellites)) {
+                    sm.setSatRadioSnapshot(data.satellites);
+                }
+            })
+            .catch(function() { /* повторим на следующем reconnect */ });
+    }
+
     function setConnectionStatus(status) {
         if (!connectionStatusEl) { return; }
 
@@ -305,6 +318,8 @@
                 setConnectionStatus('connected');
                 // Права слейва живут, пока открыт SSE: после переподключения роль могла смениться
                 if (window._accessControl) { window._accessControl.refresh(); }
+                // Стартовый снимок радиопрофилей; дальше только SSE sat_radio.
+                hydrateSatRadio(window._stateManager);
                 // При (ре)подключении к бэкенду — повторно загрузить конфиг
                 // наблюдателя: если страница была открыта до старта бэкенда,
                 // карта центрирована на (0,0) и без retry так и останется.

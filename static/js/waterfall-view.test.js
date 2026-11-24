@@ -70,6 +70,16 @@ test('a real resize keeps already painted lines instead of starting blank', () =
     assert.deepStrictEqual(pixel(view, 4, 2), HOT, 'history is carried into the new width');
 });
 
+test('peak label is marked as peak not as a bare dB value', () => {
+    assert.strictEqual(window.peakLabelText(-65.4), 'пик -65.4');
+});
+
+test('dbToPlotY maps a mid-scale level and rejects out-of-range', () => {
+    assert.strictEqual(window.dbToPlotY(-50, -100, 0, 10, 100), 60);
+    assert.strictEqual(window.dbToPlotY(-120, -100, 0, 10, 100), null);
+    assert.strictEqual(window.dbToPlotY(-65, -100, 0, 12, 200), 12 + 200 * (1 - 0.35));
+});
+
 for (const [name, fn] of queue) {
     try {
         fn();

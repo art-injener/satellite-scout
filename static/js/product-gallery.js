@@ -31,8 +31,15 @@
         return parts.join(' · ');
     }
 
-    /** Ход картинки: строки в приёме, «готово» или где приём оборвался. */
+    /** Ход картинки: SSTV — строки; GEOSCAN — байты JPEG. */
     function progressText(p) {
+        if (p.kind === 'geoscan') {
+            if (!p.done) {
+                const pct = p.height ? Math.min(100, Math.round(100 * p.lines / p.height)) : 0;
+                return pct + '% · ' + (p.chunks || 0) + ' кусков';
+            }
+            return p.gaps ? ('готово · пропусков ' + p.gaps) : 'готово';
+        }
         if (!p.done) { return p.lines + ' / ' + p.height + ' строк'; }
         if (p.lines >= p.height) { return 'готово'; }
         return 'оборвана на ' + p.lines + ' из ' + p.height;

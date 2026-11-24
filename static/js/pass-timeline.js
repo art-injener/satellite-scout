@@ -403,9 +403,11 @@
             }
             ctx.lineTo(Math.min(plotRight, xOf(tEnd)), y0);
             ctx.closePath();
-            // Сопровождаемый / выбранный: плотнее заливка и толще контур, рисуются последними
-            ctx.fillStyle = hexAlpha(stroke, focus === 2 ? 0.5 : (focus === 1 ? 0.4 : 0.22));
-            ctx.fill();
+            // Заливка только у выбранного/сопровождаемого; остальные — контур, иначе каша перекрытий
+            if (focus > 0) {
+                ctx.fillStyle = hexAlpha(stroke, focus === 2 ? 0.5 : 0.4);
+                ctx.fill();
+            }
             ctx.strokeStyle = stroke;
             ctx.lineWidth = focus === 2 ? 2.2 : (focus === 1 ? 1.8 : 1);
             ctx.stroke();

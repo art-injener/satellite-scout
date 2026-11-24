@@ -64,6 +64,8 @@ const StateEventType = Object.freeze({
     TRACK_VISIBILITY_CHANGE: 'track_visibility_change',
     /** Переключение режима «все трассы группы» (UX-TABLE-TRACK-GROUP-MODE-001). */
     SHOW_ALL_MODE_CHANGE: 'show_all_mode_change',
+    /** Радиопрофиль КА (REST hydrate / SSE sat_radio). */
+    SAT_RADIO: 'sat_radio',
     /** @deprecated Использовать SELECTED_CHANGE / TRACKING_CHANGE. */
     SATELLITE_CHANGE: 'satellite_change',
 });
@@ -335,6 +337,12 @@ class SatelliteStateManager {
 
         /** Текущая группа спутников из SSE-события satellite_group_update. */
         this._satelliteGroup = null;
+
+        /**
+         * Радиопрофили КА: NORAD → снимок (слыш./кадры/действующий демод).
+         * @type {Map<number, Object>}
+         */
+        this._satRadio = new Map();
 
         /**
          * Набор NORAD ID с включённой видимостью трассы (ручной toggle и режим «все трассы»).
@@ -1223,6 +1231,48 @@ class SatelliteStateManager {
             this._satellites.set(noradId, state);
         }
         return state;
+    }
+
+    /**
+     * Полный снимок радиопрофилей (ответ GET /api/sat-radio).
+     * @param {Array<Object>} satellites
+     */
+    setSatRadioSnapshot(satellites) {
+        this._satRadio.clear();
+        if (Array.isArray(satellites)) {
+            for (let i = 0; i < satellites.length; i++) {
+                const s = satellites[i];
+                if (s && typeof s.norad_id === 'number' && s.norad_id > 0) {
+                    this._satRadio.set(s.norad_id, s);
+                }
+            }
+        }
+        this._notify(StateEventType.SAT_RADIO, { satellites: this.listSatRadio() });
+    }
+
+    /**
+     * Одно обновление SSE sat_radio (один КА).
+     * @param {Object} sat
+     */
+    applySatRadioUpdate(sat) {
+        if (!sat || typeof sat.norad_id !== 'number' || sat.norad_id <= 0) {
+            return;
+        }
+        this._satRadio.set(sat.norad_id, sat);
+        this._notify(StateEventType.SAT_RADIO, { satellites: [sat], norad_id: sat.norad_id });
+    }
+
+    /**
+     * @param {number} noradId
+     * @returns {?Object}
+     */
+    getSatRadio(noradId) {
+        return this._satRadio.get(noradId) || null;
+    }
+
+    /** @returns {Array<Object>} */
+    listSatRadio() {
+        return Array.from(this._satRadio.values());
     }
 }
 

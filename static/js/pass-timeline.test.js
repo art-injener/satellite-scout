@@ -3,8 +3,8 @@
  *
  * Run: node static/js/pass-timeline.test.js
  *
- * Covers the Elevation×time hill chart (overlapping filled curves),
- * not a Gantt row-per-satellite strip.
+ * Covers the Elevation×time hill chart (overlapping contours;
+ * fill only on the selected/tracked pass), not a Gantt strip.
  */
 
 'use strict';
@@ -220,7 +220,7 @@ test('draw bails out when the plot area is too narrow', () => {
 
 console.log('\n— PassTimelineView: hill chart —');
 
-test('draw paints overlapping filled hills, not Gantt bars', () => {
+test('draw paints overlapping hill contours, not Gantt bars', () => {
     const canvas = makeCanvas(900, 160);
     const v = new PassTimelineView(canvas, { passes: samplePasses() });
     v.draw();
@@ -231,8 +231,26 @@ test('draw paints overlapping filled hills, not Gantt bars', () => {
         'Gantt strokeRect bars must not be used');
     const hills = ops.filter((o) => o[0] === 'closePath');
     assert.strictEqual(hills.length, 3, 'one closed path per pass');
+    const strokes = ops.filter((o) => o[0] === 'stroke');
+    assert.ok(strokes.length >= 3, 'each hill is stroked');
     const fills = ops.filter((o) => o[0] === 'fill');
-    assert.ok(fills.length >= 3, 'each hill is filled');
+    assert.strictEqual(fills.length, 0, 'without selection hills are outlines only');
+});
+
+test('only the selected hill is filled', () => {
+    const canvas = makeCanvas(900, 160);
+    const v = new PassTimelineView(canvas, { passes: samplePasses() });
+    v.setSelectedId(2);
+    const fills = canvas.getContext().ops.filter((o) => o[0] === 'fill');
+    assert.strictEqual(fills.length, 1, 'exactly one filled hill');
+});
+
+test('tracked hill is filled even without a separate selection', () => {
+    const canvas = makeCanvas(900, 160);
+    const v = new PassTimelineView(canvas, { passes: samplePasses() });
+    v.setTrackingId(1);
+    const fills = canvas.getContext().ops.filter((o) => o[0] === 'fill');
+    assert.strictEqual(fills.length, 1, 'tracked hill gets the fill');
 });
 
 test('Y-axis is labelled in elevation degrees', () => {

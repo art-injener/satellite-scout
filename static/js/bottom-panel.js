@@ -560,6 +560,23 @@
     // FFTSpectrumView — график спектра (вкладка «Обзор», canvas #fft-spectrum)
     // ════════════════════════════════════════════════════════════════════════
 
+    /** Подпись пика на спектре: не путать с порогом шумоподавления. */
+    function peakLabelText(peakDb) {
+        return 'пик ' + Number(peakDb).toFixed(1);
+    }
+
+    /**
+     * Y-координата уровня dB на поле графика (сверху вниз).
+     * @returns {?number} null — уровень вне шкалы или шкала вырождена
+     */
+    function dbToPlotY(db, dbMin, dbMax, mt, plotH) {
+        const range = dbMax - dbMin;
+        if (!(range > 0) || !(plotH > 0) || !isFinite(db)) { return null; }
+        const v = (db - dbMin) / range;
+        if (v < 0 || v > 1) { return null; }
+        return mt + plotH * (1 - v);
+    }
+
     function FFTSpectrumView(canvas, opts) {
         opts = opts || {};
         this._canvas = canvas;
@@ -573,6 +590,8 @@
         this._marginRight = 4;
         this._dbMin = -100;
         this._dbMax = 0;
+        // Порог шумоподавления в тех же единицах, что шкала (_dbMin/_dbMax); null — не рисовать.
+        this.squelchDb = null;
     }
 
     // Подгонка canvas под контейнер
@@ -688,6 +707,25 @@
         if (held && held.length > 1) { trace(held, cssVar('--spectrum-hold-trace', '#5ec8ff'), 1); }
         trace(buf, cssVar('--spectrum-trace', '#00ff80'), 1.5);
 
+        // Линия порога шумоподавления — отдельно от перекрестья пика.
+        const sqY = dbToPlotY(this.squelchDb, this._dbMin, this._dbMax, mt, plotH);
+        if (sqY !== null) {
+            ctx.save();
+            ctx.setLineDash([6, 4]);
+            ctx.strokeStyle = cssVar('--spectrum-squelch', cssVar('--accent-warning', '#e09040'));
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, sqY);
+            ctx.lineTo(w, sqY);
+            ctx.stroke();
+            ctx.font = '9px monospace';
+            ctx.fillStyle = cssVar('--spectrum-squelch', cssVar('--accent-warning', '#e09040'));
+            ctx.textAlign = 'left';
+            ctx.textBaseline = 'bottom';
+            ctx.fillText('порог', ml + 2, sqY - 3);
+            ctx.restore();
+        }
+
         // ── Перекрестье на пике ──
         const peakX = ml + (peakIdx / (bins - 1)) * plotW;
         const peakV = Math.max(0, Math.min(1, peakVal));
@@ -719,7 +757,7 @@
         ctx.fill();
         ctx.restore();
 
-        // Подписи: частота внизу вертикали, dB слева горизонтали
+        // Подписи: частота внизу вертикали, «пик» слева горизонтали (не путать с порогом)
         ctx.save();
         ctx.font = '9px monospace';
         ctx.fillStyle = cssVar('--spectrum-peak-label', '#ffd700');
@@ -728,7 +766,7 @@
         ctx.fillText(peakFreq.toFixed(3), peakX, mt + plotH - 2);
         ctx.textAlign = 'left';
         ctx.textBaseline = 'bottom';
-        ctx.fillText(peakDb.toFixed(1) + ' dB', ml + 2, peakY - 3);
+        ctx.fillText(peakLabelText(peakDb), ml + 2, peakY - 3);
         ctx.restore();
     };
 
@@ -763,6 +801,8 @@
     window.WaterfallView = WaterfallView;
     window.FFTSpectrumView = FFTSpectrumView;
     window.SpectrumDataSource = SpectrumDataSource;
+    window.peakLabelText = peakLabelText;
+    window.dbToPlotY = dbToPlotY;
     // hotColor и cssVarRgbHex нужны построчному водопаду в auto-link.js
     window.hotColor = hotColor;
     // Тема-зависимая colormap (light/dark) — для мини-водопада Авто-режима

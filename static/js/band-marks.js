@@ -15,6 +15,11 @@
     const CODE_GAP_PX = 52;
     /** Маркеры ближе этого (или чьи полосы перекрываются) попадают в одну подсказку. */
     const CLUSTER_PX = 16;
+    /**
+     * Ось спектра и панорамы: только участки, слышанные за это окно.
+     * Совпадает с bandscan.HoldMs. Полный час (RememberMs) остаётся таблице «Эфир».
+     */
+    const AXIS_HOLD_MS = 10_000;
     const EMISSION_CODE = { continuous: 'Непр.', pulsed: 'Имп.' };
     const ORIGIN_KIND = { satellite: 'sat', satellite_probable: 'probable', terrestrial: 'ground' };
     /** Модуляция по структуре (ADR-009 §6.1): подпись на маркере и в карточке. */
@@ -52,6 +57,21 @@
         return st && MODULATION[st.modulation] ? st : null;
     }
 
+    /**
+     * Участки для оси спектра и панорамы: last_seen не старше AXIS_HOLD_MS.
+     * Таблица «Эфир» берёт полный список из band_signals без этого фильтра.
+     */
+    function freshSignals(signals, nowMs, maxAgeMs) {
+        const list = Array.isArray(signals) ? signals : [];
+        const now = Number(nowMs) || 0;
+        const age = maxAgeMs > 0 ? maxAgeMs : AXIS_HOLD_MS;
+        if (!(now > 0)) { return list.slice(); }
+        return list.filter(function(s) {
+            const last = Number(s && s.last_seen_ms) || 0;
+            return last > 0 && now >= last && (now - last) <= age;
+        });
+    }
+
     /** Код вида передачи на маркере; пусто, если вид не поставлен. */
     function serviceCode(sig) {
         const st = sig && sig.structure;
@@ -60,23 +80,13 @@
     }
 
     /**
-     * Строка «Вид передачи». Эфирное радио и SSTV оставляют свою подпись.
-     * Остальные виды добавляют ступень: «по признакам» или «проба сошлась».
+     * Строка «Вид передачи» — подпись вида из каталога, без ступени разбора
+     * («по признакам»/«проба сошлась» не показываем).
      */
     function serviceText(sig) {
         const st = sig && sig.structure;
         if (!st || !st.service) { return '—'; }
-        const label = st.service_label || '';
-        if (st.service === 'broadcast' || st.service === 'sstv' || st.service === 'sstv_probable') {
-            return label || '—';
-        }
-        if (st.service_basis === 'probe') {
-            return label ? label + ', проба сошлась' : 'проба сошлась';
-        }
-        if (st.service_basis === 'signature') {
-            return label ? label + ', по признакам' : 'по признакам';
-        }
-        return label || '—';
+        return st.service_label || '—';
     }
 
     /**
@@ -137,6 +147,7 @@
 
     /** Подписи профилей приёмника в карточке (как в панели демода). */
     const DEMOD_LABEL = {
+        auto: 'Авто',
         wfm: 'FM эфир',
         fm: 'FM',
         usb: 'USB',
@@ -150,15 +161,20 @@
         fsk9600_geoscan: 'FSK 9600 GEOSCAN',
         gmsk9600: 'GMSK 9600',
         ook: 'OOK',
+        rs41: 'RS41',
+        m10: 'M10',
         bpsk1200: 'BPSK 1200',
         bpsk9600: 'BPSK 9600',
         qpsk_ccsds: 'QPSK CCSDS',
     };
 
-    /** Имя КА, иначе NORAD, иначе RDS/станция из структуры, иначе прочерк. */
+    /**
+     * Имя передатчика: аргумент nameOf, иначе sat_name из SSE (липкий с бэка).
+     * Сырой NORAD в колонку не пишем — это не имя передатчика.
+     */
     function transmitterText(sig, satName) {
         if (satName) { return satName; }
-        if (sig && sig.norad_id) { return 'NORAD ' + sig.norad_id; }
+        if (sig && sig.sat_name) { return sig.sat_name; }
         const st = sig && sig.structure;
         if (st && st.station) { return st.station; }
         // Запас: имя уже в подписи службы, а поле station в кадре ещё пустое.
@@ -176,15 +192,71 @@
         return '—';
     }
 
-    /** Рекомендуемый демодулятор из structure.demod; неразличимые кандидаты — через «или». */
+    /** Подпись демод-id для UI. */
+    function demodLabelOf(id) {
+        if (!id) { return ''; }
+        return typeof window !== 'undefined' && window.demodLabel
+            ? window.demodLabel(id) : (DEMOD_LABEL[id] || id);
+    }
+
+    /**
+     * Действующий демод из радиопрофиля КА (если NORAD известен).
+     * При расхождении с заявленным — оба значения.
+     */
+    function demodFromSatRadio(sig) {
+        const sm = typeof window !== 'undefined' ? window._stateManager : null;
+        if (!sm || typeof sm.getSatRadio !== 'function' || !sig || !sig.norad_id) {
+            return '';
+        }
+        const sat = sm.getSatRadio(sig.norad_id);
+        if (!sat || !Array.isArray(sat.tx) || sat.tx.length === 0) {
+            return '';
+        }
+        const hz = Number(sig.center_hz) || 0;
+        let best = null;
+        let bestD = Infinity;
+        for (let i = 0; i < sat.tx.length; i++) {
+            const tx = sat.tx[i];
+            if (!tx) { continue; }
+            const d = Math.abs((Number(tx.freq_hz) || 0) - hz);
+            if (d < bestD) {
+                bestD = d;
+                best = tx;
+            }
+        }
+        if (!best || bestD > 25000) {
+            best = sat.tx[0];
+        }
+        if (!best) { return ''; }
+        let text = '';
+        if (best.effective_demod) {
+            text = demodLabelOf(best.effective_demod);
+        } else if (best.effective_modulation) {
+            text = best.effective_modulation;
+            if (best.effective_baud) {
+                text += ' ' + Math.round(best.effective_baud);
+            }
+        }
+        if (!text) { return ''; }
+        if (best.declared_differs && best.declared_mode) {
+            let decl = best.declared_mode;
+            if (best.declared_baud) {
+                decl += ' ' + Math.round(best.declared_baud);
+            }
+            text += ' (заявлено: ' + decl + ')';
+        }
+        return text;
+    }
+
+    /** Рекомендуемый демодулятор: радиопрофиль, иначе structure.demod. */
     function demodText(sig) {
+        const fromRadio = demodFromSatRadio(sig);
+        if (fromRadio) { return fromRadio; }
         const st = sig && sig.structure;
         const id = st && st.demod;
         if (!id) { return '—'; }
-        const label = typeof window !== 'undefined' && window.demodLabel ? window.demodLabel(id) : (DEMOD_LABEL[id] || id);
-        const alts = (st.demod_alt || []).map(function(a) {
-            return typeof window !== 'undefined' && window.demodLabel ? window.demodLabel(a) : (DEMOD_LABEL[a] || a);
-        });
+        const label = demodLabelOf(id);
+        const alts = (st.demod_alt || []).map(function(a) { return demodLabelOf(a); });
         return alts.length ? label + ' или ' + alts.join(', ') : label;
     }
 
@@ -285,37 +357,303 @@
         ];
     }
 
+    /** Подпись kind полезной нагрузки (ADR-009 §7.2) для колонки «Данные». */
+    function payloadKindLabel(kind) {
+        switch (kind) {
+            case 'beacon': return 'Маяк ТМИ';
+            case 'text': return 'Сообщение';
+            case 'image': return 'Снимок';
+            case 'file': return 'Файл';
+            case 'position': return 'Навигация';
+            case 'sonde': return 'Зонд';
+            case 'line': return 'Линия';
+            case 'voice': return 'Голос';
+            case 'unknown': return 'Неизвестно';
+            default: return '';
+        }
+    }
+
+    /**
+     * Подпись колонки «Данные»: тип kind; для линии — ещё длина пачки.
+     * @param {Object} ev
+     * @returns {string}
+     */
+    function formatHearData(ev) {
+        if (!ev) { return '—'; }
+        const label = payloadKindLabel(ev.kind) || '—';
+        if (ev.kind === 'line' && ev.info_hex) {
+            const n = Math.floor(String(ev.info_hex).length / 2);
+            if (n > 0) { return label + ' · ' + n + ' б'; }
+        }
+        return label;
+    }
+
+    /**
+     * Печатный ASCII из hex (непечатное — «.»); пусто, если почти нет букв/цифр.
+     * @param {string} hex
+     * @returns {string}
+     */
+    function hexToAsciiPreview(hex) {
+        const h = String(hex || '').replace(/\s+/g, '');
+        if (!h || h.length < 2) { return ''; }
+        let out = '';
+        let printable = 0;
+        for (let i = 0; i + 1 < h.length; i += 2) {
+            const b = parseInt(h.slice(i, i + 2), 16);
+            if (!isFinite(b)) { continue; }
+            if (b >= 32 && b < 127) {
+                out += String.fromCharCode(b);
+                printable++;
+            } else {
+                out += '.';
+            }
+        }
+        if (printable < 4 && printable * 4 < out.length) { return ''; }
+        return out;
+    }
+
+    /**
+     * Строки модалки «Кадр» по событию telemetry (ADR-009 §7.2).
+     * @param {Object} ev
+     * @returns {Array<{key:string, value:string}>}
+     */
+    function payloadDetails(ev) {
+        if (!ev) { return []; }
+        const kind = payloadKindLabel(ev.kind) || '—';
+        const rows = [
+            { key: 'тип', value: kind },
+            { key: 'декодер', value: ev.decoder || '—' },
+            { key: 'сводка', value: ev.summary || '—' },
+            { key: 'от', value: ev.src || '—' },
+            { key: 'кому', value: ev.dest || '—' },
+        ];
+        const params = ev.params || [];
+        for (let i = 0; i < params.length; i++) {
+            const p = params[i];
+            if (!p) { continue; }
+            rows.push({
+                key: p.name || p.id || 'поле',
+                value: p.unit ? (p.value + ' ' + p.unit) : String(p.value),
+            });
+        }
+        if (ev.info) { rows.push({ key: 'текст', value: String(ev.info) }); }
+        if (ev.info_hex) {
+            const hex = String(ev.info_hex);
+            rows.push({ key: 'байты', value: String(Math.floor(hex.length / 2)) });
+            rows.push({ key: 'hex', value: hex });
+            const ascii = hexToAsciiPreview(hex);
+            if (ascii) { rows.push({ key: 'ascii', value: ascii }); }
+            if (ev.kind === 'line') {
+                rows.push({
+                    key: 'замечание',
+                    value: 'Сырые биты линии (не шифр). Разбор кадра — по протоколу (зонд, ISM…).',
+                });
+            }
+        }
+        return rows;
+    }
+
+    /**
+     * Подпись «Данные»: с бэка last_kind (+ hex для линии), иначе устаревший hear_kind.
+     * @param {Object} sig
+     * @returns {string}
+     */
+    function hearDataLabel(sig) {
+        if (!sig) { return ''; }
+        if (sig.hear_kind) { return sig.hear_kind; }
+        if (sig.last_kind) {
+            return formatHearData({
+                kind: sig.last_kind,
+                info_hex: sig.last_info_hex || '',
+            });
+        }
+        if (sig.last_summary) { return String(sig.last_summary); }
+        return '';
+    }
+
+    /**
+     * Событие для модалки «Кадр» из sticky-полей band_signals (без клиентского telemetry).
+     * @param {Object} sig
+     * @returns {?Object}
+     */
+    function lastPayloadEvent(sig) {
+        if (!sig) { return null; }
+        if (!(sig.last_kind || sig.last_summary || sig.last_decoder ||
+            sig.last_info_hex || sig.last_info || (sig.last_params && sig.last_params.length))) {
+            return null;
+        }
+        return {
+            kind: sig.last_kind || '',
+            decoder: sig.last_decoder || '',
+            summary: sig.last_summary || '',
+            src: sig.last_src || '',
+            dest: sig.last_dest || '',
+            info: sig.last_info || '',
+            info_hex: sig.last_info_hex || '',
+            params: Array.isArray(sig.last_params) ? sig.last_params : [],
+        };
+    }
+
+    /**
+     * Ячейка «Данные»: тип + кнопка модалки, либо «—».
+     * @param {Object} sig
+     * @returns {string|{type:string, label:string}}
+     */
+    function hearDataCell(sig) {
+        const label = hearDataLabel(sig);
+        if (!label) { return '—'; }
+        return { type: 'payload', label: label };
+    }
+
+    /** Кадры: frames_good с бэка, иначе устаревший hear_frames. */
+    function hearFramesText(sig) {
+        if (sig && sig.hear_frames) { return sig.hear_frames; }
+        const n = Number(sig && sig.frames_good) || 0;
+        return n > 0 ? (n + ' · OK') : '—';
+    }
+
+    /** Короткая «Сигнал»: код модуляции и % без длинного «·». */
+    function hearSignalText(sig) {
+        const st = knownModulation(sig);
+        const code = st ? (MODULATION[st.modulation] && MODULATION[st.modulation].code) : '';
+        const prob = probabilityText(sig);
+        if (!code && prob === '—') { return '—'; }
+        if (!code) { return prob; }
+        if (prob === '—') { return code; }
+        return code + ' ' + prob;
+    }
+
+    /** Короткая «Вид»: код службы и сжатое положение. */
+    function hearKindText(sig) {
+        const svc = serviceCode(sig);
+        const label = svc || (serviceText(sig) !== '—' ? serviceText(sig) : '');
+        let pos = '';
+        switch (sig && sig.origin) {
+        case 'satellite': pos = 'Косм.'; break;
+        case 'satellite_probable': pos = 'Косм.?'; break;
+        case 'terrestrial': pos = 'Земля'; break;
+        default: break;
+        }
+        if (!label && !pos) { return '—'; }
+        if (!label) { return pos; }
+        if (!pos) { return label; }
+        return label + ' ' + pos;
+    }
+
+    /** Короткая «Демод»: один профиль без альтернатив. */
+    function hearDemodText(sig) {
+        const fromRadio = demodFromSatRadio(sig);
+        if (fromRadio) {
+            const cut = String(fromRadio).split(' или ')[0];
+            return cut || '—';
+        }
+        const st = sig && sig.structure;
+        const id = st && st.demod;
+        return id ? demodLabelOf(id) : '—';
+    }
+
+    /**
+     * Ячейка с ужатым текстом и полным title при наведении.
+     * @param {string} short
+     * @param {string} full
+     * @returns {string|{type:string, text:string, title:string}}
+     */
+    function tipCell(short, full) {
+        const text = short == null || short === '' ? '—' : String(short);
+        const tip = full == null || full === '' ? text : String(full);
+        if (text === '—' || tip === text) { return text; }
+        return { type: 'tip', text: text, title: tip };
+    }
+
+    /** Полная «Сигнал» для подсказки: модуляция · вероятность. */
+    function hearSignalFull(sig) {
+        const mod = modulationText(sig);
+        const prob = probabilityText(sig);
+        if (mod === '—' && prob === '—') { return '—'; }
+        if (mod === '—') { return prob; }
+        if (prob === '—') { return mod; }
+        return mod + ' · ' + prob;
+    }
+
+    /**
+     * Ближайший участок эфира к частоте кадра: сначала попадание в полосу, иначе ≤ 50 кГц.
+     * @param {Array} signals
+     * @param {number} freqHz
+     * @returns {?Object}
+     */
+    function matchHearSignal(signals, freqHz) {
+        if (!Array.isArray(signals) || !(freqHz > 0)) { return null; }
+        let inBand = null;
+        let inBandDist = Infinity;
+        let near = null;
+        let nearDist = Infinity;
+        for (let i = 0; i < signals.length; i++) {
+            const sig = signals[i];
+            const c = Number(sig.center_hz) || 0;
+            const half = (Number(sig.bandwidth_hz) || 0) / 2;
+            const d = Math.abs(c - freqHz);
+            if (half > 0 && d <= half && d < inBandDist) {
+                inBand = sig;
+                inBandDist = d;
+            }
+            if (d < nearDist) {
+                near = sig;
+                nearDist = d;
+            }
+        }
+        if (inBand) { return inBand; }
+        if (near && nearDist <= 50000) { return near; }
+        return null;
+    }
+
+    /**
+     * Дописывает Кадры/Данные на участок эфира из принятого кадра (SSE telemetry).
+     * @param {Object} sig
+     * @param {Object} ev
+     * @returns {Object} sig
+     */
+    function applyHearTelemetry(sig, ev) {
+        if (!sig) { return sig; }
+        const n = (Number(sig.hear_frame_count) || 0) + 1;
+        sig.hear_frame_count = n;
+        sig.hear_frames = n + ' · OK';
+        sig.hear_kind = formatHearData(ev);
+        sig.hear_data = sig.hear_kind;
+        sig.hear_details = payloadDetails(ev);
+        sig.hear_ev = ev || null;
+        // Привязка кадра к КА из SSE telemetry (частота / План / позывной / SigMF).
+        if (ev && ev.norad_id > 0) {
+            sig.norad_id = ev.norad_id;
+            if (ev.sat_name) { sig.sat_name = ev.sat_name; }
+            if (ev.sat_source) { sig.sat_source = ev.sat_source; }
+        }
+        return sig;
+    }
+
     /**
      * Сжатые столбцы таблицы под «Спектром» (цепочка HEAR).
-     * Кадры и Данные — «—» до статистики кадров демода.
+     * Колонка «Вид» — вид передачи и положение в одной ячейке.
+     * Кадры и Данные — из telemetry, иначе «—». Данные: тип + кнопка (объект ячейки).
      * @param {Object} sig
      * @param {?string} satName
-     * @returns {Array<[string, string]>}
+     * @returns {Array<[string, string|Object]>}
      */
     function hearRows(sig, satName) {
         const st = sig.stats || {};
         const freq = (sig.center_hz / 1e6).toFixed(4) + ' МГц';
         const bw = sig.bandwidth_hz ? formatWidth(sig.bandwidth_hz) : '—';
-        const mod = modulationText(sig);
-        const prob = probabilityText(sig);
-        const signal = (mod !== '—' || prob !== '—')
-            ? (mod === '—' ? prob : (prob === '—' ? mod : mod + ' · ' + prob))
-            : '—';
-        const svc = serviceText(sig);
-        const pos = positionText(sig);
-        const kind = (svc !== '—' || pos !== '—')
-            ? (svc === '—' ? pos : (pos === '—' ? svc : svc + ' · ' + pos))
-            : '—';
         return [
             ['Передатчик', transmitterText(sig, satName)],
             ['Частота·полоса', freq + ' · ' + bw],
             ['Уровень', snrText(sig)],
-            ['Сигнал', signal],
-            ['Вид·положение', kind],
-            ['Демод', demodText(sig)],
+            ['Сигнал', tipCell(hearSignalText(sig), hearSignalFull(sig))],
+            ['Вид', hearKindText(sig)],
+            ['Демод', tipCell(hearDemodText(sig), demodText(sig))],
             ['В эфире', st.on_s > 0 ? formatDuration(st.on_s) : '—'],
-            ['Кадры', '—'],
-            ['Данные', '—'],
+            ['Кадры', hearFramesText(sig)],
+            ['Данные', hearDataCell(sig)],
+            // Приём важнее; если кадров ещё нет — время последней энергии участка.
+            ['Обновлён', clockText(sig.last_rx_ms || sig.last_seen_ms)],
         ];
     }
 
@@ -758,6 +1096,8 @@
         this._root = null;
     };
 
+    BandMarks.AXIS_HOLD_MS = AXIS_HOLD_MS;
+    BandMarks.freshSignals = freshSignals;
     BandMarks.markCode = markCode;
     BandMarks.markKind = markKind;
     BandMarks.markTitle = markTitle;
@@ -768,6 +1108,13 @@
     BandMarks.openCardSignals = openCardSignals;
     BandMarks.leaderAnchor = leaderAnchor;
     BandMarks.pickBandwidth = pickBandwidth;
+    BandMarks.formatHearData = formatHearData;
+    BandMarks.payloadDetails = payloadDetails;
+    BandMarks.lastPayloadEvent = lastPayloadEvent;
+    BandMarks.hexToAsciiPreview = hexToAsciiPreview;
+    BandMarks.hearDataCell = hearDataCell;
+    BandMarks.matchHearSignal = matchHearSignal;
+    BandMarks.applyHearTelemetry = applyHearTelemetry;
 
     if (typeof window !== 'undefined') {
         window.BandMarks = BandMarks;
@@ -776,6 +1123,8 @@
     if (typeof module !== 'undefined' && module.exports) { // eslint-disable-line no-undef
         module.exports = { // eslint-disable-line no-undef
             BandMarks: BandMarks,
+            AXIS_HOLD_MS: AXIS_HOLD_MS,
+            freshSignals: freshSignals,
             markCode: markCode,
             markKind: markKind,
             markTitle: markTitle,
@@ -786,6 +1135,13 @@
             openCardSignals: openCardSignals,
             leaderAnchor: leaderAnchor,
             pickBandwidth: pickBandwidth,
+            formatHearData: formatHearData,
+            payloadDetails: payloadDetails,
+            lastPayloadEvent: lastPayloadEvent,
+            hexToAsciiPreview: hexToAsciiPreview,
+            hearDataCell: hearDataCell,
+            matchHearSignal: matchHearSignal,
+            applyHearTelemetry: applyHearTelemetry,
         };
     }
 })();

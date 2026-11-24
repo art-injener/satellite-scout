@@ -73,7 +73,8 @@ const AutoLink = require('./auto-link.js');
 const {
     groupFingerprint,
     txListFingerprint,
-    txFromSatnogs,
+    txFromGroupTx,
+    txRowsFromGroupSat,
     txFromPrimaryHint,
     satHasTxHint,
     groupNeedsTxReload,
@@ -157,49 +158,54 @@ const {
     console.log('PASS: txListFingerprint');
 })();
 
-// ── txFromSatnogs + sort ─────────────────────────────────────────────────────
+// ── txFromGroupTx + sort ─────────────────────────────────────────────────────
 
-(function test_txFromSatnogs_basic() {
+(function test_txFromGroupTx_basic() {
     const sat = { norad_id: 25544, sat_name: 'ISS' };
     const t = {
         uuid: 'abc-123',
-        alive: true,
-        status: 'active',
-        downlink_low: 145825000,
+        freq_hz: 145825000,
         mode: 'FM',
+        modulation: 'FM',
         baud: 1200,
         description: 'APRS',
     };
-    const row = txFromSatnogs(sat, t);
-    assert.ok(row, 'не null для активного передатчика');
+    const row = txFromGroupTx(sat, t);
+    assert.ok(row, 'not null for downlink');
     assert.strictEqual(row.freqMHz, '145.825');
     assert.strictEqual(row.freqHz, 145825000);
     assert.strictEqual(row.satNoradId, 25544);
-    console.log('PASS: txFromSatnogs basic');
+    console.log('PASS: txFromGroupTx basic');
 })();
 
-(function test_txFromSatnogs_inactive() {
+(function test_txFromGroupTx_skips_zero_freq() {
     const sat = { norad_id: 25544 };
-    assert.strictEqual(txFromSatnogs(sat, { uuid: 'x', alive: false, status: 'active', downlink_low: 100e6 }), null);
-    assert.strictEqual(txFromSatnogs(sat, { uuid: 'x', alive: true, status: 'inactive', downlink_low: 100e6 }), null);
-    assert.strictEqual(txFromSatnogs(sat, { uuid: 'x', alive: true, status: 'active', downlink_low: 0 }), null);
-    console.log('PASS: txFromSatnogs inactive filtered');
+    assert.strictEqual(txFromGroupTx(sat, { uuid: 'x', freq_hz: 0 }), null);
+    assert.strictEqual(txFromGroupTx(sat, null), null);
+    console.log('PASS: txFromGroupTx skips zero freq');
 })();
 
-(function test_tx_sort_by_frequency() {
-    const sat = { norad_id: 25544, sat_name: 'ISS' };
-    const txList = [
-        { uuid: 'c', alive: true, status: 'active', downlink_low: 437800000, mode: 'GMSK' },
-        { uuid: 'a', alive: true, status: 'active', downlink_low: 145825000, mode: 'FM' },
-        { uuid: 'b', alive: true, status: 'active', downlink_low: 436750000, mode: 'CW' },
-    ];
-    const rows = txList.map(t => txFromSatnogs(sat, t)).filter(Boolean);
-    rows.sort((a, b) => a.freqHz - b.freqHz);
-
+(function test_txRowsFromGroupSat_sorts_and_fallback() {
+    const sat = {
+        norad_id: 25544,
+        sat_name: 'ISS',
+        transmitters: [
+            { uuid: 'c', freq_hz: 437800000, mode: 'GMSK' },
+            { uuid: 'a', freq_hz: 145825000, mode: 'FM' },
+            { uuid: 'b', freq_hz: 436750000, mode: 'CW' },
+        ],
+    };
+    const rows = txRowsFromGroupSat(sat);
     assert.strictEqual(rows[0].freqMHz, '145.825');
     assert.strictEqual(rows[1].freqMHz, '436.750');
     assert.strictEqual(rows[2].freqMHz, '437.800');
-    console.log('PASS: TX sort by frequency');
+
+    const fallback = txRowsFromGroupSat({
+        norad_id: 1, sat_name: 'X', freq_mhz: '145.800', modulation: 'FM', tx_uuid: 'p',
+    });
+    assert.strictEqual(fallback.length, 1);
+    assert.strictEqual(fallback[0].uuid, 'p');
+    console.log('PASS: txRowsFromGroupSat sorts and fallback');
 })();
 
 // ── renderStrip ──────────────────────────────────────────────────────────────
@@ -395,14 +401,15 @@ const {
 (function test_groupNeedsTxReload_when_sse_has_freq_but_no_rows() {
     assert.strictEqual(satHasTxHint({ freq_mhz: '145.825' }), true);
     assert.strictEqual(satHasTxHint({ tx_count: 2 }), true);
+    assert.strictEqual(satHasTxHint({ transmitters: [{ freq_hz: 1 }] }), true);
     assert.strictEqual(satHasTxHint({}), false);
     assert.strictEqual(
         groupNeedsTxReload(
-            [{ norad_id: 25544, freq_mhz: '145.825' }],
+            [{ norad_id: 25544, transmitters: [{ freq_hz: 145825000 }] }],
             []
         ),
         true,
-        'нет строк TX при наличии freq в SSE → нужен reload'
+        'no TX rows while SSE has transmitters → reload'
     );
     assert.strictEqual(
         groupNeedsTxReload(
@@ -410,7 +417,7 @@ const {
             [{ satNoradId: 25544 }]
         ),
         false,
-        'строки уже есть → reload не нужен'
+        'rows already present → no reload'
     );
     console.log('PASS: groupNeedsTxReload');
 })();

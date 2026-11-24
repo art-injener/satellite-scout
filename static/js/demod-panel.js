@@ -35,19 +35,42 @@
         return (hz < 0 ? '−' : '+') + text;
     }
 
-    // Подписи демодуляторов сервера (internal/sdr.Demods).
+    // Подписи демодуляторов сервера (internal/sdr.Demods); дополняются из ListMeta.
     const DEMOD_LABELS = {
+        auto: 'Авто',
         afsk1200: 'AFSK 1200',
         fsk1200: 'FSK 1200',
         fsk4800: 'FSK 4800',
         fsk9600_g3ruh: 'FSK 9600 G3RUH',
         fsk9600_geoscan: 'FSK 9600 GEOSCAN',
+        fsk9600_ax100_rs: 'FSK 9600 AX.100 RS',
+        fsk4800_ax100: 'FSK 4800 AX.100',
+        gfsk1200: 'GFSK 1200',
+        gfsk4800: 'GFSK 4800',
+        gfsk9600: 'GFSK 9600',
         gmsk9600: 'GMSK 9600',
+        gmsk9600_ax100: 'GMSK 9600 AX.100',
+        gmsk9600_ax100_rs: 'GMSK 9600 AX.100 RS',
+        gmsk9600_usp: 'GMSK 9600 USP',
+        gmsk4800: 'GMSK 4800',
+        gmsk4800_ax100: 'GMSK 4800 AX.100',
+        gmsk4800_usp: 'GMSK 4800 USP',
+        gmsk2400: 'GMSK 2400',
+        gmsk2400_usp: 'GMSK 2400 USP',
+        msk9600: 'MSK 9600',
+        '3fsk4800': '3FSK 4800',
+        '4fsk4800': '4FSK 4800',
+        gmfsk4800: 'GMFSK 4800',
         ook: 'OOK',
+        rs41: 'RS41',
+        m10: 'M10',
         bpsk1200: 'BPSK 1200',
         bpsk9600: 'BPSK 9600',
         qpsk_ccsds: 'QPSK CCSDS',
+        pi4_dqpsk: 'π/4-DQPSK',
+        apsk16: '16-APSK',
         sstv: 'SSTV',
+        am: 'AM',
         fm: 'FM',
         wfm: 'FM эфир',
         usb: 'USB',
@@ -56,12 +79,38 @@
     };
 
     // Профили, у которых итог приёма — звук: тактов, синхрослов и кадров у них нет.
-    const VOICE_DEMODS = { fm: true, wfm: true, usb: true, lsb: true, cw: true };
+    const VOICE_DEMODS = { am: true, fm: true, wfm: true, usb: true, lsb: true, cw: true };
     const SSB_DEMODS = { usb: true, lsb: true };
 
     /** Подпись демодулятора по идентификатору сервера; неизвестный — как есть. */
     function demodLabel(id) {
         return DEMOD_LABELS[id] || id;
+    }
+
+    /** Дополнить подписи из GET /api/sdr/demod-profiles. */
+    function setDemodLabels(map) {
+        if (!map || typeof map !== 'object') { return; }
+        Object.keys(map).forEach(function(id) {
+            if (map[id]) { DEMOD_LABELS[id] = map[id]; }
+        });
+    }
+
+    /**
+     * Строка pipeline в блоке «Обработка»: при «Авто» — проба кандидатов или выбранный профиль.
+     * @param {Object} st — demod_status
+     */
+    function pipelineFromStatus(st) {
+        if (!st || st.demod_off) { return '—'; }
+        if (st.demod !== 'auto') { return demodLabel(st.demod); }
+        if (st.auto_phase === 'locked' && st.auto_locked) {
+            return 'Выбран ' + demodLabel(st.auto_locked);
+        }
+        const ids = Array.isArray(st.auto_ids) ? st.auto_ids : [];
+        if (ids.length) {
+            return 'Проба — ' + ids.map(demodLabel).join(' · ');
+        }
+        const n = typeof st.auto_candidates === 'number' ? st.auto_candidates : 0;
+        return n > 0 ? ('Проба — ' + n) : 'Проба…';
     }
 
     /** Уровень в dBm по поправке тракта, без неё — в dBFS; минус типографский. */
@@ -128,6 +177,26 @@
     }
 
     /**
+     * Этап «Сигнал»: при открытом пороге — СШ (если измерено), иначе уровень канала;
+     * при закрытом — «шум», чтобы мощность канала не выглядела как сигнал.
+     * @param {Object} st — demod_status
+     * @param {?number} levelOffset
+     */
+    function signalStage(st, levelOffset) {
+        const open = st.active && st.squelch_open;
+        const level = formatLevel(st.level_dbfs, levelOffset);
+        const thresh = formatLevel(st.squelch_dbfs, levelOffset);
+        if (!open) {
+            return stage('idle', 'шум', level + ' · порог ' + thresh);
+        }
+        const snr = st.reception && typeof st.reception.snr_db === 'number' ? st.reception.snr_db : 0;
+        if (snr > 0) {
+            return stage('ok', 'СШ ' + Math.round(snr) + ' дБ', level + ' · порог ' + thresh);
+        }
+        return stage('ok', level, 'порог ' + thresh);
+    }
+
+    /**
      * Этапы приёма из `demod_status`. Меры несущей, тактов и синхрослов сервер снимает
      * только с сигнала выше порога: при закрытом пороге они остаются от последнего сигнала
      * и показываются приглушёнными.
@@ -143,8 +212,7 @@
         const rx = st.reception;
         const dim = function(state) { return open ? state : 'idle'; };
         const out = {
-            signal: stage(open ? 'ok' : 'idle', formatLevel(st.level_dbfs, levelOffset),
-                'порог ' + formatLevel(st.squelch_dbfs, levelOffset)),
+            signal: signalStage(st, levelOffset),
         };
 
         if (!rx) {
@@ -178,7 +246,11 @@
         const good = st.frames_good;
         const bad = st.frames_bad;
         const framesState = good > 0 ? 'ok' : (bad > 0 ? 'bad' : 'idle');
-        out.frames = stage(framesState, good + bad > 0 ? good + ' / ' + bad : '—', 'CRC верна / нет');
+        let framesDetail = 'CRC верна / нет';
+        if (rx && rx.fec) {
+            framesDetail += ' · FEC ' + rx.fec.corrected;
+        }
+        out.frames = stage(framesState, good + bad > 0 ? good + ' / ' + bad : '—', framesDetail);
         return out;
     }
 
@@ -195,6 +267,17 @@
         if (!st.active) { return { state: 'idle', text: 'Поток приёмника остановлен' }; }
         if (st.demod_off) { return { state: 'idle', text: 'Демодулятор выключен' }; }
         if (!st.supported) { return { state: 'bad', text: 'Демодулятор ' + st.demod + ' не реализован' }; }
+        if (st.demod === 'auto') {
+            if (st.auto_phase === 'locked' && st.auto_locked) {
+                return { state: 'ok', text: 'Выбран ' + demodLabel(st.auto_locked) };
+            }
+            const ids = Array.isArray(st.auto_ids) ? st.auto_ids : [];
+            const list = ids.length ? ids.map(demodLabel).join(' · ') : '';
+            return {
+                state: 'warn',
+                text: list ? ('Проба — ' + list) : 'Проба…',
+            };
+        }
         if (st.demod === 'sstv') { return diagnoseSSTV(st); }
         if (!st.squelch_open) {
             return good > 0
@@ -396,6 +479,9 @@
         const stages = stagesFromStatus(st, levelOffset);
         this._lastDiag = diagnose(st, stages, now);
         this._render(stages, this._lastDiag);
+        if (this._els.pipeline) {
+            this._els.pipeline.textContent = pipelineFromStatus(st);
+        }
         // Лента кадров у SSTV и голоса пуста: картинка идёт минуты, звук кадров не даёт.
         if (this._els.stripBox) { this._els.stripBox.hidden = st.demod === 'sstv' || !!VOICE_DEMODS[st.demod]; }
         this._renderStrip();
@@ -486,6 +572,8 @@
         this._history.clear();
     };
 
+    DemodPanel.setLabels = setDemodLabels;
+
     if (typeof window !== 'undefined') {
         window.DemodPanel = DemodPanel;
         window.formatDemodFreqMHz = formatFreqMHz;
@@ -500,6 +588,7 @@
             formatFreqMHz: formatFreqMHz,
             formatHz: formatHz,
             demodLabel: demodLabel,
+            pipelineFromStatus: pipelineFromStatus,
             stagesFromStatus: stagesFromStatus,
             diagnose: diagnose,
         };

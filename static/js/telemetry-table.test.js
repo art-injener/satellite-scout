@@ -112,17 +112,19 @@ test('addPacket adds one row per packet with channel column', () => {
     });
     assert.strictEqual(_tbody.childNodes.length, 1);
     const row = _tbody.childNodes[0];
-    assert.strictEqual(row.childNodes.length, 6);
+    assert.strictEqual(row.childNodes.length, 7);
     assert.ok(row.childNodes[0].textContent.indexOf('ISS-FSK') >= 0);
     assert.strictEqual(row.childNodes[1].textContent, '—', 'mock packet has no demodulator');
+    assert.strictEqual(row.childNodes[2].textContent, '—', 'mock packet has no kind');
     t.destroy();
 });
 
-test('addPacket shows the demodulator in the second column', () => {
+test('addPacket shows the demodulator and kind columns', () => {
     _tbody.innerHTML = '';
     const t = new TelemetryTable();
-    t.addPacket({ crc: 'OK', demod: 'FSK 9600 GEOSCAN', params: [] });
+    t.addPacket({ crc: 'OK', demod: 'FSK 9600 GEOSCAN', kind: 'Маяк ТМИ', params: [] });
     assert.strictEqual(_tbody.childNodes[0].childNodes[1].textContent, 'FSK 9600 GEOSCAN');
+    assert.strictEqual(_tbody.childNodes[0].childNodes[2].textContent, 'Маяк ТМИ');
     t.destroy();
 });
 
@@ -186,16 +188,34 @@ const beacon = {
 };
 
 test('telemetryPacket maps a server frame to a table row', () => {
-    const pkt = telemetryPacket(beacon);
+    const pkt = telemetryPacket(Object.assign({ kind: 'text' }, beacon));
     assert.strictEqual(pkt.time, '11:10:15');
     assert.strictEqual(pkt.crc, 'OK');
     assert.strictEqual(pkt.channelLabel, 'SCOUT');
     assert.strictEqual(pkt.channelFreqMHz, 145.825);
     assert.strictEqual(pkt.demod, 'AFSK 1200');
+    assert.strictEqual(pkt.kind, 'Сообщение');
     assert.deepStrictEqual(pkt.params, [
         { key: 'кому', value: 'CQ' },
         { key: 'данные', value: 'Satellite Scout imitator beacon' },
     ]);
+});
+
+test('telemetryPacket maps image kind to summary row', () => {
+    const pkt = telemetryPacket({
+        timestamp_ms: beacon.timestamp_ms,
+        frequency_hz: 436200000,
+        demod: 'fsk9600_geoscan',
+        kind: 'image',
+        decoder: 'geoscan.image',
+        summary: 'Снимок: кусок 1, смещение 32768',
+        info_hex: '01003e',
+    });
+    assert.strictEqual(pkt.kind, 'Снимок');
+    assert.deepStrictEqual(pkt.params, [
+        { key: 'сводка', value: 'Снимок: кусок 1, смещение 32768' },
+    ]);
+    assert.ok(pkt.details.some((d) => d.key === 'hex'));
 });
 
 test('telemetryPacket labels the demodulator like the receiver panel, unknown ones by id', () => {
@@ -225,16 +245,19 @@ test('live mode stops the mock and keeps it off on activate', () => {
 test('addTelemetry appends a live row', () => {
     _tbody.innerHTML = '';
     const t = new TelemetryTable();
-    t.addTelemetry(beacon);
+    t.addTelemetry(Object.assign({ kind: 'text' }, beacon));
     const row = _tbody.childNodes[0];
     assert.strictEqual(row.childNodes[0].textContent, 'SCOUT · 145,825 MHz');
     assert.strictEqual(row.childNodes[1].textContent, 'AFSK 1200');
-    assert.strictEqual(row.childNodes[2].textContent, '11:10:15');
+    assert.strictEqual(row.childNodes[2].textContent, 'Сообщение');
+    assert.strictEqual(row.childNodes[3].textContent, '11:10:15');
     t.destroy();
 });
 
 const geoscanBeacon = Object.assign({}, beacon, {
     demod: 'fsk9600_geoscan',
+    kind: 'beacon',
+    decoder: 'geoscan.beacon',
     dest: 'BEACON',
     info: '',
     info_hex: '01ff',
@@ -259,6 +282,8 @@ test('telemetryPacket keeps every beacon field, recipient and hex for the detail
         { key: 'ID маяка', value: '1' },
         { key: 'Напряжение АКБ', value: '7,420 В' },
         { key: 'Режим СЭП', value: 'штатный' },
+        { key: 'тип', value: 'Маяк ТМИ' },
+        { key: 'декодер', value: 'geoscan.beacon' },
         { key: 'кому', value: 'BEACON' },
         { key: 'hex', value: '01ff' },
     ]);
@@ -281,12 +306,12 @@ test('clicking a row with details opens the modal with every field', () => {
     assert.ok(!_modal.classList.contains('modal--hidden'), 'click opens the modal');
     assert.strictEqual(_modalTitle.textContent, 'SCOUT · 145,825 MHz · 11:10:15 · FSK 9600 GEOSCAN');
     const rows = _modalTbody.childNodes;
-    assert.strictEqual(rows.length, 5);
+    assert.strictEqual(rows.length, 7);
     assert.strictEqual(rows[1].childNodes[0].textContent, 'Напряжение АКБ');
     assert.strictEqual(rows[1].childNodes[1].textContent, '7,420 В');
 
     row.dispatch('click');
-    assert.strictEqual(_modalTbody.childNodes.length, 5, 'reopening replaces the rows');
+    assert.strictEqual(_modalTbody.childNodes.length, 7, 'reopening replaces the rows');
     t.destroy();
 });
 
