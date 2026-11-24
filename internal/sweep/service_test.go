@@ -503,3 +503,110 @@ func TestService_RebuildWindowsOnCycleBoundary(t *testing.T) {
 		t.Errorf("tunes %v, want third tune back to 145.9", got)
 	}
 }
+
+func TestService_PolicyTX_TunesEachPlanTX(t *testing.T) {
+	// Survey ranges would put the receiver on span midpoints; tx policy must tune TX freqs.
+	h := newHarness(t, Range{LoHz: 435_400_000, HiHz: 437_800_000})
+	h.svc.WithPlanTargets(func(string, time.Time, time.Time) []Target {
+		return []Target{
+			{FreqHz: 436_795_000, Label: "SO-50", NoradID: 27607},
+			{FreqHz: 437_800_000, Label: "ISS", NoradID: 25544},
+		}
+	})
+	if err := h.svc.StartPolicy(testPath, PolicyTX); err != nil {
+		t.Fatalf("StartPolicy: %v", err)
+	}
+	st := h.nextState(t)
+	want := []Window{
+		{CenterHz: 436_795_000, SpanHz: testBand, Label: "SO-50", NoradID: 27607},
+		{CenterHz: 437_800_000, SpanHz: testBand, Label: "ISS", NoradID: 25544},
+	}
+	if st.Policy != PolicyTX || !slices.Equal(st.Windows, want) {
+		t.Fatalf("state %+v, want policy tx windows %+v", st, want)
+	}
+	if got := h.hub.rcv.tuned(); len(got) == 0 || got[0] != 436_795_000 {
+		t.Fatalf("first tune %v, want SO-50 436.795", got)
+	}
+	h.clock.fireDwell(t)
+	st = h.nextState(t)
+	if st.Index != 1 || st.Windows[st.Index].CenterHz != 437_800_000 {
+		t.Fatalf("second dwell %+v, want ISS", st)
+	}
+	if got := h.waitTunes(t, 2); got[1] != 437_800_000 {
+		t.Errorf("tunes %v, want second tune ISS", got)
+	}
+}
+
+func TestService_PolicyTX_NoTargets(t *testing.T) {
+	h := newHarness(t, Range{CenterHz: 145_900_000})
+	h.svc.WithPlanTargets(func(string, time.Time, time.Time) []Target { return nil })
+	err := h.svc.StartPolicy(testPath, PolicyTX)
+	if !errors.Is(err, ErrNoTargets) {
+		t.Fatalf("err %v, want ErrNoTargets", err)
+	}
+}
+
+func TestService_PolicyTX_RebuildsEachHop(t *testing.T) {
+	// После ухода КА из ленты план на следующем hop уже без него — не ждём конца цикла.
+	h := newHarness(t, Range{LoHz: 435_400_000, HiHz: 437_800_000})
+	var mu sync.Mutex
+	targets := []Target{
+		{FreqHz: 436_795_000, Label: "SO-50", NoradID: 27607},
+		{FreqHz: 437_500_000, Label: "gone", NoradID: 1},
+		{FreqHz: 437_800_000, Label: "ISS", NoradID: 25544},
+	}
+	h.svc.WithPlanTargets(func(string, time.Time, time.Time) []Target {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(targets)
+	})
+	if err := h.svc.StartPolicy(testPath, PolicyTX); err != nil {
+		t.Fatalf("StartPolicy: %v", err)
+	}
+	st := h.nextState(t)
+	if len(st.Windows) != 3 {
+		t.Fatalf("start windows %d, want 3", len(st.Windows))
+	}
+	mu.Lock()
+	targets = []Target{
+		{FreqHz: 436_795_000, Label: "SO-50", NoradID: 27607},
+		{FreqHz: 437_800_000, Label: "ISS", NoradID: 25544},
+	}
+	mu.Unlock()
+	h.clock.fireDwell(t)
+	st = h.nextState(t)
+	if len(st.Windows) != 2 {
+		t.Fatalf("after hop windows %+v, want 2 (group sync)", st.Windows)
+	}
+	if st.Index != 1 || st.Windows[st.Index].CenterHz != 437_800_000 {
+		t.Fatalf("after hop %+v, want next ISS (skip removed)", st)
+	}
+}
+
+func TestNextAfterHz(t *testing.T) {
+	ws := []Window{{CenterHz: 10}, {CenterHz: 20}, {CenterHz: 30}}
+	if i, w := nextAfterHz(ws, 10); i != 1 || w {
+		t.Fatalf("got %d wrapped=%v, want 1 false", i, w)
+	}
+	if i, w := nextAfterHz(ws, 30); i != 0 || !w {
+		t.Fatalf("got %d wrapped=%v, want 0 true", i, w)
+	}
+}
+
+func TestMergeTargets_TXFirstAirDupDropped(t *testing.T) {
+	tx := []Target{{FreqHz: 435_860_000, Label: "TEN-KOH 2", NoradID: 1}}
+	air := []Target{
+		{FreqHz: 434_419_000, Label: "OOK", Air: true, Demod: "ook"},
+		{FreqHz: 435_844_000, Label: "pulse", Air: true}, // ~16 кГц от TX — в merge
+	}
+	got := mergeTargets(tx, air)
+	if len(got) != 2 {
+		t.Fatalf("len=%d want 2: %+v", len(got), got)
+	}
+	if got[0].Air || got[0].NoradID != 1 || got[0].FreqHz != 435_860_000 {
+		t.Fatalf("first=%+v, want TX sat", got[0])
+	}
+	if !got[1].Air || got[1].FreqHz != 434_419_000 {
+		t.Fatalf("second=%+v, want far air OOK", got[1])
+	}
+}

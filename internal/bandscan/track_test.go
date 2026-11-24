@@ -72,16 +72,76 @@ func TestTracker_SignalShownAfterSecondHit(t *testing.T) {
 	}
 }
 
-func TestTracker_RemembersSignalForAnHour(t *testing.T) {
+func TestTracker_RemembersShownSignalPastAnHour(t *testing.T) {
 	tr := NewTracker()
 	feed(tr, t0, t0+3_000, testCenter, steadyAt(testCenter+100_000))
 	feed(tr, t0+3_000, t0+3_000+HoldMs+stepMs, testCenter, func(uint64) []Peak { return nil })
 	if len(tr.Signals(nil)) != 1 {
-		t.Fatal("hour list dropped a signal that only just went quiet")
+		t.Fatal("list dropped a signal that only just went quiet")
 	}
+	id := only(t, tr.Signals(nil)).ID
+	// Показанная строка живёт до перезапуска / eviction, не час.
 	tr.Update(synthDecision(t0+3_000+RememberMs+stepMs, testCenter))
-	if sigs := tr.Signals(nil); len(sigs) != 0 {
-		t.Errorf("signal still shown after an hour: %+v", sigs)
+	s := only(t, tr.Signals(nil))
+	if s.ID != id {
+		t.Errorf("after an hour id = %s, want still %s", s.ID, id)
+	}
+}
+
+func TestTracker_SignalCarriesStickySatName(t *testing.T) {
+	tr := NewTracker()
+	freq := func(ms uint64) float64 { return testCenter + 100_000 - 150*float64(ms-t0)/1000 }
+	expected := func(ms uint64) []Expected {
+		return []Expected{{NoradID: 55104, UUID: "tx1", FreqHz: freq(ms), SatName: "AO-123"}}
+	}
+	peaks := func(ms uint64) []Peak { return []Peak{carrier(freq(ms), 18_000, 14)} }
+
+	feed(tr, t0, t0+3_000, testCenter, peaks)
+	for ms := t0 + 2_000; ms < t0+20_000; ms += 1_000 {
+		feed(tr, ms, ms+1_000, testCenter, peaks)
+		tr.Signals(expected(ms + 1_000))
+	}
+	s := only(t, tr.Signals(nil))
+	if s.NoradID != 55104 || s.SatName != "AO-123" {
+		t.Fatalf("sticky identity norad=%d name=%q, want 55104 AO-123", s.NoradID, s.SatName)
+	}
+}
+
+func TestTracker_DopplerShiftSameNoradStaysOneRow(t *testing.T) {
+	tr := NewTracker()
+	const f0 = testCenter + 100_000
+	freq := func(ms uint64) float64 { return f0 - 200*float64(ms-t0)/1000 } // −200 Гц/с
+	expected := func(ms uint64) []Expected {
+		return []Expected{{NoradID: 55104, UUID: "tx1", FreqHz: freq(ms), SatName: "AO-123"}}
+	}
+	peaks := func(ms uint64) []Peak { return []Peak{carrier(freq(ms), 12_000, 14)} }
+
+	feed(tr, t0, t0+3_000, testCenter, peaks)
+	for ms := t0 + 2_000; ms < t0+20_000; ms += 1_000 {
+		feed(tr, ms, ms+1_000, testCenter, peaks)
+		tr.Signals(expected(ms + 1_000))
+	}
+	id := only(t, tr.Signals(expected(t0+20_000))).ID
+
+	// Пауза (hop): огибающая остыла, Доплер ушёл дальше burstJoinHz.
+	gapFrom := t0 + 20_000
+	gapTo := gapFrom + HoldMs + stepMs
+	feed(tr, gapFrom, gapTo, testCenter, func(uint64) []Peak { return nil })
+	fAfter := freq(gapTo) - 12_000 // ещё −12 кГц от последнего центра
+	feed(tr, gapTo, gapTo+3_000, testCenter, func(uint64) []Peak {
+		return []Peak{carrier(fAfter, 12_000, 14)}
+	})
+	tr.Signals(expected(gapTo + 3_000))
+
+	sigs := tr.Signals(nil)
+	if len(sigs) != 1 {
+		t.Fatalf("doppler split into %d rows %+v, want one", len(sigs), sigs)
+	}
+	if sigs[0].ID != id {
+		t.Errorf("id = %s after doppler gap, want %s", sigs[0].ID, id)
+	}
+	if sigs[0].SatName != "AO-123" {
+		t.Errorf("sat_name = %q, want AO-123", sigs[0].SatName)
 	}
 }
 
@@ -261,6 +321,31 @@ func TestTracker_OriginSatelliteFollowsExpected(t *testing.T) {
 	}
 }
 
+// Hop / другой LO: expected текущего окна пуст для старого участка —
+// имя КА из удачного матча остаётся (часовой «Эфир»).
+func TestTracker_StickyNoradSurvivesEmptyExpected(t *testing.T) {
+	tr := NewTracker()
+	freq := func(ms uint64) float64 { return testCenter + 100_000 - 150*float64(ms-t0)/1000 }
+	expected := func(ms uint64) []Expected {
+		return []Expected{{NoradID: 53385, UUID: "tx1", FreqHz: freq(ms)}}
+	}
+	peaks := func(ms uint64) []Peak { return []Peak{carrier(freq(ms), 18_000, 14)} }
+
+	feed(tr, t0, t0+3_000, testCenter, peaks)
+	for ms := t0 + 2_000; ms < t0+20_000; ms += 1_000 {
+		feed(tr, ms, ms+1_000, testCenter, peaks)
+		tr.Signals(expected(ms + 1_000))
+	}
+	s := only(t, tr.Signals(expected(t0+20_000)))
+	if s.Origin != OriginSatellite || s.NoradID != 53385 {
+		t.Fatalf("before hop origin %q norad %d", s.Origin, s.NoradID)
+	}
+	s = only(t, tr.Signals(nil))
+	if s.Origin != OriginSatellite || s.NoradID != 53385 {
+		t.Errorf("empty expected dropped the name: origin %q norad %d", s.Origin, s.NoradID)
+	}
+}
+
 // A ground station on a satellite frequency: the expected marker passes by, the segment stays put.
 func TestTracker_OriginTerrestrialWhenExpectedLeaves(t *testing.T) {
 	tr := NewTracker()
@@ -378,6 +463,87 @@ func TestTracker_EvictsLongestSilentOverLimit(t *testing.T) {
 		if math.Abs(s.center()-(testCenter+100_000)) < testBinHz {
 			t.Error("the longest silent segment survived eviction")
 		}
+	}
+}
+
+// One 2FSK signal on the imitator: at AOS only the mark/space tones cross the threshold,
+// later the whole hump covers both tone rows for minutes. One signal must stay one row.
+func TestTracker_FSKTonesUnderPersistentHumpMergeIntoOneRow(t *testing.T) {
+	tr := NewTracker()
+	const c = testCenter + 100_000
+	tones := func(uint64) []Peak {
+		return []Peak{carrier(c-4_300, 600, 8), carrier(c+4_300, 600, 8)}
+	}
+	feed(tr, t0, t0+3_000, testCenter, tones)
+	if n := len(tr.Signals(nil)); n != 2 {
+		t.Fatalf("setup: got %d rows for the two tones, want 2", n)
+	}
+	hump := func(uint64) []Peak { return []Peak{carrier(c, 11_500, 12)} }
+	feed(tr, t0+3_000, t0+10_000, testCenter, hump)
+	sigs := tr.Signals(nil)
+	if len(sigs) != 1 {
+		t.Fatalf("2FSK split into %d rows %+v, want one", len(sigs), sigs)
+	}
+	if bw := sigs[0].BandwidthHz; bw < 11_000 || bw > 13_000 {
+		t.Errorf("bandwidth = %d Hz, want the hump ~11.5 kHz", bw)
+	}
+}
+
+// A fast-drifting satellite with deep fades: a long fade freezes the envelope, and the
+// reattach must extrapolate the segment drift instead of opening a new row each time.
+func TestTracker_DriftingSignalReattachesAfterLongFade(t *testing.T) {
+	tr := NewTracker()
+	freq := func(ms uint64) float64 { return testCenter + 100_000 - 100*float64(ms-t0)/1000 } // -100 Hz/s
+	on := func(ms uint64) []Peak { return []Peak{carrier(freq(ms), 10_000, 10)} }
+	off := func(uint64) []Peak { return nil }
+
+	feed(tr, t0, t0+5_000, testCenter, on)
+	feed(tr, t0+5_000, t0+9_000, testCenter, off) // short fade: still inside the frozen envelope
+	feed(tr, t0+9_000, t0+14_000, testCenter, on)
+	id := only(t, tr.Signals(nil)).ID
+
+	// Two minutes of silence: Doppler moves the signal -12 kHz from the frozen envelope.
+	feed(tr, t0+14_000, t0+134_000, testCenter, off)
+	feed(tr, t0+134_000, t0+139_000, testCenter, on)
+
+	sigs := tr.Signals(nil)
+	if len(sigs) != 1 {
+		t.Fatalf("fades split the pass into %d rows %+v, want one", len(sigs), sigs)
+	}
+	if sigs[0].ID != id {
+		t.Errorf("id = %s after the long fade, want %s", sigs[0].ID, id)
+	}
+}
+
+// An old ground beacon with a satellite hump passing over it: the peak goes to the
+// nearest row, not to the elder one — both rows keep their identity through the overflight.
+func TestTracker_BeaconUnderPassingHumpKeepsBothRows(t *testing.T) {
+	tr := NewTracker()
+	const beacon = testCenter + 100_000
+	feed(tr, t0, t0+61_000, testCenter, steadyAt(beacon))
+	beaconID := only(t, tr.Signals(nil)).ID
+
+	// The hump appears 20 kHz above the beacon and slides across it at -200 Hz/s.
+	humpAt := func(ms uint64) float64 { return beacon + 20_000 - 200*float64(ms-t0-61_000)/1000 }
+	feed(tr, t0+61_000, t0+261_000, testCenter, func(ms uint64) []Peak {
+		return []Peak{carrier(beacon, 2_000, 15), carrier(humpAt(ms), 11_500, 12)}
+	})
+
+	sigs := tr.Signals(nil)
+	if len(sigs) != 2 {
+		t.Fatalf("got %d rows %+v, want the beacon and the hump kept apart", len(sigs), sigs)
+	}
+	b := sigs[0]
+	if sigs[1].ID == beaconID {
+		b = sigs[1]
+	} else if sigs[0].ID != beaconID {
+		t.Fatalf("beacon row %s lost: %+v", beaconID, sigs)
+	}
+	if math.Abs(float64(b.CenterHz)-beacon) > 1_000 {
+		t.Errorf("beacon center = %d, want %d (the row slid away with the hump)", b.CenterHz, beacon)
+	}
+	if b.BandwidthHz > 4_000 {
+		t.Errorf("beacon bandwidth = %d Hz, want its own 2 kHz", b.BandwidthHz)
 	}
 }
 

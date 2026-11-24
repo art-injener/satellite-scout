@@ -493,16 +493,19 @@ func TestDefaultOptions_BeaconsOfEveryFormat(t *testing.T) {
 			t.Errorf("%s: period %v frame %+v, want the default beacon", s.Modem, s.Period, s.Frame)
 		}
 		for _, f := range freqs {
-			if math.Abs(float64(s.FrequencyHz)-float64(f)) < 30_000 {
+			if math.Abs(float64(s.FrequencyHz)-float64(f)) < float64(defaultBeaconSpacingHz)-1 {
 				t.Errorf("%s at %d Hz overlaps a beacon at %d Hz", s.Modem, s.FrequencyHz, f)
 			}
 		}
 		freqs = append(freqs, s.FrequencyHz)
 	}
-	for _, m := range []BeaconModem{BeaconAFSK1200, BeaconFSK9600G3RUH, BeaconFSK9600GEOSCAN} {
+	for _, m := range defaultBeaconModems {
 		if !modems[m] {
 			t.Errorf("no default beacon for %s", m)
 		}
+	}
+	if len(modems) != len(defaultBeaconModems) {
+		t.Errorf("beacons=%d, want %d (one per modem)", len(modems), len(defaultBeaconModems))
 	}
 }
 

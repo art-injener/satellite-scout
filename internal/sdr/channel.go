@@ -13,8 +13,16 @@ var ErrInvalidChannel = errors.New("invalid channel settings")
 // Demods — демодуляторы, которые можно выбрать в панели приёмника. Идентификаторы
 // совпадают со значениями селектора «Демодулятор» в UI.
 var Demods = []string{
-	"fsk9600_g3ruh", "fsk9600_geoscan", "fsk4800", "fsk1200", "gmsk9600", "afsk1200",
-	"bpsk1200", "bpsk9600", "qpsk_ccsds", "cw", "fm", "wfm", "usb", "lsb", "ook", "sstv",
+	"auto",
+	"fsk9600_g3ruh", "fsk9600_geoscan", "fsk9600_ax100_rs", "fsk9600", "fsk4800", "fsk4800_ax100", "fsk1200",
+	"gfsk9600", "gfsk4800", "gfsk1200",
+	"gmsk9600", "gmsk9600_ax100", "gmsk9600_ax100_rs", "gmsk9600_usp",
+	"gmsk4800", "gmsk4800_ax100", "gmsk4800_usp",
+	"gmsk2400", "gmsk2400_usp", "msk9600",
+	"3fsk4800", "4fsk4800", "gmfsk4800",
+	"afsk1200",
+	"bpsk1200", "bpsk9600", "qpsk_ccsds", "pi4_dqpsk", "apsk16",
+	"cw", "am", "fm", "wfm", "usb", "lsb", "ook", "rs41", "m10", "sstv",
 }
 
 // MaxChannelBandwidthHz — самая широкая «Полоса канала» узких профилей: шире цепочка
@@ -31,6 +39,9 @@ const WFMBandwidthHz = 200_000
 // (около 4,8 кГц). CW: тон 700 Гц от середины, шире 1 кГц края уходят за нулевые биения.
 var DemodMaxBandwidthHz = map[string]uint32{"usb": 4_000, "lsb": 4_000, "cw": 1_000}
 
+// MaxChannelBaud — верх символьной скорости в настройках канала (бод).
+const MaxChannelBaud = 100_000
+
 // ChannelSettings — что демодулятор вырезает из полосы приёмника и как принимает:
 // ширина «Полосы канала», порог и демодулятор. Панель держит сдвиг от центра в нуле:
 // слушают частоту приёмника, поправка только Доплером. Поле сдвига остаётся, чтобы
@@ -43,6 +54,9 @@ type ChannelSettings struct {
 	// Держится в dBFS: при смене усиления его значение в dBm сдвигается.
 	SquelchDBFS float64 `json:"squelch_dbfs"`
 	Demod       string  `json:"demod"`
+	// Baud — символьная скорость для профилей с гибким baud (сейчас ook), бод.
+	// 0 или нет поля — дефолт профиля. У профилей с фиксированной скоростью поле не используется.
+	Baud float64 `json:"baud,omitempty"`
 	// DemodOff — демодулятор выключен: спектр и водопад идут, цепочка не принимает.
 	// Нулевое значение оставляет приём включённым, поэтому старые запросы без поля его не гасят.
 	DemodOff bool `json:"demod_off,omitempty"`
@@ -69,6 +83,10 @@ func (c ChannelSettings) Validate(sampleRate uint32) error {
 	limit := uint32(MaxChannelBandwidthHz)
 	if c.Demod == "wfm" {
 		limit = WFMBandwidthHz
+	}
+	// APT NOAA (≈40 кГц ЧМ) не влезает в узкий лимит 18 кГц.
+	if c.Demod == "fm" {
+		limit = 48_000
 	}
 	if c.BandwidthHz == 0 || c.BandwidthHz > sampleRate || c.BandwidthHz > limit {
 		return fmt.Errorf("%w: bandwidth %d Hz not in (0, %d]", ErrInvalidChannel, c.BandwidthHz,
@@ -100,6 +118,9 @@ func (c ChannelSettings) Validate(sampleRate uint32) error {
 	}
 	if c.DopplerNorad < 0 {
 		return fmt.Errorf("%w: doppler_norad %d must not be negative", ErrInvalidChannel, c.DopplerNorad)
+	}
+	if math.IsNaN(c.Baud) || math.IsInf(c.Baud, 0) || c.Baud < 0 || c.Baud > MaxChannelBaud {
+		return fmt.Errorf("%w: baud %v must be in [0, %d]", ErrInvalidChannel, c.Baud, MaxChannelBaud)
 	}
 	return nil
 }

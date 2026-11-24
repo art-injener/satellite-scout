@@ -16,6 +16,15 @@ type Sighting struct {
 	Emission   string
 	SNRDB      float32
 	LastSeenMs int64 // для гибкой стоянки: сигнал пропал дольше GoneMs
+
+	// Поля классификатора (ADR-009); пустые, пока участок не разобран.
+	Modulation    string
+	Baud          float64
+	BandwidthHz   int64
+	BeaconPeriodS float64
+	Confidence    float64
+	Demod         string
+	DemodAlt      []string
 }
 
 // Visit — итог стоянки обхода по одному ожидаемому передатчику из плана.
@@ -60,7 +69,7 @@ func Judge(pathID string, w Window, startMs, endMs int64, plan []Entry, sights [
 			NoradID: e.NoradID, Name: e.Name, UUID: e.UUID, FreqHz: e.FreqHz,
 			Source: e.Source,
 		}
-		if s, ok := closestSighting(sights, e.FreqHz); ok {
+		if s, ok := MatchSighting(sights, e.NoradID, e.FreqHz); ok {
 			v.Energy, v.Received = true, true
 			v.SNRDB = s.SNRDB
 			v.Origin, v.Emission = s.Origin, s.Emission
@@ -81,13 +90,34 @@ func passOverlaps(aos, los, startMs, endMs int64) bool {
 	return true
 }
 
-func closestSighting(sights []Sighting, freqHz int64) (Sighting, bool) {
+// DopplerMatchHz — предел ухода сигнала своего КА от номинала: Доплер НОО на UHF
+// до ±10,5 кГц, плюс запас на неточность номинала в каталоге.
+const DopplerMatchHz = 12_000
+
+// MatchSighting — обнаружение для TX плана. Сначала участок, который bandscan уже
+// привязал к этому КА (Доплер там учтён), в пределах DopplerMatchHz; иначе
+// ближайший к номиналу в допуске NearHz.
+func MatchSighting(sights []Sighting, noradID int, freqHz int64) (Sighting, bool) {
+	if noradID > 0 {
+		if s, ok := closestWithin(sights, freqHz, DopplerMatchHz, func(s Sighting) bool {
+			return s.NoradID == noradID
+		}); ok {
+			return s, true
+		}
+	}
+	return closestWithin(sights, freqHz, NearHz, func(Sighting) bool { return true })
+}
+
+func closestWithin(sights []Sighting, freqHz int64, limitHz float64, keep func(Sighting) bool) (Sighting, bool) {
 	var best Sighting
-	bestDist := float64(NearHz) + 1
+	bestDist := limitHz + 1
 	found := false
 	for _, s := range sights {
+		if !keep(s) {
+			continue
+		}
 		d := math.Abs(float64(s.CenterHz - freqHz))
-		if d <= NearHz && d < bestDist {
+		if d <= limitHz && d < bestDist {
 			best, bestDist, found = s, d, true
 		}
 	}

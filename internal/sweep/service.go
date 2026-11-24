@@ -34,6 +34,39 @@ const (
 // ErrNotConfigured — у тракта нет диапазонов обхода в конфиге.
 var ErrNotConfigured = errors.New("sweep is not configured for radio path")
 
+// ErrNoTargets — политика tx, а в плане нет активных TX на горизонте.
+var ErrNoTargets = errors.New("sweep: no active plan transmitters")
+
+// Policy — как строить окна обхода.
+type Policy string
+
+const (
+	// PolicySurvey — конфиг ∪ кластеры плана (центры span для панорамы).
+	PolicySurvey Policy = "survey"
+	// PolicyTX — по одному окну на частоту TX плана (Авто приём).
+	PolicyTX Policy = "tx"
+)
+
+// Target — цель обхода по TX или эфиру (частота и подпись для UI).
+type Target struct {
+	FreqHz  uint64
+	Label   string
+	NoradID int
+	Air     bool    // цель из band_signals («+эфир»), не TX плана
+	Demod   string  // подсказка профиля с классификатора; пусто — «Авто»
+	Baud    float64 // скорость для гибких профилей (OOK/зонды)
+}
+
+// StartOptions — запуск обхода: политика и опции Авто приёма.
+type StartOptions struct {
+	Policy     Policy
+	IncludeAir bool // к TX плана добавить цели из эфира (band_signals)
+}
+
+// Горизонт плана для политики tx: как окно ленты группы (~1 мин), не час обзора.
+// Иначе в обход попадают восходящие через десятки минут, которых нет в списке видимых КА.
+const txHorizon = time.Minute
+
 // Hub — хаб приёмников: поток тракта, приёмник и годная полоса.
 type Hub interface {
 	Subscribe(pathID string) (<-chan sdr.IQFrame, func(), error)
@@ -62,14 +95,20 @@ func (realClock) Ticker(d time.Duration) (<-chan time.Time, func()) {
 
 // Window — окно обхода: одна настройка приёмника.
 type Window struct {
-	CenterHz uint64 `json:"center_hz"`
-	SpanHz   uint32 `json:"span_hz"`
+	CenterHz uint64  `json:"center_hz"`
+	SpanHz   uint32  `json:"span_hz"`
+	Label    string  `json:"label,omitempty"`
+	NoradID  int     `json:"norad_id,omitempty"`
+	Air      bool    `json:"air,omitempty"`
+	Demod    string  `json:"demod,omitempty"`
+	Baud     float64 `json:"baud,omitempty"`
 }
 
 // State — SSE sweep_state и ответ GET /api/sdr/sweep.
 type State struct {
 	RadioPath     string   `json:"radio_path"`
 	Running       bool     `json:"running"`
+	Policy        Policy   `json:"policy,omitempty"`
 	DwellS        int      `json:"dwell_s"`
 	Windows       []Window `json:"windows"`
 	Index         int      `json:"index"`
@@ -93,36 +132,49 @@ type DwellEndFunc func(pathID string, w Window, startMs, endMs int64)
 // Не должна вызывать методы Service (окна считаются под мьютексом).
 type PlanFreqsFunc func(pathID string, now, until time.Time) []uint64
 
+// PlanTargetsFunc — цели TX плана с именами для политики tx.
+type PlanTargetsFunc func(pathID string, now, until time.Time) []Target
+
+// AirTargetsFunc — цели из обнаружителя/классификатора («+эфир»).
+type AirTargetsFunc func(pathID string) []Target
+
 // DwellFunc — до какого момента (Unix мс) стоять на окне.
 // configDwellMs — dwell_s тракта. holdUntil <= now означает «уйти».
 // Без зависимости от bandscan/freqplan: снимок эфира собирает wiring.
 type DwellFunc func(pathID string, w Window, startMs, nowMs, configDwellMs int64) (holdUntilMs int64)
 
-// Service обходит тракты по диапазонам конфига ∪ кластерам плана.
-// Обход держит поток тракта как зритель, поэтому попутные получатели
-// (обнаружитель, демодулятор) работают и без открытой страницы.
+// AimFunc — наведение канала на пик вспышки во время стоянки (тикеры снимка, не каждый БПФ).
+type AimFunc func(pathID string, w Window, startMs, nowMs int64)
+
+// Service обходит тракты по диапазонам конфига ∪ кластерам плана
+// или по TX плана (политика tx). Обход держит поток тракта как зритель.
 // Снимки окон живут до перезапуска сервера. Список окон пересчитывается
-// на границе цикла, если задан PlanFreqs. Стоянка — DwellFunc или жёсткий dwell.
+// на границе цикла. Стоянка — DwellFunc или жёсткий dwell.
 type Service struct {
 	hub   Hub
 	emit  Sink
 	clock Clock
 
-	onDwellEnd DwellEndFunc
-	planFreqs  PlanFreqsFunc
-	dwellFn    DwellFunc
+	onDwellEnd  DwellEndFunc
+	planFreqs   PlanFreqsFunc
+	planTargets PlanTargetsFunc
+	airTargets  AirTargetsFunc
+	dwellFn     DwellFunc
+	aimFn       AimFunc
 
 	mu    sync.Mutex
 	paths map[string]*path
 }
 
 type path struct {
-	ranges   []Range
-	dwell    time.Duration
-	run      *run
-	state    State
-	snaps    map[uint64]Snapshot
-	watchers map[chan Snapshot]struct{}
+	ranges     []Range
+	dwell      time.Duration
+	policy     Policy
+	includeAir bool
+	run        *run
+	state      State
+	snaps      map[uint64]Snapshot
+	watchers   map[chan Snapshot]struct{}
 }
 
 type run struct {
@@ -142,11 +194,27 @@ func (s *Service) OnDwellEnd(fn DwellEndFunc) {
 	s.onDwellEnd = fn
 }
 
-// WithPlanFreqs подключает частоты плана: окна = конфиг ∪ жадные кластеры.
+// WithPlanFreqs подключает частоты плана: окна survey = конфиг ∪ жадные кластеры.
 func (s *Service) WithPlanFreqs(fn PlanFreqsFunc) *Service {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.planFreqs = fn
+	return s
+}
+
+// WithPlanTargets подключает цели TX с подписями для политики tx.
+func (s *Service) WithPlanTargets(fn PlanTargetsFunc) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.planTargets = fn
+	return s
+}
+
+// WithAirTargets подключает цели эфира для опции «+эфир» при политике tx.
+func (s *Service) WithAirTargets(fn AirTargetsFunc) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.airTargets = fn
 	return s
 }
 
@@ -155,6 +223,14 @@ func (s *Service) WithDwell(fn DwellFunc) *Service {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.dwellFn = fn
+	return s
+}
+
+// WithAim — наведение OffsetHz на вспышку на каждом снимке окна (~4 Гц).
+func (s *Service) WithAim(fn AimFunc) *Service {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.aimFn = fn
 	return s
 }
 
@@ -188,9 +264,102 @@ func (s *Service) path(pathID string) (*path, error) {
 	return p, nil
 }
 
-// windows — окна тракта при текущей годной полосе (конфиг ∪ план).
+// windows — окна тракта при политике survey (конфиг ∪ план).
 func (s *Service) windows(pathID string, p *path) ([]Window, uint32, error) {
 	return s.windowsHorizon(pathID, p, 0)
+}
+
+// windowsFor выбирает построение окон по политике.
+func (s *Service) windowsFor(pathID string, p *path, policy Policy, horizonN int) ([]Window, uint32, error) {
+	if policy == PolicyTX {
+		return s.windowsTX(pathID)
+	}
+	return s.windowsHorizon(pathID, p, horizonN)
+}
+
+// windowsTX — по одному окну на частоту TX плана; тюнер на частоту передатчика.
+// При includeAir — плюс цели из эфира; если целей нет — середины ranges (разведка).
+func (s *Service) windowsTX(pathID string) ([]Window, uint32, error) {
+	band, err := s.hub.UsableBand(pathID)
+	if err != nil {
+		return nil, 0, err
+	}
+	p := s.paths[pathID]
+	now := s.clock.Now()
+	until := now.Add(txHorizon)
+	var targets []Target
+	if s.planTargets != nil {
+		targets = s.planTargets(pathID, now, until)
+	} else if s.planFreqs != nil {
+		for _, hz := range s.planFreqs(pathID, now, until) {
+			targets = append(targets, Target{FreqHz: hz})
+		}
+	}
+	if p != nil && p.includeAir && s.airTargets != nil {
+		targets = mergeTargets(targets, s.airTargets(pathID))
+	}
+	if len(targets) == 0 && p != nil && p.includeAir {
+		targets = exploreRangeTargets(p.ranges, band)
+	}
+	if len(targets) == 0 {
+		return nil, band, nil
+	}
+	out := make([]Window, len(targets))
+	for i, t := range targets {
+		out[i] = Window{
+			CenterHz: t.FreqHz, SpanHz: band,
+			Label: t.Label, NoradID: t.NoradID,
+			Air: t.Air, Demod: t.Demod, Baud: t.Baud,
+		}
+	}
+	return out, band, nil
+}
+
+// airMergeHz — участок эфира ближе к TX плана сливается в hop TX (наведение добьёт Offset).
+// Шире типичного Доплера/ошибки каталога на UHF, чтобы импульс у номинала не плодил второй hop.
+const airMergeHz = 100_000
+
+// mergeTargets: сначала TX плана (КА), затем эфир без дублей у TX.
+func mergeTargets(tx, air []Target) []Target {
+	out := append([]Target(nil), tx...)
+	for _, a := range air {
+		dup := false
+		for _, t := range tx {
+			if absU64(t.FreqHz, a.FreqHz) <= airMergeHz {
+				dup = true
+				break
+			}
+		}
+		if !dup {
+			out = append(out, a)
+		}
+	}
+	return out
+}
+
+func exploreRangeTargets(ranges []Range, band uint32) []Target {
+	var out []Target
+	for _, r := range ranges {
+		var hz uint64
+		switch {
+		case r.CenterHz > 0:
+			hz = r.CenterHz
+		case r.LoHz > 0 && r.HiHz > r.LoHz:
+			hz = r.LoHz + (r.HiHz-r.LoHz)/2
+		default:
+			continue
+		}
+		out = append(out, Target{FreqHz: hz, Label: "разведка", Air: true})
+	}
+	_ = band
+	return out
+}
+
+func absU64(a, b uint64) uint64 {
+	if a >= b {
+		return a - b
+	}
+	return b - a
 }
 
 // windowsHorizon режет диапазоны на окна. horizonN > 0 — оценка длины цикла
@@ -239,33 +408,56 @@ func (s *Service) State(pathID string) (State, error) {
 	return State{RadioPath: pathID, DwellS: int(p.dwell / time.Second), Windows: ws}, nil
 }
 
-// Start ставит приёмник на первое окно и запускает обход. Идущий обход не перезапускается.
+// Start — обход survey (конфиг ∪ кластеры). Идущий обход не перезапускается.
 func (s *Service) Start(pathID string) error {
+	return s.StartWith(pathID, StartOptions{Policy: PolicySurvey})
+}
+
+// StartPolicy ставит приёмник на первое окно и запускает обход выбранной политики.
+func (s *Service) StartPolicy(pathID string, policy Policy) error {
+	return s.StartWith(pathID, StartOptions{Policy: policy})
+}
+
+// StartWith — обход с опциями (политика tx и «+эфир»).
+func (s *Service) StartWith(pathID string, opt StartOptions) error {
+	policy := opt.Policy
+	if policy == "" {
+		policy = PolicySurvey
+	}
 	s.mu.Lock()
 	p, err := s.path(pathID)
 	if err != nil || p.run != nil {
 		s.mu.Unlock()
 		return err
 	}
-	ws, band, err := s.windows(pathID, p)
+	p.includeAir = opt.IncludeAir && policy == PolicyTX
+	ws, band, err := s.windowsFor(pathID, p, policy, 0)
 	if err == nil && len(ws) == 0 {
-		err = fmt.Errorf("radio path %q: no sweep windows", pathID)
+		if policy == PolicyTX {
+			err = fmt.Errorf("%w for %q", ErrNoTargets, pathID)
+		} else {
+			err = fmt.Errorf("radio path %q: no sweep windows", pathID)
+		}
 	}
 	if err != nil {
+		p.includeAir = false
 		s.mu.Unlock()
 		return err
 	}
 	receiver, err := s.hub.Get(pathID)
 	if err != nil {
+		p.includeAir = false
 		s.mu.Unlock()
 		return err
 	}
 	frames, unsubscribe, err := s.hub.Subscribe(pathID)
 	if err != nil {
+		p.includeAir = false
 		s.mu.Unlock()
 		return err
 	}
 	if err := receiver.Tune(ws[0].CenterHz); err != nil {
+		p.includeAir = false
 		s.mu.Unlock()
 		unsubscribe()
 		return fmt.Errorf("radio path %q: tune: %w", pathID, err)
@@ -273,22 +465,25 @@ func (s *Service) Start(pathID string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	r := &run{cancel: cancel, done: make(chan struct{})}
 	p.run = r
+	p.policy = policy
 	now := s.clock.Now()
 	startMs := now.UnixMilli()
 	endMs := evalHold(s.dwellFn, pathID, ws[0], startMs, startMs, p.dwell)
 	p.state = State{
-		RadioPath: pathID, Running: true, DwellS: int(p.dwell / time.Second), Windows: ws,
+		RadioPath: pathID, Running: true, Policy: policy,
+		DwellS: int(p.dwell / time.Second), Windows: ws,
 		Index: 0, Cycle: 1, WindowStartMs: startMs, WindowEndMs: endMs,
 	}
 	st := cloneState(p.state)
 	s.mu.Unlock()
 
-	slog.Info("sweep started", slog.String("radio_path", pathID), slog.Int("windows", len(ws)),
-		slog.Duration("dwell", p.dwell))
+	slog.Info("sweep started", slog.String("radio_path", pathID), slog.String("policy", string(policy)),
+		slog.Bool("include_air", opt.IncludeAir),
+		slog.Int("windows", len(ws)), slog.Duration("dwell", p.dwell))
 	s.sendState(st)
 	go s.loop(ctx, pathID, p, r, loopParams{
 		receiver: receiver, frames: frames, unsubscribe: unsubscribe, windows: ws, band: band,
-		holdUntilMs: endMs,
+		holdUntilMs: endMs, policy: policy,
 	})
 	return nil
 }
@@ -304,7 +499,10 @@ func (s *Service) Stop(pathID string) bool {
 	}
 	r := p.run
 	p.run = nil
+	p.policy = ""
+	p.includeAir = false
 	p.state.Running = false
+	p.state.Policy = ""
 	st := cloneState(p.state)
 	s.mu.Unlock()
 
@@ -349,6 +547,7 @@ type loopParams struct {
 	windows     []Window
 	band        uint32
 	holdUntilMs int64
+	policy      Policy
 }
 
 // loop стоит на окне до holdUntil, при продлении шлёт новый sweep_state, иначе — следующее окно.
@@ -372,7 +571,9 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 			}
 			acc.push(f)
 		case <-tick:
-			s.publish(p, acc.snapshot(s.clock.Now()))
+			now := s.clock.Now()
+			s.publish(p, acc.snapshot(now))
+			s.runAim(pathID, p, r, lp.windows[idx], now.UnixMilli())
 		case <-dwell:
 			s.publish(p, acc.snapshot(s.clock.Now()))
 			// Дедлайн сработал: даже если тестовые часы не тикнули, считаем время = holdUntil.
@@ -389,15 +590,31 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 				continue
 			}
 			s.notifyDwellEnd(pathID, p, lp.windows[idx])
-			idx = (idx + 1) % len(lp.windows)
-			if idx == 0 {
-				cycle++
+			prevHz := lp.windows[idx].CenterHz
+			if lp.policy == PolicyTX {
+				// Авто приём: на каждом hop заново сверяем план с лентой видимых КА.
 				ws, band, ok := s.rebuildWindows(pathID, p, r, len(lp.windows))
 				if !ok {
 					s.finish(pathID, p, r)
 					return
 				}
 				lp.windows, lp.band = ws, band
+				next, wrapped := nextAfterHz(lp.windows, prevHz)
+				if wrapped {
+					cycle++
+				}
+				idx = next
+			} else {
+				idx = (idx + 1) % len(lp.windows)
+				if idx == 0 {
+					cycle++
+					ws, band, ok := s.rebuildWindows(pathID, p, r, len(lp.windows))
+					if !ok {
+						s.finish(pathID, p, r)
+						return
+					}
+					lp.windows, lp.band = ws, band
+				}
 			}
 			if err := lp.receiver.Tune(lp.windows[idx].CenterHz); err != nil {
 				slog.Warn("sweep: tune failed", slog.String("radio_path", pathID), slog.Any("error", err))
@@ -420,6 +637,21 @@ func (s *Service) holdUntil(pathID string, w Window, startMs, nowMs int64, dwell
 	fn := s.dwellFn
 	s.mu.Unlock()
 	return evalHold(fn, pathID, w, startMs, nowMs, dwell)
+}
+
+// runAim — наведение канала на тике снимка (~4 Гц), пока обход на окне.
+func (s *Service) runAim(pathID string, p *path, r *run, w Window, nowMs int64) {
+	s.mu.Lock()
+	fn := s.aimFn
+	startMs := int64(0)
+	if p.run == r {
+		startMs = p.state.WindowStartMs
+	}
+	s.mu.Unlock()
+	if fn == nil || startMs == 0 {
+		return
+	}
+	fn(pathID, w, startMs, nowMs)
 }
 
 func evalHold(fn DwellFunc, pathID string, w Window, startMs, nowMs int64, dwell time.Duration) int64 {
@@ -465,7 +697,18 @@ func (s *Service) extendHold(p *path, r *run, untilMs int64) {
 	s.sendState(st)
 }
 
-// rebuildWindows пересчитывает окна на границе цикла.
+// nextAfterHz — индекс окна с частотой строго выше afterHz; иначе 0 и wrapped.
+// Окна считаются упорядоченными по возрастанию частоты (как ActiveTargets).
+func nextAfterHz(windows []Window, afterHz uint64) (idx int, wrapped bool) {
+	for i, w := range windows {
+		if w.CenterHz > afterHz {
+			return i, false
+		}
+	}
+	return 0, true
+}
+
+// rebuildWindows пересчитывает окна на границе цикла (survey) или каждом hop (tx).
 // false — обход уже остановлен, ошибка полосы или окон не осталось.
 func (s *Service) rebuildWindows(pathID string, p *path, r *run, prevN int) ([]Window, uint32, bool) {
 	s.mu.Lock()
@@ -473,7 +716,7 @@ func (s *Service) rebuildWindows(pathID string, p *path, r *run, prevN int) ([]W
 	if p.run != r {
 		return nil, 0, false
 	}
-	ws, band, err := s.windowsHorizon(pathID, p, prevN)
+	ws, band, err := s.windowsFor(pathID, p, p.policy, prevN)
 	if err != nil {
 		slog.Warn("sweep: rebuild windows", slog.String("radio_path", pathID), slog.Any("error", err))
 		return nil, 0, false
@@ -519,7 +762,10 @@ func (s *Service) finish(pathID string, p *path, r *run) {
 		return
 	}
 	p.run = nil
+	p.policy = ""
+	p.includeAir = false
 	p.state.Running = false
+	p.state.Policy = ""
 	st := cloneState(p.state)
 	s.mu.Unlock()
 	slog.Info("sweep ended with stream", slog.String("radio_path", pathID))

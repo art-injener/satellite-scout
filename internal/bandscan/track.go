@@ -12,8 +12,8 @@ const (
 	// HoldMs — сколько участок ещё считается звучащим после последнего появления.
 	// Столько журнал визита стоянки считает его присутствием. Пакет между вспышками короче.
 	HoldMs = 10_000
-	// RememberMs — сколько таблица «Эфир» хранит участок после последнего появления.
-	// Новый проход обновляет ту же строку, а не заводит её заново.
+	// RememberMs — окно для несформированных участков в cacheHit и для active/черновиков.
+	// Уже показанные строки «Эфира» живут до перезапуска (лимит maxSegments).
 	RememberMs = 60 * 60 * 1000
 	// rememberMinOnMs — короче этого всплеск не передатчик: после HoldMs он из таблицы уходит.
 	rememberMinOnMs = 2_000
@@ -23,6 +23,15 @@ const (
 	// burstJoinHz — короткие всплески ближе этого по центру считаются одним источником.
 	// Дальше канала 12,5 кГц соседа не задевает.
 	burstJoinHz = 5_000
+	// dopplerJoinHz — один КА после hop: центр мог уйти дальше burstJoinHz из‑за Доплера.
+	// Разные NORAD так не склеиваются (см. sameSticky).
+	dopplerJoinHz = 30_000
+	// maxCacheDriftHzS — предел дрейфа, при котором cacheHit доверяет экстраполяции:
+	// реальный Доплер на VHF/UHF до ~150 Гц/с, больший дрейф — гуляющий центроид осколка.
+	maxCacheDriftHzS = 500
+	// coverMergeMs — накрытие огибающей дольше этого сливает показанные строки-осколки
+	// (тоны FSK под общим горбом). Короткое накрытие — мост-вспышка, соседей не трогает.
+	coverMergeMs = 3_000
 	// confirmHits — решений с превышением, после которых участок показывается: одиночный выброс не сигнал.
 	confirmHits = 2
 	// hysteresisDB — насколько ниже порога должен упасть уровень, чтобы вспышка кончилась.
@@ -72,6 +81,7 @@ type Expected struct {
 	NoradID int
 	UUID    string
 	FreqHz  float64
+	SatName string // имя КА для колонки «Передатчик» (ADR-009 §11.2)
 }
 
 // Signal — участок для SSE band_signals.
@@ -83,12 +93,25 @@ type Signal struct {
 	State       string  `json:"state"`
 	LastSeenMs  uint64  `json:"last_seen_ms"`
 	NoradID     int     `json:"norad_id,omitempty"`
+	SatName     string  `json:"sat_name,omitempty"`
 	Origin      string  `json:"origin"`
 	Emission    string  `json:"emission"`
 	Hint        string  `json:"hint,omitempty"`
 	// Structure — что за сигнал по структуре (ADR-009 §6.1); nil, пока участок не разобран.
 	Structure *signalclass.Result `json:"structure,omitempty"`
 	Stats     Stats               `json:"stats"`
+	// Приём (кадры / голос): пишет demod через RecordRx, не фронт.
+	FramesGood  int    `json:"frames_good,omitempty"`
+	LastKind    string `json:"last_kind,omitempty"`
+	LastSummary string `json:"last_summary,omitempty"`
+	LastDecoder string `json:"last_decoder,omitempty"`
+	LastRxMs    uint64 `json:"last_rx_ms,omitempty"`
+	// Тело последнего кадра для модалки «Кадр» (ADR-009 §7.2).
+	LastSrc     string      `json:"last_src,omitempty"`
+	LastDest    string      `json:"last_dest,omitempty"`
+	LastInfo    string      `json:"last_info,omitempty"`
+	LastInfoHex string      `json:"last_info_hex,omitempty"`
+	LastParams  []HearParam `json:"last_params,omitempty"`
 }
 
 // Stats — статистика участка по времени (ADR-009 §5.5).
@@ -130,9 +153,25 @@ type segment struct {
 	// Совпавший ожидаемый передатчик и обе частоты в момент совпадения.
 	txUUID           string
 	txRefHz, segAtTx float64
+	// Липкий КА: после hop expected другого окна пуст, имя в «Эфире» не снимаем.
+	stickyOrigin string
+	stickyNorad  int
+	stickyName   string
 
-	// shown — строка уже была в таблице. Пока не прошёл час, её не снимают.
+	// shown — строка уже была в таблице «Эфир»; живёт до перезапуска / eviction.
 	shown bool
+	// Приём с демодулятора: кадры и последний kind (в т.ч. голос).
+	framesGood                         int
+	lastKind, lastSummary, lastDecoder string
+	lastSrc, lastDest, lastInfo        string
+	lastInfoHex                        string
+	lastParams                         []HearParam
+	lastRxMs                           uint64
+
+	// coveredMs — с какого решения огибающая участка непрерывно накрыта огибающей
+	// другого показанного участка; 0 — не накрыта. Долгое накрытие — признак осколка
+	// чужого сигнала, а не самостоятельного передатчика.
+	coveredMs uint64
 
 	// Разбор структуры: когда поставлен последний, последние ответы и показанный.
 	classifiedMs uint64
@@ -150,6 +189,11 @@ type segment struct {
 }
 
 func (s *segment) center() float64 { return s.centerHz }
+
+// coveredLong — участок непрерывно накрыт чужой огибающей дольше coverMergeMs.
+func (s *segment) coveredLong(nowMs uint64) bool {
+	return s.coveredMs != 0 && nowMs-s.coveredMs >= coverMergeMs
+}
 
 // structureForClient — structure с именем RDS, даже если последний vote его стёр.
 func (s *segment) structureForClient(nowMs uint64) *signalclass.Result {
@@ -258,12 +302,65 @@ func (t *Tracker) Update(dec Decision) {
 			s.observe(dec, dt, matched[s])
 		}
 	}
+	t.trackCovered(matched)
 	t.joinCache()
+}
+
+// trackCovered ведёт непрерывность накрытия показанных участков огибающими совпавших
+// в решении и сливает накрытых дольше coverMergeMs: тон FSK под общим горбом — осколок
+// одного сигнала, а не соседний передатчик. Сам участок с энергией накрытым не считается.
+func (t *Tracker) trackCovered(matched map[*segment]bool) {
+	covered := make(map[*segment]bool)
+	for m := range matched {
+		if !m.shown {
+			continue
+		}
+		for _, s := range t.segs {
+			// Старшая строка осколком младшей не считается: маяк под проезжающим
+			// горбом КА должен пережить пролёт.
+			if s == m || !s.shown || s.firstSeenMs < m.firstSeenMs || s.loHz < m.loHz || s.hiHz > m.hiHz {
+				continue
+			}
+			covered[s] = true
+			if s.coveredMs == 0 {
+				s.coveredMs = t.nowMs
+			}
+		}
+	}
+	for _, s := range t.segs {
+		if !covered[s] || matched[s] {
+			s.coveredMs = 0
+		}
+	}
+	for {
+		merged := false
+		for m := range matched {
+			if !m.shown || !slices.Contains(t.segs, m) {
+				continue
+			}
+			for _, s := range t.segs {
+				if s != m && s.shown && s.coveredLong(t.nowMs) &&
+					s.loHz >= m.loHz && s.hiHz <= m.hiHz {
+					t.merge([]*segment{m, s})
+					merged = true
+					break
+				}
+			}
+			if merged {
+				break
+			}
+		}
+		if !merged {
+			return
+		}
+	}
 }
 
 // match относит пики решения к участкам. Пик у огибающей участка — тот же сигнал. Пик,
 // задевший несколько участков, сливает их в старший: это куски одного сигнала. Пик без участка
-// заводит новый. После решения сливаются и участки, чьи огибающие сошлись.
+// заводит новый. Показанные строки не сливаются — тогда пик достаётся ближайшему по центру:
+// старшая строка не должна уносить чужой сигнал, как маяк — горб пролетающего КА.
+// После решения сливаются и участки, чьи огибающие сошлись.
 func (t *Tracker) match(dec Decision) map[*segment]bool {
 	pad := mergeGapBins * dec.BinHz
 	parts := make(map[*segment][]Peak, len(dec.Peaks))
@@ -286,7 +383,11 @@ func (t *Tracker) match(dec Decision) map[*segment]bool {
 			parts[keep] = append(parts[keep], parts[g]...)
 			delete(parts, g)
 		}
-		parts[keep] = append(parts[keep], p)
+		owner := keep
+		if len(gone) == 0 && len(touched) > 1 {
+			owner = peakOwner(touched, p)
+		}
+		parts[owner] = append(parts[owner], p)
 	}
 	matched := make(map[*segment]bool, len(parts))
 	for s, ps := range parts {
@@ -296,6 +397,30 @@ func (t *Tracker) match(dec Decision) map[*segment]bool {
 	for t.mergeTouching(matched, pad) {
 	}
 	return matched
+}
+
+// peakOwner — участок, чья огибающая лучше всего совпадает с пиком по форме; при равенстве —
+// старший. Узкой строке широкий пик не достаётся, даже если центры совпали: центр сглаженный
+// и врёт на лаге сглаживания, а форма огибающей различает «свой» сигнал всегда.
+func peakOwner(segs []*segment, p Peak) *segment {
+	best := segs[0]
+	bestFit := peakFit(best, p)
+	for _, s := range segs[1:] {
+		if f := peakFit(s, p); f > bestFit || (f == bestFit && preferKeep(s, best)) {
+			best, bestFit = s, f
+		}
+	}
+	return best
+}
+
+// peakFit — доля пересечения пика с огибающей участка в их объединении (Жаккар).
+func peakFit(s *segment, p Peak) float64 {
+	inter := min(s.hiHz, p.HiHz) - max(s.loHz, p.LoHz)
+	if inter <= 0 {
+		return 0
+	}
+	union := max(s.hiHz, p.HiHz) - min(s.loHz, p.LoHz)
+	return inter / union
 }
 
 // mergeTouching сливает один участок решения с соседями, чьи огибающие он задел; true — слил.
@@ -323,7 +448,9 @@ func (t *Tracker) mergeTouching(matched map[*segment]bool, pad float64) bool {
 	return false
 }
 
-// merge оставляет одну строку. Уже показанные строки друг в друга не сливаются.
+// merge оставляет одну строку. Уже показанные с разным КА друг в друга не сливаются;
+// один stickyNorad (доплер-дубль) — склеивается. Показанные без опознанного КА сливаются,
+// если один давно накрыт огибающей другого: это осколки одного сигнала.
 // Разнесённые по времени вспышки складывают длительность.
 func (t *Tracker) merge(touched []*segment) (*segment, []*segment) {
 	keep := touched[0]
@@ -334,8 +461,14 @@ func (t *Tracker) merge(touched []*segment) (*segment, []*segment) {
 	}
 	gone := make([]*segment, 0, len(touched)-1)
 	for _, s := range touched {
-		if s == keep || (keep.shown && s.shown) {
+		if s == keep {
 			continue
+		}
+		if keep.shown && s.shown && !sameSticky(keep, s) {
+			differentSats := keep.stickyNorad > 0 && s.stickyNorad > 0 && keep.stickyNorad != s.stickyNorad
+			if differentSats || (!s.coveredLong(t.nowMs) && !keep.coveredLong(t.nowMs)) {
+				continue
+			}
 		}
 		if separateInTime(keep, s) {
 			keep.onMs += s.onMs
@@ -354,6 +487,12 @@ func (t *Tracker) merge(touched []*segment) (*segment, []*segment) {
 			keep.structure = s.structure
 			keep.votes = append(keep.votes, s.votes...)
 		}
+		if keep.stickyNorad == 0 && s.stickyNorad > 0 {
+			keep.stickyNorad, keep.stickyOrigin, keep.stickyName = s.stickyNorad, s.stickyOrigin, s.stickyName
+		} else if keep.stickyName == "" && s.stickyName != "" && keep.stickyNorad == s.stickyNorad {
+			keep.stickyName = s.stickyName
+		}
+		keep.absorbHear(s)
 		gone = append(gone, s)
 	}
 	if len(gone) > 0 {
@@ -361,6 +500,11 @@ func (t *Tracker) merge(touched []*segment) (*segment, []*segment) {
 		t.segs = slices.DeleteFunc(t.segs, func(s *segment) bool { return slices.Contains(gone, s) })
 	}
 	return keep, gone
+}
+
+// sameSticky — один КА: доплер-дубли после hop склеиваем, разные передатчики нет.
+func sameSticky(a, b *segment) bool {
+	return a.stickyNorad > 0 && a.stickyNorad == b.stickyNorad
 }
 
 // separateInTime — вспышки не пересекались по времени, их длительность можно сложить.
@@ -371,17 +515,36 @@ func separateInTime(a, b *segment) bool {
 	return a.lastSeenMs < b.firstSeenMs || b.lastSeenMs < a.firstSeenMs
 }
 
-// cacheHit — ближайший уже виденный участок в пределах burstJoinHz.
-// Огибающая могла остыть, а центр тот же источник.
+// cacheHit — ближайший уже виденный участок. Без КА центр экстраполируется по дрейфу
+// участка за время тишины: после долгого фейда Доплер уносит сигнал дальше burstJoinHz,
+// а сходиться с замороженным центром он не обязан. С stickyNorad — dopplerJoinHz.
 func (t *Tracker) cacheHit(p Peak) *segment {
 	c := (p.LoHz + p.HiHz) / 2
 	var best *segment
-	bestD := float64(burstJoinHz)
+	bestD := math.Inf(1)
 	for _, s := range t.segs {
-		if s.centerHz == 0 || t.nowMs-s.lastSeenMs > RememberMs {
+		if s.centerHz == 0 {
 			continue
 		}
-		d := math.Abs(s.centerHz - c)
+		aged := t.nowMs > s.lastSeenMs && t.nowMs-s.lastSeenMs > RememberMs
+		if aged && !s.shown {
+			continue
+		}
+		limit := float64(burstJoinHz)
+		center := s.centerHz
+		if s.stickyNorad > 0 {
+			limit = dopplerJoinHz
+		} else if t.nowMs > s.lastSeenMs {
+			gapS := float64(t.nowMs-s.lastSeenMs) / 1000
+			if dr := s.drift(); math.Abs(dr) <= maxCacheDriftHzS {
+				center += dr * gapS
+				limit = min(dopplerJoinHz, limit+math.Abs(dr)*gapS)
+			}
+		}
+		d := math.Abs(center - c)
+		if d >= limit {
+			continue
+		}
 		if d < bestD || (d == bestD && best != nil && s.firstSeenMs < best.firstSeenMs) {
 			best, bestD = s, d
 		}
@@ -389,21 +552,25 @@ func (t *Tracker) cacheHit(p Peak) *segment {
 	return best
 }
 
-// joinCache склеивает короткие участки, чьи центры ближе burstJoinHz.
-// Два уже показанных передатчика так не соединяются.
+// joinCache склеивает короткие участки ближе burstJoinHz.
+// Два показанных с разным КА не соединяются; один stickyNorad — да (доплер-дубль).
 func (t *Tracker) joinCache() {
 	for {
 		merged := false
 		for i := 0; i < len(t.segs); i++ {
 			for j := i + 1; j < len(t.segs); j++ {
 				a, b := t.segs[i], t.segs[j]
-				if a.remembered() && b.remembered() {
+				if a.remembered() && b.remembered() && !sameSticky(a, b) {
 					continue
 				}
 				if a.centerHz == 0 || b.centerHz == 0 {
 					continue
 				}
-				if math.Abs(a.centerHz-b.centerHz) > burstJoinHz {
+				limit := float64(burstJoinHz)
+				if sameSticky(a, b) {
+					limit = dopplerJoinHz
+				}
+				if math.Abs(a.centerHz-b.centerHz) > limit {
 					continue
 				}
 				t.merge([]*segment{a, b})
@@ -445,8 +612,11 @@ func (s *segment) observe(dec Decision, dt float64, matched bool) {
 	}
 }
 
-// preferKeep — уже показанная строка важнее более ранней, чтобы слияние не меняло её номер.
+// preferKeep — pin КА и уже показанная строка важнее, чтобы слияние не меняло номер и приём.
 func preferKeep(s, keep *segment) bool {
+	if s.pinned() != keep.pinned() {
+		return s.pinned()
+	}
 	if s.shown != keep.shown {
 		return s.shown
 	}
@@ -456,8 +626,8 @@ func preferKeep(s, keep *segment) bool {
 	return s.id < keep.id
 }
 
-// remembered — строка в часовой таблице. Первый раз решает qualifies,
-// дальше строка остаётся, даже если полоса разъехалась.
+// remembered — строка в таблице «Эфир». Первый раз решает qualifies;
+// дальше остаётся до перезапуска / eviction, даже если полоса разъехалась.
 func (s *segment) remembered() bool {
 	if s.shown {
 		return true
@@ -485,13 +655,18 @@ func (s *segment) qualifies() bool {
 
 func (t *Tracker) add(ms uint64) *segment {
 	if len(t.segs) >= t.limit {
-		oldest := 0
+		oldest := -1
 		for i, s := range t.segs {
-			if s.lastSeenMs < t.segs[oldest].lastSeenMs {
+			if s.pinned() {
+				continue
+			}
+			if oldest < 0 || s.lastSeenMs < t.segs[oldest].lastSeenMs {
 				oldest = i
 			}
 		}
-		t.segs = slices.Delete(t.segs, oldest, oldest+1)
+		if oldest >= 0 {
+			t.segs = slices.Delete(t.segs, oldest, oldest+1)
+		}
 	}
 	t.nextID++
 	s := &segment{id: t.nextID, firstSeenMs: ms, lastSeenMs: ms, refMs: ms}
@@ -511,9 +686,19 @@ func (t *Tracker) active(expected []Expected) []Signal {
 }
 
 func (t *Tracker) list(expected []Expected, maxAgeMs uint64) []Signal {
+	// Signals (RememberMs): показанные до перезапуска. active (HoldMs): только свежие.
+	keepShown := maxAgeMs > HoldMs
 	var out []Signal
 	for _, s := range t.segs {
-		if s.hits < confirmHits || t.nowMs-s.lastSeenMs > maxAgeMs || !s.remembered() {
+		if s.hits < confirmHits && !s.pinned() {
+			continue
+		}
+		aged := t.nowMs > s.lastSeenMs && t.nowMs-s.lastSeenMs > maxAgeMs
+		if s.shown {
+			if aged && !keepShown && !s.pinned() {
+				continue
+			}
+		} else if aged || !s.remembered() {
 			continue
 		}
 		origin, norad := s.origin(expected)
@@ -533,10 +718,21 @@ func (t *Tracker) list(expected []Expected, maxAgeMs uint64) []Signal {
 			State:       StateActive,
 			LastSeenMs:  s.lastSeenMs,
 			NoradID:     norad,
+			SatName:     s.stickyName,
 			Origin:      origin,
 			Emission:    s.emission(),
 			Hint:        bandHint(s.center()),
 			Structure:   structure,
+			FramesGood:  s.framesGood,
+			LastKind:    s.lastKind,
+			LastSummary: s.lastSummary,
+			LastDecoder: s.lastDecoder,
+			LastRxMs:    s.lastRxMs,
+			LastSrc:     s.lastSrc,
+			LastDest:    s.lastDest,
+			LastInfo:    s.lastInfo,
+			LastInfoHex: s.lastInfoHex,
+			LastParams:  cloneHearParams(s.lastParams),
 			Stats: Stats{
 				FirstSeenMs: s.firstSeenMs,
 				ObservedS:   round1(s.observedMs / 1000),
@@ -544,6 +740,9 @@ func (t *Tracker) list(expected []Expected, maxAgeMs uint64) []Signal {
 				Bursts:      s.bursts,
 				DriftHzS:    round1(s.drift()),
 			},
+		}
+		if norad == 0 {
+			sig.SatName = ""
 		}
 		if sig.Emission == EmissionPulsed {
 			sig.Stats.PeriodS = round1(s.period())
@@ -556,6 +755,7 @@ func (t *Tracker) list(expected []Expected, maxAgeMs uint64) []Signal {
 
 // origin: КА — участок совпал с ожидаемым передатчиком и сдвинулся вместе с ним;
 // земной — частота стоит дольше минуты, а передатчика рядом нет.
+// Нет TX рядом (hop / другой LO): отдаём липкий NORAD последнего удачного матча.
 func (s *segment) origin(expected []Expected) (string, int) {
 	c := s.center()
 	tol := (s.hiHz-s.loHz)/2 + s.binHz + crystalPPM*c
@@ -565,12 +765,30 @@ func (s *segment) origin(expected []Expected) (string, int) {
 			tx = &expected[i]
 		}
 	}
-	if tx == nil {
+	if tx != nil {
+		if o := s.follows(tx, c); o != "" {
+			s.stickyOrigin, s.stickyNorad = o, tx.NoradID
+			if tx.SatName != "" {
+				s.stickyName = tx.SatName
+			}
+			return o, tx.NoradID
+		}
+		// Риска рядом, участок не следует. Приём или уже подтверждённый КА не стираем.
+		// UUID не трогаем: иначе follows каждый раз обнулит сдвиг Доплера.
+		if s.pinned() || s.stickyOrigin == OriginSatellite {
+			return s.stickyOrigin, s.stickyNorad
+		}
+		s.stickyOrigin, s.stickyNorad, s.stickyName = "", 0, ""
+	} else if s.stickyNorad > 0 {
+		return s.stickyOrigin, s.stickyNorad
+	} else {
 		s.txUUID = ""
-	} else if o := s.follows(tx, c); o != "" {
-		return o, tx.NoradID
+	}
+	if s.pinned() {
+		return s.stickyOrigin, s.stickyNorad
 	}
 	if s.observedMs >= newObservationMs && math.Abs(c-s.refHz) < s.binHz {
+		s.stickyOrigin, s.stickyNorad, s.stickyName = "", 0, ""
 		return OriginTerrestrial, 0
 	}
 	return OriginUnknown, 0

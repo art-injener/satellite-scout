@@ -96,6 +96,41 @@ func TestTracker_StructureVotesOverLastThree(t *testing.T) {
 	}
 }
 
+// «Не знаю» не стирает «знаю»: слабый кадр не снимает уже разобранную модуляцию.
+func TestTracker_UndeterminedDoesNotVote(t *testing.T) {
+	tr := NewTracker()
+	feed(tr, t0, t0+3_000, testCenter, steadyAt(testCenter+100_000))
+	id := segID(t, tr)
+	fsk := signalclass.Result{Modulation: signalclass.Mod2FSK, Confidence: 0.8, Why: "fsk"}
+	und := signalclass.Result{Modulation: signalclass.ModUndetermined, Why: "SNR мало"}
+
+	tr.SetStructure(id, fsk)
+	tr.SetStructure(id, und)
+	tr.SetStructure(id, und)
+	s := only(t, tr.Signals(nil)).Structure
+	if s == nil || s.Modulation != signalclass.Mod2FSK {
+		t.Fatalf("weak frames dropped the classified modulation: %+v", s)
+	}
+	if s.Confidence != 0.8 {
+		t.Errorf("confidence %v, want the strong frame's 0.8", s.Confidence)
+	}
+	tr.SetStructure(id, und)
+	if s := only(t, tr.Signals(nil)).Structure; s == nil || s.Modulation != signalclass.Mod2FSK {
+		t.Fatalf("a row of undetermined reset the structure: %+v", s)
+	}
+}
+
+// Пока определённого ответа не было, участок честно «не разобран».
+func TestTracker_UndeterminedOnlyStaysUnclassified(t *testing.T) {
+	tr := NewTracker()
+	feed(tr, t0, t0+3_000, testCenter, steadyAt(testCenter+100_000))
+	id := segID(t, tr)
+	tr.SetStructure(id, signalclass.Result{Modulation: signalclass.ModUndetermined, Why: "SNR мало"})
+	if s := only(t, tr.Signals(nil)).Structure; s != nil {
+		t.Errorf("no classification yet, want nil structure: %+v", s)
+	}
+}
+
 func TestTracker_StructureForGoneSegmentIgnored(t *testing.T) {
 	tr := NewTracker()
 	feed(tr, t0, t0+3_000, testCenter, steadyAt(testCenter+100_000))

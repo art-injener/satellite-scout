@@ -81,6 +81,25 @@ func (s *Service) WithExpected(src ExpectedSource) *Service {
 	return s
 }
 
+// RememberedSignals — участки тракта в памяти RememberMs (для hop «+эфир»).
+func (s *Service) RememberedSignals(pathID string) []Signal {
+	pt := s.tracker(pathID)
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	return pt.tr.Signals(nil)
+}
+
+// RecordRx пишет принятый кадр/голос в участок тракта (таблица «Эфир»).
+func (s *Service) RecordRx(pathID string, freqHz uint64, note HearNote) bool {
+	if pathID == "" || freqHz == 0 {
+		return false
+	}
+	pt := s.tracker(pathID)
+	pt.mu.Lock()
+	defer pt.mu.Unlock()
+	return pt.tr.RecordRx(float64(freqHz), note)
+}
+
 // SignalsInBand — участки, которые звучат в окне centerHz ± spanHz/2 прямо сейчас.
 // Нужен журналу визитов обхода: снимок на конец стоянки, без часовой памяти таблицы.
 func (s *Service) SignalsInBand(pathID string, centerHz uint64, spanHz uint32) []Signal {
@@ -135,8 +154,8 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 	}
 	// Разбор мог ещё идти: кадры теста/обрыва приходят быстрее, чем Extract на 2 с IQ.
 	r.finishClassify()
-	// Поток встал: участки не наблюдаются, клиенты убирают маркеры.
-	s.send(pathID, r.last, []Signal{})
+	// Поток встал (hop / стоп): часовой список «Эфира» не чистим — клиенты зеркалят SSE.
+	s.send(pathID, r.last, s.signals(r.pt, r.last, r.usableHz))
 }
 
 // classified — ответ разбора участка id.

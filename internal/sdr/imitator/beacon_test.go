@@ -8,9 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/ax100"
 	"github.com/art-injener/satellite-scout/internal/ax25"
 	"github.com/art-injener/satellite-scout/internal/geoscan"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/usp"
 )
 
 func testBeacon() Signal {
@@ -86,7 +88,7 @@ func TestBeacon_FSK9600BurstIsEightTimesShorter(t *testing.T) {
 
 func TestBeacon_UnknownModem(t *testing.T) {
 	sig := testBeacon()
-	sig.Modem = "gmsk9600"
+	sig.Modem = "qpsk_ccsds" // ещё нет в маяке имитатора
 	if _, err := newSignalSource(sig, testRate); !errors.Is(err, ErrInvalidSignal) {
 		t.Errorf("err=%v, want ErrInvalidSignal", err)
 	}
@@ -122,6 +124,15 @@ func TestDefaultBeaconFrame_NamesModem(t *testing.T) {
 	}{
 		{"", "Satellite Scout imitator beacon: AFSK 1200"},
 		{BeaconAFSK1200, "Satellite Scout imitator beacon: AFSK 1200"},
+		{BeaconFSK1200, "Satellite Scout imitator beacon: FSK 1200"},
+		{BeaconFSK4800, "Satellite Scout imitator beacon: FSK 4800"},
+		{BeaconGFSK1200, "Satellite Scout imitator beacon: GFSK 1200"},
+		{BeaconGFSK4800, "Satellite Scout imitator beacon: GFSK 4800"},
+		{BeaconGFSK9600, "Satellite Scout imitator beacon: GFSK 9600"},
+		{BeaconGMSK9600, "Satellite Scout imitator beacon: GMSK 9600"},
+		{BeaconGMSK4800, "Satellite Scout imitator beacon: GMSK 4800"},
+		{BeaconBPSK1200, "Satellite Scout imitator beacon: BPSK 1200"},
+		{BeaconBPSK9600, "Satellite Scout imitator beacon: BPSK 9600"},
 		{BeaconFSK9600G3RUH, "Satellite Scout imitator beacon: FSK 9600 G3RUH"},
 	}
 	for _, c := range cases {
@@ -140,6 +151,40 @@ func TestDefaultBeaconFrame_GEOSCANCarriesBeaconTelemetry(t *testing.T) {
 		if p.ID == "eps_cell_voltage_full" && p.Value == "0,000" {
 			t.Error("battery voltage is zero, want a plausible value")
 		}
+	}
+}
+
+func TestDefaultBeaconFrame_AX100CarriesSuchaiTelemetry(t *testing.T) {
+	raw := DefaultBeaconFrame(BeaconGMSK4800AX100).Info
+	params, sat, ok := ax100.SuchaiBeaconParams(raw)
+	if !ok || sat != "SUCHAI-2" {
+		t.Fatalf("ok=%v sat=%q", ok, sat)
+	}
+	for _, p := range params {
+		if p.ID == "eps_vbatt" && p.Value == "0,00" {
+			t.Error("battery voltage is zero")
+		}
+	}
+}
+
+func TestDefaultBeaconFrame_USPCarriesBeaconTelemetry(t *testing.T) {
+	f := DefaultBeaconFrame(BeaconGMSK4800USP)
+	raw, err := f.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	params, kind, ok := usp.BeaconParams(raw)
+	if !ok || kind != "beacon" {
+		t.Fatalf("ok=%v kind=%q", ok, kind)
+	}
+	found := false
+	for _, p := range params {
+		if p.ID == "uab" && p.Value != "0,0" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("params=%v, want non-zero uab", params)
 	}
 }
 

@@ -65,15 +65,16 @@ const (
 // DefaultOptions — эфир по умолчанию: маяки всех модемов на −50 dBFS поверх шума
 // DefaultNoiseDBFS (SNR около 30 дБ в 15 кГц), кадр раз в DefaultBeaconPeriod.
 func DefaultOptions() Options {
-	signals := make([]Signal, 0, len(defaultBeacons))
-	for _, b := range defaultBeacons {
+	signals := make([]Signal, 0, len(defaultBeaconModems))
+	for i, m := range defaultBeaconModems {
+		freq := defaultBeaconFreq(i)
 		signals = append(signals, Signal{
 			Kind:        SignalBeacon,
-			FrequencyHz: b.freqHz,
+			FrequencyHz: freq,
 			LevelDBFS:   -50,
-			Frame:       DefaultBeaconFrame(b.modem),
+			Frame:       DefaultBeaconFrame(m),
 			Period:      DefaultBeaconPeriod,
-			Modem:       b.modem,
+			Modem:       m,
 		})
 	}
 	return Options{
@@ -84,18 +85,31 @@ func DefaultOptions() Options {
 	}
 }
 
-// defaultBeacons — маяки эфира по умолчанию, по одному на модем: приём каждого формата
-// проверяется без правки конфига. Частоты — в пределах ±128 кГц от DefaultFrequencyHz,
-// то есть в самой узкой «Полосе», и не ближе 50 кГц друг к другу. Приёмник стартует на
-// частоте первого сигнала, поэтому первым идёт AFSK 1200 в центре: его принимают настройки
-// канала по умолчанию (сдвиг 0, AFSK 1200).
-var defaultBeacons = []struct {
-	modem  BeaconModem
-	freqHz uint64
-}{
-	{BeaconAFSK1200, DefaultFrequencyHz},
-	{BeaconFSK9600G3RUH, DefaultFrequencyHz - 50_000},
-	{BeaconFSK9600GEOSCAN, DefaultFrequencyHz + 50_000},
+// defaultBeaconSpacingHz — шаг частот соседних маяков: все модемы должны уместиться
+// в узкую полосу (±RecommendedSampleRate/16), не ближе этого шага.
+const defaultBeaconSpacingHz = 20_000
+
+// defaultBeaconModems — маяки эфира по умолчанию в узкой полосе (±rate/16).
+// AX.100 не здесь: полоса уже забита; маяк AX.100 — явно в config (ImitatorBeaconModems).
+// Порядок: AFSK 1200 первым в центре (канал по умолчанию).
+var defaultBeaconModems = []BeaconModem{
+	BeaconAFSK1200,
+	BeaconFSK1200, BeaconFSK4800,
+	BeaconGFSK1200, BeaconGFSK4800, BeaconGFSK9600,
+	BeaconGMSK9600, BeaconGMSK4800, BeaconBPSK1200,
+	BeaconFSK9600G3RUH, BeaconFSK9600GEOSCAN,
+}
+
+// defaultBeaconFreq — частота i-го маяка: 0 в центре, далее −Δ, +Δ, −2Δ, +2Δ…
+func defaultBeaconFreq(i int) uint64 {
+	if i <= 0 {
+		return DefaultFrequencyHz
+	}
+	step := int64((i + 1) / 2) * defaultBeaconSpacingHz
+	if i%2 == 1 {
+		return uint64(int64(DefaultFrequencyHz) - step)
+	}
+	return uint64(int64(DefaultFrequencyHz) + step)
 }
 
 // Receiver — имитатор SDR-приёмника для TDD без железа.

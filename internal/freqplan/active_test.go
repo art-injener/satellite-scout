@@ -52,3 +52,50 @@ func TestActiveFreqs_NoPassWindowKept(t *testing.T) {
 		t.Errorf("got %v, want %v", got, want)
 	}
 }
+
+func TestActiveTargets_SortedUniqueWithNames(t *testing.T) {
+	plan := []Entry{
+		{NoradID: 25544, Name: "ISS", FreqHz: 437_800_000, AOS: 0, LOS: 100},
+		{NoradID: 27607, Name: "SO-50", FreqHz: 436_795_000, AOS: 0, LOS: 100},
+		{NoradID: 25544, Name: "ISS-vhf", FreqHz: 145_800_000, AOS: 0, LOS: 100},
+		{NoradID: 1, Name: "dup", FreqHz: 437_800_000, AOS: 0, LOS: 100},
+		{NoradID: 2, Name: "out", FreqHz: 401_000_000, AOS: 200, LOS: 300},
+	}
+	got := ActiveTargets(plan, 10, 50, nil)
+	want := []Target{
+		{FreqHz: 145_800_000, Name: "ISS-vhf", NoradID: 25544},
+		{FreqHz: 436_795_000, Name: "SO-50", NoradID: 27607},
+		{FreqHz: 437_800_000, Name: "ISS", NoradID: 25544},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] got %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestFilterTargetsByNorad_KeepsOnlyGroup(t *testing.T) {
+	in := []Target{
+		{FreqHz: 145_900_000, Name: "AO-7", NoradID: 7530},
+		{FreqHz: 437_800_000, Name: "ISS", NoradID: 25544},
+		{FreqHz: 436_795_000, Name: "SO-50", NoradID: 27607},
+	}
+	got := FilterTargetsByNorad(in, map[int]struct{}{25544: {}, 27607: {}})
+	want := []Target{
+		{FreqHz: 437_800_000, Name: "ISS", NoradID: 25544},
+		{FreqHz: 436_795_000, Name: "SO-50", NoradID: 27607},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+}
+
+func TestFilterTargetsByNorad_EmptyAllowPassthrough(t *testing.T) {
+	in := []Target{{FreqHz: 1, NoradID: 1}}
+	if got := FilterTargetsByNorad(in, nil); !slices.Equal(got, in) {
+		t.Errorf("got %+v, want passthrough", got)
+	}
+}

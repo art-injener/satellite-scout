@@ -92,7 +92,7 @@ func TestService_SignalsInBand_IgnoresSignalQuietLongerThanTheDwell(t *testing.T
 	}
 }
 
-func TestService_BroadcastsBandSignalsAndClearsOnStreamEnd(t *testing.T) {
+func TestService_BroadcastsBandSignalsAndKeepsHourListOnStreamEnd(t *testing.T) {
 	svc := NewService(fixedBand(testUsableHz), nil)
 	g := newIQGen(tone{offsetHz: 100_000, amp: 0.003})
 	events := runStream(t, svc, g, 2.5)
@@ -114,8 +114,19 @@ func TestService_BroadcastsBandSignalsAndClearsOnStreamEnd(t *testing.T) {
 	if !found {
 		t.Errorf("carrier at +100 kHz never reported: %+v", events)
 	}
-	if last := events[len(events)-1].ev; last.Signals == nil || len(last.Signals) != 0 {
-		t.Errorf("final event signals = %v, want an empty list when the stream stops", last.Signals)
+	// Hop / обрыв IQ не чистит «Эфир»: часовой список из трекера уходит клиентам.
+	last := events[len(events)-1].ev
+	if last.RadioPath != "path1" {
+		t.Errorf("final radio_path %q", last.RadioPath)
+	}
+	var keep bool
+	for _, s := range last.Signals {
+		if s.CenterHz > testCenter+99_000 && s.CenterHz < testCenter+101_000 {
+			keep = true
+		}
+	}
+	if !keep {
+		t.Errorf("final event signals = %+v, want the hour list still including the carrier", last.Signals)
 	}
 }
 

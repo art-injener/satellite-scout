@@ -15,7 +15,7 @@ const (
 	DatatypeCI16LE = "ci16_le"
 )
 
-// Meta — содержимое .sigmf-meta (нужные поля core:*).
+// Meta — содержимое .sigmf-meta (нужные поля core:* и расширения scout:*, ADR-007 §2.9).
 type Meta struct {
 	Global   Global    `json:"global"`
 	Captures []Capture `json:"captures"`
@@ -27,6 +27,16 @@ type Global struct {
 	SampleRate  float64 `json:"core:sample_rate"`
 	Version     string  `json:"core:version"`
 	Description string  `json:"core:description,omitempty"`
+	Author      string  `json:"core:author,omitempty"`
+	License     string  `json:"core:license,omitempty"`
+	Recorder    string  `json:"core:recorder,omitempty"`
+
+	// Расширения Satellite Scout (namespace scout): привязка записи к КА и контекст пролёта.
+	NoradID   int    `json:"scout:norad_id,omitempty"`
+	SatName   string `json:"scout:sat_name,omitempty"`
+	RadioPath string `json:"scout:radio_path,omitempty"`
+	TLELine1  string `json:"scout:tle_line1,omitempty"`
+	TLELine2  string `json:"scout:tle_line2,omitempty"`
 }
 
 // Capture — сегмент захвата; для MVP берём первый с sample_start == 0.
@@ -81,6 +91,24 @@ func (m Meta) SampleRate() uint32 {
 // CenterHz возвращает частоту центра первого сегмента, Гц.
 func (m Meta) CenterHz() uint64 {
 	return uint64(m.Captures[0].Frequency + 0.5)
+}
+
+// HasScoutSat — в метаданных задан NORAD КА (расширение scout:).
+func (m Meta) HasScoutSat() bool {
+	return m.Global.NoradID > 0
+}
+
+// SaveMeta пишет .sigmf-meta (для тестов и записи пролёта).
+func SaveMeta(path string, m Meta) error {
+	if err := m.validate(); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	raw = append(raw, '\n')
+	return os.WriteFile(path, raw, 0o644)
 }
 
 // dataPath рядом с meta: foo.sigmf-meta → foo.sigmf-data.

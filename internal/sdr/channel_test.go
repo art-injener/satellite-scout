@@ -68,6 +68,12 @@ func TestChannelSettings_Validate(t *testing.T) {
 			c.DopplerAuto = true
 			c.DopplerManualHz = rate
 		}, false},
+		{"baud zero means profile default", func(c *ChannelSettings) { c.Baud = 0 }, false},
+		{"baud for OOK line", func(c *ChannelSettings) { c.Demod = "ook"; c.Baud = 422 }, false},
+		{"baud negative", func(c *ChannelSettings) { c.Baud = -1 }, true},
+		{"baud NaN", func(c *ChannelSettings) { c.Baud = math.NaN() }, true},
+		{"baud above the limit", func(c *ChannelSettings) { c.Baud = MaxChannelBaud + 1 }, true},
+		{"baud at the limit", func(c *ChannelSettings) { c.Baud = MaxChannelBaud }, false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

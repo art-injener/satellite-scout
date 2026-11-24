@@ -203,12 +203,23 @@ func (s *segment) stickStation(nowMs uint64, r signalclass.Result) {
 	}
 }
 
-// vote — модуляция большинства последних ответов; при равенстве остаётся показанная,
-// иначе свежая. Вид передачи сглаживается так же: один промах из трёх подпись не снимает.
+// vote — модуляция большинства последних определённых ответов; при равенстве остаётся
+// показанная, иначе свежая. «Не знаю» (undetermined) не голосует и не снимает разбор:
+// участок сбрасывается только тишиной детектора, а не слабым кадром классификатора.
+// Вид передачи сглаживается так же: один промах из трёх подпись не снимает.
 func vote(votes []signalclass.Result, shown *signalclass.Result) *signalclass.Result {
-	mod := majority(votes, shown, func(v signalclass.Result) string { return v.Modulation })
+	defined := make([]signalclass.Result, 0, len(votes))
+	for _, v := range votes {
+		if v.Modulation != "" && v.Modulation != signalclass.ModUndetermined {
+			defined = append(defined, v)
+		}
+	}
+	if len(defined) == 0 {
+		return shown
+	}
+	mod := majority(defined, shown, func(v signalclass.Result) string { return v.Modulation })
 	var base *signalclass.Result
-	for _, v := range slices.Backward(votes) {
+	for _, v := range slices.Backward(defined) {
 		if v.Modulation == mod {
 			r := v
 			base = &r
@@ -218,7 +229,7 @@ func vote(votes []signalclass.Result, shown *signalclass.Result) *signalclass.Re
 	if base == nil {
 		return shown
 	}
-	svc := majorityService(votes, mod, shown)
+	svc := majorityService(defined, mod, shown)
 	base.Service = svc.Service
 	base.ServiceLabel = svc.ServiceLabel
 	base.ServiceBasis = svc.ServiceBasis
