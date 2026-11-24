@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/freqplan"
+	"github.com/art-injener/satellite-scout/internal/rfprofile"
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
 
@@ -17,24 +18,30 @@ type Registry struct {
 	// writeMu держит порядок записей: память и база меняются в одной последовательности.
 	writeMu sync.Mutex
 
-	mu     sync.RWMutex
-	facts  map[int]map[string]SatFact
-	orbits map[int]Orbit
-	txs    map[int]map[string][]Transmitter
-	loads  map[string]SourceLoad
-	heard  map[int]struct{} // NORAD с хотя бы одним визитом energy=true
+	mu         sync.RWMutex
+	facts      map[int]map[string]SatFact
+	orbits     map[int]Orbit
+	txs        map[int]map[string][]Transmitter
+	loads      map[string]SourceLoad
+	heard      map[int]struct{} // NORAD с хотя бы одним визитом energy=true
+	rfProfiles map[int]rfprofile.Profile
+	rfListener RFProfileListener
 
 	store *store // nil — только память
 }
 
+// RFProfileListener — уведомление после сохранения радиопрофиля (SSE sat_radio).
+type RFProfileListener func(p rfprofile.Profile)
+
 // New создаёт реестр только в памяти.
 func New() *Registry {
 	return &Registry{
-		facts:  make(map[int]map[string]SatFact),
-		orbits: make(map[int]Orbit),
-		txs:    make(map[int]map[string][]Transmitter),
-		loads:  make(map[string]SourceLoad),
-		heard:  make(map[int]struct{}),
+		facts:      make(map[int]map[string]SatFact),
+		orbits:     make(map[int]Orbit),
+		txs:        make(map[int]map[string][]Transmitter),
+		loads:      make(map[string]SourceLoad),
+		heard:      make(map[int]struct{}),
+		rfProfiles: make(map[int]rfprofile.Profile),
 	}
 }
 

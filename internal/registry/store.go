@@ -18,7 +18,7 @@ const (
 	// Ожидание занятой базы и журнал WAL: чтение не ждёт записи.
 	sqlitePragmas = "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=synchronous(NORMAL)"
 
-	schemaVersion = 2
+	schemaVersion = 3
 )
 
 // Время реестра — наносекунды Unix, нулевое время — 0. Наносекунды сохраняют эпоху TLE без округления.
@@ -90,6 +90,15 @@ CREATE TABLE IF NOT EXISTS rx_visits (
 CREATE INDEX IF NOT EXISTS rx_visits_norad_energy ON rx_visits (norad_id, energy);
 `
 
+// schemaV3 — накопленный радиопрофиль КА (ADR-012); payload — JSON rfprofile.Profile.
+const schemaV3 = `
+CREATE TABLE IF NOT EXISTS rf_profiles (
+	norad      INTEGER PRIMARY KEY,
+	payload    TEXT    NOT NULL,
+	updated_ns INTEGER NOT NULL DEFAULT 0
+);
+`
+
 // ErrSchemaNewer база создана более новой версией программы.
 var ErrSchemaNewer = errors.New("registry: database schema is newer than supported")
 
@@ -144,6 +153,15 @@ func (s *store) migrate(ctx context.Context) error {
 		if err := s.setUserVersion(ctx, 2); err != nil {
 			return err
 		}
+		version = 2
+	}
+	if version < 3 {
+		if _, err := s.db.ExecContext(ctx, schemaV3); err != nil {
+			return fmt.Errorf("registry: create schema v3: %w", err)
+		}
+		if err := s.setUserVersion(ctx, 3); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -169,7 +187,10 @@ func (s *store) load(ctx context.Context, r *Registry) error {
 	if err := s.loadLoads(ctx, r); err != nil {
 		return err
 	}
-	return s.loadHeard(ctx, r)
+	if err := s.loadHeard(ctx, r); err != nil {
+		return err
+	}
+	return s.loadRFProfiles(ctx, r)
 }
 
 func (s *store) loadFacts(ctx context.Context, r *Registry) error {

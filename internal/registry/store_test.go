@@ -49,7 +49,7 @@ func TestStore_CreatesOnlyRegistryTables(t *testing.T) {
 	if err = rows.Err(); err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"orbits", "rx_visits", "satellites", "source_loads", "transmitters"}
+	want := []string{"orbits", "rf_profiles", "rx_visits", "satellites", "source_loads", "transmitters"}
 	if !slices.Equal(names, want) {
 		t.Fatalf("tables = %v, want %v", names, want)
 	}

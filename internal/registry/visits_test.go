@@ -29,8 +29,8 @@ func TestStore_CreatesRxVisitsTable(t *testing.T) {
 	if err = db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Fatalf("user_version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("user_version = %d, want 3", version)
 	}
 }
 
@@ -60,8 +60,8 @@ func TestStore_MigratesV1ToV2AddsRxVisits(t *testing.T) {
 	if err = db.QueryRow(`PRAGMA user_version`).Scan(&version); err != nil {
 		t.Fatal(err)
 	}
-	if version != 2 {
-		t.Fatalf("user_version = %d, want 2", version)
+	if version != 3 {
+		t.Fatalf("user_version = %d, want 3", version)
 	}
 	var n int
 	if err = db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'rx_visits'`).Scan(&n); err != nil {
