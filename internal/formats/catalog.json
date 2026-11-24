@@ -1,0 +1,15 @@
+[
+  {
+    "norad": 53385,
+    "name": "GEOSCAN-EDELVEIS",
+    "transmitters": [
+      {
+        "freq_hz": 436200000,
+        "profile": "fsk9600_geoscan",
+        "bandwidth_hz": 20000,
+        "decoders": ["geoscan.beacon", "geoscan.image"],
+        "callsigns": ["RS20S", "RS23S"]
+      }
+    ]
+  }
+]

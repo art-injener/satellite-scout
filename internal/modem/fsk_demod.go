@@ -24,8 +24,9 @@ const (
 // выделенного канала, на выходе — уровни линии 0/1 (до дескремблера). Состояние
 // сохраняется между вызовами Demodulate. Не потокобезопасен.
 type FSKDemod struct {
-	prev complex128
-	norm float64 // перевод радиан на отсчёт в доли девиации
+	prev     complex128
+	havePrev bool
+	norm     float64 // перевод радиан на отсчёт в доли девиации
 
 	ring []float64 // выход дискриминатора в окне усреднения
 	sum  float64
@@ -70,6 +71,12 @@ func (d *FSKDemod) ClockJitter() float64 { return d.jitter }
 func (d *FSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
 	for _, s := range iq {
 		x := complex128(s)
+		if !d.havePrev {
+			// Без предыдущего отсчёта разность фаз с нулём даёт выброс и портит преамбулу
+			// на большом окне (низкая скорость, много отсчётов на символ).
+			d.prev, d.havePrev = x, true
+			continue
+		}
 		f := cmplx.Phase(x*cmplx.Conj(d.prev)) * d.norm
 		d.prev = x
 

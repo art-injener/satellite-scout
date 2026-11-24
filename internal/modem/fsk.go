@@ -31,6 +31,47 @@ func FSK9600(sampleRate float64) FSKConfig {
 	return FSKConfig{SampleRate: sampleRate, Baud: 9600, DeviationHz: 3000, BT: 0.5}
 }
 
+// FSK1200 — GFSK 1200 Бод, девиация ±3 кГц, BT 0,5. Кадр AX.25 HDLC без G3RUH.
+func FSK1200(sampleRate float64) FSKConfig {
+	return FSKConfig{SampleRate: sampleRate, Baud: 1200, DeviationHz: 3000, BT: 0.5}
+}
+
+// FSK4800 — GFSK 4800 Бод, те же девиация и BT, что у FSK1200/9600.
+func FSK4800(sampleRate float64) FSKConfig {
+	return FSKConfig{SampleRate: sampleRate, Baud: 4800, DeviationHz: 3000, BT: 0.5}
+}
+
+// GFSK1200 / GFSK4800 / GFSK9600 — явные пресеты семейства GFSK (BT 0,5).
+// Физика совпадает с FSK1200/4800/9600; отдельные имена для профилей селектора.
+func GFSK1200(sampleRate float64) FSKConfig { return FSK1200(sampleRate) }
+func GFSK4800(sampleRate float64) FSKConfig { return FSK4800(sampleRate) }
+func GFSK9600(sampleRate float64) FSKConfig { return FSK9600(sampleRate) }
+
+// mskNearRectBT — большой BT: гауссов импульс почти прямоугольный (классический MSK без гаусса).
+const mskNearRectBT = 100
+
+// MSK9600 — MSK 9600 Бод: индекс модуляции 0,5 (девиация = baud/4), без гауссова сужения.
+// Не клон GMSK: у GMSK BT 0,4 и девиация ±3 кГц. Приём — тот же FSKDemod.
+func MSK9600(sampleRate float64) FSKConfig {
+	return FSKConfig{SampleRate: sampleRate, Baud: 9600, DeviationHz: 9600 / 4, BT: mskNearRectBT}
+}
+
+// GMSK9600 — GMSK 9600 Бод, девиация ±3 кГц. BT 0,4: классические 0,3 на некогерентном
+// FSKDemod дают ошибки кадра (как FSK в gr-satellites; не CCSDS-precode OQPSK).
+func GMSK9600(sampleRate float64) FSKConfig {
+	return FSKConfig{SampleRate: sampleRate, Baud: 9600, DeviationHz: 3000, BT: 0.4}
+}
+
+// GMSK4800 — GMSK 4800 Бод, те же BT и девиация, что у GMSK9600.
+func GMSK4800(sampleRate float64) FSKConfig {
+	return FSKConfig{SampleRate: sampleRate, Baud: 4800, DeviationHz: 3000, BT: 0.4}
+}
+
+// GMSK2400 — GMSK 2400 Бод (SPUTNIX USP на многих SXC3).
+func GMSK2400(sampleRate float64) FSKConfig {
+	return FSKConfig{SampleRate: sampleRate, Baud: 2400, DeviationHz: 3000, BT: 0.4}
+}
+
 // FSK — модулятор GFSK с непрерывной фазой: состояние сохраняется между вызовами Modulate.
 // Частота — сумма импульсов символов, импульс — прямоугольник символа после гауссова фильтра,
 // заранее посчитанный таблицей: свёртка на каждом отсчёте на 1 МГц не успела бы в реальном времени.
