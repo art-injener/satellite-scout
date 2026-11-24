@@ -29,6 +29,10 @@ const (
 	syncMinFill = 0.6
 	// maxClockSkew — допустимое расхождение тактов передатчика и приёмника.
 	maxClockSkew = 0.02
+	// midJoinDelay — сколько искать только VIS, прежде чем хватать строчные синхро.
+	// На эфирных записях VIS бывает после 2–4 с тона/тишины; раньше mid-join
+	// ловит чужой режим (robot36 на pd120) и даёт лишний кадр.
+	midJoinDelay = 5.0
 )
 
 // EventKind — вид события декодера.
@@ -71,19 +75,37 @@ type Decoder struct {
 	nextCheck int // номер отсчёта следующей проверки заголовка
 
 	img *imageRx // принимаемая картинка; nil — поиск заголовка
+
+	// midJoin — захват без VIS по строчным синхро (середина передачи).
+	// После любой готовой картинки выключается: хвост синхро иначе даёт ложный кадр.
+	// Снова включить — SetMidJoin(true) или новый Decoder.
+	midJoin bool
+	// midJoinAfter — номер отсчёта, с которого mid-join уже можно пробовать.
+	midJoinAfter int
 }
 
 // NewDecoder создаёт декодер звука с частотой отсчётов audioRate.
+// Mid-join включён с задержкой: hop в середину передачи без VIS.
 func NewDecoder(audioRate float64) *Decoder {
 	n := int(math.Ceil(4*audioRate/freqCutoffHz)) | 1
 	d := &Decoder{
-		rate:   audioRate,
-		dcPole: math.Exp(-2 * math.Pi * dcCutoffHz / audioRate),
-		mixInc: 2 * math.Pi * mixHz / audioRate,
-		taps:   dsp.DesignLowpass(freqCutoffHz, audioRate, n, dsp.WindowBlackmanHarris),
+		rate:    audioRate,
+		dcPole:  math.Exp(-2 * math.Pi * dcCutoffHz / audioRate),
+		mixInc:  2 * math.Pi * mixHz / audioRate,
+		taps:    dsp.DesignLowpass(freqCutoffHz, audioRate, n, dsp.WindowBlackmanHarris),
+		midJoin: true,
 	}
+	d.midJoinAfter = d.samples(midJoinDelay)
 	d.hist = make([]complex128, 2*len(d.taps))
 	return d
+}
+
+// SetMidJoin разрешает или запрещает старт картинки без VIS.
+func (d *Decoder) SetMidJoin(on bool) {
+	d.midJoin = on
+	if on {
+		d.midJoinAfter = d.base + d.samples(midJoinDelay)
+	}
 }
 
 // Push принимает звук и возвращает события, случившиеся в нём.
@@ -96,6 +118,9 @@ func (d *Decoder) Push(audio []float32) []Event {
 	for {
 		if d.img == nil {
 			ev, ok := d.searchVIS(end)
+			if !ok && d.midJoin && end >= d.midJoinAfter {
+				ev, ok = d.searchSyncLock(end)
+			}
 			if !ok {
 				break
 			}
@@ -109,6 +134,8 @@ func (d *Decoder) Push(audio []float32) []Event {
 		}
 		d.img = nil
 		d.nextCheck = at
+		// Хвост синхро после Done не должен открыть второй кадр без нового VIS.
+		d.midJoin = false
 	}
 	if d.img == nil {
 		d.trim(end - int(searchKeep*d.rate))
@@ -214,6 +241,101 @@ func (d *Decoder) matchVIS(s int) (Mode, bool) {
 		return Mode{}, false
 	}
 	return ModeByVIS(code)
+}
+
+// searchSyncLock — старт без VIS: несколько строчных синхроимпульсов с шагом режима.
+// Нужен при hop/Автоприёме в середине передачи.
+// Сначала длинный период группы: короткий robot36 иначе цепляется на PD-развёртку.
+func (d *Decoder) searchSyncLock(end int) (Event, bool) {
+	best := Mode{}
+	bestStart := 0.0
+	found := false
+	for _, m := range Modes {
+		start, ok := d.findSyncTrain(m, end)
+		if !ok {
+			continue
+		}
+		if !found || m.groupDuration() > best.groupDuration() {
+			best, bestStart, found = m, start, true
+		}
+	}
+	if !found {
+		return Event{}, false
+	}
+	d.img = newImageRx(d, best, bestStart)
+	d.img.midJoin = true
+	d.nextCheck = end
+	return Event{Kind: EventStart, Mode: best, Image: d.img.rgba}, true
+}
+
+// findSyncTrain ищет ≥3 синхроимпульса с периодом группы режима в хвосте буфера.
+func (d *Decoder) findSyncTrain(m Mode, end int) (start float64, ok bool) {
+	syncLen := max(d.samples(m.sync), 1)
+	period := m.groupDuration() * d.rate
+	if period < float64(syncLen*2) {
+		return 0, false
+	}
+	span := int(4 * period)
+	from := max(end-span, d.base)
+	hits := d.listSyncEdges(from, end, syncLen)
+	if len(hits) < 3 {
+		return 0, false
+	}
+	tol := period * maxClockSkew
+	var chain []float64
+	for i := 0; i < len(hits); i++ {
+		chain = chain[:0]
+		chain = append(chain, float64(hits[i]))
+		for j := i + 1; j < len(hits) && len(chain) < 5; j++ {
+			want := chain[len(chain)-1] + period
+			got := float64(hits[j])
+			if math.Abs(got-want) <= tol {
+				chain = append(chain, got)
+			}
+		}
+		if len(chain) >= 3 {
+			return chain[0], true
+		}
+	}
+	return 0, false
+}
+
+// listSyncEdges — начала окон, где доля отсчётов ниже syncBelowHz ≥ syncMinFill.
+func (d *Decoder) listSyncEdges(from, to, syncLen int) []int {
+	lo, hi := from-d.base, to-d.base
+	if lo < 0 {
+		lo = 0
+	}
+	if hi > len(d.freq) {
+		hi = len(d.freq)
+	}
+	if hi-lo < syncLen {
+		return nil
+	}
+	below := func(i int) int {
+		if d.freq[i] < syncBelowHz {
+			return 1
+		}
+		return 0
+	}
+	count := 0
+	for i := lo; i < lo+syncLen; i++ {
+		count += below(i)
+	}
+	var hits []int
+	minFill := int(math.Ceil(syncMinFill * float64(syncLen)))
+	inPulse := false
+	for c := lo; c <= hi-syncLen; c++ {
+		if c > lo {
+			count += below(c+syncLen-1) - below(c-1)
+		}
+		ok := count >= minFill
+		if ok && !inPulse {
+			hits = append(hits, c+d.base)
+		}
+		inPulse = ok
+	}
+	return hits
 }
 
 // refineEdge уточняет начало стартового бита по переходу с ведущего тона 1900 Гц на 1200 Гц.

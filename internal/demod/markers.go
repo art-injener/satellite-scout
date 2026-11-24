@@ -11,7 +11,9 @@ import (
 type ExpectedTransmitter struct {
 	NoradID int
 	UUID    string
-	FreqHz  int64 // номинальный downlink
+	FreqHz  int64   // номинальный downlink
+	Mode    string  // режим из локального реестра (FSK, AFSK, …)
+	Baud    float64 // скорость, если известна
 }
 
 // TransmitterSource — передатчики КА группы сопровождения (План сеансов и SatNOGS).

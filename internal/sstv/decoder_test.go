@@ -160,6 +160,39 @@ func TestDecoder_NoiseGivesNoPicture(t *testing.T) {
 	}
 }
 
+// Приём с середины: VIS уже прошёл, остаются строчные синхроимпульсы.
+func TestDecoder_JoinsMidTransmission(t *testing.T) {
+	m := Robot36
+	src := smoothImage(m.Width, m.Height)
+	full := sstvAudio(src, m, decodeRate)
+	// Тишина 1 с + VIS + половина строк — вырезаем, оставляем хвост передачи.
+	skipSec := 1 + visDuration + float64(m.Groups()/2)*m.groupDuration()
+	skip := int(skipSec * decodeRate)
+	if skip >= len(full)-int(decodeRate) {
+		t.Fatalf("skip %d of %d", skip, len(full))
+	}
+	events := decodeAll(full[skip:])
+	var started bool
+	var lastLines int
+	for _, e := range events {
+		if e.Kind == EventStart {
+			started = true
+			if e.Mode.ID != m.ID {
+				t.Fatalf("mode=%s, want %s", e.Mode.ID, m.ID)
+			}
+		}
+		if e.Kind == EventLines || e.Kind == EventDone {
+			lastLines = e.Lines
+		}
+	}
+	if !started {
+		t.Fatal("no EventStart without VIS (mid-join)")
+	}
+	if lastLines < 40 {
+		t.Fatalf("lines=%d, want a visible tail of the picture", lastLines)
+	}
+}
+
 func TestDecoder_BackToBackPictures(t *testing.T) {
 	a := sstvAudio(smoothImage(320, 240), Robot36, decodeRate)
 	b := sstvAudio(TestPattern(320, 240), Robot36, decodeRate)

@@ -20,6 +20,9 @@ import (
 // KindSSTV — картинка SSTV.
 const KindSSTV = "sstv"
 
+// KindGEOSCAN — снимок GEOSCAN (JPEG из кусков по смещениям).
+const KindGEOSCAN = "geoscan"
+
 // maxProducts — сколько последних продуктов помнит список.
 const maxProducts = 50
 
@@ -36,6 +39,7 @@ type Meta struct {
 	Mode        string `json:"mode"`
 	ModeName    string `json:"mode_name,omitempty"`
 	FrequencyHz uint64 `json:"frequency_hz,omitempty"`
+	NoradID     int    `json:"norad_id,omitempty"`
 }
 
 // Product — продукт для списка «Снимки» и SSE `product`.
@@ -44,7 +48,9 @@ type Product struct {
 	ID         string `json:"id"`
 	Width      int    `json:"width"`
 	Height     int    `json:"height"`
-	Lines      int    `json:"lines"` // проявившиеся строки
+	Lines      int    `json:"lines"` // SSTV: строки; GEOSCAN: принятые байты
+	Gaps       int    `json:"gaps,omitempty"`
+	Chunks     int    `json:"chunks,omitempty"`
 	Done       bool   `json:"done"`
 	StartedMs  uint64 `json:"started_ms"`
 	FinishedMs uint64 `json:"finished_ms,omitempty"`
@@ -52,7 +58,9 @@ type Product struct {
 
 type entry struct {
 	Product
-	img *image.RGBA // своя копия, пока картинка проявляется; у готовой — файл
+	img  *image.RGBA // SSTV: копия в приёме; у готовой — файл
+	jpeg []byte      // GEOSCAN: буфер JPEG (дыры — нули)
+	got  map[int]bool // индексы принятых кусков GEOSCAN
 }
 
 // Store — продукты в памяти и PNG в каталоге. Потокобезопасен: пишет горутина
@@ -179,26 +187,42 @@ func (s *Store) List() []Product {
 	return out
 }
 
-// PNG — картинка продукта: проявляющаяся — как есть сейчас, готовая — из файла.
+// PNG — картинка SSTV (совместимость); для GEOSCAN используйте Image.
 func (s *Store) PNG(id string) ([]byte, bool) {
+	b, _, ok := s.Image(id)
+	return b, ok
+}
+
+// Image — байты картинки и Content-Type: проявляющаяся или с диска.
+func (s *Store) Image(id string) (data []byte, contentType string, ok bool) {
 	s.mu.Lock()
 	e := s.find(id)
 	if e == nil {
 		s.mu.Unlock()
-		return nil, false
+		return nil, "", false
+	}
+	if e.Kind == KindGEOSCAN || e.jpeg != nil {
+		if e.jpeg != nil {
+			out := append([]byte(nil), e.jpeg...)
+			s.mu.Unlock()
+			return out, "image/jpeg", true
+		}
+		s.mu.Unlock()
+		b, err := os.ReadFile(filepath.Join(s.dir, id+".jpg"))
+		return b, "image/jpeg", err == nil
 	}
 	if e.img == nil {
 		s.mu.Unlock()
 		b, err := os.ReadFile(filepath.Join(s.dir, id+".png"))
-		return b, err == nil
+		return b, "image/png", err == nil
 	}
 	img := clone(e.img)
 	s.mu.Unlock()
 	var buf bytes.Buffer
 	if err := png.Encode(&buf, img); err != nil {
-		return nil, false
+		return nil, "", false
 	}
-	return buf.Bytes(), true
+	return buf.Bytes(), "image/png", true
 }
 
 func (s *Store) find(id string) *entry {

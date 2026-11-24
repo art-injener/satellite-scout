@@ -12,7 +12,7 @@ type syncPoint struct {
 	pos float64
 }
 
-// imageRx — приём одной картинки после заголовка VIS.
+// imageRx — приём одной картинки после заголовка VIS или после захвата строчных синхро.
 type imageRx struct {
 	d    *Decoder
 	mode Mode
@@ -23,6 +23,9 @@ type imageRx struct {
 	a, b    float64 // прямая начал синхроимпульсов: группа g начинается в a + b·g
 	points  []syncPoint
 	g       int // следующая группа
+
+	midJoin bool // старт без VIS: конец по потере синхро, не по полной высоте
+	misses  int  // подряд групп без найденного синхро (только midJoin)
 
 	y, cb, cr []uint8
 	rgba      *image.RGBA
@@ -56,7 +59,18 @@ func (r *imageRx) advance(end int) (events []Event, finished bool, at int) {
 		if float64(end) < pred+r.b+float64(r.window+r.syncLen) {
 			break
 		}
+		before := len(r.points)
 		r.findSync(r.g, pred)
+		if r.midJoin && len(r.points) == before {
+			r.misses++
+			if r.misses >= 2 && r.g > 2 {
+				lines := r.g * r.mode.groupLines()
+				at = int(pred)
+				return []Event{{Kind: EventDone, Mode: r.mode, Lines: lines, Image: r.rgba}}, true, at
+			}
+		} else {
+			r.misses = 0
+		}
 		r.render(r.g)
 		r.g++
 		events = append(events[:0], Event{Kind: EventLines, Mode: r.mode, Lines: r.g * r.mode.groupLines(), Image: r.rgba})

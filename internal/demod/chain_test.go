@@ -2,15 +2,22 @@ package demod
 
 import (
 	"bytes"
+	"encoding/hex"
 	"math"
 	"slices"
 	"testing"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/ax100"
 	"github.com/art-injener/satellite-scout/internal/ax25"
+	"github.com/art-injener/satellite-scout/internal/ccsds"
 	"github.com/art-injener/satellite-scout/internal/geoscan"
+	"github.com/art-injener/satellite-scout/internal/m10"
 	"github.com/art-injener/satellite-scout/internal/modem"
+	"github.com/art-injener/satellite-scout/internal/payload"
+	"github.com/art-injener/satellite-scout/internal/rs41"
 	"github.com/art-injener/satellite-scout/internal/sdr"
+	"github.com/art-injener/satellite-scout/internal/usp"
 )
 
 const (
@@ -46,11 +53,16 @@ func TestChain_WidestChannelIsFlat(t *testing.T) {
 // burstLevels — line levels of one beacon frame, as the imitator transmits it.
 func burstLevels(t *testing.T) []byte {
 	t.Helper()
+	return burstLevelsFlags(t, 32, 2)
+}
+
+func burstLevelsFlags(t *testing.T, preamble, postamble int) []byte {
+	t.Helper()
 	b, err := testFrame().Bytes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	return ax25.NRZI(ax25.HDLCBits(b, 32, 2))
+	return ax25.NRZI(ax25.HDLCBits(b, preamble, postamble))
 }
 
 func burstSamples(t *testing.T, rate float64) int {
@@ -69,10 +81,33 @@ func geoscanData(t *testing.T) []byte {
 	return data
 }
 
-// modulateBurst — one beacon frame in AFSK 1200, FSK 9600 G3RUH or GEOSCAN at the given rate.
+// modulateBurst — one beacon frame in AFSK 1200, FSK 1200/4800, FSK 9600 G3RUH or GEOSCAN.
 func modulateBurst(t *testing.T, rate float64, demod string) []complex64 {
 	t.Helper()
 	switch demod {
+	case "fsk1200", "gfsk1200":
+		return modem.NewFSK(modem.GFSK1200(rate)).Modulate(nil, burstLevels(t))
+	case "fsk4800", "gfsk4800":
+		return modem.NewFSK(modem.GFSK4800(rate)).Modulate(nil, burstLevels(t))
+	case "gfsk9600":
+		var s modem.G3RUHScrambler
+		return modem.NewFSK(modem.GFSK9600(rate)).Modulate(nil, s.Scramble(nil, burstLevels(t)))
+	case "gmsk9600":
+		var s modem.G3RUHScrambler
+		// 64 флага: у GMSK захват дольше, чем у GFSK (как у маяка имитатора).
+		return modem.NewFSK(modem.GMSK9600(rate)).Modulate(nil, s.Scramble(nil, burstLevelsFlags(t, 64, 2)))
+	case "gmsk4800":
+		return modem.NewFSK(modem.GMSK4800(rate)).Modulate(nil, burstLevelsFlags(t, 64, 2))
+	case "bpsk1200":
+		return modem.NewBPSK(modem.BPSK1200(rate)).Modulate(nil, burstLevelsFlags(t, 64, 2))
+	case "bpsk9600":
+		return modem.NewBPSK(modem.BPSK9600(rate)).Modulate(nil, burstLevelsFlags(t, 64, 2))
+	case "qpsk_ccsds":
+		levels, err := ccsds.Encode(ccsdsTestData(t), 64, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return modem.NewQPSK(modem.QPSKCCSDS(rate)).Modulate(nil, levels)
 	case "fsk9600_g3ruh":
 		var s modem.G3RUHScrambler
 		return modem.NewFSK(modem.FSK9600(rate)).Modulate(nil, s.Scramble(nil, burstLevels(t)))
@@ -82,8 +117,101 @@ func modulateBurst(t *testing.T, rate float64, demod string) []complex64 {
 			t.Fatal(err)
 		}
 		return modem.NewFSK(modem.FSK9600(rate)).Modulate(nil, levels)
+	case "gmsk4800_ax100":
+		levels, err := ax100.Encode(ax100TestCSP(t), 64, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return modem.NewFSK(modem.GMSK4800(rate)).Modulate(nil, levels)
+	case "gmsk9600_ax100":
+		levels, err := ax100.Encode(ax100TestCSP(t), 64, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return modem.NewFSK(modem.GMSK9600(rate)).Modulate(nil, levels)
+	case "fsk4800_ax100":
+		levels, err := ax100.Encode(ax100TestCSP(t), 32, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return modem.NewFSK(modem.FSK4800(rate)).Modulate(nil, levels)
+	case "gmsk9600_ax100_rs":
+		levels, err := ax100.EncodeRSMode(ax100TestCSP(t), 64, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return modem.NewFSK(modem.GMSK9600(rate)).Modulate(nil, levels)
+	case "fsk9600_ax100_rs":
+		levels, err := ax100.EncodeRSMode(ax100TestCSP(t), 32, 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return modem.NewFSK(modem.FSK9600(rate)).Modulate(nil, levels)
+	case "gmsk2400_usp", "gmsk4800_usp", "gmsk9600_usp":
+		raw, err := usp.SampleGeneralAX25()
+		if err != nil {
+			t.Fatal(err)
+		}
+		// Длинный PLS: маяк 0x4216 не помещается в короткий кадр USP.
+		levels, err := usp.Encode(raw, true, 64, 4)
+		if err != nil {
+			t.Fatal(err)
+		}
+		switch demod {
+		case "gmsk2400_usp":
+			return modem.NewFSK(modem.GMSK2400(rate)).Modulate(nil, levels)
+		case "gmsk4800_usp":
+			return modem.NewFSK(modem.GMSK4800(rate)).Modulate(nil, levels)
+		default:
+			return modem.NewFSK(modem.GMSK9600(rate)).Modulate(nil, levels)
+		}
+	case "rs41":
+		clear, err := hex.DecodeString(rs41GoldenClearHex)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pre := make([]byte, 320)
+		for i := range pre {
+			pre[i] = byte((i + 1) % 2) // преамбула 0101…, заканчивается единицей
+		}
+		levels := append(pre, rs41.BytesToLevels(rs41.ScrambleFrame(clear))...)
+		levels = append(levels, make([]byte, 64)...)
+		return modem.NewFSK(modem.GFSK4800(rate)).Modulate(nil, levels)
+	case "m10":
+		raw, err := hex.DecodeString(m10GoldenHex)
+		if err != nil {
+			t.Fatal(err)
+		}
+		pre := make([]byte, 128)
+		for i := range pre {
+			pre[i] = byte(i % 2)
+		}
+		levels := append(pre, m10.BytesToLevels(raw)...)
+		levels = append(levels, make([]byte, 128)...)
+		return modem.NewFSK(modem.FSKConfig{
+			SampleRate: rate, Baud: m10.Baud, DeviationHz: 3000, BT: 0.5,
+		}).Modulate(nil, levels)
 	}
 	return modem.NewAFSK(modem.AFSK1200(rate)).Modulate(nil, burstLevels(t))
+}
+
+// rs41GoldenClearHex — эталонный кадр rs1729 (после whitening), CRC TLV ок.
+const rs41GoldenClearHex = "8635f44093df1a602c87e0fa0521e8943d9cef4c7a67393f6d39fb546461f2111b6447ab79a746c80350cda5344157f8c0c12234f46902220f792816174b313933303239331a00000300000a00002f0007322ce53e31991abf12dada3eb68468c16755d51c7a2a15310216060245f302000d08a31607821e08bb210219060243f302000000000000000000000000000000220d7c1e0807d03cdc071fd81ddb19d70a8d0eb602b60cb518d40692ff00ff00ff001c277d59b8d83301ff0f881f0f38f4fe18b283038735ff000000003eb8ff4947201e6e3aff55415f13fc6e005440440cf100009e9f7406f85800832b631719d70010bebc172a8b00000000000000000000000000000000000000000000a48b7b15366181193ef05d07e1245b1be0f721f801f60804107b0b76110000000000000000000000000000000000ecc7"
+
+const m10GoldenHex = "649f20000000000000000000000020bf258c0b78607c004c4b400000000000000000000000000000000000000000000000000000000000000000000000000106a20000000000000000000000000000000000000000000000000000000002083a3125019f37"
+
+func ax100TestCSP(t *testing.T) []byte {
+	t.Helper()
+	return ax100.PackSuchaiBeacon(ax100.SuchaiPort2, map[string]uint32{
+		"eps_vbatt":     7420,
+		"obc_hrs_alive": 99,
+		"timestamp":     1_700_000_000,
+	})
+}
+
+func ccsdsTestData(t *testing.T) []byte {
+	t.Helper()
+	return []byte("scout ccsds cadu chain probe")
 }
 
 // beaconAir — receiver input: an AFSK 1200 beacon every period starting at 0, offset from
@@ -238,6 +366,330 @@ func TestChain_DecodesFSK9600Beacons(t *testing.T) {
 	}
 }
 
+func TestChain_DecodesBPSK1200Beacons(t *testing.T) {
+	c := NewChain()
+	air := beaconAirWithLead(t, testRate, 3, time.Second, "bpsk1200", testRate/5)
+	s := afskSettings(testOffset, -90)
+	s.Demod = "bpsk1200"
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	checkPackets(t, got, 3)
+	if st := c.Status(); st.Good != 3 || !st.Supported {
+		t.Errorf("status=%+v, want 3 good, supported", st)
+	}
+}
+
+func TestChain_DecodesBPSK9600Beacons(t *testing.T) {
+	c := NewChain()
+	air := beaconAirWithLead(t, testRate, 3, time.Second, "bpsk9600", testRate/5)
+	s := afskSettings(testOffset, -90)
+	s.Demod = "bpsk9600"
+	s.BandwidthHz = sdr.MaxChannelBandwidthHz
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	checkPackets(t, got, 3)
+	if st := c.Status(); st.Good != 3 || !st.Supported {
+		t.Errorf("status=%+v, want 3 good, supported", st)
+	}
+	if !slices.Contains(ImplementedFrameProfiles(), "bpsk9600") {
+		t.Error("bpsk9600 must be in ImplementedFrameProfiles")
+	}
+	pl := payload.Decode(payload.Frame{Raw: got[0].Raw, Profile: "bpsk9600"})
+	if pl.Kind != payload.KindText {
+		t.Fatalf("payload kind=%q decoder=%q, want text (AX.25 UI)", pl.Kind, pl.Decoder)
+	}
+}
+
+func TestChain_MSK9600SupportedLine(t *testing.T) {
+	c := NewChain()
+	s := afskSettings(testOffset, -90)
+	s.Demod = "msk9600"
+	s.BandwidthHz = sdr.MaxChannelBandwidthHz
+	cfg := modem.MSK9600(testRate)
+	levels := make([]byte, 5000)
+	for i := range levels {
+		levels[i] = byte(i % 2)
+	}
+	air := toAir(modem.NewFSK(cfg).Modulate(nil, levels), testRate, 20)
+	_ = run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	if st := c.Status(); !st.Supported || st.Demod != "msk9600" {
+		t.Errorf("status=%+v, want supported msk9600", st)
+	}
+}
+
+func TestChain_MFSKLineSupported(t *testing.T) {
+	for _, tc := range []struct {
+		demod string
+		cfg   modem.MFSKConfig
+	}{
+		{"3fsk4800", modem.FSK3_4800(testRate)},
+		{"4fsk4800", modem.FSK4DMR4800(testRate)},
+		{"gmfsk4800", modem.GMFSK4800(testRate)},
+	} {
+		t.Run(tc.demod, func(t *testing.T) {
+			c := NewChain()
+			s := afskSettings(testOffset, -90)
+			s.Demod = tc.demod
+			s.BandwidthHz = sdr.MaxChannelBandwidthHz
+			levels := make([]byte, 3000)
+			for i := range levels {
+				levels[i] = byte(i % tc.cfg.Levels)
+			}
+			air := toAir(modem.NewMFSK(tc.cfg).Modulate(nil, levels), testRate, 20)
+			_ = run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+			if st := c.Status(); !st.Supported || st.Demod != tc.demod {
+				t.Errorf("status=%+v, want supported %s", st, tc.demod)
+			}
+			if slices.Contains(ImplementedFrameProfiles(), tc.demod) {
+				t.Errorf("%s must not be in ImplementedFrameProfiles", tc.demod)
+			}
+		})
+	}
+}
+
+func TestChain_DecodesQPSKCCSDS(t *testing.T) {
+	c := NewChain()
+	// Тишина до кадра: Costas/ФАПЧ тактов успевают захватить до ASM.
+	air := beaconAirWithLead(t, testRate, 2, time.Second, "qpsk_ccsds", testRate/5)
+	s := afskSettings(testOffset, -90)
+	s.Demod = "qpsk_ccsds"
+	s.BandwidthHz = sdr.MaxChannelBandwidthHz
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	if len(got) == 0 {
+		t.Fatalf("no frames, status=%+v", c.Status())
+	}
+	want := ccsdsTestData(t)
+	if !bytes.HasPrefix(got[0].Raw, want) {
+		t.Fatalf("raw prefix=%q, want %q", got[0].Raw[:min(len(got[0].Raw), len(want))], want)
+	}
+	if st := c.Status(); st.Good < 1 || !st.Supported || !st.FECCounted {
+		t.Fatalf("status=%+v, want good>=1 supported FECCounted", st)
+	}
+	if !slices.Contains(ImplementedFrameProfiles(), "qpsk_ccsds") {
+		t.Error("qpsk_ccsds must be in ImplementedFrameProfiles")
+	}
+	pl := payload.Decode(payload.Frame{Raw: got[0].Raw, Profile: "qpsk_ccsds"})
+	if pl.Kind != payload.KindUnknown {
+		t.Fatalf("payload kind=%q decoder=%q, want unknown (no TM parser yet)", pl.Kind, pl.Decoder)
+	}
+}
+
+// GMSK: тот же FSKDemod, BT 0,4; 9600 — HDLC+G3RUH, 4800 — HDLC без скремблера.
+func TestChain_DecodesGMSKBeacons(t *testing.T) {
+	for _, tc := range []struct {
+		demod string
+		scram bool
+		lead  bool
+	}{
+		{"gmsk9600", true, false},
+		{"gmsk4800", false, true},
+	} {
+		t.Run(tc.demod, func(t *testing.T) {
+			c := NewChain()
+			var air []complex64
+			if tc.lead {
+				air = beaconAirWithLead(t, testRate, 3, time.Second, tc.demod, testRate/5)
+			} else {
+				air = beaconAirOf(t, testRate, 3, time.Second, tc.demod)
+			}
+			s := fsk9600Settings(testOffset, -90)
+			s.Demod = tc.demod
+			got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+			checkPackets(t, got, 3)
+			if st := c.Status(); st.Good != 3 || !st.Supported {
+				t.Errorf("status=%+v, want 3 good, supported", st)
+			}
+		})
+	}
+}
+
+// FSK 1200/4800: GFSK без G3RUH, кадр AX.25 HDLC. У 1200 перед первым кадром —
+// короткая тишина: иначе FIR/дискриминатор стартуют на фронте преамбулы.
+func TestChain_DecodesFSK1200And4800Beacons(t *testing.T) {
+	for _, demod := range []string{"fsk1200", "fsk4800"} {
+		t.Run(demod, func(t *testing.T) {
+			c := NewChain()
+			var air []complex64
+			if demod == "fsk1200" {
+				air = beaconAirWithLead(t, testRate, 3, time.Second, demod, testRate/5)
+			} else {
+				air = beaconAirOf(t, testRate, 3, time.Second, demod)
+			}
+			s := afskSettings(testOffset, -90)
+			s.Demod = demod
+			if demod == "fsk4800" {
+				s.BandwidthHz = sdr.MaxChannelBandwidthHz
+			}
+			got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+			checkPackets(t, got, 3)
+			if st := c.Status(); st.Good != 3 || !st.Supported {
+				t.Errorf("status=%+v, want 3 good, supported", st)
+			}
+		})
+	}
+}
+
+// Явные профили GFSK (BT 0,5): те же пресеты, что fsk*, отдельные id в селекторе.
+// 1200/4800 — HDLC без G3RUH; 9600 — HDLC+G3RUH, как fsk9600_g3ruh.
+func TestChain_DecodesGFSKBeacons(t *testing.T) {
+	for _, tc := range []struct {
+		demod string
+		wide  bool
+		lead  bool
+	}{
+		{"gfsk1200", false, true},
+		{"gfsk4800", true, false},
+		{"gfsk9600", true, false},
+	} {
+		t.Run(tc.demod, func(t *testing.T) {
+			c := NewChain()
+			var air []complex64
+			if tc.lead {
+				air = beaconAirWithLead(t, testRate, 3, time.Second, tc.demod, testRate/5)
+			} else {
+				air = beaconAirOf(t, testRate, 3, time.Second, tc.demod)
+			}
+			s := afskSettings(testOffset, -90)
+			s.Demod = tc.demod
+			if tc.wide {
+				s.BandwidthHz = sdr.MaxChannelBandwidthHz
+			}
+			got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+			checkPackets(t, got, 3)
+			if st := c.Status(); st.Good != 3 || !st.Supported {
+				t.Errorf("status=%+v, want 3 good, supported", st)
+			}
+		})
+	}
+}
+
+// beaconAirWithLead — как beaconAirOf, плюс lead отсчётов тишины до первого кадра.
+func beaconAirWithLead(t *testing.T, rate float64, bursts int, period time.Duration, demod string, lead int) []complex64 {
+	t.Helper()
+	burst := modulateBurst(t, rate, demod)
+	clean := make([]complex64, lead+int(float64(bursts)*period.Seconds()*rate))
+	for k := range bursts {
+		copy(clean[lead+int(float64(k)*period.Seconds()*rate):], burst)
+	}
+	ch := modem.NewChannel(modem.ChannelConfig{
+		SampleRate:       rate,
+		OffsetHz:         func(time.Duration) float64 { return testOffset },
+		SNRdB:            testSNR,
+		NoiseBandwidthHz: 15_000,
+		Seed:             7,
+	})
+	air := ch.Process(nil, clean)
+	gain := complex(float32(math.Pow(10, testLevel/20)), 0)
+	for i := range air {
+		air[i] *= gain
+	}
+	return air
+}
+
+func TestChain_DecodesAX100Beacons(t *testing.T) {
+	for _, tc := range []struct {
+		demod string
+		lead  bool
+		wide  bool
+	}{
+		{"gmsk4800_ax100", true, false},
+		{"gmsk9600_ax100", false, true},
+		{"fsk4800_ax100", false, false},
+		{"gmsk9600_ax100_rs", false, true},
+		{"fsk9600_ax100_rs", false, true},
+	} {
+		t.Run(tc.demod, func(t *testing.T) {
+			c := NewChain()
+			var air []complex64
+			if tc.lead {
+				air = beaconAirWithLead(t, testRate, 3, time.Second, tc.demod, testRate/5)
+			} else {
+				air = beaconAirOf(t, testRate, 3, time.Second, tc.demod)
+			}
+			s := fsk9600Settings(testOffset, -90)
+			s.Demod = tc.demod
+			if !tc.wide {
+				s.BandwidthHz = 15_000
+			}
+			got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+			if len(got) == 0 {
+				t.Fatalf("no frames, status=%+v", c.Status())
+			}
+			want := ax100TestCSP(t)
+			if !bytes.Equal(got[0].Raw, want) {
+				t.Fatalf("raw %x, want %x", got[0].Raw, want)
+			}
+			if st := c.Status(); st.Good < 1 || !st.Supported || !st.FECCounted {
+				t.Fatalf("status=%+v, want good>=1 supported FECCounted", st)
+			}
+			pl := payload.Decode(payload.Frame{Raw: got[0].Raw, Profile: tc.demod})
+			if pl.Decoder != "suchai.beacon" || pl.Kind != payload.KindBeacon {
+				t.Fatalf("payload kind=%q decoder=%q summary=%q", pl.Kind, pl.Decoder, pl.Summary)
+			}
+			if !hasParam(pl, "eps_vbatt") {
+				t.Fatalf("params=%v, want eps_vbatt", pl.Params)
+			}
+		})
+	}
+}
+
+func hasParam(pl payload.Payload, id string) bool {
+	for _, p := range pl.Params {
+		if p.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func TestChain_DecodesUSPBeacons(t *testing.T) {
+	// Длинный USP-кадр на 2400 бод ~2 с — период 3 с, иначе вспышки накладываются.
+	const uspPeriod = 3 * time.Second
+	for _, tc := range []struct {
+		demod string
+		lead  bool
+		wide  bool
+	}{
+		{"gmsk2400_usp", true, false},
+		{"gmsk4800_usp", true, false},
+		{"gmsk9600_usp", false, true},
+	} {
+		t.Run(tc.demod, func(t *testing.T) {
+			c := NewChain()
+			var air []complex64
+			if tc.lead {
+				air = beaconAirWithLead(t, testRate, 2, uspPeriod, tc.demod, testRate/5)
+			} else {
+				air = beaconAirOf(t, testRate, 2, uspPeriod, tc.demod)
+			}
+			s := fsk9600Settings(testOffset, -90)
+			s.Demod = tc.demod
+			if !tc.wide {
+				s.BandwidthHz = 15_000
+			}
+			got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+			if len(got) == 0 {
+				t.Fatalf("no frames, status=%+v", c.Status())
+			}
+			want, err := usp.SampleGeneralAX25()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !bytes.Equal(got[0].Raw, want) {
+				t.Fatalf("raw %x want %x", got[0].Raw, want)
+			}
+			if st := c.Status(); !st.FECCounted {
+				t.Fatalf("status=%+v, want FECCounted for USP", st)
+			}
+			pl := payload.Decode(payload.Frame{Raw: got[0].Raw, Profile: tc.demod})
+			if pl.Decoder != "usp.beacon" || pl.Kind != payload.KindBeacon {
+				t.Fatalf("payload kind=%q decoder=%q", pl.Kind, pl.Decoder)
+			}
+			if !hasParam(pl, "uab") {
+				t.Fatalf("params=%v, want uab", pl.Params)
+			}
+		})
+	}
+}
+
 func TestChain_DecodesGEOSCANBeacons(t *testing.T) {
 	c := NewChain()
 	air := beaconAirOf(t, testRate, 3, time.Second, "fsk9600_geoscan")
@@ -362,12 +814,156 @@ func TestProfiles_AreSelectable(t *testing.T) {
 func TestChain_UnsupportedDemodReceivesNothing(t *testing.T) {
 	c := NewChain()
 	s := afskSettings(testOffset, -90)
-	s.Demod = "gmsk9600"
+	s.Demod = "lora" // нет в profiles
 	frames := toFrames(beaconAir(t, testRate, 1, time.Second), testRate, sdr.DefaultBlockSize, 0)
 	if got := run(c, frames, s); len(got) != 0 {
 		t.Fatalf("packets=%d, want 0 for a demodulator that is not implemented", len(got))
 	}
-	if st := c.Status(); st.Supported || st.Demod != "gmsk9600" {
-		t.Errorf("status=%+v, want unsupported gmsk9600", st)
+	if st := c.Status(); st.Supported || st.Demod != "lora" {
+		t.Errorf("status=%+v, want unsupported lora", st)
+	}
+}
+
+func TestChain_DecodesRS41(t *testing.T) {
+	c := NewChain()
+	air := beaconAirOf(t, testRate, 1, time.Second, "rs41")
+	s := fsk9600Settings(testOffset, -90)
+	s.Demod = "rs41"
+	s.BandwidthHz = 15_000
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	if len(got) == 0 {
+		t.Fatalf("no frames, status=%+v", c.Status())
+	}
+	tel, ok := rs41.Parse(got[0].Raw)
+	if !ok || tel.ID != "K1930293" {
+		t.Fatalf("parse=%+v ok=%v", tel, ok)
+	}
+	if st := c.Status(); st.Good < 1 || !st.Supported || st.Demod != "rs41" {
+		t.Fatalf("status=%+v", st)
+	}
+}
+
+func TestChain_M10ProfileFramed(t *testing.T) {
+	// Кадр/checksum — в internal/m10. Через FSKDemod длинные нули без whitening
+	// срывают такты (в отличие от RS41); здесь проверяем профиль в «Авто».
+	if !slices.Contains(ImplementedFrameProfiles(), "m10") {
+		t.Fatal("m10 not in ImplementedFrameProfiles")
+	}
+	c := NewChain()
+	s := fsk9600Settings(testOffset, -90)
+	s.Demod = "m10"
+	s.BandwidthHz = 15_000
+	_ = c.Process(sdr.IQFrame{Samples: make([]complex64, 1024), SampleRate: testRate}, s)
+	if st := c.Status(); !st.Supported || st.Demod != "m10" {
+		t.Fatalf("status=%+v", st)
+	}
+}
+
+func TestChain_OOKSupportedLineBurst(t *testing.T) {
+	c := NewChain()
+	s := afskSettings(testOffset, -90)
+	s.Demod = "ook"
+	s.Baud = 2000
+	cfg := modem.OOKConfig{SampleRate: testRate, Baud: 2000}
+	// Пачка mark/space, затем длинная пауза (нули) — burstDeframer отдаёт Packet.
+	levels := make([]byte, 0, 200)
+	for i := 0; i < 64; i++ {
+		levels = append(levels, byte(i%2))
+	}
+	for i := 0; i < 80; i++ {
+		levels = append(levels, 0)
+	}
+	air := toAir(modem.NewOOK(cfg).Modulate(nil, levels), testRate, 20)
+	// Тишина после сигнала, чтобы порог закрылся и Flush отдал хвост.
+	quiet := make([]complex64, int(testRate/10))
+	air = append(air, quiet...)
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	if len(got) < 1 {
+		t.Fatalf("packets=%d, want ≥1 line burst", len(got))
+	}
+	if len(got[0].Raw) < 4 {
+		t.Fatalf("raw len=%d, want packed bytes", len(got[0].Raw))
+	}
+	if st := c.Status(); !st.Supported || st.Demod != "ook" || st.Good < 1 {
+		t.Errorf("status=%+v, want supported ook with good≥1", st)
+	}
+}
+
+func TestChain_PI4DQPSKSupportedLineBurst(t *testing.T) {
+	c := NewChain()
+	s := afskSettings(testOffset, -90)
+	s.Demod = "pi4_dqpsk"
+	s.Baud = 9600
+	s.BandwidthHz = sdr.MaxChannelBandwidthHz
+	cfg := modem.PI4DQPSKConfig{SampleRate: testRate, Baud: 9600}
+	levels := make([]byte, 64)
+	for i := range levels {
+		levels[i] = 1
+	}
+	for i := 0; i < 80; i++ {
+		levels = append(levels, 0)
+	}
+	air := toAir(modem.NewPI4DQPSK(cfg).Modulate(nil, levels), testRate, 20)
+	air = append(air, make([]complex64, int(testRate/10))...)
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	if len(got) < 1 {
+		t.Fatalf("packets=%d, want ≥1 line burst", len(got))
+	}
+	if st := c.Status(); !st.Supported || st.Demod != "pi4_dqpsk" {
+		t.Errorf("status=%+v, want supported pi4_dqpsk", st)
+	}
+}
+
+func TestChain_APSK16SupportedLineBurst(t *testing.T) {
+	c := NewChain()
+	s := afskSettings(testOffset, -90)
+	s.Demod = "apsk16"
+	s.Baud = 9600
+	s.BandwidthHz = sdr.MaxChannelBandwidthHz
+	cfg := modem.APSK16Config{SampleRate: testRate, Baud: 9600}
+	levels := make([]byte, 64)
+	for i := range levels {
+		levels[i] = byte(i % 2)
+	}
+	if levels[0] == 0 {
+		levels[0] = 1
+	}
+	for i := 0; i < 80; i++ {
+		levels = append(levels, 0)
+	}
+	air := toAir(modem.NewAPSK16(cfg).Modulate(nil, levels), testRate, 20)
+	air = append(air, make([]complex64, int(testRate/10))...)
+	got := run(c, toFrames(air, testRate, sdr.DefaultBlockSize, 0), s)
+	if len(got) < 1 {
+		t.Fatalf("packets=%d, want ≥1 line burst", len(got))
+	}
+	if st := c.Status(); !st.Supported || st.Demod != "apsk16" {
+		t.Errorf("status=%+v, want supported apsk16", st)
+	}
+}
+
+func TestChain_OOKRebuildsOnBaudChange(t *testing.T) {
+	c := NewChain()
+	s := afskSettings(testOffset, -90)
+	s.Demod = "ook"
+	s.Baud = 480
+	cfg := modem.OOKConfig{SampleRate: testRate, Baud: 480}
+	levels := make([]byte, 2000)
+	for i := range levels {
+		levels[i] = byte(i % 2)
+	}
+	air := toAir(modem.NewOOK(cfg).Modulate(nil, levels), testRate, 20)
+	frames := toFrames(air, testRate, sdr.DefaultBlockSize, 0)
+	_ = run(c, frames[:1], s)
+	if c.baud != 480 {
+		t.Fatalf("baud after build=%.0f, want 480", c.baud)
+	}
+	s.Baud = 422
+	_ = run(c, frames[1:2], s)
+	if c.baud != 422 {
+		t.Fatalf("baud after change=%.0f, want 422", c.baud)
+	}
+	if st := c.Status(); !st.Supported {
+		t.Errorf("status=%+v, want supported after baud change", st)
 	}
 }

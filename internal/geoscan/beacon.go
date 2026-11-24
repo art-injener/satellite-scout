@@ -22,6 +22,9 @@ var (
 const (
 	// BeaconLen — длина поля данных AX.25 маяка платформы Geoscan (кадр 74 байта).
 	BeaconLen = 56
+	// minBeaconInfo — минимум байт info, чтобы считать кадр маяком: до «Напряжение АКБ» включительно.
+	// Короткие кадры CC1125 (64 байта с транспортным заголовком) обрезают хвост раскладки.
+	minBeaconInfo = 15
 	// BeaconDest — получатель кадров маяка; кадры GNSS и снимков идут без заголовка AX.25.
 	BeaconDest = "BEACON"
 )
@@ -112,10 +115,17 @@ var beaconLayout = []beaconField{
 }
 
 // BeaconParams разбирает маяк платформы Geoscan. ok=false — кадр не маяк: другой получатель
-// или длина данных.
+// или слишком короткое поле данных. Info короче BeaconLen дополняется нулями (обрезанный
+// короткий кадр эфира); длиннее — обрезается.
 func BeaconParams(f ax25.Frame) ([]Param, bool) {
-	if len(f.Info) != BeaconLen || !isBeaconDest(f.Dest.Call) {
+	if !isBeaconDest(f.Dest.Call) || len(f.Info) < minBeaconInfo {
 		return nil, false
+	}
+	info := f.Info
+	if len(info) != BeaconLen {
+		padded := make([]byte, BeaconLen)
+		copy(padded, info)
+		info = padded
 	}
 	params := make([]Param, 0, len(beaconLayout))
 	off := 0
@@ -123,7 +133,7 @@ func BeaconParams(f ax25.Frame) ([]Param, bool) {
 		params = append(params, Param{
 			ID:    fd.id,
 			Name:  fd.name,
-			Value: fd.format(f.Info[off : off+fd.size]),
+			Value: fd.format(info[off : off+fd.size]),
 			Unit:  fd.unit,
 			Key:   fd.key,
 		})

@@ -124,13 +124,31 @@ func TestBeaconParams_KeyFieldsForTableRow(t *testing.T) {
 
 func TestBeaconParams_RejectsOtherFrames(t *testing.T) {
 	for name, f := range map[string]ax25.Frame{
-		"short info": beaconFrame(testBeaconInfo()[:BeaconLen-1]),
-		"long info":  beaconFrame(append(testBeaconInfo(), 0)),
+		"tiny info":  beaconFrame(testBeaconInfo()[:minBeaconInfo-1]),
 		"other dest": {Dest: ax25.Address{Call: "CQ"}, Src: ax25.Address{Call: "RS23S"}, Info: testBeaconInfo()},
 	} {
 		if _, ok := BeaconParams(f); ok {
 			t.Errorf("%s: recognized as beacon", name)
 		}
+	}
+}
+
+func TestBeaconParams_PadsShortInfo(t *testing.T) {
+	// Короткий кадр эфира: info обрезана, ключевые поля до напряжения АКБ на месте.
+	short := testBeaconInfo()[:43]
+	params, ok := BeaconParams(beaconFrame(short))
+	if !ok {
+		t.Fatal("short beacon not recognized")
+	}
+	if len(params) != len(beaconLayout) {
+		t.Fatalf("params=%d, want full layout %d", len(params), len(beaconLayout))
+	}
+}
+
+func TestBeaconParams_TruncatesLongInfo(t *testing.T) {
+	long := append(testBeaconInfo(), 0xFF)
+	if _, ok := BeaconParams(beaconFrame(long)); !ok {
+		t.Fatal("long beacon should truncate and parse")
 	}
 }
 

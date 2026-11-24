@@ -137,6 +137,33 @@ func TestChain_FMVoiceToAudio(t *testing.T) {
 	}
 }
 
+// amToneAir — тон 1 кГц поверх АМ с глубиной DefaultAMDepth.
+func amToneAir(seconds float64) []complex64 {
+	n := int(seconds * testRate)
+	a := make([]float32, n)
+	for i := range a {
+		a[i] = float32(math.Sin(2 * math.Pi * 1000 * float64(i) / testRate))
+	}
+	clean := modem.NewAM(modem.AMVoice(testRate)).Modulate(nil, a)
+	return toAir(clean, testRate, 30)
+}
+
+func TestChain_AMVoiceToAudio(t *testing.T) {
+	c := NewChain()
+	frames := toFrames(amToneAir(1), testRate, sdr.DefaultBlockSize, 0)
+	audio := collectAudio(c, frames, voiceSettings("am", 15_000, -90))
+
+	checkAudioLength(t, audio, 1)
+	settled := audio[AudioRate/5:]
+	tone := tonePower(settled, 1000)
+	if other := tonePower(settled, 1700); tone < 100*other {
+		t.Errorf("1000 Hz power %.2e vs 1700 Hz %.2e, want the tone", tone, other)
+	}
+	if st := c.Status(); !st.Supported || !st.SquelchOpen || st.Demod != "am" {
+		t.Errorf("status=%+v, want supported am with squelch open", st)
+	}
+}
+
 // Below the threshold the stream goes on with silence: the player keeps real time.
 func TestChain_ClosedSquelchGivesSilence(t *testing.T) {
 	c := NewChain()

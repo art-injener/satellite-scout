@@ -6,12 +6,17 @@ import (
 	"slices"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/ax100"
 	"github.com/art-injener/satellite-scout/internal/ax25"
+	"github.com/art-injener/satellite-scout/internal/ccsds"
 	"github.com/art-injener/satellite-scout/internal/dsp"
 	"github.com/art-injener/satellite-scout/internal/geoscan"
+	"github.com/art-injener/satellite-scout/internal/m10"
 	"github.com/art-injener/satellite-scout/internal/modem"
+	"github.com/art-injener/satellite-scout/internal/rs41"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/sstv"
+	"github.com/art-injener/satellite-scout/internal/usp"
 )
 
 const (
@@ -72,6 +77,11 @@ type syncCounter interface {
 	SyncBitErrors() int
 }
 
+// fecCounter — выделитель с FEC (AX.100 / USP): число исправленных символов/бит.
+type fecCounter interface {
+	FECCorrected() int
+}
+
 // pictureRx принимает картинки из IQ канала (SSTV).
 type pictureRx interface {
 	Push(iq []complex64) []sstv.Event
@@ -99,18 +109,24 @@ type profile struct {
 	fineTaps    int
 	midHz       float64
 	newDemod    func(rate float64) lineDemod
-	newDeframer func() deframer
-	newPictures func(rate float64) pictureRx
-	newAudio    func(rate, beatHz float64) audioRx
-	sideband    float64
-	toneHz      float64
-	maxWidthHz  float64
+	// newDemodBaud — линия со скоростью из ChannelSettings.Baud; baud уже > 0 (дефолт подставлен).
+	newDemodBaud func(rate, baud float64) lineDemod
+	newDeframer  func() deframer
+	newPictures  func(rate float64) pictureRx
+	newAudio     func(rate, beatHz float64) audioRx
+	sideband     float64
+	toneHz       float64
+	maxWidthHz   float64
 }
 
 func newVoiceFM(rate, _ float64) audioRx {
 	return modem.NewFMAudioDemod(modem.FMAudioConfig{
 		SampleRate: rate, DeviationHz: voiceDeviationHz, AudioRate: AudioRate, DeemphasisTau: voiceDeemphasisTau,
 	})
+}
+
+func newVoiceAM(rate, _ float64) audioRx {
+	return modem.NewAMAudioDemod(modem.AMAudioConfig{SampleRate: rate, AudioRate: AudioRate})
 }
 
 func newWideFM(rate, _ float64) audioRx {
@@ -125,6 +141,16 @@ func newSSB(rate, beatHz float64) audioRx {
 
 func newHDLCDeframer() deframer { return &ax25.Deframer{} }
 
+func newAX100Deframer() deframer   { return &ax100.Deframer{} }
+func newAX100RSDeframer() deframer { return &ax100.RSDeframer{} }
+func newUSPDeframer() deframer     { return &usp.Deframer{} }
+func newCCSDSDeframer() deframer   { return &ccsds.Deframer{} }
+func newRS41Deframer() deframer    { return &rs41.Deframer{} }
+func newM10Deframer() deframer     { return &m10.Deframer{} }
+
+// newNullDeframer оставлен как имя для тестов/старых ссылок: линия режется burstDeframer.
+func newNullDeframer() deframer { return newBurstDeframer() }
+
 // demodGEOSCAN — профиль кадров CC1125: кроме кадра он даёт и разбор маяка Geoscan.
 const demodGEOSCAN = "fsk9600_geoscan"
 
@@ -136,6 +162,69 @@ var profiles = map[string]profile{
 	"afsk1200": {fineDecim: 2, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
 		return modem.NewAFSKDemod(modem.AFSK1200(rate))
 	}},
+	// GFSK 1200: без прореживания — на 64 кГц около 53 отсчёта на символ; кадр HDLC без G3RUH.
+	"fsk1200": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.FSK1200(rate))
+	}},
+	// GFSK 4800: без прореживания, около 13 отсчётов на символ на 64 кГц.
+	"fsk4800": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.FSK4800(rate))
+	}},
+	// FSK 9600 линия: эфир ISM без HDLC/G3RUH; baud из канала; пачки burstDeframer.
+	"fsk9600": {fineDecim: 1, newDemodBaud: func(rate, baud float64) lineDemod {
+		cfg := modem.FSK9600(rate)
+		if baud > 0 {
+			cfg.Baud = baud
+		}
+		return modem.NewFSKDemod(cfg)
+	}},
+	// Явные id GFSK (BT 0,5): та же физика, что fsk*; 9600 — кадр с G3RUH.
+	"gfsk1200": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GFSK1200(rate))
+	}},
+	"gfsk4800": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GFSK4800(rate))
+	}},
+	"gfsk9600": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return &g3ruhDemod{fsk: modem.NewFSKDemod(modem.GFSK9600(rate))}
+	}},
+	// GMSK 9600: BT 0,4; кадр как у G3RUH (любительский UHF).
+	"gmsk9600": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return &g3ruhDemod{fsk: modem.NewFSKDemod(modem.GMSK9600(rate))}
+	}},
+	// GMSK 4800: тот же модем, кадр HDLC без G3RUH.
+	"gmsk4800": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK4800(rate))
+	}},
+	"gmsk2400": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK2400(rate))
+	}},
+	// MSK 9600: линия без известного кадра (не в «Авто» по CRC).
+	"msk9600": {fineDecim: 1, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.MSK9600(rate))
+	}},
+	// M-FSK: линия без кадра (DMR sync/кадр — не в этом срезе).
+	"3fsk4800": {fineDecim: 1, newDemod: func(rate float64) lineDemod {
+		return modem.NewMFSKDemod(modem.FSK3_4800(rate))
+	}},
+	"4fsk4800": {fineDecim: 1, newDemod: func(rate float64) lineDemod {
+		return modem.NewMFSKDemod(modem.FSK4DMR4800(rate))
+	}},
+	"gmfsk4800": {fineDecim: 1, newDemod: func(rate float64) lineDemod {
+		return modem.NewMFSKDemod(modem.GMFSK4800(rate))
+	}},
+	// BPSK 1200: дифференциальный приём, кадр AX.25 HDLC.
+	"bpsk1200": {fineDecim: 2, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewBPSKDemod(modem.BPSK1200(rate))
+	}},
+	// BPSK 9600: DBPSK + AX.25 HDLC (любительский UHF, как bpsk1200).
+	"bpsk9600": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewBPSKDemod(modem.BPSK9600(rate))
+	}},
+	// QPSK CCSDS: CADU ASM+RS dual-basis (стык под LRPT — тот же CADU).
+	"qpsk_ccsds": {fineDecim: 1, newDeframer: newCCSDSDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewQPSKDemod(modem.QPSKCCSDS(rate))
+	}},
 	// 9600 на 64 кГц: около 6,7 отсчёта на символ, меньше ФАПЧ тактов не держит.
 	"fsk9600_g3ruh": {fineDecim: 1, newDeframer: newHDLCDeframer, newDemod: func(rate float64) lineDemod {
 		return &g3ruhDemod{fsk: modem.NewFSKDemod(modem.FSK9600(rate))}
@@ -145,9 +234,37 @@ var profiles = map[string]profile{
 		newDemod: func(rate float64) lineDemod {
 			return modem.NewFSKDemod(modem.FSK9600(rate))
 		}},
+	// AX.100 Mode 5 (ASM+Golay): та же линия GMSK/FSK, другой выделитель кадров.
+	"gmsk4800_ax100": {fineDecim: 1, newDeframer: newAX100Deframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK4800(rate))
+	}},
+	"gmsk9600_ax100": {fineDecim: 1, newDeframer: newAX100Deframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK9600(rate))
+	}},
+	"fsk4800_ax100": {fineDecim: 1, newDeframer: newAX100Deframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.FSK4800(rate))
+	}},
+	// AX.100 Mode RS: G3RUH внутри выделителя кадров (скремблирован и sync).
+	"gmsk9600_ax100_rs": {fineDecim: 1, newDeframer: newAX100RSDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK9600(rate))
+	}},
+	"fsk9600_ax100_rs": {fineDecim: 1, newDeframer: newAX100RSDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.FSK9600(rate))
+	}},
+	// USP (SPUTNIX): GMSK + свой кадр (Viterbi + RS dual-basis).
+	"gmsk2400_usp": {fineDecim: 1, newDeframer: newUSPDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK2400(rate))
+	}},
+	"gmsk4800_usp": {fineDecim: 1, newDeframer: newUSPDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK4800(rate))
+	}},
+	"gmsk9600_usp": {fineDecim: 1, newDeframer: newUSPDeframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GMSK9600(rate))
+	}},
 	// ЧМ с девиацией до 5 кГц и звуком до 2,3 кГц укладывается в 32 кГц.
 	DemodSSTV: {fineDecim: 2, newPictures: newSSTVRx},
-	// Голос: ЧМ и однополосная. 32 кГц не дают наложений даже при самой широкой полосе канала.
+	// Голос: АМ, ЧМ и однополосная. 32 кГц не дают наложений даже при самой широкой полосе канала.
+	"am": {fineDecim: 2, newAudio: newVoiceAM},
 	"fm": {fineDecim: 2, newAudio: newVoiceFM},
 	// Вещательная ЧМ: канал 200 кГц не проходит через 64 кГц, поэтому грубый фильтр шире.
 	"wfm": {fineDecim: 4, midHz: wfmMidHz, newAudio: newWideFM},
@@ -155,6 +272,27 @@ var profiles = map[string]profile{
 	"lsb": {fineDecim: 2, newAudio: newSSB, sideband: -1, maxWidthHz: maxWidth("lsb")},
 	// CW слушается как SSB с тоном биений; полосе до 1 кГц хватает 16 кГц.
 	"cw": {fineDecim: 4, fineTaps: cwFineTaps, newAudio: newSSB, toneHz: cwToneHz, maxWidthHz: maxWidth("cw")},
+	// OOK: линия без кадрового протокола; пачки burstDeframer. Скорость из Baud канала.
+	"ook": {fineDecim: 1, newDemodBaud: func(rate, baud float64) lineDemod {
+		return modem.NewOOKDemod(modem.OOKConfig{SampleRate: rate, Baud: baud})
+	}},
+	// RS41: GFSK 4800 + кадр Vaisala (whitening, dual RS, TLV CRC).
+	"rs41": {fineDecim: 1, newDeframer: newRS41Deframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.GFSK4800(rate))
+	}},
+	// M10: FSK ~9615 (после Manchester на линии) + линейный checksum.
+	"m10": {fineDecim: 1, newDeframer: newM10Deframer, newDemod: func(rate float64) lineDemod {
+		return modem.NewFSKDemod(modem.FSKConfig{
+			SampleRate: rate, Baud: m10.Baud, DeviationHz: 3000, BT: 0.5,
+		})
+	}},
+	// π/4-DQPSK и 16-APSK: линия без кадра; скорость из Baud канала (0 — дефолт модема).
+	"pi4_dqpsk": {fineDecim: 1, newDemodBaud: func(rate, baud float64) lineDemod {
+		return modem.NewPI4DQPSKDemod(modem.PI4DQPSKConfig{SampleRate: rate, Baud: baud})
+	}},
+	"apsk16": {fineDecim: 1, newDemodBaud: func(rate, baud float64) lineDemod {
+		return modem.NewAPSK16Demod(modem.APSK16Config{SampleRate: rate, Baud: baud})
+	}},
 }
 
 // maxWidth — самая широкая слышимая полоса профиля; шире настройку отклоняет sdr.ChannelSettings.Validate.
@@ -204,6 +342,8 @@ type Status struct {
 	SyncCounted   bool    // выделитель кадров считает синхрослова
 	SyncWords     int
 	SyncBitErrors int
+	FECCounted    bool // профиль с FEC (AX.100 / USP)
+	FECCorrected  int  // исправления Golay/RS с начала сеанса профиля
 	// SNRDB — превышение сигнала над шумом в полосе канала, дБ. 0 — не измерялось:
 	// меряется только на блоке с уровнем выше порога, как и прочие меры хода приёма.
 	SNRDB float32
@@ -217,6 +357,12 @@ type Status struct {
 	// PassbandHz — ширина полосы, которую цепочка пропускает на деле: у SSB и CW она уже
 	// «Полосы канала», если та не помещается в звук.
 	PassbandHz float64
+
+	// Поля режима «Авто» (Demod=auto): фаза подбора и закреплённый профиль.
+	AutoLocked     string   // id профиля после победы по CRC; пусто — подбор
+	AutoPhase      string   // "search" | "locked"
+	AutoCandidates int      // число кандидатов в текущем подборе
+	AutoIDs        []string // id кандидатов (порядок подбора)
 }
 
 // PictureProgress — ход картинки в приёме.
@@ -310,6 +456,7 @@ type Chain struct {
 	offsetHz  int64
 	bandwidth uint32
 	demodName string
+	baud      float64 // ChannelSettings.Baud; учитывается профилями с newDemodBaud
 
 	coarse, fine *dsp.XlatingFIR
 	demod        lineDemod
@@ -324,6 +471,9 @@ type Chain struct {
 	picRx    pictureRx
 	pictures []sstv.Event
 	centerHz uint64 // настройка приёмника, на которой идёт картинка
+
+	// sstvVISOnly — следующий приёмник SSTV только с VIS (после DemodOff).
+	sstvVISOnly bool
 
 	audioRx audioRx
 	audio   []float32
@@ -351,15 +501,16 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	}
 	if f.CenterHz != c.centerHz {
 		// Другая частота приёмника — другой передатчик: картинка в приёме бросается.
+		// Mid-join выключен: тот же IQ в тесте/срыве LO не должен сразу стать новым кадром.
 		c.centerHz = f.CenterHz
 		if c.picRx != nil && p.newPictures != nil && s.Demod == c.demodName {
-			c.picRx = p.newPictures(c.outRate)
+			c.picRx = newSSTVRxVISOnly(c.outRate)
 			c.status.Picture = nil
 		}
 	}
 	if c.coarse == nil || f.SampleRate != c.rate || s.OffsetHz != c.offsetHz || s.BandwidthHz != c.bandwidth ||
-		s.Demod != c.demodName {
-		c.build(f.SampleRate, s.OffsetHz, s.BandwidthHz, s.Demod, p)
+		s.Demod != c.demodName || (p.newDemodBaud != nil && s.Baud != c.baud) {
+		c.build(f.SampleRate, s.OffsetHz, s.BandwidthHz, s.Demod, s.Baud, p)
 	}
 	// Доплер сдвигает канал без пересборки фильтров: фаза не рвётся, картинка не бросается.
 	c.coarse.SetShift(float64(s.OffsetHz) + c.dopplerHz)
@@ -371,37 +522,56 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	c.pictures = c.pictures[:0]
 	if c.picRx != nil || c.audioRx != nil {
 		c.listen(ch)
-		if float64(c.status.LevelDBFS) >= s.SquelchDBFS {
+		// Меры — только с громкого блока (пик или среднее), не с хвоста удержания.
+		if c.squelch.AboveThreshold() {
 			c.measure(ch)
 		}
 		c.prevCh = ch[len(ch)-1]
 		return nil
 	}
+	freqHz := uint64(int64(f.CenterHz) + s.OffsetHz) //nolint:gosec // частоты канала > 0
 	if !c.status.SquelchOpen {
-		return nil
+		// Хвост линии (OOK/burst) отдаём при закрытии порога, иначе пачка теряется.
+		return c.packetsFromFrames(f.TimestampMs, freqHz, c.flushLine(nil))
 	}
 
 	c.levels = c.demod.Demodulate(c.levels[:0], ch)
 	c.frames = c.deframer.Push(c.frames[:0], c.levels)
 	c.status.Good, c.status.Bad = c.deframer.Good(), c.deframer.Bad()
-	if float64(c.status.LevelDBFS) >= s.SquelchDBFS {
+	if fc, ok := c.deframer.(fecCounter); ok {
+		c.status.FECCounted = true
+		c.status.FECCorrected = fc.FECCorrected()
+	}
+	if c.squelch.AboveThreshold() {
 		c.measure(ch)
 	}
 	c.prevCh = ch[len(ch)-1]
+	return c.packetsFromFrames(f.TimestampMs, freqHz, c.frames)
+}
 
+func (c *Chain) flushLine(dst [][]byte) [][]byte {
+	if c.deframer == nil {
+		return dst
+	}
+	if f, ok := c.deframer.(lineFlusher); ok {
+		dst = f.Flush(dst)
+		c.status.Good, c.status.Bad = c.deframer.Good(), c.deframer.Bad()
+	}
+	return dst
+}
+
+func (c *Chain) packetsFromFrames(tsMs, freqHz uint64, frames [][]byte) []Packet {
 	var out []Packet
-	for _, b := range c.frames {
-		frame, err := ax25.Parse(b)
-		if err != nil {
-			continue
-		}
+	for _, b := range frames {
+		// Сырой кадр отдаём всегда: разбор kind — в payload; AX.25 может не сойтись (снимок GEOSCAN).
+		frame, _ := ax25.Parse(b)
 		out = append(out, Packet{
-			TimestampMs: f.TimestampMs,
-			FrequencyHz: uint64(int64(f.CenterHz) + s.OffsetHz),
+			TimestampMs: tsMs,
+			FrequencyHz: freqHz,
 			Frame:       frame,
-			Raw:         b,
+			Raw:         append([]byte(nil), b...),
 		})
-		c.status.LastPacketMs = f.TimestampMs
+		c.status.LastPacketMs = tsMs
 	}
 	return out
 }
@@ -482,6 +652,10 @@ func (c *Chain) measure(ch []complex64) {
 		st.SyncCounted = true
 		st.SyncWords, st.SyncBitErrors = sc.SyncWords(), sc.SyncBitErrors()
 	}
+	if fc, ok := c.deframer.(fecCounter); ok {
+		st.FECCounted = true
+		st.FECCorrected = fc.FECCorrected()
+	}
 }
 
 // midRate — частота отсчётов после грубого фильтра: ближайшая к midRateHz, кратная частоте приёмника.
@@ -492,11 +666,11 @@ func midRate(fs float64) float64 {
 // build строит фильтры канала и демодулятор. Грубый фильтр прореживает до midRateHz: пропускает
 // плоско до 0,15 от новой частоты, подавляет с 0,65 — наложенное при прореживании ложится дальше
 // 0,35 от центра, за точный фильтр. Поэтому «Полоса канала» шире 0,3 от неё обрезается.
-func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod string, p profile) {
+func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod string, baud float64, p profile) {
 	newProfile := demod != c.demodName
 	newRate := rate != c.rate
 	newOffset := offsetHz != c.offsetHz
-	c.rate, c.offsetHz, c.bandwidth, c.demodName = rate, offsetHz, bandwidth, demod
+	c.rate, c.offsetHz, c.bandwidth, c.demodName, c.baud = rate, offsetHz, bandwidth, demod, baud
 
 	fs := float64(rate)
 	target := float64(midRateHz)
@@ -532,18 +706,31 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 		c.audioRx = p.newAudio(c.outRate, beatHz)
 		c.status.Good, c.status.Bad = 0, 0
 	case p.newPictures != nil:
-		// Картинка в приёме переживает смену полосы канала; новый сдвиг — другой передатчик,
-		// и заголовок VIS ищется заново.
+		// Первый вход / смена сдвига: mid-join (hop на середину). После DemodOff — только VIS.
 		if c.picRx == nil || newProfile || newRate || newOffset {
-			c.picRx = p.newPictures(c.outRate)
+			if c.sstvVISOnly {
+				c.picRx = newSSTVRxVISOnly(c.outRate)
+				c.sstvVISOnly = false
+			} else {
+				c.picRx = p.newPictures(c.outRate)
+			}
 			c.status.Picture = nil
 		}
 		c.demod, c.deframer = nil, nil
 		c.status.Bad = 0
 	default:
 		c.picRx, c.status.Picture = nil, nil
-		c.demod = p.newDemod(c.outRate)
-		if c.deframer == nil || newProfile {
+		switch {
+		case p.newDemodBaud != nil:
+			c.demod = p.newDemodBaud(c.outRate, baud)
+		default:
+			c.demod = p.newDemod(c.outRate)
+		}
+		if p.newDeframer == nil {
+			// Линия без кадрового протокола: пачки по паузе/max (burstDeframer).
+			// newDeframer в профиле остаётся nil — не попадает в «Авто» по CRC.
+			c.deframer = newBurstDeframer()
+		} else if c.deframer == nil || newProfile {
 			c.deframer = p.newDeframer()
 		}
 	}
@@ -553,5 +740,9 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 	m.PassbandHz = 2 * cutoff
 	m.Measured, m.CarrierHz, m.DeviationHz, m.ClockJitter = false, 0, 0, 0
 	m.SyncCounted, m.SyncWords, m.SyncBitErrors = false, 0, 0
+	m.FECCounted, m.FECCorrected = false, 0
+	if _, ok := c.deframer.(fecCounter); ok {
+		m.FECCounted = true
+	}
 	m.SNRDB = 0
 }

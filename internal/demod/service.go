@@ -1,17 +1,17 @@
 package demod
 
 import (
-	"bytes"
-	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"image"
 	"log/slog"
 	"strconv"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
-	"github.com/art-injener/satellite-scout/internal/geoscan"
+	"github.com/art-injener/satellite-scout/internal/payload"
 	"github.com/art-injener/satellite-scout/internal/products"
+	"github.com/art-injener/satellite-scout/internal/rfprofile"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/sstv"
 	"github.com/art-injener/satellite-scout/internal/tracker"
@@ -53,6 +53,52 @@ type Service struct {
 	doppler  DopplerSource
 	// transmitters — ожидаемые передатчики для маркеров на спектре; nil — маркеров нет.
 	transmitters TransmitterSource
+	callsigns    CallsignIndex
+	pathSats     PathSatSource
+	names        NameSource
+	horizon      HorizonSource
+	formats      ProfileCatalog
+	rfFrames     RFFrameRecorder
+	rfProfiles   RFProfileSource
+	airHints     AirHintSource
+	airHear      AirHear
+}
+
+// AirNote — принятый кадр/голос для строки «Эфир» (тело кадра для модалки).
+type AirNote struct {
+	Kind        string
+	Summary     string
+	Decoder     string
+	Src         string
+	Dest        string
+	Info        string
+	InfoHex     string
+	Params      []TelemetryParam
+	TimestampMs uint64
+	NoradID     int
+	SatName     string
+	// CountFrame — увеличить frames_good; голос — false.
+	CountFrame bool
+}
+
+// AirHear — запись приёма в таблицу «Эфир» (bandscan.RecordRx).
+type AirHear interface {
+	RecordRx(pathID string, freqHz uint64, note AirNote)
+}
+
+// AirHintSource — подсказка «Авто» с участка эфира (классификатор), без NORAD.
+type AirHintSource interface {
+	AirHint(pathID string, freqHz uint64) (demod string, alt []string, mode string, baud float64, ok bool)
+}
+
+// RFFrameRecorder — запись принятого кадра в радиопрофиль КА (ADR-012).
+type RFFrameRecorder interface {
+	RecordFrame(norad int, freqHz int64, demodID string, tsMs int64)
+}
+
+// RFProfileSource — чтение радиопрофиля для кандидатов «Авто».
+type RFProfileSource interface {
+	RFProfile(norad int) (rfprofile.Profile, bool)
 }
 
 // NewService создаёт сервис демодуляции.
@@ -75,6 +121,75 @@ func (s *Service) WithAudio(hub *AudioHub) *Service {
 // WithDoppler даёт орбиты КА: канал с doppler_norad следует за Доплером этого КА.
 func (s *Service) WithDoppler(src DopplerSource) *Service {
 	s.doppler = src
+	return s
+}
+
+// WithCallsigns включает привязку кадра по позывному из каталога форматов.
+func (s *Service) WithCallsigns(idx CallsignIndex) *Service {
+	s.callsigns = idx
+	return s
+}
+
+// WithPathSats даёт подсказку КА по тракту (SigMF / конфиг replay).
+func (s *Service) WithPathSats(src PathSatSource) *Service {
+	s.pathSats = src
+	return s
+}
+
+// WithNames подставляет отображаемое имя КА, если источник привязки его не дал.
+func (s *Service) WithNames(src NameSource) *Service {
+	s.names = src
+	return s
+}
+
+// WithHorizon ограничивает привязку по частоте КА над горизонтом.
+func (s *Service) WithHorizon(src HorizonSource) *Service {
+	s.horizon = src
+	return s
+}
+
+// ProfileCatalog — закреплённый профиль с карточки КА (каталог форматов).
+type ProfileCatalog interface {
+	ProfileFor(norad int, freqHz uint64) (profile string, ok bool)
+}
+
+// WithFormats включает подсказку профиля с карточки для режима «Авто».
+func (s *Service) WithFormats(c ProfileCatalog) *Service {
+	s.formats = c
+	return s
+}
+
+// WithAirHints подключает подсказки классификатора по частоте канала (эфир без КА).
+func (s *Service) WithAirHints(src AirHintSource) *Service {
+	s.airHints = src
+	return s
+}
+
+// WithAirHear пишет кадры и голос в участки band_signals.
+func (s *Service) WithAirHear(h AirHear) *Service {
+	s.airHear = h
+	return s
+}
+
+// voiceDemod — профили без кадра: в «Данные» эфира пишем kind=voice при открытом пороге.
+func voiceDemod(id string) bool {
+	switch id {
+	case "fm", "wfm", "am", "usb", "lsb", "cw":
+		return true
+	default:
+		return false
+	}
+}
+
+// WithRFFrames включает накопление принятых кадров в радиопрофиле КА.
+func (s *Service) WithRFFrames(r RFFrameRecorder) *Service {
+	s.rfFrames = r
+	return s
+}
+
+// WithRFProfiles включает чтение радиопрофиля для подсказок «Авто».
+func (s *Service) WithRFProfiles(src RFProfileSource) *Service {
+	s.rfProfiles = src
 	return s
 }
 
@@ -115,7 +230,7 @@ func (s *Service) publishAudio(pathID string, timestampMs, freq uint64, audio []
 	}
 }
 
-// TelemetryEvent — принятый кадр для таблицы телеметрии.
+// TelemetryEvent — принятый кадр для таблицы телеметрии (ADR-009 §11.1).
 type TelemetryEvent struct {
 	RadioPath   string `json:"radio_path"`
 	TimestampMs uint64 `json:"timestamp_ms"`
@@ -125,8 +240,18 @@ type TelemetryEvent struct {
 	Dest        string `json:"dest"`
 	Info        string `json:"info"` // данные текстом без нулей в конце, если все символы печатные; иначе пусто
 	InfoHex     string `json:"info_hex"`
+	// Kind / Decoder / Summary — разбор полезной нагрузки (ADR-009 §7); старые поля сохранены.
+	Kind    string `json:"kind,omitempty"`
+	Decoder string `json:"decoder,omitempty"`
+	Summary string `json:"summary,omitempty"`
 	// Params — разобранная телеметрия, если формат кадра известен.
 	Params []TelemetryParam `json:"params,omitempty"`
+	// Привязка кадра к КА (ADR-009 §6.3); norad_id=0 — не опознан.
+	NoradID   int    `json:"norad_id,omitempty"`
+	SatName   string `json:"sat_name,omitempty"`
+	SatSource string `json:"sat_source,omitempty"`
+	// ProductID — сборка снимка (GEOSCAN), если кусок ушёл в products.
+	ProductID string `json:"product_id,omitempty"`
 }
 
 // TelemetryParam — параметр телеметрии для таблицы: ключевые показываются в строке,
@@ -153,9 +278,10 @@ type StatusEvent struct {
 	FramesBad    int     `json:"frames_bad"`
 	LastPacketMs uint64  `json:"last_packet_ms"`
 	// DemodOff — оператор выключил демодулятор: спектр идёт, кадров и снимков нет.
-	DemodOff    bool   `json:"demod_off,omitempty"`
-	BandwidthHz uint32 `json:"bandwidth_hz"`
-	OffsetHz    int64  `json:"offset_hz"` // по сдвигу, полосе, порогу и профилю клиенты следуют за каналом
+	DemodOff    bool    `json:"demod_off,omitempty"`
+	BandwidthHz uint32  `json:"bandwidth_hz"`
+	OffsetHz    int64   `json:"offset_hz"`      // по сдвигу, полосе, порогу и профилю клиенты следуют за каналом
+	Baud        float64 `json:"baud,omitempty"` // символьная скорость канала; 0 — дефолт профиля
 	// DopplerAuto — режим «Авто». DopplerNorad — КА, за которым следует канал.
 	// DopplerManualHz — поправка оператора в режиме «Вручную».
 	// DopplerHz — действующая поправка сейчас. Нет поля: поправки нет.
@@ -172,15 +298,21 @@ type StatusEvent struct {
 	Picture *PictureProgress `json:"picture,omitempty"`
 	// TxMarkers — передатчики КА группы в окне приёмника, частота с Доплером; нет — поток не идёт.
 	TxMarkers []TxMarker `json:"tx_markers,omitempty"`
+	// Режим «Авто»: фаза подбора и закреплённый профиль (demod остаётся "auto").
+	AutoLocked     string   `json:"auto_locked,omitempty"`
+	AutoPhase      string   `json:"auto_phase,omitempty"` // search | locked
+	AutoCandidates int      `json:"auto_candidates,omitempty"`
+	AutoIDs        []string `json:"auto_ids,omitempty"` // кандидаты в работе
 }
 
-// ReceptionStages — по одной мере на этап приёма: несущая, такты, синхрослова.
+// ReceptionStages — по одной мере на этап приёма: несущая, такты, синхрослова, FEC.
 type ReceptionStages struct {
 	CarrierHz   float64    `json:"carrier_hz"`             // смещение от центра канала
 	DeviationHz float64    `json:"deviation_hz,omitempty"` // нет — демодулятор её не меряет
 	ClockJitter float64    `json:"clock_jitter"`           // ошибка фазы тактов, доли символа
-	SNRDB       float32   `json:"snr_db,omitempty"`       // превышение сигнала над шумом в полосе; нет — не измерялось
+	SNRDB       float32    `json:"snr_db,omitempty"`       // превышение сигнала над шумом в полосе; нет — не измерялось
 	Sync        *SyncStats `json:"sync,omitempty"`         // нет — кадры без синхрослова
+	FEC         *FECStats  `json:"fec,omitempty"`          // нет — профиль без FEC (ADR-009 §9.3)
 }
 
 // SyncStats — найденные синхрослова и ошибочные биты в них.
@@ -189,10 +321,16 @@ type SyncStats struct {
 	BitErrors int `json:"bit_errors"`
 }
 
+// FECStats — исправления канального кода (Golay / RS) за сеанс профиля.
+type FECStats struct {
+	Corrected int `json:"corrected"`
+}
+
 // Run демодулирует поток тракта до его закрытия. Подходит как sdr.StreamTap.
 // Настройки канала читаются на каждый блок, так что изменения оператора применяются сразу.
 func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 	chain := NewChain()
+	auto := NewAutoPicker()
 	var (
 		cs         sdr.ChannelSettings
 		freq       uint64
@@ -216,6 +354,9 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 					picture = pictureState{}
 				}
 				chain = NewChain()
+				// После выключения не хватать ту же передачу mid-join: только новый VIS.
+				chain.sstvVISOnly = true
+				auto = NewAutoPicker()
 				demodOff = true
 				s.sendStatus(pathID, true, freq, cs, Status{}, s.bandMarkers(f.CenterHz, f.SampleRate))
 				lastStatus = s.now()
@@ -226,19 +367,24 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 			continue
 		}
 		demodOff = false
-		doppler := s.applyDoppler(chain, cs, freq)
-		for _, p := range chain.Process(f, cs) {
-			s.send(EventTelemetry, telemetryEvent(pathID, cs.Demod, p))
+		if cs.Demod == DemodAuto {
+			st = s.runAuto(pathID, f, cs, freq, auto)
+		} else {
+			auto = NewAutoPicker()
+			doppler := s.applyDoppler(chain, cs, freq)
+			for _, p := range chain.Process(f, cs) {
+				s.emitTelemetry(pathID, cs, p)
+			}
+			s.publishAudio(pathID, f.TimestampMs, freq, chain.Audio())
+			s.publishPictures(pathID, freq, f.TimestampMs, chain.Pictures(), &picture)
+			if picture.id != "" && chain.Status().Picture == nil {
+				// Цепочка бросила картинку (перестройка, другой профиль): сохраняется принятая часть.
+				s.finishPicture(picture.id, nil)
+				picture.id = ""
+			}
+			st = chain.Status()
+			st.DopplerHz = doppler
 		}
-		s.publishAudio(pathID, f.TimestampMs, freq, chain.Audio())
-		s.publishPictures(pathID, freq, f.TimestampMs, chain.Pictures(), &picture)
-		if picture.id != "" && chain.Status().Picture == nil {
-			// Цепочка бросила картинку (перестройка, другой профиль): сохраняется принятая часть.
-			s.finishPicture(picture.id, nil)
-			picture.id = ""
-		}
-		st = chain.Status()
-		st.DopplerHz = doppler
 		if now := s.now(); lastStatus.IsZero() || now.Sub(lastStatus) >= statusInterval {
 			s.sendStatus(pathID, true, freq, cs, st, s.bandMarkers(f.CenterHz, f.SampleRate))
 			lastStatus = now
@@ -249,6 +395,76 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 		// Поток закрылся посреди картинки: сохраняется то, что успело проявиться.
 		s.finishPicture(picture.id, nil)
 	}
+}
+
+// runAuto — один блок в режиме подбора профиля: кандидаты, CRC, телеметрия от победителя.
+func (s *Service) runAuto(pathID string, f sdr.IQFrame, cs sdr.ChannelSettings, freq uint64, auto *AutoPicker) Status {
+	hints := s.autoHints(pathID, cs, freq)
+	key := autoConfigKey(cs.DopplerNorad, freq, cs.BandwidthHz, hints)
+	cands := BuildCandidates(hints)
+	if hints.Accepted != "" {
+		auto.SeedMemory(key, hints.Accepted)
+	}
+	auto.Configure(key, cands)
+	// Доплер: одна поправка на все цепочки — через временную цепочку-носитель.
+	probe := NewChain()
+	doppler := s.applyDoppler(probe, cs, freq)
+	var dopplerHz float64
+	if doppler != nil {
+		dopplerHz = *doppler
+	}
+	pkts, st := auto.Process(f, cs, dopplerHz)
+	st.DopplerHz = doppler
+	for _, tp := range pkts {
+		evCS := cs
+		evCS.Demod = tp.Profile
+		s.emitTelemetry(pathID, evCS, tp.Packet)
+	}
+	return st
+}
+
+func (s *Service) autoHints(pathID string, cs sdr.ChannelSettings, freq uint64) CandidateHints {
+	h := CandidateHints{}
+	if s.rfProfiles != nil && cs.DopplerNorad > 0 {
+		if p, ok := s.rfProfiles.RFProfile(cs.DopplerNorad); ok {
+			if tx, ok := rfprofile.FindTx(p, "", int64(freq)); ok { //nolint:gosec // частоты канала < MaxInt64
+				eff := rfprofile.Effective(tx)
+				switch eff.Source {
+				case rfprofile.SourceAccepted:
+					h.Accepted = eff.Demod
+				case rfprofile.SourceDetected:
+					h.Blind = eff.Demod
+					h.BlindAlt = append([]string(nil), eff.DemodAlt...)
+					if h.Mode == "" && eff.Modulation != "" {
+						h.Mode, h.Baud = eff.Modulation, eff.Baud
+					}
+				}
+			}
+		}
+	}
+	if s.formats != nil && cs.DopplerNorad > 0 {
+		if p, ok := s.formats.ProfileFor(cs.DopplerNorad, freq); ok {
+			h.CardProfile = p
+		}
+	}
+	if s.transmitters != nil && cs.DopplerNorad > 0 {
+		if mode, baud, ok := MatchTXModeBaud(s.transmitters.ExpectedTransmitters(), cs.DopplerNorad, freq); ok {
+			if h.Mode == "" {
+				h.Mode, h.Baud = mode, baud
+			}
+		}
+	}
+	// Участок эфира: классификатор даёт demod/mode, когда нет закреплённого КА.
+	if h.Blind == "" && h.Accepted == "" && s.airHints != nil {
+		if demod, alt, mode, baud, ok := s.airHints.AirHint(pathID, freq); ok {
+			h.Blind = demod
+			h.BlindAlt = alt
+			if h.Mode == "" && mode != "" {
+				h.Mode, h.Baud = mode, baud
+			}
+		}
+	}
+	return h
 }
 
 // pictureState — картинка, которая сейчас проявляется в тракте.
@@ -311,36 +527,143 @@ func (s *Service) send(eventType string, v any) {
 	s.emit(eventType, data)
 }
 
+// emitTelemetry шлёт кадр в SSE и при известном NORAD пишет слой «принято» в радиопрофиль.
+func (s *Service) emitTelemetry(pathID string, cs sdr.ChannelSettings, p Packet) {
+	ev := s.telemetryEvent(pathID, cs, p)
+	s.publishGeoscanChunk(pathID, &ev, p)
+	s.send(EventTelemetry, ev)
+	kind := ev.Kind
+	if kind == "" {
+		kind = payload.KindUnknown
+	}
+	summary := ev.Summary
+	if summary == "" {
+		summary = payload.Label(kind)
+	}
+	s.noteAir(pathID, ev.FrequencyHz, AirNote{
+		Kind: kind, Summary: summary, Decoder: ev.Decoder,
+		Src: ev.Src, Dest: ev.Dest, Info: ev.Info, InfoHex: ev.InfoHex, Params: ev.Params,
+		TimestampMs: ev.TimestampMs, NoradID: ev.NoradID, SatName: ev.SatName, CountFrame: true,
+	})
+	if s.rfFrames == nil || ev.NoradID <= 0 || ev.Demod == "" || ev.FrequencyHz == 0 {
+		return
+	}
+	s.rfFrames.RecordFrame(ev.NoradID, int64(ev.FrequencyHz), ev.Demod, int64(ev.TimestampMs)) //nolint:gosec // метки времени кадра < MaxInt64
+}
+
+// publishGeoscanChunk собирает JPEG из кусков geoscan.image в products и шлёт SSE product.
+func (s *Service) publishGeoscanChunk(pathID string, ev *TelemetryEvent, p Packet) {
+	if s == nil || s.products == nil || ev == nil || ev.Kind != payload.KindImage {
+		return
+	}
+	pl := payload.Decode(payload.Frame{
+		Raw: p.Raw, Profile: ev.Demod, FrequencyHz: p.FrequencyHz, TimestampMs: p.TimestampMs,
+	})
+	if pl.Decoder != "geoscan.image" || len(pl.Chunk) == 0 {
+		return
+	}
+	prod := s.products.PutGeoscanChunk(products.Meta{
+		RadioPath: pathID, Kind: products.KindGEOSCAN, Mode: "geoscan", ModeName: "GEOSCAN",
+		FrequencyHz: ev.FrequencyHz, NoradID: ev.NoradID,
+	}, pl.Offset, pl.Chunk)
+	if prod.ID == "" {
+		return
+	}
+	ev.ProductID = prod.ID
+	if prod.Height > 0 {
+		pct := 100 * prod.Lines / prod.Height
+		if pct > 100 {
+			pct = 100
+		}
+		ev.Summary = fmt.Sprintf("Снимок · %d%% · кусков %d", pct, prod.Chunks)
+	}
+	s.send(EventProduct, prod)
+}
+
+// noteAir — участок эфира на частоте приёма (кадр или голос).
+func (s *Service) noteAir(pathID string, freqHz uint64, note AirNote) {
+	if s.airHear == nil || pathID == "" || freqHz == 0 || note.Kind == "" {
+		return
+	}
+	if note.SatName == "" && note.NoradID > 0 && s.names != nil {
+		note.SatName = s.names.SatName(note.NoradID)
+	}
+	s.airHear.RecordRx(pathID, freqHz, note)
+}
+
+// telemetryEvent собирает SSE-кадр и привязывает его к КА (ADR-009 §6.3).
+func (s *Service) telemetryEvent(pathID string, cs sdr.ChannelSettings, p Packet) TelemetryEvent {
+	ev := telemetryEvent(pathID, cs.Demod, p)
+	bind := s.resolveBinding(pathID, cs, ev.Src, ev.Dest, p.FrequencyHz)
+	if bind.NoradID > 0 {
+		ev.NoradID = bind.NoradID
+		ev.SatName = bind.SatName
+		ev.SatSource = bind.Source
+	}
+	return ev
+}
+
 func telemetryEvent(pathID, demod string, p Packet) TelemetryEvent {
+	raw := p.Raw
+	if len(raw) == 0 && len(p.Frame.Info) > 0 {
+		// Старые тесты собирают Packet только из Frame — восстанавливаем тело для разбора.
+		if b, err := p.Frame.Bytes(); err == nil && len(b) >= 2 {
+			raw = b[:len(b)-2]
+		}
+	}
+	pl := payload.Decode(payload.Frame{
+		Raw:         raw,
+		Profile:     demod,
+		FrequencyHz: p.FrequencyHz,
+		TimestampMs: p.TimestampMs,
+	})
 	ev := TelemetryEvent{
 		RadioPath:   pathID,
 		TimestampMs: p.TimestampMs,
 		FrequencyHz: p.FrequencyHz,
 		Demod:       demod,
-		Src:         callsign(p.Frame.Src),
-		Dest:        callsign(p.Frame.Dest),
-		InfoHex:     hex.EncodeToString(p.Frame.Info),
+		Src:         pl.Src,
+		Dest:        pl.Dest,
+		Info:        pl.Info,
+		InfoHex:     pl.InfoHex,
+		Kind:        pl.Kind,
+		Decoder:     pl.Decoder,
+		Summary:     pl.Summary,
 	}
-	// Кадры фиксированной длины дополняются нулями в конце: текст показывается и без них.
-	if text := bytes.TrimRight(p.Frame.Info, "\x00"); printable(text) {
-		ev.Info = string(text)
+	if ev.Src == "" && p.Frame.Src.Call != "" {
+		ev.Src = callsign(p.Frame.Src)
 	}
-	if demod == demodGEOSCAN {
-		ev.Params = geoscanParams(p.Frame)
+	if ev.Dest == "" && p.Frame.Dest.Call != "" {
+		ev.Dest = callsign(p.Frame.Dest)
+	}
+	if len(pl.Params) > 0 {
+		ev.Params = make([]TelemetryParam, len(pl.Params))
+		for i, prm := range pl.Params {
+			ev.Params[i] = TelemetryParam{ID: prm.ID, Name: prm.Name, Value: prm.Value, Unit: prm.Unit, Key: prm.Key}
+		}
 	}
 	return ev
 }
 
-func geoscanParams(f ax25.Frame) []TelemetryParam {
-	params, ok := geoscan.BeaconParams(f)
-	if !ok {
-		return nil
+func (s *Service) resolveBinding(pathID string, cs sdr.ChannelSettings, src, dest string, freqHz uint64) SatBinding {
+	if s == nil {
+		return SatBinding{}
 	}
-	out := make([]TelemetryParam, 0, len(params))
-	for _, p := range params {
-		out = append(out, TelemetryParam{ID: p.ID, Name: p.Name, Value: p.Value, Unit: p.Unit, Key: p.Key})
+	in := ResolveInput{
+		SrcCall: src, DestCall: dest,
+		FrequencyHz: freqHz, BandwidthHz: cs.BandwidthHz,
+		Now: s.now(), Doppler: s.doppler, Horizon: s.horizon,
+		Callsigns: s.callsigns, Names: s.names,
 	}
-	return out
+	if s.transmitters != nil {
+		in.Transmitters = s.transmitters.ExpectedTransmitters()
+	}
+	if s.pathSats != nil {
+		if h, ok := s.pathSats.Hint(pathID); ok {
+			in.Path = h
+		}
+	}
+	return ResolveSat(in)
 }
 
 // sendStatus рассылает состояние демодулятора вместе с усилением приёмника и маркерами передатчиков.
@@ -352,6 +675,23 @@ func (s *Service) sendStatus(pathID string, active bool, freq uint64, cs sdr.Cha
 		ev.GainDB = &g
 	}
 	s.send(EventStatus, ev)
+	s.noteAirVoice(pathID, ev)
+}
+
+// noteAirVoice — при открытом пороге голоса/CW пишем kind=voice в эфир (кадров нет).
+func (s *Service) noteAirVoice(pathID string, ev StatusEvent) {
+	if !ev.Active || !ev.SquelchOpen || ev.DemodOff || !voiceDemod(ev.Demod) {
+		return
+	}
+	norad := ev.DopplerNorad
+	ts := ev.LastPacketMs
+	if ts == 0 {
+		ts = uint64(s.now().UnixMilli()) //nolint:gosec // UnixMilli > 0
+	}
+	s.noteAir(pathID, ev.FrequencyHz, AirNote{
+		Kind: payload.KindVoice, Summary: payload.Label(payload.KindVoice), Decoder: ev.Demod,
+		TimestampMs: ts, NoradID: norad, CountFrame: false,
+	})
 }
 
 func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings, st Status) StatusEvent {
@@ -377,17 +717,25 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		LastPacketMs:    st.LastPacketMs,
 		BandwidthHz:     cs.BandwidthHz,
 		OffsetHz:        cs.OffsetHz,
+		Baud:            cs.Baud,
 		DopplerAuto:     cs.DopplerAuto,
 		DopplerNorad:    cs.DopplerNorad,
 		DopplerManualHz: cs.DopplerManualHz,
 		DopplerHz:       st.DopplerHz,
 		Picture:         st.Picture,
+		AutoLocked:      st.AutoLocked,
+		AutoPhase:       st.AutoPhase,
+		AutoCandidates:  st.AutoCandidates,
+		AutoIDs:         st.AutoIDs,
 	}
 	if st.Measured {
 		ev.Reception = &ReceptionStages{CarrierHz: st.CarrierHz, DeviationHz: st.DeviationHz,
 			ClockJitter: st.ClockJitter, SNRDB: st.SNRDB}
 		if st.SyncCounted {
 			ev.Reception.Sync = &SyncStats{Words: st.SyncWords, BitErrors: st.SyncBitErrors}
+		}
+		if st.FECCounted {
+			ev.Reception.FEC = &FECStats{Corrected: st.FECCorrected}
 		}
 	}
 	return ev
@@ -399,13 +747,4 @@ func callsign(a ax25.Address) string {
 		return a.Call
 	}
 	return a.Call + "-" + strconv.Itoa(int(a.SSID))
-}
-
-func printable(b []byte) bool {
-	for _, c := range b {
-		if c < 0x20 || c > 0x7e {
-			return false
-		}
-	}
-	return true
 }

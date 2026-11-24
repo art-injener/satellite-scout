@@ -18,11 +18,23 @@ type sstvRx struct {
 }
 
 func newSSTVRx(rate float64) pictureRx {
+	return newSSTVRxOpt(rate, true)
+}
+
+// newSSTVRxVISOnly — только заголовок VIS: после перестройки или выключения демода
+// нельзя сразу схватить ту же передачу по строчным синхро.
+func newSSTVRxVISOnly(rate float64) pictureRx {
+	return newSSTVRxOpt(rate, false)
+}
+
+func newSSTVRxOpt(rate float64, midJoin bool) pictureRx {
+	dec := sstv.NewDecoder(AudioRate)
+	dec.SetMidJoin(midJoin)
 	return &sstvRx{
 		fm: modem.NewFMAudioDemod(modem.FMAudioConfig{
 			SampleRate: rate, DeviationHz: sstvDeviationHz, AudioRate: AudioRate,
 		}),
-		dec: sstv.NewDecoder(AudioRate),
+		dec: dec,
 	}
 }
 
