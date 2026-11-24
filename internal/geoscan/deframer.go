@@ -16,6 +16,7 @@ const syncMaxErrors = 4
 type Deframer struct {
 	shift   uint32 // последние 32 бита линии
 	inFrame bool
+	invert  bool // синхрослово найдено в инверсной полярности
 	cur     byte // собираемый байт
 	nbits   int  // бит в cur
 	buf     []byte
@@ -31,13 +32,22 @@ func (d *Deframer) Push(dst [][]byte, levels []byte) [][]byte {
 		b := lv & 1
 		if !d.inFrame {
 			d.shift = d.shift<<1 | uint32(b)
-			if errs := bits.OnesCount32(d.shift ^ SyncWord); errs <= syncMaxErrors {
+			errs := bits.OnesCount32(d.shift ^ SyncWord)
+			if errs <= syncMaxErrors {
 				d.syncs++
 				d.syncErrs += errs
-				d.inFrame = true
+				d.inFrame, d.invert = true, false
+				d.buf, d.nbits = d.buf[:0], 0
+			} else if invErrs := 32 - errs; invErrs <= syncMaxErrors {
+				d.syncs++
+				d.syncErrs += invErrs
+				d.inFrame, d.invert = true, true
 				d.buf, d.nbits = d.buf[:0], 0
 			}
 			continue
+		}
+		if d.invert {
+			b ^= 1
 		}
 
 		d.cur = d.cur<<1 | b
@@ -71,6 +81,7 @@ func (d *Deframer) Push(dst [][]byte, levels []byte) [][]byte {
 // endFrame возвращает к поиску синхрослова; биты кадра в него не попадают.
 func (d *Deframer) endFrame() {
 	d.inFrame = false
+	d.invert = false
 	d.shift = 0
 }
 

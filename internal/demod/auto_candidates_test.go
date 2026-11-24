@@ -76,3 +76,37 @@ func TestMatchTXModeBaud(t *testing.T) {
 		t.Fatal("unknown norad")
 	}
 }
+
+func TestMatchTXModeBauds_CollectsAllModesOnSameFrequency(t *testing.T) {
+	txs := []ExpectedTransmitter{
+		{NoradID: 57172, FreqHz: 437_625_000, Mode: "SSTV"},
+		{NoradID: 57172, FreqHz: 437_625_000, Mode: "GMSK USP", Baud: 2400},
+		{NoradID: 57172, FreqHz: 437_625_000, Mode: "GMSK USP", Baud: 4800},
+		{NoradID: 57172, FreqHz: 437_625_000, Mode: "GMSK USP", Baud: 9600},
+		{NoradID: 57172, FreqHz: 437_625_000, Mode: "CW"},
+		{NoradID: 57172, FreqHz: 435_825_000, Mode: "FSK", Baud: 4800},
+	}
+	got := MatchTXModeBauds(txs, 57172, 437_626_000)
+	if len(got) != 5 {
+		t.Fatalf("got %d hints %+v, want 5", len(got), got)
+	}
+	cands := BuildCandidates(CandidateHints{TXHints: got})
+	for _, want := range []string{"gmsk2400_usp", "gmsk4800_usp", "gmsk9600_usp"} {
+		if !slices.Contains(cands, want) {
+			t.Errorf("missing %q in %v", want, cands)
+		}
+	}
+}
+
+func TestBuildCandidates_DefaultIncludesAllFrameProfiles(t *testing.T) {
+	got := BuildCandidates(CandidateHints{})
+	want := ImplementedFrameProfiles()
+	if len(got) != len(want) {
+		t.Fatalf("got %d candidates, want all %d frame profiles", len(got), len(want))
+	}
+	for _, id := range []string{"gmsk9600_usp", "gmsk2400_usp", "afsk1200", "bpsk1200", "qpsk_ccsds"} {
+		if !slices.Contains(got, id) {
+			t.Errorf("missing %q in default candidates", id)
+		}
+	}
+}

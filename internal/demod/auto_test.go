@@ -84,3 +84,135 @@ func TestAutoConfigKey_StableWithoutInstantFreq(t *testing.T) {
 		t.Fatal("different mode/baud must change key")
 	}
 }
+
+func TestAutoPicker_GMSK9600USPWithoutHintsLocksOnOneFrame(t *testing.T) {
+	air := beaconAirOf(t, testRate, 1, time.Second, "gmsk9600_usp")
+	frames := toFrames(air, testRate, sdr.DefaultBlockSize, 0)
+
+	picker := NewAutoPicker()
+	clock := time.Unix(1_000, 0)
+	picker.now = func() time.Time { return clock }
+	picker.Configure("no-hints", BuildCandidates(CandidateHints{}))
+	if len(picker.Candidates()) <= 5 {
+		t.Fatalf("expected all frame candidates without limit 5, got %d", len(picker.Candidates()))
+	}
+
+	cs := sdr.ChannelSettings{
+		OffsetHz: testOffset, BandwidthHz: sdr.MaxChannelBandwidthHz, SquelchDBFS: -90, Demod: DemodAuto,
+	}
+	var pkts []taggedPacket
+	for _, f := range frames {
+		clock = clock.Add(time.Millisecond)
+		p, st := picker.Process(f, cs, 0)
+		pkts = append(pkts, p...)
+		if st.AutoPhase == "locked" {
+			break
+		}
+	}
+	if picker.Locked() != "gmsk9600_usp" {
+		t.Fatalf(
+			"locked = %q, want gmsk9600_usp on single valid USP frame without hints (pkts=%d)",
+			picker.Locked(), len(pkts),
+		)
+	}
+	if len(pkts) < 1 {
+		t.Fatal("expected at least 1 decoded packet")
+	}
+}
+
+func TestAutoPicker_ConfigureSameKeyKeepsHitsAndDeframers(t *testing.T) {
+	air := beaconAirOf(t, testRate, 2, time.Second, "afsk1200")
+	frames := toFrames(air, testRate, sdr.DefaultBlockSize, 0)
+
+	picker := NewAutoPicker()
+	clock := time.Unix(2_000, 0)
+	picker.now = func() time.Time { return clock }
+	picker.window = time.Minute
+	picker.Configure("same-key", []string{"fsk9600_g3ruh", "afsk1200", "gmsk9600_usp"})
+
+	cs := sdr.ChannelSettings{
+		OffsetHz: testOffset, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: DemodAuto,
+	}
+	reconfigured := false
+	for _, f := range frames {
+		clock = clock.Add(time.Millisecond)
+		p, st := picker.Process(f, cs, 0)
+		if len(p) > 0 && !reconfigured {
+			// Simulate hints update arriving mid-search on the same TX key.
+			picker.Configure("same-key", []string{"afsk1200", "fsk9600_g3ruh", "gmsk9600_usp", "bpsk1200"})
+			reconfigured = true
+		}
+		if st.AutoPhase == "locked" {
+			break
+		}
+	}
+	if !reconfigured {
+		t.Fatal("never decoded first afsk1200 frame")
+	}
+	if picker.Locked() != "afsk1200" {
+		t.Fatalf("locked = %q, want afsk1200 (Configure on same key must preserve hits)", picker.Locked())
+	}
+}
+
+func TestAutoPicker_StrongFECProfilesLockOnSingleFrame(t *testing.T) {
+	cases := []struct {
+		id     string
+		hints  CandidateHints
+		want   string
+		period time.Duration
+		lead   int
+		bw     uint32
+	}{
+		{
+			id: "gmsk2400_usp", want: "gmsk2400_usp",
+			period: 3 * time.Second, lead: testRate / 5, bw: 15_000,
+		},
+		{
+			id: "gmsk4800_ax100", hints: CandidateHints{Mode: "GMSK", Baud: 4800}, want: "gmsk4800_ax100",
+			period: time.Second, bw: 15_000,
+		},
+		{
+			id: "fsk9600_geoscan", want: "fsk9600_geoscan",
+			period: time.Second, bw: sdr.MaxChannelBandwidthHz,
+		},
+		{
+			id: "qpsk_ccsds", want: "qpsk_ccsds",
+			period: time.Second, bw: sdr.MaxChannelBandwidthHz,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.id, func(t *testing.T) {
+			var air []complex64
+			if tc.lead > 0 {
+				air = beaconAirWithLead(t, testRate, 1, tc.period, tc.id, tc.lead)
+			} else {
+				air = beaconAirOf(t, testRate, 1, tc.period, tc.id)
+			}
+			frames := toFrames(air, testRate, sdr.DefaultBlockSize, 0)
+
+			picker := NewAutoPicker()
+			clock := time.Unix(3_000, 0)
+			picker.now = func() time.Time { return clock }
+			picker.Configure("k-"+tc.id, BuildCandidates(tc.hints))
+
+			cs := sdr.ChannelSettings{
+				OffsetHz: testOffset, BandwidthHz: tc.bw, SquelchDBFS: -90, Demod: DemodAuto,
+			}
+			var pkts []taggedPacket
+			for _, f := range frames {
+				clock = clock.Add(time.Millisecond)
+				p, st := picker.Process(f, cs, 0)
+				pkts = append(pkts, p...)
+				if st.AutoPhase == "locked" {
+					break
+				}
+			}
+			if picker.Locked() != tc.want {
+				t.Fatalf("locked = %q, want %q on single valid frame", picker.Locked(), tc.want)
+			}
+			if len(pkts) != 1 {
+				t.Fatalf("got %d packets, want 1 without duplicates across equivalent pipelines", len(pkts))
+			}
+		})
+	}
+}

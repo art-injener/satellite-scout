@@ -1,22 +1,154 @@
 package demod
 
 import (
+	"log/slog"
 	"strconv"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/m10"
+	"github.com/art-injener/satellite-scout/internal/modem"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
 // Окна автоподбора по умолчанию.
 const (
-	autoWinDefault    = 30 * time.Second // два кадра с CRC за это окно
-	autoReviewDefault = 30 * time.Second // без кадров после закрепления — снова подбор
-	autoNeedGood      = 2
+	autoWinDefault    = 30 * time.Second // окно накопления кадров для HDLC без FEC
+	autoReviewDefault = 30 * time.Second // без кадров после закрепления запускается повторный подбор
+	autoNeedGoodHDLC  = 2
+	autoNeedGoodFEC   = 1
 )
 
-// AutoPicker — параллельный подбор кадрового профиля на одном канале.
-// Успешный выбор помнится по ключу TX/КА: следующий заход сразу «Выбран»,
-// снова проба — только если закреплённый профиль не дал кадров.
+// demodKey — ключ общего линейного демодулятора поверх узкого канала 64 или 32 кГц.
+type demodKey string
+
+const (
+	demodKeyFSK1200   demodKey = "fsk1200"
+	demodKeyFSK2400   demodKey = "fsk2400"
+	demodKeyFSK4800   demodKey = "fsk4800"
+	demodKeyFSK9600   demodKey = "fsk9600"
+	demodKeyFSKM10    demodKey = "fsk_m10"
+	demodKeyAFSK1200  demodKey = "afsk1200"
+	demodKeyBPSK1200  demodKey = "bpsk1200"
+	demodKeyBPSK9600  demodKey = "bpsk9600"
+	demodKeyQPSKCCSDS demodKey = "qpsk_ccsds"
+)
+
+type autoProfileSpec struct {
+	key    demodKey
+	need32 bool   // канал 32 кГц вместо 64 кГц
+	g3ruh  bool   // пропустить биты через общий дескремблер G3RUH
+	dfKind string // тип выделителя кадров для дедупликации идентичных трактов
+}
+
+// pipelineSig определяет физически эквивалентную ветку (демодулятор, дескремблер, выделитель кадров).
+type pipelineSig struct {
+	key    demodKey
+	g3ruh  bool
+	dfKind string
+}
+
+func (s autoProfileSpec) sig() pipelineSig {
+	return pipelineSig{key: s.key, g3ruh: s.g3ruh, dfKind: s.dfKind}
+}
+
+// autoSpecFor возвращает общий линейный демодулятор и тип дефреймера для кадрового профиля.
+// FSK/GFSK/GMSK одной скорости имеют идентичную физику в FSKDemod и разделяют один поток бит.
+func autoSpecFor(id string) autoProfileSpec {
+	switch id {
+	case "fsk1200", "gfsk1200":
+		return autoProfileSpec{key: demodKeyFSK1200, dfKind: "hdlc"}
+	case "gmsk2400":
+		return autoProfileSpec{key: demodKeyFSK2400, dfKind: "hdlc"}
+	case "gmsk2400_usp":
+		return autoProfileSpec{key: demodKeyFSK2400, dfKind: "usp"}
+	case "fsk4800", "gfsk4800", "gmsk4800":
+		return autoProfileSpec{key: demodKeyFSK4800, dfKind: "hdlc"}
+	case "fsk4800_ax100", "gmsk4800_ax100":
+		return autoProfileSpec{key: demodKeyFSK4800, dfKind: "ax100"}
+	case "gmsk4800_usp":
+		return autoProfileSpec{key: demodKeyFSK4800, dfKind: "usp"}
+	case "rs41":
+		return autoProfileSpec{key: demodKeyFSK4800, dfKind: "rs41"}
+	case "fsk9600_geoscan":
+		return autoProfileSpec{key: demodKeyFSK9600, dfKind: "geoscan"}
+	case "fsk9600_ax100_rs", "gmsk9600_ax100_rs":
+		return autoProfileSpec{key: demodKeyFSK9600, dfKind: "ax100_rs"}
+	case "gmsk9600_ax100":
+		return autoProfileSpec{key: demodKeyFSK9600, dfKind: "ax100"}
+	case "gmsk9600_usp":
+		return autoProfileSpec{key: demodKeyFSK9600, dfKind: "usp"}
+	case "fsk9600_g3ruh", "gfsk9600", "gmsk9600":
+		return autoProfileSpec{key: demodKeyFSK9600, g3ruh: true, dfKind: "hdlc"}
+	case "m10":
+		return autoProfileSpec{key: demodKeyFSKM10, dfKind: "m10"}
+	case "afsk1200":
+		return autoProfileSpec{key: demodKeyAFSK1200, need32: true, dfKind: "hdlc"}
+	case "bpsk1200":
+		return autoProfileSpec{key: demodKeyBPSK1200, need32: true, dfKind: "hdlc"}
+	case "bpsk9600":
+		return autoProfileSpec{key: demodKeyBPSK9600, dfKind: "hdlc"}
+	case "qpsk_ccsds":
+		return autoProfileSpec{key: demodKeyQPSKCCSDS, dfKind: "ccsds"}
+	default:
+		p := profiles[id]
+		return autoProfileSpec{key: demodKey("custom:" + id), need32: p.fineDecim == 2, dfKind: "custom:" + id}
+	}
+}
+
+// needGoodFor возвращает число валидных кадров, достаточное для закрепления профиля.
+// Профили с синхрословом и сильным FEC/CRC (AX.100, USP, GEOSCAN, RS41, CCSDS) закрепляются с 1 кадра;
+// профили HDLC без FEC (и M10) требуют 2 кадра в окне.
+func needGoodFor(id string) int {
+	switch id {
+	case "fsk4800_ax100", "gmsk4800_ax100", "gmsk9600_ax100",
+		"fsk9600_ax100_rs", "gmsk9600_ax100_rs",
+		"gmsk2400_usp", "gmsk4800_usp", "gmsk9600_usp",
+		demodGEOSCAN, "rs41", "qpsk_ccsds":
+		return autoNeedGoodFEC
+	default:
+		return autoNeedGoodHDLC
+	}
+}
+
+func newSharedLineDemod(key demodKey, id string, midRate float64) lineDemod {
+	switch key {
+	case demodKeyFSK1200:
+		return modem.NewFSKDemod(modem.FSK1200(midRate))
+	case demodKeyFSK2400:
+		return modem.NewFSKDemod(modem.GMSK2400(midRate))
+	case demodKeyFSK4800:
+		return modem.NewFSKDemod(modem.FSK4800(midRate))
+	case demodKeyFSK9600:
+		return modem.NewFSKDemod(modem.FSK9600(midRate))
+	case demodKeyFSKM10:
+		return modem.NewFSKDemod(modem.FSKConfig{
+			SampleRate: midRate, Baud: m10.Baud, DeviationHz: 3000, BT: 0.5,
+		})
+	case demodKeyAFSK1200:
+		return modem.NewAFSKDemod(modem.AFSK1200(midRate / 2))
+	case demodKeyBPSK1200:
+		return modem.NewBPSKDemod(modem.BPSK1200(midRate / 2))
+	case demodKeyBPSK9600:
+		return modem.NewBPSKDemod(modem.BPSK9600(midRate))
+	case demodKeyQPSKCCSDS:
+		return modem.NewQPSKDemod(modem.QPSKCCSDS(midRate))
+	default:
+		p := profiles[id]
+		if p.newDemod != nil {
+			r := midRate
+			if p.fineDecim > 1 {
+				r /= float64(p.fineDecim)
+			}
+			return p.newDemod(r)
+		}
+		return nil
+	}
+}
+
+// AutoPicker — параллельный подбор кадрового профиля на одном общем канале 64 кГц.
+// Децимация IQ выполняется один раз на блок, линейные демодуляторы расшарены по скоростям
+// и питают все активные дефреймеры одновременно без жёсткого лимита кандидатов.
+// Успешный выбор помнится по ключу условий и восстанавливается при возврате на тот же передатчик.
 type AutoPicker struct {
 	window time.Duration
 	review time.Duration
@@ -24,22 +156,34 @@ type AutoPicker struct {
 
 	key        string
 	candidates []string
-	chains     map[string]*Chain
+	frontend   channelFrontend
+	demodRate  float64
+	demods     map[demodKey]lineDemod
+	g3ruh      modem.G3RUHDescrambler
+	deframers  map[pipelineSig]deframer
 	hits       map[string][]time.Time
-	pinned     string
-	lastGood   time.Time
-	memory     map[string]string // ключ условий → закреплённый профиль
+
+	pinned       string
+	lastGood     time.Time
+	lastPacketMs uint64
+	memory       map[string]string // ключ условий соответствует закреплённому профилю
+
+	bitsBuf  map[demodKey][]byte
+	g3ruhBuf []byte
+	frameBuf [][]byte
 }
 
 // NewAutoPicker создаёт подборщик с окнами по умолчанию.
 func NewAutoPicker() *AutoPicker {
 	return &AutoPicker{
-		window: autoWinDefault,
-		review: autoReviewDefault,
-		now:    time.Now,
-		chains: make(map[string]*Chain),
-		hits:   make(map[string][]time.Time),
-		memory: make(map[string]string),
+		window:    autoWinDefault,
+		review:    autoReviewDefault,
+		now:       time.Now,
+		demods:    make(map[demodKey]lineDemod),
+		deframers: make(map[pipelineSig]deframer),
+		hits:      make(map[string][]time.Time),
+		memory:    make(map[string]string),
+		bitsBuf:   make(map[demodKey][]byte),
 	}
 }
 
@@ -58,10 +202,10 @@ func (a *AutoPicker) SeedMemory(key, id string) {
 	a.memory[key] = id
 }
 
-// Configure задаёт список кандидатов и ключ условий (NORAD, режим TX, …).
-// Смена ключа не забывает прежний выбор: он лежит в memory и восстанавливается
-// при возврате. Состав кандидатов обновляется; закрепление с прошлого захода
-// остаётся, если профиль ещё в списке.
+// Configure обновляет ключ условий и список кандидатов.
+// При том же ключе обновление подсказок выполняется инкрементально: накопленные попадания
+// и работающие дефреймеры с демодуляторами сохраняются. При смене ключа прежнее закрепление
+// запоминается в memory и восстанавливается при возврате.
 func (a *AutoPicker) Configure(key string, candidates []string) {
 	if a == nil {
 		return
@@ -69,30 +213,117 @@ func (a *AutoPicker) Configure(key string, candidates []string) {
 	if a.memory == nil {
 		a.memory = make(map[string]string)
 	}
+	if a.deframers == nil {
+		a.deframers = make(map[pipelineSig]deframer)
+	}
+	if a.hits == nil {
+		a.hits = make(map[string][]time.Time)
+	}
+	if a.demods == nil {
+		a.demods = make(map[demodKey]lineDemod)
+	}
+	if a.bitsBuf == nil {
+		a.bitsBuf = make(map[demodKey][]byte)
+	}
+
 	sameKey := key == a.key
 	sameCand := slicesEqual(candidates, a.candidates)
 	if sameKey && sameCand {
 		return
 	}
+
+	if sameKey {
+		a.configureSameKey(key, candidates)
+		return
+	}
+
 	if a.key != "" && a.pinned != "" {
 		a.remember(a.key, a.pinned)
 	}
 	a.key = key
 	a.candidates = append([]string(nil), candidates...)
-	a.chains = make(map[string]*Chain)
+	a.deframers = make(map[pipelineSig]deframer, len(a.candidates))
 	a.hits = make(map[string][]time.Time)
+	a.demods = make(map[demodKey]lineDemod)
+	a.g3ruh = modem.G3RUHDescrambler{}
+	a.demodRate = 0
 	for _, id := range a.candidates {
-		a.chains[id] = NewChain()
+		sig := autoSpecFor(id).sig()
+		if a.deframers[sig] == nil {
+			if df := newProfileDeframer(id); df != nil {
+				a.deframers[sig] = df
+			}
+		}
 	}
 	a.pinned = ""
 	a.lastGood = time.Time{}
+	a.lastPacketMs = 0
 	if mem := a.memory[key]; mem != "" && candidateHas(a.candidates, mem) {
 		a.pinned = mem
 		a.lastGood = a.now() // свежий заход: не считать простой с прошлого hop
 	}
+	slog.Info("demod auto: configure",
+		slog.String("key", key),
+		slog.Int("candidates", len(a.candidates)),
+		slog.String("pinned", a.pinned),
+	)
 }
 
-// Locked — закреплённый профиль; пусто — ещё подбор.
+func newProfileDeframer(id string) deframer {
+	p, ok := profiles[id]
+	if !ok || p.newDeframer == nil {
+		return nil
+	}
+	return p.newDeframer()
+}
+
+func (a *AutoPicker) configureSameKey(key string, candidates []string) {
+	a.candidates = append([]string(nil), candidates...)
+	keepID := make(map[string]bool, len(a.candidates))
+	keepSig := make(map[pipelineSig]bool, len(a.candidates))
+	for _, id := range a.candidates {
+		keepID[id] = true
+		sig := autoSpecFor(id).sig()
+		keepSig[sig] = true
+		a.ensureDeframer(id, sig)
+	}
+	for sig := range a.deframers {
+		if !keepSig[sig] {
+			delete(a.deframers, sig)
+		}
+	}
+	for id := range a.hits {
+		if !keepID[id] {
+			delete(a.hits, id)
+		}
+	}
+	if a.pinned != "" && !keepID[a.pinned] {
+		a.pinned = ""
+		a.lastGood = time.Time{}
+	}
+	if a.pinned == "" {
+		if mem := a.memory[key]; mem != "" && keepID[mem] {
+			a.pinned = mem
+			a.lastGood = a.now()
+		}
+	}
+	slog.Info("demod auto: configure",
+		slog.String("key", key),
+		slog.Int("candidates", len(a.candidates)),
+		slog.String("pinned", a.pinned),
+	)
+}
+
+func (a *AutoPicker) ensureDeframer(id string, sig pipelineSig) {
+	if a.deframers[sig] != nil {
+		return
+	}
+	if df := newProfileDeframer(id); df != nil {
+		a.deframers[sig] = df
+	}
+}
+
+// Locked — закреплённый профиль; пусто, пока идёт подбор.
 func (a *AutoPicker) Locked() string {
 	if a == nil {
 		return ""
@@ -113,7 +344,7 @@ type taggedPacket struct {
 	Packet  Packet
 }
 
-// Process гоняет кандидатов (или только закреплённый) по одному блоку IQ.
+// Process гоняет всех кандидатов (или только закреплённый) поверх одного канального фронтенда.
 func (a *AutoPicker) Process(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz float64) (pkts []taggedPacket, st Status) {
 	if a == nil || len(a.candidates) == 0 {
 		st.Demod = DemodAuto
@@ -128,54 +359,251 @@ func (a *AutoPicker) Process(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz 
 	return a.processSearch(f, base, dopplerHz, now)
 }
 
-func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz float64, now time.Time) ([]taggedPacket, Status) {
-	ch := a.chain(a.pinned)
-	cs := base
-	cs.Demod = a.pinned
-	ch.SetDopplerHz(dopplerHz)
-	var out []taggedPacket
-	for _, p := range ch.Process(f, cs) {
-		out = append(out, taggedPacket{Profile: a.pinned, Packet: p})
-		a.lastGood = now
+func (a *AutoPicker) ensureDemodRate(midRate float64) {
+	if midRate <= 0 || midRate == a.demodRate {
+		return
 	}
-	st := ch.Status()
+	a.demodRate = midRate
+	a.demods = make(map[demodKey]lineDemod)
+	a.g3ruh = modem.G3RUHDescrambler{}
+}
+
+func (a *AutoPicker) lineDemod(spec autoProfileSpec, id string) lineDemod {
+	d := a.demods[spec.key]
+	if d == nil {
+		d = newSharedLineDemod(spec.key, id, a.frontend.midRate)
+		if d != nil {
+			a.demods[spec.key] = d
+		}
+	}
+	return d
+}
+
+func (a *AutoPicker) deframerFor(id string, sig pipelineSig) deframer {
+	df := a.deframers[sig]
+	if df == nil {
+		df = newProfileDeframer(id)
+		if df != nil {
+			a.deframers[sig] = df
+		}
+	}
+	return df
+}
+
+func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz float64, now time.Time) ([]taggedPacket, Status) {
+	id := a.pinned
+	spec := autoSpecFor(id)
+	fr := a.frontend.process(f, base, dopplerHz, spec.need32)
+	a.ensureDemodRate(a.frontend.midRate)
+
+	st := Status{
+		LevelDBFS:    fr.levelDBFS,
+		SquelchOpen:  fr.open,
+		PassbandHz:   a.frontend.passbandHz,
+		LastPacketMs: a.lastPacketMs,
+	}
+
+	var out []taggedPacket
+	df := a.deframerFor(id, spec.sig())
+	dem := a.lineDemod(spec, id)
+	if fr.open && dem != nil && df != nil {
+		out = a.runPinnedBlock(id, spec, dem, df, fr, f, base, now, &st)
+	} else if df != nil {
+		st.Good, st.Bad = df.Good(), df.Bad()
+	}
+	a.frontend.updatePrev(fr.ch64)
+
 	fillAutoStatus(&st, a.pinned, "locked", a.candidates)
 	if !a.lastGood.IsZero() && now.Sub(a.lastGood) >= a.review {
+		prev := a.pinned
 		a.forget(a.key)
 		a.unpin()
+		slog.Info("demod auto: unpin",
+			slog.String("key", a.key),
+			slog.String("previous", prev),
+		)
 		fillAutoStatus(&st, "", "search", a.candidates)
 	}
 	return out, st
 }
 
+func (a *AutoPicker) runPinnedBlock(
+	id string,
+	spec autoProfileSpec,
+	dem lineDemod,
+	df deframer,
+	fr frontendResult,
+	f sdr.IQFrame,
+	base sdr.ChannelSettings,
+	now time.Time,
+	st *Status,
+) []taggedPacket {
+	ch := fr.ch64
+	if spec.need32 {
+		ch = fr.ch32
+	}
+	if lf, ok := dem.(levelFreezer); ok {
+		lf.SetFreeze(!fr.above)
+	}
+	bits := dem.Demodulate(a.bitsBuf[spec.key][:0], ch)
+	a.bitsBuf[spec.key] = bits
+	inBits := bits
+	if spec.g3ruh {
+		a.g3ruhBuf = a.g3ruh.Descramble(a.g3ruhBuf[:0], bits)
+		inBits = a.g3ruhBuf
+	}
+	a.frameBuf = df.Push(a.frameBuf[:0], inBits)
+	freqHz := uint64(int64(f.CenterHz) + base.OffsetHz) //nolint:gosec // частоты канала > 0
+	pkts := buildPackets(f.TimestampMs, freqHz, a.frameBuf)
+	out := make([]taggedPacket, 0, len(pkts))
+	for _, p := range pkts {
+		out = append(out, taggedPacket{Profile: id, Packet: p})
+		a.lastGood = now
+		a.lastPacketMs = f.TimestampMs
+	}
+	st.LastPacketMs = a.lastPacketMs
+	fillProfileMetrics(st, dem, df, fr.above)
+	if fr.above {
+		a.frontend.measureCarrierSNR(fr.ch64, st)
+	}
+	return out
+}
+
 func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopplerHz float64, now time.Time) ([]taggedPacket, Status) {
-	var out []taggedPacket
-	var best Status
-	have := false
+	need32 := false
 	for _, id := range a.candidates {
-		ch := a.chain(id)
-		cs := base
-		cs.Demod = id
-		ch.SetDopplerHz(dopplerHz)
-		for _, p := range ch.Process(f, cs) {
-			out = append(out, taggedPacket{Profile: id, Packet: p})
-			a.noteHit(id, now)
-		}
-		st := ch.Status()
-		if !have || st.SquelchOpen {
-			best = st
-			have = true
-		}
-		if a.hitsInWindow(id, now) >= autoNeedGood {
-			a.pinned = id
-			a.lastGood = now
-			a.remember(a.key, id)
-			fillAutoStatus(&st, id, "locked", a.candidates)
-			return out, st
+		if autoSpecFor(id).need32 {
+			need32 = true
+			break
 		}
 	}
-	fillAutoStatus(&best, "", "search", a.candidates)
-	return out, best
+	fr := a.frontend.process(f, base, dopplerHz, need32)
+	a.ensureDemodRate(a.frontend.midRate)
+
+	st := Status{
+		LevelDBFS:    fr.levelDBFS,
+		SquelchOpen:  fr.open,
+		PassbandHz:   a.frontend.passbandHz,
+		LastPacketMs: a.lastPacketMs,
+	}
+	if !fr.open {
+		a.frontend.updatePrev(fr.ch64)
+		fillAutoStatus(&st, "", "search", a.candidates)
+		return nil, st
+	}
+
+	freqHz := uint64(int64(f.CenterHz) + base.OffsetHz) //nolint:gosec // частоты канала > 0
+	computed := make(map[demodKey][]byte, len(a.demods)+4)
+	seenSig := make(map[pipelineSig]bool, len(a.candidates))
+	g3ruhReady := false
+	var g3ruhBits []byte
+
+	var out []taggedPacket
+	var primaryDem lineDemod
+	var primaryDF deframer
+	lockedID := ""
+
+	for _, id := range a.candidates {
+		spec := autoSpecFor(id)
+		sig := spec.sig()
+		if seenSig[sig] {
+			// Эквивалентный физический тракт уже проверен более приоритетным кандидатом.
+			continue
+		}
+		seenSig[sig] = true
+		df := a.deframerFor(id, sig)
+		if df == nil {
+			continue
+		}
+		dem := a.lineDemod(spec, id)
+		if dem == nil {
+			continue
+		}
+		bits, ok := computed[spec.key]
+		if !ok {
+			ch := fr.ch64
+			if spec.need32 {
+				ch = fr.ch32
+			}
+			if lf, okFreeze := dem.(levelFreezer); okFreeze {
+				lf.SetFreeze(!fr.above)
+			}
+			bits = dem.Demodulate(a.bitsBuf[spec.key][:0], ch)
+			a.bitsBuf[spec.key] = bits
+			computed[spec.key] = bits
+		}
+		inBits := bits
+		if spec.g3ruh {
+			if !g3ruhReady {
+				a.g3ruhBuf = a.g3ruh.Descramble(a.g3ruhBuf[:0], bits)
+				g3ruhBits = a.g3ruhBuf
+				g3ruhReady = true
+			}
+			inBits = g3ruhBits
+		}
+
+		if primaryDem == nil {
+			primaryDem, primaryDF = dem, df
+		}
+
+		a.frameBuf = df.Push(a.frameBuf[:0], inBits)
+		for _, p := range buildPackets(f.TimestampMs, freqHz, a.frameBuf) {
+			out = append(out, taggedPacket{Profile: id, Packet: p})
+			a.noteHit(id, now)
+			a.lastPacketMs = f.TimestampMs
+		}
+		if lockedID == "" {
+			if hits := a.hitsInWindow(id, now); hits >= needGoodFor(id) {
+				lockedID = id
+				primaryDem, primaryDF = dem, df
+				a.pinned = id
+				a.lastGood = now
+				a.remember(a.key, id)
+				slog.Info("demod auto: locked",
+					slog.String("key", a.key),
+					slog.String("profile", id),
+					slog.Int("hits", hits),
+				)
+			}
+		}
+	}
+
+	st.LastPacketMs = a.lastPacketMs
+	if primaryDem != nil && primaryDF != nil {
+		fillProfileMetrics(&st, primaryDem, primaryDF, fr.above)
+	}
+	if fr.above {
+		a.frontend.measureCarrierSNR(fr.ch64, &st)
+	}
+	a.frontend.updatePrev(fr.ch64)
+
+	if lockedID != "" {
+		fillAutoStatus(&st, lockedID, "locked", a.candidates)
+		return out, st
+	}
+	fillAutoStatus(&st, "", "search", a.candidates)
+	return out, st
+}
+
+func fillProfileMetrics(st *Status, dem lineDemod, df deframer, above bool) {
+	st.Good, st.Bad = df.Good(), df.Bad()
+	if fc, ok := df.(fecCounter); ok {
+		st.FECCounted = true
+		st.FECCorrected = fc.FECCorrected()
+	}
+	if !above {
+		return
+	}
+	if m, ok := dem.(clockMeter); ok {
+		st.ClockJitter = m.ClockJitter()
+	}
+	if m, ok := dem.(deviationMeter); ok {
+		st.DeviationHz = m.DeviationHz()
+	}
+	if sc, ok := df.(syncCounter); ok {
+		st.SyncCounted = true
+		st.SyncWords, st.SyncBitErrors = sc.SyncWords(), sc.SyncBitErrors()
+	}
 }
 
 func fillAutoStatus(st *Status, locked, phase string, candidates []string) {
@@ -209,15 +637,6 @@ func trimHits(hits []time.Time, now time.Time, win time.Duration) []time.Time {
 	return hits[i:]
 }
 
-func (a *AutoPicker) chain(id string) *Chain {
-	ch := a.chains[id]
-	if ch == nil {
-		ch = NewChain()
-		a.chains[id] = ch
-	}
-	return ch
-}
-
 func (a *AutoPicker) remember(key, id string) {
 	if a == nil || key == "" || id == "" {
 		return
@@ -239,8 +658,17 @@ func (a *AutoPicker) unpin() {
 	a.pinned = ""
 	a.lastGood = time.Time{}
 	a.hits = make(map[string][]time.Time)
-	for id := range a.chains {
-		a.chains[id] = NewChain()
+	a.demods = make(map[demodKey]lineDemod)
+	a.g3ruh = modem.G3RUHDescrambler{}
+	a.demodRate = 0
+	a.deframers = make(map[pipelineSig]deframer, len(a.candidates))
+	for _, id := range a.candidates {
+		sig := autoSpecFor(id).sig()
+		if a.deframers[sig] == nil {
+			if df := newProfileDeframer(id); df != nil {
+				a.deframers[sig] = df
+			}
+		}
 	}
 }
 
@@ -267,7 +695,7 @@ func slicesEqual(a, b []string) bool {
 
 // autoConfigKey — устойчивый ключ TX/КА для памяти выбора.
 // При известном NORAD живая частота с доплером не входит: иначе каждый hop
-// того же TX считался бы новым. Без NORAD — номинал с шагом 5 кГц.
+// того же TX считался бы новым. Без NORAD берётся номинал с шагом 5 кГц.
 func autoConfigKey(norad int, freqHz uint64, bw uint32, hints CandidateHints) string {
 	_ = bw
 	key := "n" + strconv.Itoa(norad) +

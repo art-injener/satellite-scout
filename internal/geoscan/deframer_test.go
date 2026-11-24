@@ -124,3 +124,18 @@ func TestDeframer_ReturnedFrameIsNotReused(t *testing.T) {
 		t.Error("first frame changed after the next Push")
 	}
 }
+
+func TestDeframer_InvertedPolarity(t *testing.T) {
+	for _, n := range []int{ShortDataLen, LongDataLen} {
+		levels := mustEncode(t, testData(n), 8, 2)
+		for i := range levels {
+			levels[i] ^= 1
+		}
+		var d Deframer
+		got := d.Push(nil, levels)
+		if len(got) != 1 || !bytes.Equal(got[0], testData(n)) {
+			t.Fatalf("%d bytes inverted: frames=%d good=%d bad=%d, want 1 matching frame",
+				n, len(got), d.Good(), d.Bad())
+		}
+	}
+}

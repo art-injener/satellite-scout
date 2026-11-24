@@ -370,12 +370,17 @@ func (a *app) AirHint(pathID string, freqHz uint64) (demod string, alt []string,
 		return "", nil, "", 0, false
 	}
 	st := best.Structure
-	demod = airLineDemod(st.Demod)
-	alt = append([]string(nil), st.DemodAlt...)
-	for i := range alt {
-		alt[i] = airLineDemod(alt[i])
-	}
+	demod, alt = airHintDemods(st)
 	return demod, alt, st.Modulation, st.Params.Baud, true
+}
+
+// airHintDemods возвращает кадровые подсказки классификатора без подмены на линейный fsk9600:
+// режим «Авто» перебирает кадровые профили с проверкой CRC, а линейный fsk9600 им отбрасывается.
+func airHintDemods(st *signalclass.Result) (string, []string) {
+	if st == nil {
+		return "", nil
+	}
+	return st.Demod, append([]string(nil), st.DemodAlt...)
 }
 
 func absU64Hz(a, b uint64) uint64 {

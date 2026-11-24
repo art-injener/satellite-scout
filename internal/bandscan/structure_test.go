@@ -425,3 +425,28 @@ func TestTracker_SatelliteAFSKCWAndOOKAreSatTx(t *testing.T) {
 		})
 	}
 }
+
+func TestTracker_NextJobPrioritizesFinishedShortBurstOverSteady(t *testing.T) {
+	tr := NewTracker()
+	const steadyHz = testCenter + 100_000
+	const burstHz = testCenter + 300_000
+
+	// Steady interferer runs continuously for 2.5 s and is ready for classification.
+	feed(tr, t0, t0+uint64(sliceMs)+2*stepMs, testCenter, steadyAt(steadyHz))
+	// A short single-hit strong burst (167 ms, SNR 12 dB) fires and ends.
+	burstAt := t0 + uint64(sliceMs) + 2*stepMs
+	tr.Update(synthDecision(burstAt, testCenter,
+		carrier(steadyHz, 2_000, 15),
+		carrier(burstHz, 12_000, 12),
+	))
+	// Wait burstMarginMs after burst ends while steady signal continues.
+	feed(tr, burstAt+stepMs, burstAt+stepMs+burstMarginMs+2*stepMs, testCenter, steadyAt(steadyHz))
+
+	job, ok := tr.nextJob(0)
+	if !ok {
+		t.Fatal("nextJob returned no job")
+	}
+	if math.Abs(job.centerHz-float64(burstHz)) > testBinHz {
+		t.Fatalf("nextJob picked %.0f Hz (steady), want finished short burst at %d Hz first", job.centerHz, burstHz)
+	}
+}

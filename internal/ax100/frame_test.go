@@ -77,3 +77,19 @@ func TestDeframer_ReportsFECCorrections(t *testing.T) {
 		t.Fatalf("fecCorr=%d, want ≥1", d.FECCorrected())
 	}
 }
+
+func TestDeframer_InvertedPolarity(t *testing.T) {
+	payload := []byte{0x00, 0x2A, 0x10, 0x00, 'I', 'N', 'V', '5'}
+	levels, err := Encode(payload, 32, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range levels {
+		levels[i] ^= 1
+	}
+	var d Deframer
+	got := d.Push(nil, levels)
+	if len(got) != 1 || !bytes.Equal(got[0], payload) {
+		t.Fatalf("inverted mode 5: frames=%d good=%d bad=%d, want 1 matching frame", len(got), d.Good(), d.Bad())
+	}
+}

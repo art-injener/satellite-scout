@@ -201,8 +201,10 @@ func (r *pathRun) frame(f sdr.IQFrame) {
 	r.pt.mu.Lock()
 	r.pt.tr.Update(dec)
 	r.pt.mu.Unlock()
+	// Ставим разбор сразу по готовности, не дожидаясь секундного тика рассылки:
+	// короткие вспышки иначе вытесняются из трёхсекундного кольца IQ постоянными помехами.
+	r.schedule()
 	if now := r.svc.now(); r.lastEmit.IsZero() || now.Sub(r.lastEmit) >= emitInterval {
-		r.schedule()
 		r.svc.send(r.pathID, dec, r.svc.signals(r.pt, dec, r.usableHz))
 		r.lastEmit = now
 	}

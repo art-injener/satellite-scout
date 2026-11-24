@@ -246,30 +246,235 @@ func ListProfilesAPI() []ProfileMeta {
 	return append(out, ListMeta()...)
 }
 
-// Candidates — id профилей, совместимых с режимом и скоростью SatNOGS.
-// Без автовыбора: только список. Порядок как в sdr.Demods.
+// Candidates возвращает id профилей, совместимых с режимом и скоростью из реестра.
+// Поддерживаются составные строки SatNOGS/sonik («GMSK USP», «FSK AX.100 Mode 5»,
+// «FSK AX.25 G3RUH») и строки AMSAT со встроенными скоростями («2k4/4k8/9k6*GMSK_USP SSTV»).
+// Профили с совпадением протокольного хинта идут первыми, далее порядок как в sdr.Demods.
 func Candidates(mode string, baud float64) []string {
 	mode = strings.TrimSpace(mode)
 	if mode == "" {
 		return nil
 	}
-	want := normalizeMode(mode)
-	baudKey := roundBaud(baud)
-	var out []string
+	parsed := parseModeSpec(mode, baud)
+	if len(parsed.modes) == 0 && len(parsed.protos) == 0 {
+		return nil
+	}
+	var preferred, rest []string
 	for _, id := range sdr.Demods {
 		m, ok := metaByID[id]
 		if !ok {
 			continue
 		}
-		if !modeMatches(m, want) {
+		if !specMatchesProfile(parsed, m) {
 			continue
 		}
-		if !baudMatches(m, baudKey) {
-			continue
+		if parsed.matchesProto(id) {
+			preferred = append(preferred, id)
+		} else {
+			rest = append(rest, id)
 		}
-		out = append(out, id)
 	}
-	return out
+	return append(preferred, rest...)
+}
+
+// modeSpec — разобранная строка режима: токены модуляций, скоростей и протоколов.
+type modeSpec struct {
+	modes       map[string]bool
+	bauds       map[float64]bool
+	protos      map[string]bool
+	argBaud     float64
+	hasNonDigit bool // в строке помимо скоростей есть аналоговые токены (SSTV, CW, FM...)
+}
+
+func parseModeSpec(mode string, baud float64) modeSpec {
+	sp := modeSpec{
+		modes:   make(map[string]bool),
+		bauds:   make(map[float64]bool),
+		protos:  make(map[string]bool),
+		argBaud: roundBaud(baud),
+	}
+	if sp.argBaud > 0 {
+		sp.bauds[sp.argBaud] = true
+	}
+	rawTokens := strings.FieldsFunc(strings.ToUpper(mode), func(r rune) bool {
+		switch r {
+		case ' ', '\t', '/', '_', '*', ',', ';', '(', ')', '+':
+			return true
+		default:
+			return false
+		}
+	})
+	for _, tok := range rawTokens {
+		tok = strings.TrimSpace(tok)
+		if tok == "" {
+			continue
+		}
+		if b, tail, ok := parseBaudPrefix(tok); ok {
+			sp.bauds[b] = true
+			if tail == "" {
+				continue
+			}
+			tok = tail
+		}
+		addModeToken(&sp, tok)
+	}
+	return sp
+}
+
+// parseBaudPrefix извлекает скорость вида «2K4», «4K8», «9K6», «1K2», «19K2», «9600»
+// из начала токена и возвращает оставшийся хвост модуляции (например «9K6BPSK» даёт 9600 и «BPSK»).
+func parseBaudPrefix(tok string) (float64, string, bool) {
+	// Формат NkM: например 1K2, 2K4, 4K8, 9K6, 19K2, 38K4.
+	if kIdx := strings.IndexByte(tok, 'K'); kIdx > 0 && kIdx <= 2 {
+		if allDigits(tok[:kIdx]) {
+			whole := parseIntSimple(tok[:kIdx])
+			fracEnd := kIdx + 1
+			for fracEnd < len(tok) && tok[fracEnd] >= '0' && tok[fracEnd] <= '9' {
+				fracEnd++
+			}
+			fracStr := tok[kIdx+1 : fracEnd]
+			var val float64
+			switch len(fracStr) {
+			case 0:
+				val = float64(whole) * 1000
+			case 1:
+				val = float64(whole)*1000 + float64(parseIntSimple(fracStr))*100
+			case 2:
+				val = float64(whole)*1000 + float64(parseIntSimple(fracStr))*10
+			default:
+				return 0, "", false
+			}
+			if val >= 300 && val <= 100_000 {
+				return math.Round(val), tok[fracEnd:], true
+			}
+		}
+	}
+	// Чистая десятичная скорость, например «9600», «4800», «2400», «1200».
+	if allDigits(tok) && len(tok) >= 3 && len(tok) <= 6 {
+		v := parseIntSimple(tok)
+		if v >= 300 && v <= 100_000 {
+			return float64(v), "", true
+		}
+	}
+	return 0, "", false
+}
+
+func allDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for i := range len(s) {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func parseIntSimple(s string) int {
+	n := 0
+	for i := range len(s) {
+		n = n*10 + int(s[i]-'0')
+	}
+	return n
+}
+
+func addModeToken(sp *modeSpec, tok string) {
+	compact := strings.NewReplacer(".", "", "-", "").Replace(tok)
+	switch compact {
+	case "USP":
+		sp.protos["usp"] = true
+		return
+	case "AX100":
+		sp.protos["ax100"] = true
+		return
+	case "G3RUH":
+		sp.protos["g3ruh"] = true
+		return
+	case "GEOSCAN":
+		sp.protos["geoscan"] = true
+		return
+	case "CCSDS":
+		sp.protos["ccsds"] = true
+		return
+	case "FMN":
+		sp.modes["FM"] = true
+		sp.hasNonDigit = true
+		return
+	}
+	// Токены аналоговых режимов: фиксируем, чтобы составные AMSAT-строки вроде «1k2 AFSK CW*»
+	// могли подтягивать и цифровой, и аналоговый профиль, если аргумент baud == 0.
+	switch tok {
+	case "AM", "FM", "NFM", "WFM", "CW", "USB", "LSB", "SSB", "SSTV":
+		sp.hasNonDigit = true
+	}
+	sp.modes[tok] = true
+	if compact != tok {
+		sp.modes[compact] = true
+	}
+}
+
+func (sp modeSpec) matchesProto(id string) bool {
+	if len(sp.protos) == 0 {
+		return false
+	}
+	if sp.protos["usp"] && strings.HasSuffix(id, "_usp") {
+		return true
+	}
+	if sp.protos["ax100"] && strings.Contains(id, "_ax100") {
+		return true
+	}
+	if sp.protos["g3ruh"] && (strings.HasSuffix(id, "_g3ruh") || id == "gfsk9600" || id == "gmsk9600") {
+		return true
+	}
+	if sp.protos["geoscan"] && id == demodGEOSCAN {
+		return true
+	}
+	if sp.protos["ccsds"] && id == "qpsk_ccsds" {
+		return true
+	}
+	return false
+}
+
+func specMatchesProfile(sp modeSpec, m ProfileMeta) bool {
+	if !specModeMatches(sp, m) {
+		return false
+	}
+	if m.BaudFlexible {
+		return true
+	}
+	if m.Baud > 0 {
+		if len(sp.bauds) == 0 {
+			return false
+		}
+		return sp.bauds[roundBaud(m.Baud)]
+	}
+	// Голос, CW и SSTV: при явно заданной цифровой скорости в аргументе не подходят.
+	// В составных строках AMSAT (argBaud == 0, скорости указаны внутри строки) допускаются.
+	return sp.argBaud == 0
+}
+
+func specModeMatches(sp modeSpec, m ProfileMeta) bool {
+	for _, s := range m.SatNOGSModes {
+		norm := normalizeMode(s)
+		if sp.modes[norm] {
+			return true
+		}
+		compact := strings.NewReplacer(".", "", "-", "").Replace(norm)
+		if sp.modes[compact] {
+			return true
+		}
+	}
+	// В реестре для AX.100 часто пишут «FSK AX.100 Mode 5» или «MSK AX.100 Mode 5»:
+	// физически FSK/GFSK/GMSK/MSK принимаются одним FSK-демодулятором.
+	if sp.protos["ax100"] && strings.Contains(m.ID, "_ax100") &&
+		(sp.modes["FSK"] || sp.modes["GFSK"] || sp.modes["GMSK"] || sp.modes["MSK"] || sp.modes["2FSK"]) {
+		return true
+	}
+	if sp.protos["geoscan"] && m.ID == demodGEOSCAN {
+		return true
+	}
+	return false
 }
 
 func normalizeMode(mode string) string {
@@ -281,28 +486,4 @@ func roundBaud(baud float64) float64 {
 		return 0
 	}
 	return math.Round(baud)
-}
-
-func modeMatches(m ProfileMeta, want string) bool {
-	for _, s := range m.SatNOGSModes {
-		if normalizeMode(s) == want {
-			return true
-		}
-	}
-	return false
-}
-
-func baudMatches(m ProfileMeta, baudKey float64) bool {
-	if m.BaudFlexible {
-		return true
-	}
-	if m.Baud > 0 {
-		// Цифровой профиль с фиксированной скоростью: без baud из SatNOGS не кандидат.
-		if baudKey <= 0 {
-			return false
-		}
-		return roundBaud(m.Baud) == baudKey
-	}
-	// Голос / CW / SSTV: только без скорости.
-	return baudKey == 0
 }

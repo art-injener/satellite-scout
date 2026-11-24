@@ -128,3 +128,81 @@ func TestFSKDemod_SilenceGivesNoLock(t *testing.T) {
 		t.Error("checker locked on demodulated silence")
 	}
 }
+
+func TestFSKDemod_ShortPacketAfterNoisyFMClicks(t *testing.T) {
+	// Strong off-deviation FM clicks before a short 9600 FSK packet inflate unclamped high/low
+	// and shift threshold so the short 24-bit preamble is burned on recovery.
+	cfg := FSK9600(fskTestRate)
+	noiseSamples := int(0.1 * fskTestRate)
+	pktBits := 960 // 100 ms at 9600 baud
+	pktIQ := modulatePRBSFSK(cfg, pktBits)
+
+	ch := NewChannel(ChannelConfig{
+		SampleRate: fskTestRate, SNRdB: 16, NoiseBandwidthHz: 18_000, Seed: 101,
+	})
+	iq := make([]complex64, noiseSamples+len(pktIQ))
+	// Simulated FM clicks (+24 kHz = +8 deviations) right before packet start.
+	for i := noiseSamples - 200; i < noiseSamples; i++ {
+		iq[i] = complex64(cmplx.Rect(0.6, twoPi*24_000*float64(i)/fskTestRate))
+	}
+	copy(iq[noiseSamples:], pktIQ)
+	noisy := ch.Process(nil, iq)
+
+	bits := NewFSKDemod(cfg).Demodulate(nil, noisy)
+	pktStart := int(float64(noiseSamples) * cfg.Baud / fskTestRate)
+	const preambleAllowance = 24
+	if len(bits) <= pktStart+preambleAllowance+200 {
+		t.Fatalf("too few bits %d for packet starting at %d", len(bits), pktStart)
+	}
+	tail := bits[pktStart+preambleAllowance:]
+	var c PRBS9Checker
+	c.Push(tail)
+	if !c.Locked() || c.Errors() != 0 {
+		t.Errorf("short packet after noisy FM clicks: locked=%v bits=%d errors=%d, want 0 after 24-bit preamble",
+			c.Locked(), c.Bits(), c.Errors())
+	}
+}
+
+func TestFSKDemod_TracksLargeCarrierOffset(t *testing.T) {
+	cases := []struct {
+		name   string
+		cfg    FSKConfig
+		offset float64
+	}{
+		{"9600/+4kHz", FSK9600(fskTestRate), 4000},
+		{"9600/-4kHz", FSK9600(fskTestRate), -4000},
+		{"4800/+4kHz", FSK4800(fskTestRate), 4000},
+		{"4800/-4kHz", FSK4800(fskTestRate), -4000},
+		{"2400/+4kHz", GMSK2400(fskTestRate), 4000},
+		{"2400/-4kHz", GMSK2400(fskTestRate), -4000},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			// Short burst (~250 ms) with residual carrier offset right after channel noise.
+			noiseSamples := int(0.2 * fskTestRate)
+			pktBits := max(int(0.25*tc.cfg.Baud), 600)
+			pktIQ := modulatePRBSFSK(tc.cfg, pktBits)
+			ch := NewChannel(ChannelConfig{
+				SampleRate: fskTestRate, SNRdB: 18, NoiseBandwidthHz: 18_000, Seed: 107,
+				OffsetHz: func(time.Duration) float64 { return tc.offset },
+			})
+			iq := make([]complex64, noiseSamples+len(pktIQ))
+			copy(iq[noiseSamples:], pktIQ)
+			noisy := ch.Process(nil, iq)
+
+			bits := NewFSKDemod(tc.cfg).Demodulate(nil, noisy)
+			pktStart := int(float64(noiseSamples) * tc.cfg.Baud / fskTestRate)
+			const preambleAllowance = 24
+			if len(bits) <= pktStart+preambleAllowance+150 {
+				t.Fatalf("too few bits %d", len(bits))
+			}
+			tail := bits[pktStart+preambleAllowance:]
+			var c PRBS9Checker
+			c.Push(tail)
+			if !c.Locked() || c.Errors() != 0 {
+				t.Errorf("%s: locked=%v bits=%d errors=%d, want 0 errors immediately after 24-bit preamble",
+					tc.name, c.Locked(), c.Bits(), c.Errors())
+			}
+		})
+	}
+}

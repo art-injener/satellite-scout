@@ -173,3 +173,29 @@ func TestService_KeepsSegmentsAcrossStreams(t *testing.T) {
 		t.Errorf("observed %.1f s after the second stream, want more than %.1f s", obs2, obs1)
 	}
 }
+
+func TestService_SignalsInBand_IncludesShortStrongBurstWithoutPollutingRemembered(t *testing.T) {
+	svc := NewService(fixedBand(testUsableHz), nil)
+	pt := svc.tracker("path1")
+	burstHz := float64(testCenter + 120_000)
+	weakHz := float64(testCenter + 240_000)
+
+	// Single 167 ms decision with strong SNR (>= 10 dB) and a weak single-hit spike (7 dB).
+	pt.tr.Update(synthDecision(t0, testCenter,
+		carrier(burstHz, 12_000, 12),
+		carrier(weakHz, 12_000, 7),
+	))
+	// Silence right after: total on-time is ~167 ms, well below rememberMinOnMs (2000 ms).
+	pt.tr.Update(synthDecision(t0+stepMs, testCenter))
+
+	inBand := svc.SignalsInBand("path1", testCenter, uint32(testUsableHz))
+	if len(inBand) != 1 {
+		t.Fatalf("SignalsInBand got %d signals %+v, want only the strong short burst", len(inBand), inBand)
+	}
+	if d := inBand[0].CenterHz - int64(burstHz); d > int64(testBinHz) || d < -int64(testBinHz) {
+		t.Errorf("burst center %d, want ~%.0f", inBand[0].CenterHz, burstHz)
+	}
+	if rem := svc.RememberedSignals("path1"); len(rem) != 0 {
+		t.Fatalf("RememberedSignals got %+v, want empty so short bursts do not pollute air table", rem)
+	}
+}

@@ -44,7 +44,7 @@ func (t *Tracker) nextJob(historyFromMs uint64) (classifyJob, bool) {
 	var best *segment
 	var bestJob classifyJob
 	for _, s := range t.segs {
-		if s.hits < confirmHits || s.loHz < t.usableLo || s.hiHz > t.usableHi {
+		if !s.hitConfirmed() || s.loHz < t.usableLo || s.hiHz > t.usableHi {
 			continue
 		}
 		if s.classifiedMs != 0 && t.nowMs < s.classifiedMs+s.reclassifyAfter() {
@@ -83,9 +83,20 @@ func (s *segment) reclassifyAfter() uint64 {
 	return reclassifyMs
 }
 
-// betterClassify — a важнее b: сначала ещё не разобранные, потом более старый разбор.
+// betterClassify — a важнее b: сначала завершившиеся неразобранные вспышки (их IQ
+// хранятся в кольце всего несколько секунд), затем остальные неразобранные, потом более старый разбор.
 // Эфирное радио без PS не ставим выше новых: иначе один «глухой» RDS блокирует остальных.
 func betterClassify(a, b *segment) bool {
+	aBurst := !a.on && a.classifiedMs == 0
+	bBurst := !b.on && b.classifiedMs == 0
+	if aBurst != bBurst {
+		return aBurst
+	}
+	if aBurst {
+		// Из двух неразобранных вспышек срочнее та, что закончилась раньше
+		// и ближе к вытеснению из кольца iqHistory.
+		return a.lastSeenMs < b.lastSeenMs
+	}
 	if (a.classifiedMs == 0) != (b.classifiedMs == 0) {
 		return a.classifiedMs == 0
 	}

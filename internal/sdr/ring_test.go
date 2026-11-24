@@ -188,3 +188,26 @@ func TestDataRing_ConcurrentWriteRead(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestDataRing_DroppedCounters(t *testing.T) {
+	const ringCap = 4
+	ring := NewDataRing(ringCap)
+	defer ring.Close()
+
+	slow := ring.Subscribe()
+	fast := ring.Subscribe()
+
+	for i := 1; i <= ringCap+3; i++ {
+		ring.Write(makeFrame(i))
+		<-fast
+	}
+	if got := ring.DroppedFor(fast); got != 0 {
+		t.Fatalf("fast reader dropped = %d, want 0", got)
+	}
+	if got := ring.DroppedFor(slow); got != 3 {
+		t.Fatalf("slow reader dropped = %d, want 3", got)
+	}
+	if got := ring.Dropped(); got != 3 {
+		t.Fatalf("total dropped = %d, want 3", got)
+	}
+}

@@ -81,3 +81,21 @@ func TestAirHopWorthy_SkipsCarrierAndKeepsPulse(t *testing.T) {
 		t.Fatal("SNR below MinSNRDB must not hop")
 	}
 }
+
+func TestAirHint_KeepsFrameDemodProfiles(t *testing.T) {
+	svc := bandscan.NewService(nil, nil)
+	// Seed a remembered signal via direct service helper if available, or test through app.AirHint.
+	_ = svc
+	gotDemod, gotAlt := airHintDemods(&signalclass.Result{
+		Modulation: signalclass.Mod2FSK,
+		Params:     signalclass.Params{Baud: 9600},
+		Demod:      "fsk9600_g3ruh",
+		DemodAlt:   []string{"fsk9600_geoscan", "gmsk9600_usp"},
+	})
+	if gotDemod != "fsk9600_g3ruh" {
+		t.Fatalf("demod = %q, want fsk9600_g3ruh (must not rewrite to fsk9600)", gotDemod)
+	}
+	if len(gotAlt) != 2 || gotAlt[0] != "fsk9600_geoscan" || gotAlt[1] != "gmsk9600_usp" {
+		t.Fatalf("alt = %v, want [fsk9600_geoscan gmsk9600_usp]", gotAlt)
+	}
+}

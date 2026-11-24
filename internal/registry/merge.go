@@ -1,6 +1,7 @@
 package registry
 
 import (
+	"math"
 	"slices"
 	"strings"
 	"time"
@@ -23,13 +24,62 @@ func (t Transmitter) active() bool {
 	return strings.EqualFold(t.Status, "active") && (t.Alive == nil || *t.Alive)
 }
 
-// sameTransmitter: совпадение по uuid, иначе по частоте вниз в пределах допуска канала.
+// sameTransmitter проверяет, что две записи описывают один и тот же режим передатчика.
+// Совпадение по uuid всегда слияние; иначе близкая частота с совместимым режимом и скоростью.
+// Разные режимы на одной частоте (например SSTV и GMSK USP или CW) сохраняются оба.
 func sameTransmitter(a, b Transmitter) bool {
 	if a.UUID != "" && a.UUID == b.UUID {
 		return true
 	}
 	d := a.DownlinkHz - b.DownlinkHz
-	return d >= -freqplan.NearHz && d <= freqplan.NearHz
+	if d < -freqplan.NearHz || d > freqplan.NearHz {
+		return false
+	}
+	ma := canonicalTxMode(a.Mode)
+	mb := canonicalTxMode(b.Mode)
+	if mb == "" {
+		// Младшая запись без указания режима покрыта любой более приоритетной на той же частоте.
+		return true
+	}
+	if ma == "" {
+		// Запись без режима (например Heavens-Above) не должна скрывать конкретный режим младшего источника.
+		return false
+	}
+	if ma != mb {
+		return false
+	}
+	ba := roundTxBaud(a.Baud)
+	bb := roundTxBaud(b.Baud)
+	if bb > 0 && ba <= 0 {
+		// Запись без скорости не скрывает запись с известной скоростью того же режима.
+		return false
+	}
+	if ba > 0 && bb > 0 && ba != bb {
+		return false
+	}
+	return true
+}
+
+// canonicalTxMode приводит обозначение режима к каноническому виду для дедупликации.
+func canonicalTxMode(mode string) string {
+	m := strings.ToUpper(strings.TrimSpace(mode))
+	switch m {
+	case "":
+		return ""
+	case "FMN", "NFM":
+		return "FM"
+	}
+	if m == "SSTV" || strings.HasPrefix(m, "SSTV_") || strings.HasPrefix(m, "SSTV ") {
+		return "SSTV"
+	}
+	return m
+}
+
+func roundTxBaud(b float64) float64 {
+	if b <= 0 || math.IsNaN(b) || math.IsInf(b, 0) {
+		return 0
+	}
+	return math.Round(b)
 }
 
 // sameRecord сравнивает записи без времени получения.

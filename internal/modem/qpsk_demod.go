@@ -2,13 +2,19 @@ package modem
 
 import "math"
 
-const qpskClockGain = 0.3
+const (
+	qpskClockGain  = 0.3
+	qpskPwrAlpha   = 0.05
+	qpskMaxNCOFreq = 0.5
+	qpskMinPwr     = 1e-18
+)
 
 // QPSKDemod — некогерентный по тактам приём QPSK: усреднение по символу, ФАПЧ тактов,
 // Costas 4-го порядка, два бита Gray на символ. На выходе — поток бит без кадров.
 type QPSKDemod struct {
 	ncoPhase float64
 	ncoFreq  float64
+	avgPwr   float64 // сглаженная мощность для нормировки фазового детектора
 
 	ring []complex128
 	sum  complex128
@@ -39,10 +45,19 @@ func (d *QPSKDemod) Demodulate(dst []byte, iq []complex64) []byte {
 		x := complex128(s)
 		sin, cos := math.Sincos(d.ncoPhase)
 		y := x * complex(cos, -sin)
-		// Costas для QPSK: err = sign(Re)·Im − sign(Im)·Re.
+		// Нормированная ошибка Costas для QPSK: err = (sign(Re)·Im − sign(Im)·Re) / |y|.
 		re, im := real(y), imag(y)
-		err := math.Copysign(1, re)*im - math.Copysign(1, im)*re
-		d.ncoFreq += 0.0005 * err
+		mag2 := re*re + im*im
+		if d.avgPwr == 0 {
+			d.avgPwr = mag2
+		} else {
+			d.avgPwr += qpskPwrAlpha * (mag2 - d.avgPwr)
+		}
+		err := 0.0
+		if den := max(mag2, 0.25*d.avgPwr); den > qpskMinPwr {
+			err = (math.Copysign(1, re)*im - math.Copysign(1, im)*re) / math.Sqrt(den)
+		}
+		d.ncoFreq = clampFloat(d.ncoFreq+0.0005*err, -qpskMaxNCOFreq, qpskMaxNCOFreq)
 		d.ncoPhase = math.Mod(d.ncoPhase+d.ncoFreq+0.02*err, 2*math.Pi)
 
 		d.sum += y - d.ring[d.pos]

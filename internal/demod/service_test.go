@@ -585,6 +585,33 @@ func TestEmitTelemetry_RecordsRFProfile(t *testing.T) {
 	}
 }
 
+func TestEmitTelemetry_SkipsRFProfileForBurstProfiles(t *testing.T) {
+	for _, demodID := range []string{"ook", "fsk9600", "msk9600"} {
+		t.Run(demodID, func(t *testing.T) {
+			rec := &rfRecorderStub{}
+			sink := &sinkStub{}
+			svc := NewService(&channelsStub{}, sink.emit).
+				WithCallsigns(callsignsMap{"RS23S": {norad: 53385, name: "GEOSCAN-EDELVEIS"}}).
+				WithRFFrames(rec)
+			pkt := Packet{
+				Frame: ax25.Frame{
+					Src: ax25.Address{Call: "RS23S"},
+				},
+				Raw:         []byte{0xAA, 0x55, 0x01, 0x02},
+				FrequencyHz: 436_200_000,
+				TimestampMs: 42,
+			}
+			svc.emitTelemetry("radio_path_0", sdr.ChannelSettings{Demod: demodID}, pkt)
+			if rec.n != 0 {
+				t.Fatalf("%s must not pollute rf_profiles.Accepted, recorded %d times", demodID, rec.n)
+			}
+			if n := len(sink.ofType(EventTelemetry)); n != 1 {
+				t.Fatalf("telemetry events=%d, want 1", n)
+			}
+		})
+	}
+}
+
 func TestEmitTelemetry_NotesAirHear(t *testing.T) {
 	air := &airHearStub{}
 	sink := &sinkStub{}
@@ -630,5 +657,36 @@ func TestNoteAirVoice_OpenSquelch(t *testing.T) {
 	})
 	if air.n != 0 {
 		t.Fatalf("digital demod must not write voice, got %+v", air)
+	}
+}
+
+type dropCounterStub struct {
+	mu      sync.Mutex
+	dropped uint64
+	calls   int
+}
+
+func (d *dropCounterStub) DroppedFrames(_ string, _ <-chan sdr.IQFrame) uint64 {
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	d.calls++
+	return d.dropped
+}
+
+func TestService_DropCounterPolledAndThrottled(t *testing.T) {
+	dc := &dropCounterStub{dropped: 5}
+	sink := &sinkStub{}
+	now := time.Unix(1000, 0)
+	svc := NewService(&channelsStub{s: afskSettings(testOffset, -90)}, sink.emit).WithDropCounter(dc)
+	svc.now = func() time.Time { return now }
+
+	ch := make(chan sdr.IQFrame, 4)
+	ch <- sdr.IQFrame{Samples: make([]complex64, 64), SampleRate: uint32(testRate), CenterHz: testCenter}
+	ch <- sdr.IQFrame{Samples: make([]complex64, 64), SampleRate: uint32(testRate), CenterHz: testCenter}
+	close(ch)
+
+	svc.Run("radio_path_0", ch)
+	if dc.calls == 0 {
+		t.Fatal("expected Service.Run to poll DropCounter")
 	}
 }

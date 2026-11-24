@@ -68,3 +68,45 @@ func TestExtractThenClassify_FSKFromWideStream(t *testing.T) {
 		t.Errorf("got %q %.0f baud, want 2fsk 4800 (why: %s)", res.Modulation, res.Params.Baud, res.Why)
 	}
 }
+
+func TestExtractThenClassify_FSK9600FromWideStream(t *testing.T) {
+	const off = 250_000.0
+	n := int(wideRate / 2)
+	m := modem.NewFSK(modem.FSKConfig{SampleRate: wideRate, Baud: 9600, DeviationHz: 3000, BT: 0.5})
+	clean := m.Modulate(nil, prbs(int(float64(n)/wideRate*9600)+8))[:n]
+	ch := modem.NewChannel(modem.ChannelConfig{
+		SampleRate: wideRate, SNRdB: 20, NoiseBandwidthHz: 15_000, Seed: 29,
+		OffsetHz: func(time.Duration) float64 { return off },
+	})
+	// Narrow detector bandwidth typical for 9600 GFSK (~10.6 kHz).
+	slice, rate := Extract(ch.Process(nil, clean), wideRate, off, 10_625)
+	if rate < 48_000 {
+		t.Fatalf("extract rate %.0f Hz is too low for 9600 FSK (want >= 48000)", rate)
+	}
+	res := Classify(slice, rate)
+	if res.Modulation != Mod2FSK || res.Params.Baud != 9600 {
+		t.Errorf("got %q %.0f baud, want 2fsk 9600 (why: %s)", res.Modulation, res.Params.Baud, res.Why)
+	}
+}
+
+func TestExtractThenClassify_ShortBurstFSK9600InSilence(t *testing.T) {
+	const off = -180_000.0
+	// 100 ms burst surrounded by 450 ms silence on each side (1000 ms total), 10.5 dB SNR in burst, bw=10.6 kHz.
+	// Without trimming silence before welch(), PSD averages out the burst by 10 dB and findBand misses it.
+	totalN := int(1.00 * wideRate)
+	burstN := int(0.10 * wideRate)
+	m := modem.NewFSK(modem.FSKConfig{SampleRate: wideRate, Baud: 9600, DeviationHz: 3000, BT: 0.5})
+	burst := m.Modulate(nil, prbs(int(0.10*9600)+8))[:burstN]
+	clean := make([]complex64, totalN)
+	copy(clean[(totalN-burstN)/2:], burst)
+
+	ch := modem.NewChannel(modem.ChannelConfig{
+		SampleRate: wideRate, SNRdB: 10.5, NoiseBandwidthHz: 15_000, Seed: 31,
+		OffsetHz: func(time.Duration) float64 { return off },
+	})
+	slice, rate := Extract(ch.Process(nil, clean), wideRate, off, 10_625)
+	res := Classify(slice, rate)
+	if res.Modulation != Mod2FSK || res.Params.Baud != 9600 {
+		t.Errorf("short burst got %q %.0f baud, want 2fsk 9600 (why: %s)", res.Modulation, res.Params.Baud, res.Why)
+	}
+}

@@ -582,9 +582,14 @@ func TestSuggestedDemod_Profiles(t *testing.T) {
 		{"cw", Result{Modulation: ModCW}, "cw", nil},
 		{"ook", Result{Modulation: ModOOK, Params: Params{Baud: 2000}}, "ook", nil},
 		{"2fsk 1200", Result{Modulation: Mod2FSK, Params: Params{Baud: 1200}}, "fsk1200", nil},
-		{"2fsk 2400", Result{Modulation: Mod2FSK, Params: Params{Baud: 2400}}, "fsk1200", nil},
-		{"2fsk 4800", Result{Modulation: Mod2FSK, Params: Params{Baud: 4800}}, "fsk4800", nil},
-		{"2fsk 9600", Result{Modulation: Mod2FSK, Params: Params{Baud: 9600}}, "fsk9600_g3ruh", []string{"fsk9600_geoscan"}},
+		{"2fsk 2400", Result{Modulation: Mod2FSK, Params: Params{Baud: 2400}}, "gmsk2400_usp", []string{"gmsk2400"}},
+		{"2fsk 4800", Result{Modulation: Mod2FSK, Params: Params{Baud: 4800}}, "fsk4800", []string{
+			"fsk4800_ax100", "gmsk4800_usp", "gmsk4800_ax100", "gmsk4800", "gfsk4800", "rs41",
+		}},
+		{"2fsk 9600", Result{Modulation: Mod2FSK, Params: Params{Baud: 9600}}, "fsk9600_g3ruh", []string{
+			"fsk9600_geoscan", "fsk9600_ax100_rs", "gmsk9600_usp", "gmsk9600_ax100",
+			"gmsk9600_ax100_rs", "gmsk9600", "gfsk9600", "m10",
+		}},
 		{"2fsk faster than any profile", Result{Modulation: Mod2FSK, Params: Params{Baud: 270833}}, "", nil},
 		{"unknown", Result{Modulation: ModUnknown}, "", nil},
 		{"undetermined", Result{Modulation: ModUndetermined}, "", nil},
@@ -612,8 +617,10 @@ func TestClassify_DemodFilled(t *testing.T) {
 		t.Errorf("gfsk 4800: demod %q, want fsk4800", res.Demod)
 	}
 	res := Classify(noisy(gfsk(int(testRate/2), 9600, 3000), 20, 18_000, 73), testRate)
-	if res.Demod != "fsk9600_g3ruh" || len(res.DemodAlt) != 1 || res.DemodAlt[0] != "fsk9600_geoscan" {
-		t.Errorf("gfsk 9600: demod %q alt %v, want fsk9600_g3ruh + geoscan", res.Demod, res.DemodAlt)
+	if res.Demod != "fsk9600_g3ruh" ||
+		!slices.Contains(res.DemodAlt, "fsk9600_geoscan") ||
+		!slices.Contains(res.DemodAlt, "gmsk9600_usp") {
+		t.Errorf("gfsk 9600: demod %q alt %v, want fsk9600_g3ruh + geoscan + usp", res.Demod, res.DemodAlt)
 	}
 }
 
@@ -642,5 +649,42 @@ func TestTagBroadcast_BandPlanWithoutPilot(t *testing.T) {
 	}
 	if TagBroadcast(r, 145_900_000).Service != "" {
 		t.Fatal("tagged outside the broadcast band")
+	}
+}
+
+func TestClassify_FSK9600WithSlowQSBIs2FSK(t *testing.T) {
+	// 1 s of 9600 GFSK with slow satellite spin QSB fading (1.5 Hz, 2.5x amplitude swing).
+	// Global kappa exceeds constKappa (1.12), while local envelope is constant.
+	n := int(testRate)
+	clean := gfsk(n, 9600, 3000)
+	faded := make([]complex64, n)
+	for i, s := range clean {
+		env := float32(0.70 + 0.35*math.Sin(2*math.Pi*1.5*float64(i)/testRate))
+		faded[i] = complex(real(s)*env, imag(s)*env)
+	}
+	res := Classify(noisy(faded, 18, 18_000, 79), testRate)
+	if res.Modulation != Mod2FSK || res.Params.Baud != 9600 {
+		t.Errorf("QSB 9600 FSK got %q %.0f baud, want 2fsk 9600 (why: %s)", res.Modulation, res.Params.Baud, res.Why)
+	}
+}
+
+func TestClassify_ShortBurstDilutedInSilenceBeforeWelch(t *testing.T) {
+	// 80 ms GFSK 9600 burst at 10.5 dB SNR inside 2.0 s of channel noise (14 dB dilution).
+	// Without trimming silence before the initial welch(), findBand misses the signal completely.
+	const rate = 64_000.0
+	totalN := int(2.0 * rate)
+	burstN := int(0.08 * rate)
+	m := modem.NewFSK(modem.FSKConfig{SampleRate: rate, Baud: 9600, DeviationHz: 3000, BT: 0.5})
+	burst := m.Modulate(nil, prbs(int(0.08*9600)+8))[:burstN]
+	x := make([]complex64, totalN)
+	copy(x[(totalN-burstN)/2:], burst)
+
+	ch := modem.NewChannel(modem.ChannelConfig{
+		SampleRate: rate, SNRdB: 10.5, NoiseBandwidthHz: 10_000, Seed: 83,
+	})
+	res := Classify(ch.Process(nil, x), rate)
+	if res.Modulation != Mod2FSK || res.Params.Baud != 9600 {
+		t.Errorf("diluted short burst got %q %.0f baud, want 2fsk 9600 (why: %s)",
+			res.Modulation, res.Params.Baud, res.Why)
 	}
 }

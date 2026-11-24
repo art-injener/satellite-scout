@@ -98,6 +98,23 @@ func (h *ReceiverHub) GainDB(pathID string) (float32, error) {
 	return r.Status().GainDB, nil
 }
 
+// DroppedFrames возвращает число IQ-фреймов, пропущенных конкретным подписчиком тракта.
+func (h *ReceiverHub) DroppedFrames(pathID string, frames <-chan IQFrame) uint64 {
+	h.mu.Lock()
+	entry, ok := h.entries[pathID]
+	h.mu.Unlock()
+	if !ok {
+		return 0
+	}
+	entry.sessMu.Lock()
+	s := entry.session
+	entry.sessMu.Unlock()
+	if s == nil || s.ring == nil {
+		return 0
+	}
+	return s.ring.DroppedFor(frames)
+}
+
 // SetChannel проверяет настройки демодулятора по годной полосе приёмника и сохраняет их.
 // Неподходящие не сохраняются, у тракта остаются прежние.
 func (h *ReceiverHub) SetChannel(pathID string, c ChannelSettings) error {

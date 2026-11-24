@@ -71,6 +71,11 @@ type deviationMeter interface {
 	DeviationHz() float64
 }
 
+// levelFreezer — демодулятор с заморозкой адаптации порогов и AFC на хвосте шумоподавителя.
+type levelFreezer interface {
+	SetFreeze(freeze bool)
+}
+
 // syncCounter — выделитель кадров по синхрослову, считающий найденные слова и их ошибки.
 type syncCounter interface {
 	SyncWords() int
@@ -312,8 +317,9 @@ func (d *g3ruhDemod) Demodulate(dst []byte, iq []complex64) []byte {
 	return d.desc.Descramble(dst, d.buf)
 }
 
-func (d *g3ruhDemod) ClockJitter() float64 { return d.fsk.ClockJitter() }
-func (d *g3ruhDemod) DeviationHz() float64 { return d.fsk.DeviationHz() }
+func (d *g3ruhDemod) ClockJitter() float64  { return d.fsk.ClockJitter() }
+func (d *g3ruhDemod) DeviationHz() float64  { return d.fsk.DeviationHz() }
+func (d *g3ruhDemod) SetFreeze(freeze bool) { d.fsk.SetFreeze(freeze) }
 
 // Packet — принятый кадр.
 type Packet struct {
@@ -508,11 +514,19 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 			c.status.Picture = nil
 		}
 	}
-	if c.coarse == nil || f.SampleRate != c.rate || s.OffsetHz != c.offsetHz || s.BandwidthHz != c.bandwidth ||
+	if c.coarse == nil || f.SampleRate != c.rate || s.BandwidthHz != c.bandwidth ||
 		s.Demod != c.demodName || (p.newDemodBaud != nil && s.Baud != c.baud) {
 		c.build(f.SampleRate, s.OffsetHz, s.BandwidthHz, s.Demod, s.Baud, p)
+	} else if s.OffsetHz != c.offsetHz {
+		// Смена сдвига канала выполняется плавно через NCO без пересборки фильтров и модема.
+		c.offsetHz = s.OffsetHz
+		if c.picRx != nil && p.newPictures != nil {
+			// Перестройка канала посреди SSTV означает другой передатчик: картинка сбрасывается.
+			c.picRx = newSSTVRxVISOnly(c.outRate)
+			c.status.Picture = nil
+		}
 	}
-	// Доплер сдвигает канал без пересборки фильтров: фаза не рвётся, картинка не бросается.
+	// Сдвиг канала плюс Доплер без пересборки фильтров: фаза не рвётся.
 	c.coarse.SetShift(float64(s.OffsetHz) + c.dopplerHz)
 
 	c.squelch.ThresholdDBFS = s.SquelchDBFS
@@ -535,6 +549,9 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 		return c.packetsFromFrames(f.TimestampMs, freqHz, c.flushLine(nil))
 	}
 
+	if lf, okFreeze := c.demod.(levelFreezer); okFreeze {
+		lf.SetFreeze(!c.squelch.AboveThreshold())
+	}
 	c.levels = c.demod.Demodulate(c.levels[:0], ch)
 	c.frames = c.deframer.Push(c.frames[:0], c.levels)
 	c.status.Good, c.status.Bad = c.deframer.Good(), c.deframer.Bad()
@@ -656,6 +673,130 @@ func (c *Chain) measure(ch []complex64) {
 		st.FECCounted = true
 		st.FECCorrected = fc.FECCorrected()
 	}
+}
+
+// channelFrontend — общий канальный тракт для параллельного подбора профилей:
+// один грубый фильтр с децимацией до 64 кГц, точный фильтр 64 кГц (и при необходимости 32 кГц),
+// шумоподавитель и оценка несущей с SNR. При изменении только OffsetHz сдвигает NCO без пересборки.
+type channelFrontend struct {
+	rate       uint32
+	bandwidth  uint32
+	midRate    float64
+	passbandHz float64
+
+	coarse *dsp.XlatingFIR
+	fine64 *dsp.XlatingFIR
+	fine32 *dsp.XlatingFIR
+
+	squelch dsp.Squelch
+	noise   channelNoise
+	prevCh  complex64
+}
+
+// build пересобирает фильтры фронтенда при первом блоке или смене частоты дискретизации и полосы.
+func (fe *channelFrontend) build(rate uint32, offsetHz int64, bandwidth uint32) {
+	fe.rate, fe.bandwidth = rate, bandwidth
+	fs := float64(rate)
+	mid := fs / float64(max(1, int(math.Round(fs/midRateHz))))
+	decim := int(math.Round(fs / mid))
+	transition := 0.25 * mid
+	coarseTaps := int(math.Ceil(4*fs/transition)) | 1
+	fe.coarse = dsp.NewXlatingFIR(float64(offsetHz), fs, decim,
+		dsp.DesignLowpass(0.4*mid, fs, coarseTaps, dsp.WindowBlackmanHarris))
+
+	cutoff := min(float64(bandwidth)/2, 0.15*mid)
+	fineCoeffs := dsp.DesignLowpass(cutoff, mid, fineTaps, dsp.WindowBlackmanHarris)
+	fe.fine64 = dsp.NewXlatingFIR(0, mid, 1, fineCoeffs)
+	fe.fine32 = dsp.NewXlatingFIR(0, mid, 2, fineCoeffs)
+
+	fe.midRate = mid
+	fe.passbandHz = 2 * cutoff
+	fe.squelch.HoldSamples = int(squelchHold.Seconds() * mid)
+	fe.prevCh = 0
+}
+
+type frontendResult struct {
+	ch64      []complex64
+	ch32      []complex64
+	open      bool
+	above     bool
+	levelDBFS float32
+}
+
+// process прогоняет блок IQ через общий фронтенд ровно один раз.
+func (fe *channelFrontend) process(
+	f sdr.IQFrame,
+	s sdr.ChannelSettings,
+	dopplerHz float64,
+	need32 bool,
+) frontendResult {
+	if f.SampleRate == 0 || len(f.Samples) == 0 {
+		return frontendResult{}
+	}
+	if fe.coarse == nil || f.SampleRate != fe.rate || s.BandwidthHz != fe.bandwidth {
+		fe.build(f.SampleRate, s.OffsetHz, s.BandwidthHz)
+	}
+	fe.coarse.SetShift(float64(s.OffsetHz) + dopplerHz)
+
+	coarseOut := fe.coarse.Process(f.Samples)
+	ch64 := fe.fine64.Process(coarseOut)
+	var ch32 []complex64
+	if need32 {
+		ch32 = fe.fine32.Process(coarseOut)
+	}
+	fe.squelch.ThresholdDBFS = s.SquelchDBFS
+	open := fe.squelch.Open(ch64)
+	return frontendResult{
+		ch64:      ch64,
+		ch32:      ch32,
+		open:      open,
+		above:     fe.squelch.AboveThreshold(),
+		levelDBFS: fe.squelch.LevelDBFS(),
+	}
+}
+
+// measureCarrierSNR заполняет CarrierHz и SNRDB по блоку узкого канала 64 кГц.
+func (fe *channelFrontend) measureCarrierSNR(ch64 []complex64, st *Status) {
+	if len(ch64) == 0 {
+		return
+	}
+	var sum complex128
+	prev := complex128(fe.prevCh)
+	for _, s := range ch64 {
+		x := complex128(s)
+		sum += x * cmplx.Conj(prev)
+		prev = x
+	}
+	st.Measured = true
+	st.CarrierHz = cmplx.Phase(sum) * fe.midRate / (2 * math.Pi)
+	st.SNRDB = fe.noise.snrDB(ch64, fe.midRate, fe.passbandHz)
+}
+
+func (fe *channelFrontend) updatePrev(ch64 []complex64) {
+	if len(ch64) > 0 {
+		fe.prevCh = ch64[len(ch64)-1]
+	}
+}
+
+// buildPackets оборачивает принятые сырые кадры в Packet с разбором AX.25.
+func buildPackets(tsMs, freqHz uint64, frames [][]byte) []Packet {
+	if len(frames) == 0 {
+		return nil
+	}
+	out := make([]Packet, 0, len(frames))
+	for _, b := range frames {
+		var frame ax25.Frame
+		if parsed, err := ax25.Parse(b); err == nil {
+			frame = parsed
+		}
+		out = append(out, Packet{
+			TimestampMs: tsMs,
+			FrequencyHz: freqHz,
+			Frame:       frame,
+			Raw:         append([]byte(nil), b...),
+		})
+	}
+	return out
 }
 
 // midRate — частота отсчётов после грубого фильтра: ближайшая к midRateHz, кратная частоте приёмника.

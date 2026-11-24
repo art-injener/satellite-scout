@@ -66,11 +66,11 @@ func TestFSKReceiveChain_NoErrorsAtGoodSNR(t *testing.T) {
 // (an AX.25 frame of 300 bytes mostly fails its CRC).
 func TestFSKReceiveChain_BERGrowsAsSNRFalls(t *testing.T) {
 	var prev float64
-	for _, snr := range []float64{12, 10, 8} {
+	for i, snr := range []float64{12, 10, 8} {
 		c := runFSKReceiveChain(t, snr)
 		ber := c.BER()
 		t.Logf("SNR %v dB: BER %.4f (%d/%d)", snr, ber, c.Errors(), c.Bits())
-		if ber <= prev {
+		if i > 0 && ber <= prev {
 			t.Errorf("SNR %v dB: BER %.4f not above %.4f at higher SNR", snr, ber, prev)
 		}
 		if snr >= 10 && ber > 0.005 {

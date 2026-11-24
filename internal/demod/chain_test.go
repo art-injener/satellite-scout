@@ -967,3 +967,33 @@ func TestChain_OOKRebuildsOnBaudChange(t *testing.T) {
 		t.Errorf("status=%+v, want supported after baud change", st)
 	}
 }
+
+func TestChain_OffsetChangeDoesNotRebuildFilters(t *testing.T) {
+	air := beaconAirOf(t, testRate, 2, time.Second, "gmsk9600_usp")
+	frames := toFrames(air, testRate, sdr.DefaultBlockSize, 0)
+	c := NewChain()
+	s := sdr.ChannelSettings{
+		OffsetHz:    testOffset - 30_000,
+		BandwidthHz: sdr.MaxChannelBandwidthHz,
+		SquelchDBFS: -90,
+		Demod:       "gmsk9600_usp",
+	}
+	c.Process(frames[0], s)
+	origCoarse, origFine, origDemod := c.coarse, c.fine, c.demod
+	if origCoarse == nil || origFine == nil || origDemod == nil {
+		t.Fatal("filters and demod must be initialized after first block")
+	}
+
+	// Retune channel offset to the actual signal without changing sample rate, bandwidth or demod.
+	s.OffsetHz = testOffset
+	got := make([]Packet, 0, 2)
+	for _, f := range frames[1:] {
+		got = append(got, c.Process(f, s)...)
+	}
+	if c.coarse != origCoarse || c.fine != origFine || c.demod != origDemod {
+		t.Fatal("changing only OffsetHz must shift NCO without rebuilding coarse/fine/demod")
+	}
+	if len(got) == 0 {
+		t.Fatal("expected decoded gmsk9600_usp frames after smooth OffsetHz shift")
+	}
+}

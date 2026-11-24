@@ -189,11 +189,16 @@ func Classify(iq []complex64, rate float64) Result {
 // ClassifyHint — то же, что Classify, плюс ширина участка от обнаружителя: при многолучёвости
 // внутренний замер полосы уже, а горб на спектре уже широкий.
 func ClassifyHint(iq []complex64, rate, widthHintHz float64) Result {
-	b, ok := findBand(welch(iq, rate))
+	work := trimActiveWindow(iq, rate)
+	b, ok := findBand(welch(work, rate))
+	if !ok && len(work) != len(iq) {
+		work = iq
+		b, ok = findBand(welch(work, rate))
+	}
 	if !ok {
 		return Result{Modulation: ModUndetermined, Why: "над шумом ничего нет"}
 	}
-	a := newAnalysis(iq, rate, b)
+	a := newAnalysis(work, rate, b)
 	if a != nil {
 		a.widthHint = widthHintHz
 	}
@@ -238,7 +243,7 @@ func (a *analysis) tree() Result {
 	if r, keyed := a.keyed(); keyed {
 		return r
 	}
-	if k := kappa(a.on, a.nz); k < constKappa {
+	if k := localKappa(a.on, a.rate, a.nz); k < constKappa {
 		return a.constant(k)
 	}
 	return a.varying(kappa(a.z, a.nz))
@@ -332,13 +337,20 @@ func SuggestedDemod(r Result) (string, []string) {
 		return "ook", nil
 	case r.Modulation == Mod2FSK && r.Params.Baud > 0:
 		switch b := r.Params.Baud; {
-		case b <= 2400:
+		case b <= 1800:
 			return "fsk1200", nil
+		case b <= 3600:
+			return "gmsk2400_usp", []string{"gmsk2400"}
 		case b <= 7200:
-			return "fsk4800", nil
+			return "fsk4800", []string{
+				"fsk4800_ax100", "gmsk4800_usp", "gmsk4800_ax100", "gmsk4800", "gfsk4800", "rs41",
+			}
 		case b <= 19_200:
-			// Кадровый формат по структуре не читается: G3RUH чаще, GEOSCAN — второй кандидат.
-			return "fsk9600_g3ruh", []string{"fsk9600_geoscan"}
+			// Кадровый формат по структуре не читается: отдаём всё кадровое семейство скорости.
+			return "fsk9600_g3ruh", []string{
+				"fsk9600_geoscan", "fsk9600_ax100_rs", "gmsk9600_usp", "gmsk9600_ax100",
+				"gmsk9600_ax100_rs", "gmsk9600", "gfsk9600", "m10",
+			}
 		default:
 			// Быстрее профилей нет: GSM 270,8 кбод и шире — без рекомендации.
 			return "", nil
@@ -482,6 +494,75 @@ func withoutPauses(z []complex64, p []float64, nz float64, minRun, guard int) []
 		return z
 	}
 	return on
+}
+
+// trimActiveWindow вырезает активную вспышку до первичного расчёта спектра, чтобы тишина
+// по краям короткого пакета не разбавляла его ниже порога разметки полосы.
+func trimActiveWindow(iq []complex64, rate float64) []complex64 {
+	win := max(64, int(math.Round(0.01*rate)))
+	if len(iq) < 4*win {
+		return iq
+	}
+	pw := make([]float64, len(iq))
+	for i, v := range iq {
+		pw[i] = sqAbs(v)
+	}
+	p := movingAvg(pw, win)
+	base := quantile(p, 0.2)
+	peak := quantile(p, 0.99)
+	minPeak := max(1.3*base, base*(1+6/math.Sqrt(float64(win))))
+	if base <= 0 || peak < minPeak {
+		return iq
+	}
+	thr := base + 0.3*(peak-base)
+	first, last := -1, -1
+	for i, v := range p {
+		if v > thr {
+			if first < 0 {
+				first = i
+			}
+			last = i
+		}
+	}
+	if first < 0 {
+		return iq
+	}
+	from := max(0, first-win)
+	to := min(len(iq), last+1+win)
+	if to-from < 256 || to-from >= len(iq)*85/100 {
+		return iq
+	}
+	return iq[from:to]
+}
+
+// localKappa оценивает постоянство огибающей по коротким окнам (~40 мс) и возвращает
+// медиану по активным окнам: медленный QSB и вращение КА дают локальную kappa около 1,
+// тогда как речь и SSB колеблются существенно быстрее окна.
+func localKappa(z []complex64, rate, nz float64) float64 {
+	win := max(256, int(math.Round(0.04*rate)))
+	if len(z) < 2*win {
+		return kappa(z, nz)
+	}
+	step := win / 2
+	ks := make([]float64, 0, len(z)/step)
+	for start := 0; start+win <= len(z); start += step {
+		blk := z[start : start+win]
+		var m2 float64
+		for _, v := range blk {
+			m2 += sqAbs(v)
+		}
+		m2 /= float64(len(blk))
+		if m2 <= 2*nz {
+			continue
+		}
+		if k := kappa(blk, nz); !math.IsInf(k, 0) && !math.IsNaN(k) {
+			ks = append(ks, k)
+		}
+	}
+	if len(ks) < 2 {
+		return kappa(z, nz)
+	}
+	return quantile(ks, 0.5)
 }
 
 // kappa — E|s|⁴/(E|s|²)² сигнала без шума: 1 у постоянной огибающей, 1/d у манипуляции
@@ -716,7 +797,7 @@ func (a *analysis) lfm() (Result, bool) {
 // wideDigital — занятая полоса как у вещания, но такты цифры: GMSK около 200 кГц
 // не называется широкой ЧМ. Такты GSM чаще самой полосы, поэтому предел поиска выше.
 func (a *analysis) wideDigital() (Result, bool) {
-	if kappa(a.on, a.nz) >= constKappa {
+	if localKappa(a.on, a.rate, a.nz) >= constKappa {
 		return Result{}, false
 	}
 	p := Params{OccupiedHz: round10(a.occ)}

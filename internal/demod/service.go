@@ -27,6 +27,14 @@ const (
 // statusInterval — как часто панель приёмника получает состояние демодулятора.
 const statusInterval = time.Second
 
+// dropLogInterval — минимальный интервал между предупреждениями о пропуске IQ-фреймов.
+const dropLogInterval = 5 * time.Second
+
+// DropCounter — источник счётчика пропущенных IQ-фреймов канала подписки.
+type DropCounter interface {
+	DroppedFrames(pathID string, frames <-chan sdr.IQFrame) uint64
+}
+
 // ChannelSource — текущие настройки канала и усиление приёмника тракта (хаб приёмников).
 type ChannelSource interface {
 	Channel(pathID string) (sdr.ChannelSettings, error)
@@ -62,6 +70,7 @@ type Service struct {
 	rfProfiles   RFProfileSource
 	airHints     AirHintSource
 	airHear      AirHear
+	drops        DropCounter
 }
 
 // AirNote — принятый кадр/голос для строки «Эфир» (тело кадра для модалки).
@@ -193,34 +202,52 @@ func (s *Service) WithRFProfiles(src RFProfileSource) *Service {
 	return s
 }
 
-// applyDoppler ставит поправку канала. «Авто» берёт орбиту КА. «Вручную» берёт герцы оператора.
-// nil — поправки нет: орбита неизвестна или ручное значение нулевое.
-func (s *Service) applyDoppler(chain *Chain, cs sdr.ChannelSettings, freq uint64) *float64 {
+// WithDropCounter подключает источник счётчика пропущенных IQ-фреймов для логирования.
+func (s *Service) WithDropCounter(dc DropCounter) *Service {
+	s.drops = dc
+	return s
+}
+
+func (s *Service) dropCounter() DropCounter {
+	if s.drops != nil {
+		return s.drops
+	}
+	if dc, ok := s.channels.(DropCounter); ok {
+		return dc
+	}
+	return nil
+}
+
+// dopplerShift рассчитывает поправку Доплера для текущих настроек канала; nil означает отсутствие поправки.
+func (s *Service) dopplerShift(cs sdr.ChannelSettings, freq uint64) *float64 {
 	if !cs.DopplerAuto {
 		hz := float64(cs.DopplerManualHz)
-		chain.SetDopplerHz(hz)
 		if hz == 0 {
 			return nil
 		}
 		return &hz
 	}
-	return s.followDoppler(chain, cs.DopplerNorad, freq)
-}
-
-// followDoppler ставит канал цепочки на Доплер КА norad для частоты freq сейчас и возвращает
-// этот сдвиг; nil — канал за Доплером не следует или орбита КА неизвестна, канал стоит без поправки.
-func (s *Service) followDoppler(chain *Chain, norad int, freq uint64) *float64 {
-	chain.SetDopplerHz(0)
-	if norad == 0 || s.doppler == nil {
+	if cs.DopplerNorad == 0 || s.doppler == nil {
 		return nil
 	}
-	rr, ok := s.doppler.RangeRateKmps(norad, s.now())
+	rr, ok := s.doppler.RangeRateKmps(cs.DopplerNorad, s.now())
 	if !ok {
 		return nil
 	}
 	hz := tracker.DopplerShiftHz(float64(freq), rr)
-	chain.SetDopplerHz(hz)
 	return &hz
+}
+
+// applyDoppler ставит поправку канала. «Авто» берёт орбиту КА. «Вручную» берёт герцы оператора.
+// nil — поправки нет: орбита неизвестна или ручное значение нулевое.
+func (s *Service) applyDoppler(chain *Chain, cs sdr.ChannelSettings, freq uint64) *float64 {
+	doppler := s.dopplerShift(cs, freq)
+	if doppler == nil {
+		chain.SetDopplerHz(0)
+		return nil
+	}
+	chain.SetDopplerHz(*doppler)
+	return doppler
 }
 
 // publishAudio отдаёт звук блока слушателям, если раздача включена и профиль даёт звук.
@@ -332,14 +359,31 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 	chain := NewChain()
 	auto := NewAutoPicker()
 	var (
-		cs         sdr.ChannelSettings
-		freq       uint64
-		lastStatus time.Time
-		picture    pictureState
-		demodOff   bool
-		st         Status // состояние после последнего принятого блока
+		cs          sdr.ChannelSettings
+		freq        uint64
+		lastStatus  time.Time
+		lastDropLog time.Time
+		lastDropped uint64
+		picture     pictureState
+		demodOff    bool
+		st          Status // состояние после последнего принятого блока
 	)
+	dc := s.dropCounter()
 	for f := range frames {
+		if dc != nil {
+			if dropped := dc.DroppedFrames(pathID, frames); dropped > lastDropped {
+				now := s.now()
+				if lastDropLog.IsZero() || now.Sub(lastDropLog) >= dropLogInterval {
+					slog.Warn("demod: IQ frames dropped",
+						slog.String("radio_path", pathID),
+						slog.Uint64("dropped_delta", dropped-lastDropped),
+						slog.Uint64("dropped_total", dropped),
+					)
+					lastDropped = dropped
+					lastDropLog = now
+				}
+			}
+		}
 		var err error
 		if cs, err = s.channels.Channel(pathID); err != nil {
 			slog.Warn("demod: channel settings", slog.String("radio_path", pathID), slog.Any("error", err))
@@ -406,9 +450,7 @@ func (s *Service) runAuto(pathID string, f sdr.IQFrame, cs sdr.ChannelSettings, 
 		auto.SeedMemory(key, hints.Accepted)
 	}
 	auto.Configure(key, cands)
-	// Доплер: одна поправка на все цепочки — через временную цепочку-носитель.
-	probe := NewChain()
-	doppler := s.applyDoppler(probe, cs, freq)
+	doppler := s.dopplerShift(cs, freq)
 	var dopplerHz float64
 	if doppler != nil {
 		dopplerHz = *doppler
@@ -448,19 +490,20 @@ func (s *Service) autoHints(pathID string, cs sdr.ChannelSettings, freq uint64) 
 		}
 	}
 	if s.transmitters != nil && cs.DopplerNorad > 0 {
-		if mode, baud, ok := MatchTXModeBaud(s.transmitters.ExpectedTransmitters(), cs.DopplerNorad, freq); ok {
+		if txHints := MatchTXModeBauds(s.transmitters.ExpectedTransmitters(), cs.DopplerNorad, freq); len(txHints) > 0 {
+			h.TXHints = txHints
 			if h.Mode == "" {
-				h.Mode, h.Baud = mode, baud
+				h.Mode, h.Baud = txHints[0].Mode, txHints[0].Baud
 			}
 		}
 	}
-	// Участок эфира: классификатор даёт demod/mode, когда нет закреплённого КА.
+	// Участок эфира: классификатор даёт подсказку, когда нет закреплённого или сохранённого профиля.
 	if h.Blind == "" && h.Accepted == "" && s.airHints != nil {
 		if demod, alt, mode, baud, ok := s.airHints.AirHint(pathID, freq); ok {
 			h.Blind = demod
 			h.BlindAlt = alt
-			if h.Mode == "" && mode != "" {
-				h.Mode, h.Baud = mode, baud
+			if mode != "" {
+				h.AirMode, h.AirBaud = mode, baud
 			}
 		}
 	}
@@ -545,7 +588,7 @@ func (s *Service) emitTelemetry(pathID string, cs sdr.ChannelSettings, p Packet)
 		Src: ev.Src, Dest: ev.Dest, Info: ev.Info, InfoHex: ev.InfoHex, Params: ev.Params,
 		TimestampMs: ev.TimestampMs, NoradID: ev.NoradID, SatName: ev.SatName, CountFrame: true,
 	})
-	if s.rfFrames == nil || ev.NoradID <= 0 || ev.Demod == "" || ev.FrequencyHz == 0 {
+	if s.rfFrames == nil || ev.NoradID <= 0 || ev.Demod == "" || ev.FrequencyHz == 0 || !isFrameProfile(ev.Demod) {
 		return
 	}
 	s.rfFrames.RecordFrame(ev.NoradID, int64(ev.FrequencyHz), ev.Demod, int64(ev.TimestampMs)) //nolint:gosec // метки времени кадра < MaxInt64

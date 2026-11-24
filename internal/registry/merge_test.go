@@ -67,6 +67,94 @@ func TestMergeTransmitters_InactiveAndNoDownlinkSkipped(t *testing.T) {
 	}
 }
 
+func TestMergeTransmitters_UMKA1MultiModeSameFrequency(t *testing.T) {
+	const umkaFreq = 437_625_000
+	by := map[string][]Transmitter{
+		SourceCurated: {
+			{NoradID: 57172, Name: "UMKA-1", DownlinkHz: umkaFreq, Mode: "SSTV", Source: SourceCurated},
+		},
+		SourceAMSAT: {
+			{NoradID: 57172, DownlinkHz: umkaFreq, Mode: "2k4/4k8/9k6*GMSK_USP SSTV", Source: SourceAMSAT},
+		},
+		SourceSonik: {
+			{UUID: "u-sstv", NoradID: 57172, DownlinkHz: umkaFreq, Mode: "SSTV", Status: "active", Source: SourceSonik},
+			{
+				UUID: "u-2400", NoradID: 57172, DownlinkHz: umkaFreq,
+				Mode: "GMSK USP", Baud: 2400, Status: "active", Source: SourceSonik,
+			},
+			{
+				UUID: "u-4800", NoradID: 57172, DownlinkHz: umkaFreq,
+				Mode: "GMSK USP", Baud: 4800, Status: "active", Source: SourceSonik,
+			},
+			{
+				UUID: "u-4800-dup", NoradID: 57172, DownlinkHz: umkaFreq,
+				Mode: "GMSK USP", Baud: 4800, Status: "active", Source: SourceSonik,
+			},
+			{UUID: "u-cw-1", NoradID: 57172, DownlinkHz: umkaFreq, Mode: "CW", Status: "active", Source: SourceSonik},
+			{UUID: "u-cw-2", NoradID: 57172, DownlinkHz: umkaFreq, Mode: "CW", Status: "active", Source: SourceSonik},
+		},
+		SourceSatNOGS: {
+			{
+				UUID: "s-9600", NoradID: 57172, DownlinkHz: umkaFreq,
+				Mode: "GMSK USP", Baud: 9600, Status: "active", Alive: new(true), Source: SourceSatNOGS,
+			},
+			{
+				UUID: "s-4800", NoradID: 57172, DownlinkHz: umkaFreq,
+				Mode: "GMSK USP", Baud: 4800, Status: "active", Alive: new(true), Source: SourceSatNOGS,
+			},
+			{
+				UUID: "s-sstv", NoradID: 57172, DownlinkHz: umkaFreq,
+				Mode: "SSTV", Status: "active", Alive: new(true), Source: SourceSatNOGS,
+			},
+			{
+				UUID: "s-cw", NoradID: 57172, DownlinkHz: umkaFreq,
+				Mode: "CW", Status: "active", Alive: new(true), Source: SourceSatNOGS,
+			},
+		},
+	}
+	got := mergeTransmitters(by)
+	type key struct {
+		source string
+		mode   string
+		baud   float64
+	}
+	want := []key{
+		{SourceCurated, "SSTV", 0},
+		{SourceAMSAT, "2k4/4k8/9k6*GMSK_USP SSTV", 0},
+		{SourceSonik, "GMSK USP", 2400},
+		{SourceSonik, "GMSK USP", 4800},
+		{SourceSonik, "CW", 0},
+		{SourceSatNOGS, "GMSK USP", 9600},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("got %d transmitters %+v, want %d", len(got), got, len(want))
+	}
+	for i, w := range want {
+		g := key{got[i].Source, got[i].Mode, got[i].Baud}
+		if g != w {
+			t.Errorf("tx[%d] = %+v, want %+v", i, g, w)
+		}
+	}
+}
+
+func TestMergeTransmitters_SameModeNearFrequencyDeduplicated(t *testing.T) {
+	by := map[string][]Transmitter{
+		SourceCurated: {
+			{DownlinkHz: 437_800_000, Mode: "FM", Source: SourceCurated},
+		},
+		SourceHeavensAbove: {
+			{DownlinkHz: 437_800_000, Mode: "", Source: SourceHeavensAbove},
+		},
+		SourceSonik: {
+			{UUID: "s-fm", DownlinkHz: 437_802_000, Mode: "FMN", Status: "active", Source: SourceSonik},
+		},
+	}
+	got := mergeTransmitters(by)
+	if len(got) != 1 || got[0].Source != SourceCurated {
+		t.Fatalf("got %+v, want only curated FM", got)
+	}
+}
+
 func TestMergeSatellite_NamePriority(t *testing.T) {
 	orbit := &Orbit{Name: "ISS (ZARYA)", Source: SourceSpaceTrack}
 	sonik := map[string]SatFact{SourceSonik: {Name: "ISS", Source: SourceSonik}}

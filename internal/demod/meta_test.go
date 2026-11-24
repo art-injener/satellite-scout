@@ -131,6 +131,117 @@ func TestCandidates_Empty(t *testing.T) {
 	}
 }
 
+func TestCandidates_CompoundAndAMSATModes(t *testing.T) {
+	cases := []struct {
+		name      string
+		mode      string
+		baud      float64
+		wantFirst string
+		wantAll   []string
+	}{
+		{
+			name:      "GMSK USP 2400 prioritizes USP",
+			mode:      "GMSK USP",
+			baud:      2400,
+			wantFirst: "gmsk2400_usp",
+			wantAll:   []string{"gmsk2400_usp", "gmsk2400"},
+		},
+		{
+			name:      "GMSK USP 4800 prioritizes USP",
+			mode:      "GMSK USP",
+			baud:      4800,
+			wantFirst: "gmsk4800_usp",
+			wantAll:   []string{"gmsk4800_usp", "gmsk4800", "gmsk4800_ax100"},
+		},
+		{
+			name:      "GMSK USP 9600 prioritizes USP",
+			mode:      "GMSK USP",
+			baud:      9600,
+			wantFirst: "gmsk9600_usp",
+			wantAll:   []string{"gmsk9600_usp", "gmsk9600", "gmsk9600_ax100", "gmsk9600_ax100_rs"},
+		},
+		{
+			name:      "FSK AX.100 Mode 5 4800 prioritizes AX.100",
+			mode:      "FSK AX.100 Mode 5",
+			baud:      4800,
+			wantFirst: "fsk4800_ax100",
+			wantAll:   []string{"fsk4800_ax100", "fsk4800"},
+		},
+		{
+			name:      "FSK AX.100 Mode 5 9600 prioritizes AX.100",
+			mode:      "FSK AX.100 Mode 5",
+			baud:      9600,
+			wantFirst: "fsk9600_ax100_rs",
+			wantAll:   []string{"fsk9600_ax100_rs", "gmsk9600_ax100", "gmsk9600_ax100_rs", "fsk9600_g3ruh"},
+		},
+		{
+			name:      "FSK AX.25 G3RUH 9600 prioritizes G3RUH",
+			mode:      "FSK AX.25 G3RUH",
+			baud:      9600,
+			wantFirst: "fsk9600_g3ruh",
+			wantAll:   []string{"fsk9600_g3ruh", "fsk9600_geoscan"},
+		},
+		{
+			name:      "GFSK_GEOSCAN 9600 prioritizes geoscan",
+			mode:      "GFSK_GEOSCAN",
+			baud:      9600,
+			wantFirst: "fsk9600_geoscan",
+			wantAll:   []string{"fsk9600_geoscan", "fsk9600_g3ruh"},
+		},
+		{
+			name:      "AMSAT UMKA-1 multi-baud GMSK USP SSTV",
+			mode:      "2k4/4k8/9k6*GMSK_USP SSTV",
+			baud:      0,
+			wantFirst: "gmsk9600_usp",
+			wantAll:   []string{"gmsk9600_usp", "gmsk4800_usp", "gmsk2400_usp", "sstv"},
+		},
+		{
+			name:      "AMSAT 9k6 GFSK",
+			mode:      "9k6 GFSK",
+			baud:      0,
+			wantFirst: "fsk9600_g3ruh",
+			wantAll:   []string{"fsk9600_g3ruh", "fsk9600_geoscan", "gfsk9600"},
+		},
+		{
+			name:      "AMSAT 1k2 AFSK CW",
+			mode:      "1k2 AFSK CW*",
+			baud:      0,
+			wantFirst: "afsk1200",
+			wantAll:   []string{"afsk1200", "cw"},
+		},
+		{
+			name:      "FMN alias",
+			mode:      "FMN",
+			baud:      0,
+			wantFirst: "fm",
+			wantAll:   []string{"fm"},
+		},
+		{
+			name:      "SSTV_PD120 alias",
+			mode:      "SSTV_PD120",
+			baud:      0,
+			wantFirst: "sstv",
+			wantAll:   []string{"sstv"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := Candidates(tc.mode, tc.baud)
+			if len(got) == 0 {
+				t.Fatalf("Candidates(%q, %.0f) = nil", tc.mode, tc.baud)
+			}
+			if got[0] != tc.wantFirst {
+				t.Errorf("first = %q, want %q (all=%v)", got[0], tc.wantFirst, got)
+			}
+			for _, w := range tc.wantAll {
+				if !slices.Contains(got, w) {
+					t.Errorf("missing %q in %v", w, got)
+				}
+			}
+		})
+	}
+}
+
 func TestListMeta_OrderMatchesDemods(t *testing.T) {
 	list := ListMeta()
 	var want []string

@@ -10,6 +10,7 @@ import (
 type Deframer struct {
 	shift     uint64
 	inFrame   bool
+	invert    bool // синхрослово найдено в инверсной полярности
 	plsBuf    []byte
 	coded     []byte
 	needCoded int
@@ -30,13 +31,24 @@ func (d *Deframer) Push(dst [][]byte, levels []byte) [][]byte {
 			if errs <= syncMaxErrors {
 				d.syncs++
 				d.syncErrs += errs
-				d.inFrame = true
+				d.inFrame, d.invert = true, false
+				d.plsBuf = d.plsBuf[:0]
+				d.coded = d.coded[:0]
+				d.needCoded = 0
+				d.dataLen = 0
+			} else if invErrs := 64 - errs; invErrs <= syncMaxErrors {
+				d.syncs++
+				d.syncErrs += invErrs
+				d.inFrame, d.invert = true, true
 				d.plsBuf = d.plsBuf[:0]
 				d.coded = d.coded[:0]
 				d.needCoded = 0
 				d.dataLen = 0
 			}
 			continue
+		}
+		if d.invert {
+			b ^= 1
 		}
 		if len(d.plsBuf) < 64 {
 			d.plsBuf = append(d.plsBuf, b)
@@ -84,6 +96,7 @@ func (d *Deframer) decodeFrame(coded []byte) ([]byte, bool) {
 
 func (d *Deframer) endFrame() {
 	d.inFrame = false
+	d.invert = false
 	d.shift = 0
 	d.needCoded = 0
 	d.dataLen = 0

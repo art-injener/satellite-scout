@@ -52,3 +52,21 @@ func TestRSDeframer_RejectsNoise(t *testing.T) {
 		t.Fatalf("false frames=%d good=%d", len(got), d.Good())
 	}
 }
+
+func TestRSDeframer_InvertedPolarity(t *testing.T) {
+	payload := PackCSP(CSPHeader{
+		Priority: 1, Source: 2, Destination: 5, SrcPort: 10, DstPort: 9,
+	}, []byte("RS mode inverted"))
+	levels, err := EncodeRSMode(payload, 64, 8)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range levels {
+		levels[i] ^= 1
+	}
+	var d RSDeframer
+	got := d.Push(nil, levels)
+	if len(got) != 1 || !bytes.Equal(got[0], payload) {
+		t.Fatalf("inverted mode RS: frames=%d good=%d bad=%d, want 1 matching frame", len(got), d.Good(), d.Bad())
+	}
+}

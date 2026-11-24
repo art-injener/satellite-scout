@@ -64,3 +64,27 @@ func TestUSP_PLSComputeDistinct(t *testing.T) {
 		t.Fatalf("pls1 → %d ok=%v", dl, ok)
 	}
 }
+
+func TestUSP_InvertedPolarity(t *testing.T) {
+	frame := ax25.Frame{
+		Dest: ax25.Address{Call: "CQ"},
+		Src:  ax25.Address{Call: "RS32S"},
+		Info: []byte("USP inverted beacon"),
+	}
+	raw, err := frame.Bytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	levels, err := Encode(raw, false, 32, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range levels {
+		levels[i] ^= 1
+	}
+	var d Deframer
+	got := d.Push(nil, levels)
+	if len(got) != 1 || !bytes.Equal(got[0], raw) {
+		t.Fatalf("inverted USP: frames=%d good=%d bad=%d, want 1 matching frame", len(got), d.Good(), d.Bad())
+	}
+}

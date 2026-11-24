@@ -17,6 +17,12 @@ const (
 	RememberMs = 60 * 60 * 1000
 	// rememberMinOnMs — короче этого всплеск не передатчик: после HoldMs он из таблицы уходит.
 	rememberMinOnMs = 2_000
+	// activeMinOnMs — минимальная длительность короткой вспышки для оперативного
+	// снимка стоянки (SignalsInBand): короткие пакеты кубсатов длятся от 150 мс.
+	activeMinOnMs = 150
+	// strongHitSNRDB — порог SNR одиночного решения, достаточный для мгновенного
+	// пропуска короткой вспышки в SignalsInBand и очередь классификации.
+	strongHitSNRDB = 10
 	// rememberPlainHz — шире этого без разбора модуляции участок не держат час:
 	// на высоком усилении шум сливается в одну широкую отметку.
 	rememberPlainHz = 50_000
@@ -653,6 +659,34 @@ func (s *segment) qualifies() bool {
 	return m != "" && m != signalclass.ModUndetermined && m != signalclass.ModUnknown
 }
 
+// hitConfirmed — участок подтверждён для оперативной работы и классификации:
+// не менее confirmHits решений, одиночный сильный всплеск или закреплённый КА.
+func (s *segment) hitConfirmed() bool {
+	return s.hits >= confirmHits || (s.hits >= 1 && s.snr >= strongHitSNRDB) || s.pinned()
+}
+
+// activeBurst — короткая свежая вспышка для удержания и наведения канала
+// без записи в долгоживущую таблицу «Эфир».
+func (s *segment) activeBurst() bool {
+	if !s.hitConfirmed() || s.onMs < activeMinOnMs {
+		return false
+	}
+	return s.hiHz-s.loHz <= rememberPlainHz
+}
+
+func (s *segment) visibleInList(keepShown, aged bool) bool {
+	if keepShown {
+		if s.hits < confirmHits && !s.pinned() {
+			return false
+		}
+		return s.shown || (!aged && s.remembered())
+	}
+	if aged && !s.pinned() {
+		return false
+	}
+	return s.shown || s.activeBurst()
+}
+
 func (t *Tracker) add(ms uint64) *segment {
 	if len(t.segs) >= t.limit {
 		oldest := -1
@@ -686,19 +720,13 @@ func (t *Tracker) active(expected []Expected) []Signal {
 }
 
 func (t *Tracker) list(expected []Expected, maxAgeMs uint64) []Signal {
-	// Signals (RememberMs): показанные до перезапуска. active (HoldMs): только свежие.
+	// Signals (RememberMs): показанные до перезапуска. active (HoldMs): только свежие,
+	// включая короткие вспышки от activeMinOnMs без записи в память таблицы «Эфир».
 	keepShown := maxAgeMs > HoldMs
 	var out []Signal
 	for _, s := range t.segs {
-		if s.hits < confirmHits && !s.pinned() {
-			continue
-		}
 		aged := t.nowMs > s.lastSeenMs && t.nowMs-s.lastSeenMs > maxAgeMs
-		if s.shown {
-			if aged && !keepShown && !s.pinned() {
-				continue
-			}
-		} else if aged || !s.remembered() {
+		if !s.visibleInList(keepShown, aged) {
 			continue
 		}
 		origin, norad := s.origin(expected)
