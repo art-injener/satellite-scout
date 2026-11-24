@@ -1,9 +1,18 @@
 package bandscan
 
-import "math"
+import (
+	"math"
+	"slices"
+)
 
 // hearJoinHz — кадр/голос без попадания в полосу участка клеится, если ближе этого.
 const hearJoinHz = 50_000
+
+// hearHistoryMax — сколько последних приёмов держать на участке до рестарта (модалка «Кадр»).
+const hearHistoryMax = 16
+
+// hearHistoryHexMax — обрезка hex в истории, чтобы SSE band_signals не раздувался.
+const hearHistoryHexMax = 512
 
 // HearParam — поле последнего кадра для модалки «Кадр» (как telemetry.params).
 type HearParam struct {
@@ -12,6 +21,19 @@ type HearParam struct {
 	Value string `json:"value"`
 	Unit  string `json:"unit,omitempty"`
 	Key   bool   `json:"key,omitempty"`
+}
+
+// HearRx — одна запись журнала приёма участка (без служебных полей HearNote).
+type HearRx struct {
+	Kind        string      `json:"kind,omitempty"`
+	Summary     string      `json:"summary,omitempty"`
+	Decoder     string      `json:"decoder,omitempty"`
+	Src         string      `json:"src,omitempty"`
+	Dest        string      `json:"dest,omitempty"`
+	Info        string      `json:"info,omitempty"`
+	InfoHex     string      `json:"info_hex,omitempty"`
+	Params      []HearParam `json:"params,omitempty"`
+	TimestampMs uint64      `json:"timestamp_ms,omitempty"`
 }
 
 // HearNote — принятые данные для строки «Эфир» (кадр или голос).
@@ -70,6 +92,11 @@ func (t *Tracker) RecordRx(freqHz float64, note HearNote) bool {
 		s.lastInfo = note.Info
 		s.lastInfoHex = note.InfoHex
 		s.lastParams = cloneHearParams(note.Params)
+		ms := note.TimestampMs
+		if ms == 0 {
+			ms = t.nowMs
+		}
+		s.pushHearRx(noteToHearRx(note, ms))
 	}
 	if note.TimestampMs > 0 {
 		s.lastRxMs = note.TimestampMs
@@ -183,6 +210,59 @@ func (keep *segment) absorbHear(s *segment) {
 		keep.lastParams = cloneHearParams(s.lastParams)
 		keep.lastRxMs = s.lastRxMs
 	}
+	keep.rxHistory = mergeHearHistory(keep.rxHistory, s.rxHistory)
+}
+
+func (s *segment) pushHearRx(rx HearRx) {
+	if rx.Kind == "" && rx.InfoHex == "" && rx.Info == "" && len(rx.Params) == 0 {
+		return
+	}
+	s.rxHistory = append(s.rxHistory, rx)
+	if len(s.rxHistory) > hearHistoryMax {
+		s.rxHistory = append([]HearRx(nil), s.rxHistory[len(s.rxHistory)-hearHistoryMax:]...)
+	}
+}
+
+func noteToHearRx(note HearNote, ms uint64) HearRx {
+	hex := note.InfoHex
+	if len(hex) > hearHistoryHexMax {
+		hex = hex[:hearHistoryHexMax]
+	}
+	return HearRx{
+		Kind:        note.Kind,
+		Summary:     note.Summary,
+		Decoder:     note.Decoder,
+		Src:         note.Src,
+		Dest:        note.Dest,
+		Info:        note.Info,
+		InfoHex:     hex,
+		Params:      cloneHearParams(note.Params),
+		TimestampMs: ms,
+	}
+}
+
+// mergeHearHistory склеивает журналы при слиянии участков: по времени, хвост не длиннее лимита.
+func mergeHearHistory(a, b []HearRx) []HearRx {
+	if len(a) == 0 && len(b) == 0 {
+		return nil
+	}
+	out := make([]HearRx, 0, len(a)+len(b))
+	out = append(out, a...)
+	out = append(out, b...)
+	slices.SortStableFunc(out, func(x, y HearRx) int {
+		switch {
+		case x.TimestampMs < y.TimestampMs:
+			return -1
+		case x.TimestampMs > y.TimestampMs:
+			return 1
+		default:
+			return 0
+		}
+	})
+	if len(out) > hearHistoryMax {
+		out = append([]HearRx(nil), out[len(out)-hearHistoryMax:]...)
+	}
+	return out
 }
 
 func cloneHearParams(in []HearParam) []HearParam {
@@ -191,5 +271,17 @@ func cloneHearParams(in []HearParam) []HearParam {
 	}
 	out := make([]HearParam, len(in))
 	copy(out, in)
+	return out
+}
+
+func cloneHearHistory(in []HearRx) []HearRx {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]HearRx, len(in))
+	for i := range in {
+		out[i] = in[i]
+		out[i].Params = cloneHearParams(in[i].Params)
+	}
 	return out
 }

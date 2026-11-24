@@ -254,6 +254,8 @@ MockBandMarks.applyHearTelemetry = realBandMarks.applyHearTelemetry;
 MockBandMarks.formatHearData = realBandMarks.formatHearData;
 MockBandMarks.payloadDetails = realBandMarks.payloadDetails;
 MockBandMarks.lastPayloadEvent = realBandMarks.lastPayloadEvent;
+MockBandMarks.payloadHistory = realBandMarks.payloadHistory;
+MockBandMarks.payloadHistoryDetails = realBandMarks.payloadHistoryDetails;
 global.window.BandMarks = MockBandMarks;
 
 function MockAirTable(tbody, opts) {

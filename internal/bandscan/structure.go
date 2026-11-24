@@ -215,15 +215,21 @@ func (s *segment) stickStation(nowMs uint64, r signalclass.Result) {
 }
 
 // vote — модуляция большинства последних определённых ответов; при равенстве остаётся
-// показанная, иначе свежая. «Не знаю» (undetermined) не голосует и не снимает разбор:
-// участок сбрасывается только тишиной детектора, а не слабым кадром классификатора.
-// Вид передачи сглаживается так же: один промах из трёх подпись не снимает.
+// показанная, иначе свежая. «Не знаю» (undetermined и unknown) не снимает уже известный
+// разбор: участок сбрасывается только тишиной детектора, а не слабым кадром классификатора.
+// Первый unknown без прежнего разбора всё же показывается. Вид передачи сглаживается так же.
 func vote(votes []signalclass.Result, shown *signalclass.Result) *signalclass.Result {
+	knownShown := structureKnown(shown)
 	defined := make([]signalclass.Result, 0, len(votes))
 	for _, v := range votes {
-		if v.Modulation != "" && v.Modulation != signalclass.ModUndetermined {
-			defined = append(defined, v)
+		if v.Modulation == "" || v.Modulation == signalclass.ModUndetermined {
+			continue
 		}
+		// unknown не перекрашивает уже известную модуляцию в таблице «Эфир».
+		if v.Modulation == signalclass.ModUnknown && knownShown {
+			continue
+		}
+		defined = append(defined, v)
 	}
 	if len(defined) == 0 {
 		return shown
@@ -295,6 +301,33 @@ func majorityService(votes []signalclass.Result, mod string, shown *signalclass.
 		}
 	}
 	return signalclass.Result{}
+}
+
+// structureKnown — разбор с конкретной модуляцией, а не «не разобран» / «не знаю».
+func structureKnown(r *signalclass.Result) bool {
+	if r == nil || r.Modulation == "" {
+		return false
+	}
+	return r.Modulation != signalclass.ModUndetermined && r.Modulation != signalclass.ModUnknown
+}
+
+// absorbStructure переносит разбор с уходящего участка: известная модуляция важнее
+// пустого и unknown у оставляемого, иначе «Эфир» мигает «неизвестна» после склейки.
+func (keep *segment) absorbStructure(s *segment) {
+	if s == nil || s.structure == nil {
+		return
+	}
+	if !structureKnown(keep.structure) && structureKnown(s.structure) {
+		cp := *s.structure
+		keep.structure = &cp
+		keep.votes = append(append([]signalclass.Result(nil), keep.votes...), s.votes...)
+		return
+	}
+	if keep.structure == nil {
+		cp := *s.structure
+		keep.structure = &cp
+		keep.votes = append(keep.votes, s.votes...)
+	}
 }
 
 // applyOrigin замыкает подпись происхождением. КА снимает земной вид.

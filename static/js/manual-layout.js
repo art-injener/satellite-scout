@@ -4141,7 +4141,7 @@
     };
 
     /**
-     * Модалка «Кадр» для ячейки «Данные» в «Эфире»: поля telemetry + простая визуализация.
+     * Модалка «Кадр» для ячейки «Данные» в «Эфире»: последний кадр или журнал rx_history.
      * @param {Object} sig
      */
     ManualLayout.prototype._openHearPayload = function(sig) {
@@ -4152,7 +4152,11 @@
         const viz = document.getElementById('manual-tmi-details-viz');
         if (!modal || !tbody) { return; }
         const BM = typeof window !== 'undefined' ? window.BandMarks : null;
+        const hist = BM && typeof BM.payloadHistory === 'function' ? BM.payloadHistory(sig) : [];
+        const newest = hist.length ? hist[0] : null;
         const kindLabel = (sig && sig.hear_kind)
+            || (newest && BM && typeof BM.formatHearData === 'function'
+                ? BM.formatHearData(newest) : '')
             || (BM && typeof BM.formatHearData === 'function'
                 ? BM.formatHearData({
                     kind: sig && sig.last_kind,
@@ -4163,14 +4167,18 @@
         const freq = sig && sig.center_hz
             ? ((sig.center_hz / 1e6).toFixed(4) + ' МГц') : '';
         if (titleEl) {
-            titleEl.textContent = [kind, freq].filter(Boolean).join(' · ');
+            const head = hist.length > 1
+                ? ('История · ' + hist.length)
+                : kind;
+            titleEl.textContent = [head, freq].filter(Boolean).join(' · ');
         }
         tbody.textContent = '';
-        let details = (sig && sig.hear_details) || [];
-        if (!details.length && BM && typeof BM.lastPayloadEvent === 'function'
-            && typeof BM.payloadDetails === 'function') {
-            const ev = BM.lastPayloadEvent(sig);
-            if (ev) { details = BM.payloadDetails(ev); }
+        let details = [];
+        if (BM && typeof BM.payloadHistoryDetails === 'function') {
+            details = BM.payloadHistoryDetails(sig);
+        }
+        if (!details.length && sig && sig.hear_details) {
+            details = sig.hear_details;
         }
         if (!details.length && sig && (sig.last_kind || sig.last_summary || sig.last_decoder)) {
             details = [
@@ -4178,14 +4186,6 @@
                 { key: 'декодер', value: sig.last_decoder || '—' },
                 { key: 'сводка', value: sig.last_summary || '—' },
             ];
-        }
-        if (sig && sig.last_rx_ms && details.length) {
-            const d = new Date(sig.last_rx_ms);
-            const p = function(n) { return n < 10 ? '0' + n : String(n); };
-            details = details.concat([{
-                key: 'обновлён',
-                value: p(d.getHours()) + ':' + p(d.getMinutes()) + ':' + p(d.getSeconds()),
-            }]);
         }
         for (let i = 0; i < details.length; i++) {
             const tr = document.createElement('tr');

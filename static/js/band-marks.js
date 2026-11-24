@@ -174,6 +174,7 @@
     /**
      * Имя передатчика: аргумент nameOf, иначе sat_name из SSE (липкий с бэка).
      * Сырой NORAD в колонку не пишем — это не имя передатчика.
+     * Если кадр уже принят, а КА нет — позывной из кадра или «Неопознан», не «—».
      */
     function transmitterText(sig, satName) {
         if (satName) { return satName; }
@@ -192,6 +193,10 @@
         if (typeof label === 'string' && label.indexOf(progress) === 0) {
             return label.slice('Эфирное радио ('.length, -1); // «RDS 2/4»
         }
+        const src = sig && sig.last_src ? String(sig.last_src).trim() : '';
+        if (src) { return src; }
+        const heard = sig && (sig.last_kind || sig.hear_kind || (Number(sig.frames_good) || 0) > 0);
+        if (heard) { return 'Неопознан'; }
         return '—';
     }
 
@@ -494,7 +499,82 @@
             info: sig.last_info || '',
             info_hex: sig.last_info_hex || '',
             params: Array.isArray(sig.last_params) ? sig.last_params : [],
+            timestamp_ms: Number(sig.last_rx_ms) || 0,
         };
+    }
+
+    /**
+     * Журнал приёмов участка: rx_history с бэка (новые первые), иначе один last_*.
+     * @param {Object} sig
+     * @returns {Object[]}
+     */
+    function payloadHistory(sig) {
+        const raw = sig && Array.isArray(sig.rx_history) ? sig.rx_history : null;
+        if (raw && raw.length) {
+            const out = [];
+            for (let i = raw.length - 1; i >= 0; i--) {
+                const e = raw[i];
+                if (!e) { continue; }
+                out.push({
+                    kind: e.kind || '',
+                    decoder: e.decoder || '',
+                    summary: e.summary || '',
+                    src: e.src || '',
+                    dest: e.dest || '',
+                    info: e.info || '',
+                    info_hex: e.info_hex || '',
+                    params: Array.isArray(e.params) ? e.params : [],
+                    timestamp_ms: Number(e.timestamp_ms) || 0,
+                });
+            }
+            return out;
+        }
+        const one = lastPayloadEvent(sig);
+        return one ? [one] : [];
+    }
+
+    /**
+     * Строки модалки: при нескольких приёмах — заголовок записи + детали последнего полностью,
+     * у более старых только сводка/hex (коротко).
+     * @param {Object} sig
+     * @returns {Array<{key:string, value:string}>}
+     */
+    function payloadHistoryDetails(sig) {
+        const hist = payloadHistory(sig);
+        if (!hist.length) { return []; }
+        if (hist.length === 1) {
+            const rows = payloadDetails(hist[0]);
+            if (hist[0].timestamp_ms) {
+                rows.push({ key: 'обновлён', value: clockText(hist[0].timestamp_ms) });
+            }
+            return rows;
+        }
+        const rows = [];
+        for (let i = 0; i < hist.length; i++) {
+            const ev = hist[i];
+            const n = hist.length - i;
+            const label = formatHearData(ev);
+            const when = ev.timestamp_ms ? clockText(ev.timestamp_ms) : '';
+            rows.push({
+                key: '#' + n,
+                value: [label !== '—' ? label : (payloadKindLabel(ev.kind) || 'Кадр'), when]
+                    .filter(Boolean).join(' · '),
+            });
+            if (i === 0) {
+                const full = payloadDetails(ev).filter(function(r) {
+                    return r.key !== 'тип';
+                });
+                for (let j = 0; j < full.length; j++) { rows.push(full[j]); }
+            } else {
+                if (ev.summary) { rows.push({ key: 'сводка', value: String(ev.summary) }); }
+                if (ev.info_hex) {
+                    const hex = String(ev.info_hex);
+                    const short = hex.length > 64 ? hex.slice(0, 64) + '…' : hex;
+                    rows.push({ key: 'hex', value: short });
+                }
+            }
+        }
+        return rows;
     }
 
     /**
@@ -1114,6 +1194,8 @@
     BandMarks.formatHearData = formatHearData;
     BandMarks.payloadDetails = payloadDetails;
     BandMarks.lastPayloadEvent = lastPayloadEvent;
+    BandMarks.payloadHistory = payloadHistory;
+    BandMarks.payloadHistoryDetails = payloadHistoryDetails;
     BandMarks.hexToAsciiPreview = hexToAsciiPreview;
     BandMarks.hearDataCell = hearDataCell;
     BandMarks.matchHearSignal = matchHearSignal;
@@ -1141,6 +1223,8 @@
             formatHearData: formatHearData,
             payloadDetails: payloadDetails,
             lastPayloadEvent: lastPayloadEvent,
+            payloadHistory: payloadHistory,
+            payloadHistoryDetails: payloadHistoryDetails,
             hexToAsciiPreview: hexToAsciiPreview,
             hearDataCell: hearDataCell,
             matchHearSignal: matchHearSignal,

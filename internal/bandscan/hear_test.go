@@ -39,7 +39,7 @@ func TestTracker_RecordRx_KeepsLastPayloadForModal(t *testing.T) {
 	tr.RecordRx(hz, HearNote{
 		Kind: "beacon", Summary: "Маяк ТМИ · RS23S", Decoder: "geoscan.beacon",
 		Src: "RS23S", Dest: "BEACON", Info: "U=3.9", InfoHex: "01003e",
-		Params: []HearParam{{ID: "u", Name: "U", Value: "3.9", Unit: "V", Key: true}},
+		Params:      []HearParam{{ID: "u", Name: "U", Value: "3.9", Unit: "V", Key: true}},
 		TimestampMs: t0 + 4_000, CountFrame: true, NoradID: 53385, SatName: "GEOSCAN",
 	})
 	s = only(t, tr.Signals(nil))
@@ -51,6 +51,28 @@ func TestTracker_RecordRx_KeepsLastPayloadForModal(t *testing.T) {
 	}
 	if len(s.LastParams) != 1 || s.LastParams[0].Name != "U" || s.LastParams[0].Value != "3.9" {
 		t.Fatalf("params = %+v", s.LastParams)
+	}
+	if len(s.RxHistory) != 2 || s.RxHistory[0].Kind != "line" || s.RxHistory[1].Kind != "beacon" {
+		t.Fatalf("rx_history = %+v, want line then beacon", s.RxHistory)
+	}
+}
+
+func TestTracker_RecordRx_HistoryKeepsLastN(t *testing.T) {
+	tr := NewTracker()
+	hz := float64(testCenter + 100_000)
+	feed(tr, t0, t0+3_000, testCenter, steadyAt(hz))
+	for i := range hearHistoryMax + 5 {
+		tr.RecordRx(hz, HearNote{
+			Kind: "line", InfoHex: "aa", TimestampMs: t0 + uint64(3_000+i), CountFrame: true,
+		})
+	}
+	s := only(t, tr.Signals(nil))
+	if len(s.RxHistory) != hearHistoryMax {
+		t.Fatalf("rx_history len=%d, want %d", len(s.RxHistory), hearHistoryMax)
+	}
+	wantFirst := t0 + uint64(3_000+5)
+	if s.RxHistory[0].TimestampMs != wantFirst {
+		t.Fatalf("oldest kept ts=%d, want %d", s.RxHistory[0].TimestampMs, wantFirst)
 	}
 }
 

@@ -118,6 +118,8 @@ type Signal struct {
 	LastInfo    string      `json:"last_info,omitempty"`
 	LastInfoHex string      `json:"last_info_hex,omitempty"`
 	LastParams  []HearParam `json:"last_params,omitempty"`
+	// RxHistory — последние приёмы участка до рестарта (модалка «Кадр»), старые→новые.
+	RxHistory []HearRx `json:"rx_history,omitempty"`
 }
 
 // Stats — статистика участка по времени (ADR-009 §5.5).
@@ -173,6 +175,7 @@ type segment struct {
 	lastInfoHex                        string
 	lastParams                         []HearParam
 	lastRxMs                           uint64
+	rxHistory                          []HearRx
 
 	// coveredMs — с какого решения огибающая участка непрерывно накрыта огибающей
 	// другого показанного участка; 0 — не накрыта. Долгое накрытие — признак осколка
@@ -489,10 +492,7 @@ func (t *Tracker) merge(touched []*segment) (*segment, []*segment) {
 		keep.hits += s.hits
 		keep.on = keep.on || s.on
 		keep.lastSeenMs = max(keep.lastSeenMs, s.lastSeenMs)
-		if keep.structure == nil && s.structure != nil {
-			keep.structure = s.structure
-			keep.votes = append(keep.votes, s.votes...)
-		}
+		keep.absorbStructure(s)
 		if keep.stickyNorad == 0 && s.stickyNorad > 0 {
 			keep.stickyNorad, keep.stickyOrigin, keep.stickyName = s.stickyNorad, s.stickyOrigin, s.stickyName
 		} else if keep.stickyName == "" && s.stickyName != "" && keep.stickyNorad == s.stickyNorad {
@@ -761,6 +761,7 @@ func (t *Tracker) list(expected []Expected, maxAgeMs uint64) []Signal {
 			LastInfo:    s.lastInfo,
 			LastInfoHex: s.lastInfoHex,
 			LastParams:  cloneHearParams(s.lastParams),
+			RxHistory:   cloneHearHistory(s.rxHistory),
 			Stats: Stats{
 				FirstSeenMs: s.firstSeenMs,
 				ObservedS:   round1(s.observedMs / 1000),

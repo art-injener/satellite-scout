@@ -120,6 +120,56 @@ func TestTracker_UndeterminedDoesNotVote(t *testing.T) {
 	}
 }
 
+// unknown («ветка не подошла») тоже не снимает уже известную модуляцию в «Эфире».
+func TestTracker_UnknownDoesNotOverwriteKnown(t *testing.T) {
+	tr := NewTracker()
+	feed(tr, t0, t0+3_000, testCenter, steadyAt(testCenter+100_000))
+	id := segID(t, tr)
+	fsk := signalclass.Result{Modulation: signalclass.Mod2FSK, Confidence: 0.8, Why: "fsk"}
+	unk := signalclass.Result{Modulation: signalclass.ModUnknown, Confidence: 0.3, Why: "нет ветки"}
+
+	tr.SetStructure(id, fsk)
+	tr.SetStructure(id, unk)
+	tr.SetStructure(id, unk)
+	s := only(t, tr.Signals(nil)).Structure
+	if s == nil || s.Modulation != signalclass.Mod2FSK {
+		t.Fatalf("unknown votes wiped known modulation: %+v", s)
+	}
+	tr.SetStructure(id, unk)
+	s = only(t, tr.Signals(nil)).Structure
+	if s == nil || s.Modulation != signalclass.Mod2FSK {
+		t.Fatalf("a row of unknown reset the structure: %+v", s)
+	}
+}
+
+// Пока известного ответа не было, один unknown всё же показывается как разбор.
+func TestTracker_UnknownAloneIsShown(t *testing.T) {
+	tr := NewTracker()
+	feed(tr, t0, t0+3_000, testCenter, steadyAt(testCenter+100_000))
+	id := segID(t, tr)
+	tr.SetStructure(id, signalclass.Result{Modulation: signalclass.ModUnknown, Why: "нет ветки"})
+	s := only(t, tr.Signals(nil)).Structure
+	if s == nil || s.Modulation != signalclass.ModUnknown {
+		t.Fatalf("first unknown should stay visible: %+v", s)
+	}
+}
+
+// Поглощение при склейке: unknown у оставляемого не важнее известной модуляции у уходящего.
+func TestTracker_AbsorbStructurePrefersKnownOverUnknown(t *testing.T) {
+	keep := &segment{
+		structure: &signalclass.Result{Modulation: signalclass.ModUnknown, Why: "нет ветки"},
+		votes:     []signalclass.Result{{Modulation: signalclass.ModUnknown, Why: "нет ветки"}},
+	}
+	other := &segment{
+		structure: &signalclass.Result{Modulation: signalclass.Mod2FSK, Confidence: 0.8, Why: "fsk"},
+		votes:     []signalclass.Result{{Modulation: signalclass.Mod2FSK, Confidence: 0.8, Why: "fsk"}},
+	}
+	keep.absorbStructure(other)
+	if keep.structure == nil || keep.structure.Modulation != signalclass.Mod2FSK {
+		t.Fatalf("absorbed structure %+v, want 2fsk", keep.structure)
+	}
+}
+
 // Пока определённого ответа не было, участок честно «не разобран».
 func TestTracker_UndeterminedOnlyStaysUnclassified(t *testing.T) {
 	tr := NewTracker()
@@ -418,7 +468,7 @@ func TestTracker_SatelliteAFSKCWAndOOKAreSatTx(t *testing.T) {
 			tr.Signals(expected(t0 + 2_000)) // опорная точка слежения за Доплером
 			feed(tr, t0+2_000, t0+20_000, testCenter, peaks)
 			tr.SetStructure(id, signalclass.Result{Modulation: mod, Params: signalclass.Params{OccupiedHz: 12_000, Baud: 1200}})
-			s := only(t, tr.Signals(expected(t0 + 20_000)))
+			s := only(t, tr.Signals(expected(t0+20_000)))
 			if s.Origin != OriginSatellite || s.Structure == nil || s.Structure.Service != signalclass.ServiceSatTx {
 				t.Fatalf("origin %q structure %+v, want sat_tx", s.Origin, s.Structure)
 			}

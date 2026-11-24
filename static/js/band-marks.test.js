@@ -11,7 +11,7 @@ const {
     AXIS_HOLD_MS, freshSignals,
     markCode, markKind, markTitle, markSummary, hearRows, clusterAt, leaderAnchor,
     pickBandwidth, openCardSignals, formatHearData, matchHearSignal, applyHearTelemetry,
-    hearDataCell, payloadDetails, lastPayloadEvent,
+    hearDataCell, payloadDetails, lastPayloadEvent, payloadHistory, payloadHistoryDetails,
 } = require('./band-marks.js');
 
 let passed = 0;
@@ -258,6 +258,36 @@ test('band_signals last payload fills data cell and modal rows', () => {
     assert.ok(rows.some((r) => r.key === 'декодер' && r.value === 'line'));
 });
 
+test('payloadHistory prefers rx_history newest first and falls back to last_*', () => {
+    const fromLast = payloadHistory({
+        last_kind: 'beacon', last_summary: 'Маяк', last_rx_ms: 1000, stats: {},
+    });
+    assert.strictEqual(fromLast.length, 1);
+    assert.strictEqual(fromLast[0].kind, 'beacon');
+
+    const hist = payloadHistory({
+        last_kind: 'beacon',
+        rx_history: [
+            { kind: 'line', info_hex: 'aa', timestamp_ms: 1000 },
+            { kind: 'beacon', summary: 'Маяк', timestamp_ms: 2000 },
+        ],
+        stats: {},
+    });
+    assert.strictEqual(hist.length, 2);
+    assert.strictEqual(hist[0].kind, 'beacon');
+    assert.strictEqual(hist[1].kind, 'line');
+
+    const rows = payloadHistoryDetails({
+        rx_history: [
+            { kind: 'line', info_hex: 'aa55cc33', summary: 'Линия', timestamp_ms: 1000 },
+            { kind: 'beacon', summary: 'Маяк', decoder: 'geoscan.beacon', timestamp_ms: 2000 },
+        ],
+    });
+    assert.ok(rows.some((r) => r.key === '#2' && String(r.value).indexOf('Маяк') >= 0));
+    assert.ok(rows.some((r) => r.key === '#1' && String(r.value).indexOf('Линия') >= 0));
+    assert.ok(rows.some((r) => r.key === 'декодер' && r.value === 'geoscan.beacon'));
+});
+
 test('hexToAsciiPreview keeps printable runs', () => {
     const { hexToAsciiPreview } = require('./band-marks.js');
     // "HELLO" + 0x00 + "!"
@@ -374,6 +404,15 @@ test('time column merges first and last; removed rows stay gone', () => {
     assert.ok(markTitle({
         center_hz: 1e8, bandwidth_hz: 800, norad_id: 25544, sat_name: 'ISS', stats: {}, last_seen_ms: 0,
     }, null).indexOf('Передатчик\tISS') === 0);
+
+    // Кадр без КА: позывной из last_src, иначе «Неопознан» — не пустой прочерк.
+    assert.ok(markTitle({
+        center_hz: 1e8, bandwidth_hz: 800, last_kind: 'beacon', last_src: 'RS23S', stats: {},
+    }, null).indexOf('Передатчик\tRS23S') === 0);
+    assert.ok(hearRows({
+        center_hz: 436e6, bandwidth_hz: 20e3, last_kind: 'line', last_info_hex: 'aa55',
+        frames_good: 1, stats: {},
+    }, null)[0][1] === 'Неопознан');
 
     const same = markTitle({
         center_hz: 1e8, bandwidth_hz: 1e3, snr_db: 3,
