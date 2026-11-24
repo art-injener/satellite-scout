@@ -369,12 +369,36 @@ var ImitatorSSTVModes = []string{"robot36", "pd120", "pd180"}
 // Модемы маяка имитатора; названия совпадают с демодуляторами канала.
 const (
 	ImitatorAFSK1200       = "afsk1200"        // AFSK 1200 поверх FM
-	ImitatorFSK9600G3RUH   = "fsk9600_g3ruh"   // GFSK 9600 со скремблером G3RUH
-	ImitatorFSK9600GEOSCAN = "fsk9600_geoscan" // GFSK 9600, кадр GEOSCAN (CC1125)
+	ImitatorFSK1200        = "fsk1200"         // GFSK 1200, AX.25 HDLC без G3RUH
+	ImitatorFSK4800        = "fsk4800"         // GFSK 4800, AX.25 HDLC без G3RUH
+	ImitatorGFSK1200       = "gfsk1200"        // явный GFSK 1200 BT 0,5, AX.25 HDLC
+	ImitatorGFSK4800       = "gfsk4800"        // явный GFSK 4800 BT 0,5, AX.25 HDLC
+	ImitatorGFSK9600       = "gfsk9600"        // явный GFSK 9600 BT 0,5, AX.25 + G3RUH
+	ImitatorGMSK9600       = "gmsk9600"        // GMSK 9600 BT 0,4, AX.25 + G3RUH
+	ImitatorGMSK4800       = "gmsk4800"        // GMSK 4800 BT 0,4, AX.25 без G3RUH
+	ImitatorGMSK4800AX100   = "gmsk4800_ax100"    // GMSK 4800, AX.100 Mode 5 (CSP)
+	ImitatorGMSK9600AX100   = "gmsk9600_ax100"    // GMSK 9600, AX.100 Mode 5
+	ImitatorGMSK9600AX100RS = "gmsk9600_ax100_rs" // GMSK 9600, AX.100 Mode RS
+	ImitatorFSK4800AX100    = "fsk4800_ax100"     // GFSK 4800, AX.100 Mode 5
+	ImitatorFSK9600AX100RS  = "fsk9600_ax100_rs"  // GFSK 9600, AX.100 Mode RS
+	ImitatorGMSK2400USP     = "gmsk2400_usp"      // GMSK 2400, USP (SPUTNIX)
+	ImitatorGMSK4800USP     = "gmsk4800_usp"      // GMSK 4800, USP
+	ImitatorGMSK9600USP     = "gmsk9600_usp"      // GMSK 9600, USP
+	ImitatorBPSK1200        = "bpsk1200"          // DBPSK 1200, AX.25 HDLC
+	ImitatorBPSK9600        = "bpsk9600"          // DBPSK 9600, AX.25 HDLC
+	ImitatorFSK9600G3RUH    = "fsk9600_g3ruh"     // GFSK 9600 со скремблером G3RUH
+	ImitatorFSK9600GEOSCAN  = "fsk9600_geoscan"   // GFSK 9600, кадр GEOSCAN (CC1125)
 )
 
 // ImitatorBeaconModems — все допустимые значения ImitatorSignal.Modem для маяка.
-var ImitatorBeaconModems = []string{ImitatorAFSK1200, ImitatorFSK9600G3RUH, ImitatorFSK9600GEOSCAN}
+var ImitatorBeaconModems = []string{
+	ImitatorAFSK1200, ImitatorFSK1200, ImitatorFSK4800, ImitatorFSK4800AX100,
+	ImitatorGFSK1200, ImitatorGFSK4800, ImitatorGFSK9600,
+	ImitatorGMSK9600, ImitatorGMSK9600AX100, ImitatorGMSK9600AX100RS, ImitatorGMSK9600USP,
+	ImitatorGMSK4800, ImitatorGMSK4800AX100, ImitatorGMSK4800USP,
+	ImitatorGMSK2400USP,
+	ImitatorBPSK1200, ImitatorBPSK9600, ImitatorFSK9600G3RUH, ImitatorFSK9600AX100RS, ImitatorFSK9600GEOSCAN,
+}
 
 // ImitatorConfig — эфир имитатора: общий шум приёмника и сигналы.
 // Если задан Replay — воспроизводится запись SigMF (.sigmf-meta), сигналы и шум не используются.
@@ -384,6 +408,9 @@ type ImitatorConfig struct {
 	Signals   []ImitatorSignal `json:"signals,omitempty"`
 	// Replay — путь к .sigmf-meta (рядом должен лежать .sigmf-data). Пусто — синтетический эфир.
 	Replay string `json:"replay,omitempty"`
+	// NoradID / SatName — запасная привязка КА для тракта replay, если в SigMF нет scout:norad_id.
+	NoradID int    `json:"norad_id,omitempty"`
+	SatName string `json:"sat_name,omitempty"`
 }
 
 // ImitatorSignal — сигнал имитатора. Сдвиг от центра приёмника в момент t:

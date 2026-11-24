@@ -78,7 +78,7 @@ type groupSatInfo struct {
 	UIColUntil    string `json:"ui_col_until"`
 	// Траектория пролёта на небесной сфере (az/el/time) для отрисовки SkyView.
 	SkyPath []tracker.AzElPoint `json:"sky_path,omitempty"`
-	// Радиочастотные характеристики из SatNOGS (опционально, только при доступности данных).
+	// Радиочастотные характеристики из реестра (опционально).
 	// FreqMHz — нижний край downlink в формате "145.825".
 	// Modulation — короткая подпись для UI: "FM" или "AFSK 1200".
 	FreqMHz    string `json:"freq_mhz,omitempty"`
@@ -87,7 +87,7 @@ type groupSatInfo struct {
 	TxUUID string `json:"tx_uuid,omitempty"`
 	// TxCount — число активных downlink-передатчиков.
 	TxCount int `json:"tx_count,omitempty"`
-	// Transmitters — все активные downlink-передатчики КА из SatNOGS, по возрастанию частоты.
+	// Transmitters — активные downlink из реестра, по возрастанию частоты.
 	// Пусто, если данных нет: лента передатчиков не выдумывает их.
 	Transmitters []groupTxInfo `json:"transmitters,omitempty"`
 	// TCA — момент максимальной элевации, Unix ms.
@@ -151,27 +151,27 @@ type PassProvider interface {
 	GetAllGroupsPasses(hours int, minEl float64) ([]*tracker.Pass, error)
 }
 
-// TransmitterInfo — узкая выжимка для UI, не зависящая от пакета satnogs.
-// Поля совпадают с satnogs.TransmitterSummary — sat-tracking использует только их.
+// TransmitterInfo — узкая выжимка для UI (реестр / план частот / мок в тестах).
 type TransmitterInfo struct {
 	UUID       string
 	FreqMHz    string
 	Modulation string
 	// Count — число активных downlink-передатчиков у КА (0 если неизвестно).
 	Count int
-	// Поля ленты передатчиков: частота в Гц, режим, скорость и описание из SatNOGS.
+	// Поля ленты передатчиков: частота в Гц, режим, скорость и описание.
 	FreqHz      int64
 	Mode        string
 	Baud        float64
 	Description string
 }
 
-// TransmitterProvider — источник данных о передатчиках (SatNOGS или мок в тестах).
-// Интерфейс намеренно узкий, чтобы не тащить пакет satnogs в services.
+// TransmitterProvider — источник передатчиков для SSE (реестр или мок в тестах).
+// Интерфейс намеренно узкий, чтобы не тащить registry/satnogs в services.
 type TransmitterProvider interface {
 	GetPrimaryTransmitter(noradID int) *TransmitterInfo
 	// GetTransmitters — активные downlink-передатчики КА по возрастанию частоты; nil — данных нет.
 	GetTransmitters(noradID int) []TransmitterInfo
+	// RequestFetch — устаревший крючок догрузки; реестр отвечает пусто (пробелы — ingest).
 	RequestFetch(noradIDs []int)
 }
 
@@ -373,8 +373,7 @@ func (s *SatelliteTrackingService) SetPassProvider(provider PassProvider) {
 	slog.Info("group tracking enabled", "window_forward", s.windowForward)
 }
 
-// SetTransmitterProvider устанавливает источник данных о передатчиках (SatNOGS).
-// Опционально: можно вызывать или не вызывать в зависимости от config.SatNOGSEnabled.
+// SetTransmitterProvider устанавливает источник передатчиков для SSE (обычно реестр).
 func (s *SatelliteTrackingService) SetTransmitterProvider(provider TransmitterProvider) {
 	s.mu.Lock()
 	s.transmitterProvider = provider
@@ -547,6 +546,29 @@ func (s *SatelliteTrackingService) CurrentNoradID() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.currentNoradID
+}
+
+// SatName — отображаемое имя КА из tracked (для «Эфира» / band_signals.sat_name).
+// Пусто, если КА сейчас не в сопровождении.
+func (s *SatelliteTrackingService) SatName(noradID int) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if sat, ok := s.tracked[noradID]; ok && sat != nil {
+		return sat.name
+	}
+	return ""
+}
+
+// IsVisible — КА в текущей группе Плана и сейчас над горизонтом.
+func (s *SatelliteTrackingService) IsVisible(noradID int) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, e := range s.currentGroupEntries {
+		if e.NoradID == noradID {
+			return e.IsVisible
+		}
+	}
+	return false
 }
 
 // GroupNoradIDs возвращает NORAD ID активной группы скользящего окна
@@ -891,16 +913,7 @@ func (s *SatelliteTrackingService) broadcastGroupUpdate(group ConcurrentPassGrou
 	txProvider := s.transmitterProvider
 	s.mu.RUnlock()
 
-	// Триггерим background-prefetch SatNOGS для всех NORAD группы.
-	// Не блокирует: если данных нет — поля FreqMHz/Modulation будут пустыми,
-	// при следующем group_update (~5с) подтянутся из кеша.
-	if txProvider != nil && len(group.Satellites) > 0 {
-		ids := make([]int, len(group.Satellites))
-		for i, sat := range group.Satellites {
-			ids[i] = sat.NoradID
-		}
-		txProvider.RequestFetch(ids)
-	}
+	// Передатчики уже в реестре; фоновая догрузка пробелов — feedRegistry, не здесь.
 
 	sats := make([]groupSatInfo, len(group.Satellites))
 	for i, sat := range group.Satellites {

@@ -86,14 +86,11 @@ func TestBroadcastGroupUpdate_IncludesFreqAndModulation(t *testing.T) {
 	// Дёргаем broadcastGroupUpdate напрямую — без полного цикла Run.
 	svc.broadcastGroupUpdate(group, now, 0)
 
-	// Проверяем, что provider.RequestFetch вызван с NORAD группы.
+	// Group update читает реестр/провайдер; live RequestFetch больше не делается.
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
-	if provider.requestFetchCalled != 1 {
-		t.Errorf("RequestFetch calls = %d, want 1", provider.requestFetchCalled)
-	}
-	if len(provider.requestedNoradIDs) != 1 || provider.requestedNoradIDs[0] != issNoradID {
-		t.Errorf("requested NORAD = %v, want [%d]", provider.requestedNoradIDs, issNoradID)
+	if provider.requestFetchCalled != 0 {
+		t.Errorf("RequestFetch calls = %d, want 0", provider.requestFetchCalled)
 	}
 }
 
@@ -268,12 +265,12 @@ func TestBroadcastGroupUpdate_NoPrimaryReturnsEmptyFreq(t *testing.T) {
 		TimeWindow:   TimeWindow{Start: now.UnixMilli(), End: now.Add(10 * time.Minute).UnixMilli()},
 	}
 
-	// Должен вызвать prefetch и не упасть.
+	// Без primary не падает и не дергает live-fetch.
 	svc.broadcastGroupUpdate(group, now, 0)
 
 	provider.mu.Lock()
 	defer provider.mu.Unlock()
-	if provider.requestFetchCalled != 1 {
-		t.Errorf("RequestFetch calls = %d, want 1", provider.requestFetchCalled)
+	if provider.requestFetchCalled != 0 {
+		t.Errorf("RequestFetch calls = %d, want 0", provider.requestFetchCalled)
 	}
 }

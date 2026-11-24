@@ -2,12 +2,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"math"
+	"strings"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/bandscan"
 	"github.com/art-injener/satellite-scout/internal/freqplan"
+	"github.com/art-injener/satellite-scout/internal/rfprofile"
 	"github.com/art-injener/satellite-scout/internal/services"
+	"github.com/art-injener/satellite-scout/internal/signalclass"
 	"github.com/art-injener/satellite-scout/internal/sweep"
 	"github.com/art-injener/satellite-scout/internal/tracker"
 )
@@ -35,7 +40,7 @@ func (a *app) startFreqPlan(ctx context.Context) {
 		return
 	}
 	a.seedRegistry(ctx, curated)
-	// План обогащает ленту панорамы и ожидаемые TX (даже без SatNOGS).
+	// План обогащает ленту панорамы и ожидаемые TX из реестра.
 	a.wireFreqPlanProvider()
 	go func() {
 		a.refreshFreqPlan(ctx)
@@ -52,13 +57,13 @@ func (a *app) startFreqPlan(ctx context.Context) {
 	}()
 }
 
-// wireFreqPlanProvider — GetTransmitters = SatNOGS ∪ план частот.
+// wireFreqPlanProvider — GetTransmitters = реестр ∪ план частот (не live SatNOGS).
 func (a *app) wireFreqPlanProvider() {
 	if a.tracking == nil {
 		return
 	}
 	a.tracking.SetTransmitterProvider(&planAugment{
-		base: a.satnogsAdapter,
+		base: newRegistryTXSource(a.registry).asServices(),
 		plan: func() []freqplan.Entry {
 			a.freqPlanMu.Lock()
 			defer a.freqPlanMu.Unlock()
@@ -119,19 +124,54 @@ func (a *app) refreshFreqPlan(ctx context.Context) {
 	)
 }
 
+// planAllow — полоса приёмника ∩ антенны.
+func (a *app) planAllow(hz int64) bool {
+	if !a.bands.Allow(hz) {
+		return false
+	}
+	if len(a.antennaBands) > 0 && !a.antennaBands.Allow(hz) {
+		return false
+	}
+	return true
+}
+
 // planSweepFreqs — частоты плана в полосе приёмника ∩ антенны на горизонте обхода.
 func (a *app) planSweepFreqs(_ string, now, until time.Time) []uint64 {
-	plan := a.loadFreqPlan()
-	bands, antenna := a.bands, a.antennaBands
-	return freqplan.ActiveFreqs(plan, now.UnixMilli(), until.UnixMilli(), func(hz int64) bool {
-		if !bands.Allow(hz) {
-			return false
+	return freqplan.ActiveFreqs(a.loadFreqPlan(), now.UnixMilli(), until.UnixMilli(), a.planAllow)
+}
+
+// planSweepTargets — TX плана для политики tx (Авто приём).
+// Состав как у ленты «видимых» КА: только NORAD активной группы скользящего окна.
+func (a *app) planSweepTargets(_ string, now, until time.Time) []sweep.Target {
+	targets := freqplan.ActiveTargets(a.loadFreqPlan(), now.UnixMilli(), until.UnixMilli(), a.planAllow)
+	if a.tracking != nil {
+		ids := a.tracking.GroupNoradIDs()
+		if len(ids) > 0 {
+			allow := make(map[int]struct{}, len(ids))
+			for _, id := range ids {
+				allow[id] = struct{}{}
+			}
+			targets = freqplan.FilterTargetsByNorad(targets, allow)
 		}
-		if len(antenna) > 0 && !antenna.Allow(hz) {
-			return false
-		}
-		return true
-	})
+	}
+	targets = freqplan.PrioritizeTargets(targets, a.rfHeardMs)
+	out := make([]sweep.Target, len(targets))
+	for i, t := range targets {
+		out[i] = sweep.Target{FreqHz: t.FreqHz, Label: t.Name, NoradID: t.NoradID}
+	}
+	return out
+}
+
+// rfHeardMs — последняя энергия/кадр в радиопрофиле; 0 — молчит или нет профиля.
+func (a *app) rfHeardMs(norad int, freqHz uint64) int64 {
+	if a.registry == nil || norad <= 0 {
+		return 0
+	}
+	p, ok := a.registry.RFProfile(norad)
+	if !ok {
+		return 0
+	}
+	return rfprofile.LastHeardAt(p, int64(freqHz)) //nolint:gosec // частоты TX < MaxInt64
 }
 
 // loadFreqPlan — копия плана в памяти или CSV на диске.
@@ -154,22 +194,195 @@ func (a *app) bandSightings(pathID string, w sweep.Window) []freqplan.Sighting {
 	}
 	var sights []freqplan.Sighting
 	for _, s := range a.bandscan.SignalsInBand(pathID, w.CenterHz, w.SpanHz) {
-		sights = append(sights, freqplan.Sighting{
+		sight := freqplan.Sighting{
 			CenterHz: s.CenterHz, NoradID: s.NoradID,
 			Origin: s.Origin, Emission: s.Emission, SNRDB: s.SNRDB,
-			LastSeenMs: int64(s.LastSeenMs), //nolint:gosec // метки времени bandscan < MaxInt64
-		})
+			LastSeenMs:    int64(s.LastSeenMs), //nolint:gosec // метки времени bandscan < MaxInt64
+			BandwidthHz:   s.BandwidthHz,
+			BeaconPeriodS: s.Stats.PeriodS,
+		}
+		if s.Structure != nil {
+			sight.Modulation = s.Structure.Modulation
+			sight.Baud = s.Structure.Params.Baud
+			sight.Confidence = s.Structure.Confidence
+			sight.Demod = s.Structure.Demod
+			if len(s.Structure.DemodAlt) > 0 {
+				sight.DemodAlt = append([]string(nil), s.Structure.DemodAlt...)
+			}
+		}
+		sights = append(sights, sight)
 	}
 	return sights
 }
 
+// enrichSightingsFromProfiles подставляет период/режим из радиопрофиля, если эфир ещё молчит.
+func (a *app) enrichSightingsFromProfiles(sights []freqplan.Sighting) {
+	if a.registry == nil {
+		return
+	}
+	for i := range sights {
+		s := &sights[i]
+		if s.NoradID <= 0 {
+			continue
+		}
+		p, ok := a.registry.RFProfile(s.NoradID)
+		if !ok {
+			continue
+		}
+		tx, ok := rfprofile.FindTx(p, "", s.CenterHz)
+		if !ok {
+			continue
+		}
+		eff := rfprofile.Effective(tx)
+		if s.BeaconPeriodS <= 0 {
+			if tx.Detected.BeaconPeriodS > 0 {
+				s.BeaconPeriodS = tx.Detected.BeaconPeriodS
+			} else if eff.BeaconPeriodS > 0 {
+				s.BeaconPeriodS = eff.BeaconPeriodS
+			}
+		}
+		if s.Modulation == "" && eff.Modulation != "" {
+			s.Modulation = eff.Modulation
+			s.Baud = eff.Baud
+		}
+	}
+}
+
 // sweepDwell — гибкая стоянка: план × обнаружения → DecideHold.
+// Окно «+эфир» (Air) — отдельная политика пробы без TX плана.
 func (a *app) sweepDwell(pathID string, w sweep.Window, startMs, nowMs, configDwellMs int64) int64 {
-	return freqplan.DecideHold(
-		freqplan.Window{CenterHz: w.CenterHz, SpanHz: w.SpanHz},
-		startMs, nowMs, configDwellMs,
-		a.loadFreqPlan(), a.bandSightings(pathID, w),
-	)
+	sights := a.bandSightings(pathID, w)
+	a.enrichSightingsFromProfiles(sights)
+	fw := freqplan.Window{CenterHz: w.CenterHz, SpanHz: w.SpanHz}
+	if w.Air {
+		return freqplan.DecideHoldAir(fw, startMs, nowMs, sights)
+	}
+	return freqplan.DecideHold(fw, startMs, nowMs, configDwellMs, a.loadFreqPlan(), sights)
+}
+
+// sweepAim — наведение OffsetHz на пик вспышки на тике снимка обхода (~4 Гц).
+func (a *app) sweepAim(pathID string, w sweep.Window, startMs, nowMs int64) {
+	sights := a.bandSightings(pathID, w)
+	a.enrichSightingsFromProfiles(sights)
+	a.maybeAimHoldChannel(pathID, w, startMs, nowMs, sights)
+}
+
+// airSweepTargets — hop «+эфир»: импульсы/неопознанное из памяти bandscan.
+// Немодулированные несущие и земной continuous в план не берём — кадров нет, только крадут стоянку.
+func (a *app) airSweepTargets(pathID string) []sweep.Target {
+	if a.bandscan == nil {
+		return nil
+	}
+	sigs := a.bandscan.RememberedSignals(pathID)
+	out := make([]sweep.Target, 0, len(sigs))
+	for _, s := range sigs {
+		if !airHopWorthy(s) {
+			continue
+		}
+		t := sweep.Target{
+			FreqHz: uint64(s.CenterHz), //nolint:gosec // частоты эфира > 0
+			Label:  "Эфир",
+			Air:    true,
+		}
+		if s.Structure != nil {
+			t.Demod = airLineDemod(s.Structure.Demod)
+			t.Baud = s.Structure.Params.Baud
+			t.Label = airHopLabel(s)
+		} else if s.Emission == bandscan.EmissionPulsed {
+			t.Label = "Имп."
+		}
+		out = append(out, t)
+	}
+	return out
+}
+
+// airHopWorthy — участок стоит hop: СШ и не «пустая» несущая/вещалка.
+func airHopWorthy(s bandscan.Signal) bool {
+	if s.SNRDB < freqplan.MinSNRDB || s.CenterHz <= 0 {
+		return false
+	}
+	if s.Emission == bandscan.EmissionContinuous {
+		return false
+	}
+	if s.Origin == bandscan.OriginTerrestrial {
+		return false
+	}
+	if st := s.Structure; st != nil {
+		mod := strings.ToLower(strings.TrimSpace(st.Modulation))
+		if mod == "carrier" || mod == "wfm" {
+			return false
+		}
+		if strings.Contains(st.ServiceLabel, signalclass.LabelBroadcast) {
+			return false
+		}
+	}
+	return true
+}
+
+// airLineDemod — для эфира без КА: HDLC/G3RUH не даёт CRC → линия + burst.
+func airLineDemod(id string) string {
+	switch id {
+	case "fsk9600_g3ruh", "fsk9600_geoscan", "fsk9600_ax100_rs",
+		"gfsk9600", "gmsk9600", "fsk4800", "fsk4800_ax100", "gfsk4800", "gmsk4800",
+		"fsk1200", "gfsk1200":
+		return "fsk9600" // baud подставит классификатор
+	default:
+		return id
+	}
+}
+
+func airHopLabel(s bandscan.Signal) string {
+	st := s.Structure
+	if st == nil {
+		return "Эфир"
+	}
+	mod := strings.ToUpper(st.Modulation)
+	if mod == "" {
+		mod = "Эфир"
+	}
+	if st.Params.Baud > 0 {
+		return fmt.Sprintf("%s %.0f", mod, st.Params.Baud)
+	}
+	return mod
+}
+
+// AirHint — подсказка «Авто» с ближайшего участка эфира (классификатор).
+func (a *app) AirHint(pathID string, freqHz uint64) (demod string, alt []string, mode string, baud float64, ok bool) {
+	if a.bandscan == nil {
+		return "", nil, "", 0, false
+	}
+	const matchHz = 25_000
+	var best bandscan.Signal
+	found := false
+	for _, s := range a.bandscan.RememberedSignals(pathID) {
+		if s.CenterHz <= 0 {
+			continue
+		}
+		d := absU64Hz(uint64(s.CenterHz), freqHz) //nolint:gosec // CenterHz > 0
+		if d > matchHz || s.Structure == nil {
+			continue
+		}
+		if !found || s.SNRDB > best.SNRDB {
+			best, found = s, true
+		}
+	}
+	if !found || best.Structure == nil {
+		return "", nil, "", 0, false
+	}
+	st := best.Structure
+	demod = airLineDemod(st.Demod)
+	alt = append([]string(nil), st.DemodAlt...)
+	for i := range alt {
+		alt[i] = airLineDemod(alt[i])
+	}
+	return demod, alt, st.Modulation, st.Params.Baud, true
+}
+
+func absU64Hz(a, b uint64) uint64 {
+	if a >= b {
+		return a - b
+	}
+	return b - a
 }
 
 // onSweepDwellEnd пишет журнал визитов: план × обнаружения в закончившемся окне.
@@ -181,9 +394,13 @@ func (a *app) onSweepDwellEnd(pathID string, w sweep.Window, startMs, endMs int6
 	if a.registry == nil {
 		return
 	}
-	if err := a.registry.AppendVisits(context.Background(), visits); err != nil {
+	ctx := context.Background()
+	if err := a.registry.AppendVisits(ctx, visits); err != nil {
 		slog.Warn("freqplan: visits", slogKeyError, err)
 		return
+	}
+	if err := a.registry.ApplyRFDwell(ctx, visits, sights); err != nil {
+		slog.Warn("freqplan: rf profile dwell", slogKeyError, err)
 	}
 	if len(visits) > 0 {
 		slog.Info("freqplan visits",

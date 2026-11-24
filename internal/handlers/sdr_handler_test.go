@@ -12,6 +12,40 @@ import (
 	"github.com/art-injener/satellite-scout/internal/sdr/imitator"
 )
 
+func TestSDRHandler_ListDemodProfiles(t *testing.T) {
+	h := NewSDRHandler(sdr.NewService(), nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/sdr/demod-profiles", nil)
+	w := httptest.NewRecorder()
+	h.ListDemodProfiles(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200", w.Code)
+	}
+	var body []struct {
+		ID           string  `json:"id"`
+		Label        string  `json:"label"`
+		BaudFlexible bool    `json:"baud_flexible"`
+		Baud         float64 `json:"baud"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(body) < 2 || body[0].ID != "auto" || body[0].Label != "Авто" {
+		t.Fatalf("first=%+v, want auto/Авто", body)
+	}
+	var ookOK, pi4OK bool
+	for _, p := range body {
+		if p.ID == "ook" && p.BaudFlexible {
+			ookOK = true
+		}
+		if p.ID == "pi4_dqpsk" && p.BaudFlexible {
+			pi4OK = true
+		}
+	}
+	if !ookOK || !pi4OK {
+		t.Errorf("ook/pi4_dqpsk baud_flexible missing in %+v", body)
+	}
+}
+
 func TestSDRHandler_ListDevices(t *testing.T) {
 	h := NewSDRHandler(sdr.NewService(), nil)
 
@@ -291,6 +325,31 @@ func TestSDRHandler_SetChannel_StoresDemodLeavesReceiver(t *testing.T) {
 	if st.GainDB != 0 || st.SampleRate != 2_048_000 {
 		t.Errorf("gain=%v rate=%d, want receiver left at 0 and 2048000", st.GainDB, st.SampleRate)
 	}
+	if st.Channel != want {
+		t.Errorf("status channel=%+v, want %+v", st.Channel, want)
+	}
+}
+
+func TestSDRHandler_SetChannel_StoresOOKBaud(t *testing.T) {
+	hub, pathID := testHubWithImitator(t)
+	h := NewSDRHandler(sdr.NewService(), hub)
+
+	want := sdr.ChannelSettings{OffsetHz: 0, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: "ook", Baud: 422}
+	body, _ := json.Marshal(map[string]any{
+		"radio_path":   pathID,
+		"offset_hz":    want.OffsetHz,
+		"bandwidth_hz": want.BandwidthHz,
+		"squelch_dbfs": want.SquelchDBFS,
+		"demod":        want.Demod,
+		"baud":         want.Baud,
+	})
+	req := httptest.NewRequest(http.MethodPost, "/api/sdr/channel", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	h.SetChannel(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d, want 200; body: %s", w.Code, w.Body.String())
+	}
+	st := getStatus(t, h, pathID)
 	if st.Channel != want {
 		t.Errorf("status channel=%+v, want %+v", st.Channel, want)
 	}

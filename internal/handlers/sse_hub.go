@@ -227,17 +227,19 @@ func (st *hubState) cleanup(ctx context.Context) {
 // Порядок важен:
 //  1. satellite_group_update — состав группы, primary, tracking_id (источник истины для новых клиентов)
 //  2. satellite_state_update — последние позиции/треки
-//  3. tx_cycle, tle_status — состояние для нижней панели и шапки
+//  3. tx_cycle, tle_status, sat_radio — нижняя панель, шапка, радиопрофиль
 //
 // satellite_change НЕ кешируется: это событие-транзакция («что произошло»),
 // актуально только для живых клиентов. Отправлять его новому клиенту бессмысленно
 // и вызывает мелькание индикатора наблюдения при обновлении страницы.
+// sat_radio в кеше — последний изменённый КА; полный снимок даёт GET /api/sat-radio.
 func sendCachedEvents(client *sseClient, lastEvents map[string]SSEEvent) {
 	for _, eventType := range []string{
 		"satellite_group_update",
 		"satellite_state_update",
 		"tx_cycle",
 		"tle_status",
+		"sat_radio",
 	} {
 		if cached, ok := lastEvents[eventType]; ok {
 			select {

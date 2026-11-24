@@ -22,10 +22,12 @@ import (
 	"github.com/art-injener/satellite-scout/internal/config"
 	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/exclude"
+	"github.com/art-injener/satellite-scout/internal/formats"
 	"github.com/art-injener/satellite-scout/internal/freqplan"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/products"
 	"github.com/art-injener/satellite-scout/internal/registry"
+	"github.com/art-injener/satellite-scout/internal/rfprofile"
 	"github.com/art-injener/satellite-scout/internal/satnogs"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/sdr/chipdrivers/rtlsdr"
@@ -79,6 +81,8 @@ type app struct {
 
 	freqPlanMu sync.Mutex
 	freqPlan   []freqplan.Entry // последний план частот для журнала визитов
+
+	holdAim *holdAimByPath // наведение OffsetHz на пик вспышки при hold
 
 	tleStatusKick chan struct{} // внеочередная отправка tle_status, см. kickTLEStatus
 }
@@ -141,6 +145,15 @@ func NewApp(configStore *config.Store) *app {
 		)...)
 	// SSEHub - eдиная точка рассылки данных для UI
 	sseHub := handlers.NewSSEHub()
+	reg.OnRFProfile(func(p rfprofile.Profile) {
+		sat := handlers.BuildSatRadioSat(reg, p)
+		data, err := json.Marshal(sat)
+		if err != nil {
+			slog.Warn("sat_radio marshal", slogKeyError, err)
+			return
+		}
+		sseHub.Broadcast("sat_radio", data)
+	})
 
 	// Роли и передача управления: хаб сообщает о подключениях, менеджер шлёт через него события.
 	accessManager := access.NewManager(cfg.Server.MasterPassword)
@@ -211,8 +224,20 @@ func NewApp(configStore *config.Store) *app {
 	// Демодулятор принимает телеметрию попутно со зрителями потока тракта и сам поток не держит:
 	// приём идёт, пока открыт «Спектр» или звук. Картинки SSTV складываются в productsDir.
 	audioHub := demod.NewAudioHub()
+	formatCatalog, err := formats.Load("data/formats.json")
+	if err != nil {
+		slog.Error("formats catalog", slogKeyError, err)
+		formatCatalog, _ = formats.Load("")
+	}
 	demodService := demod.NewService(receiverHub, sseHub.Broadcast).WithAudio(audioHub).WithDoppler(trackingService).
-		WithTransmitters(demodTransmitters{tracking: trackingService})
+		WithTransmitters(demodTransmitters{tracking: trackingService}).
+		WithCallsigns(formatCatalog).
+		WithFormats(formatCatalog).
+		WithPathSats(pathSatHints(cfg.Station.RadioPaths)).
+		WithNames(trackingService).
+		WithHorizon(trackingService).
+		WithRFFrames(rfFrameRecorder{reg: reg}).
+		WithRFProfiles(reg)
 	productStore, err := products.NewStore(productsDir)
 	if err != nil {
 		slog.Error("products disabled", slogKeyError, err)
@@ -253,10 +278,16 @@ func NewApp(configStore *config.Store) *app {
 		audio:        audioHub,
 		sweep:        sweepService,
 		bandscan:     bandService,
+		holdAim:      &holdAimByPath{byID: make(map[string]freqplan.AimState)},
 	}
+	demodService.WithAirHints(a)
+	demodService.WithAirHear(airHearAdapter{band: bandService})
 	sweepService.OnDwellEnd(a.onSweepDwellEnd)
 	sweepService.WithPlanFreqs(a.planSweepFreqs)
+	sweepService.WithPlanTargets(a.planSweepTargets)
+	sweepService.WithAirTargets(a.airSweepTargets)
 	sweepService.WithDwell(a.sweepDwell)
+	sweepService.WithAim(a.sweepAim)
 	return a
 }
 
@@ -376,11 +407,11 @@ func (a *app) setupClientState() {
 	})
 }
 
-// Запускаем SatNOGS — частоты и модуляции передатчиков передаются в SSE вместе с трассами спутников.
-// Параллельно mock tx_cycle для нижней панели Авто-режима (auto-link).
+// startSatNOGS — фоновая догрузка пробелов передатчиков в реестр (ADR-011 §2.5).
+// UI и SSE читают реестр через wireFreqPlanProvider, не этот сервис.
 func (a *app) startSatNOGS(ctx context.Context) {
 	if !a.cfg.SatNOGS.Enabled {
-		slog.InfoContext(ctx, "satnogs integration disabled (config: satnogs.enabled=false)")
+		slog.InfoContext(ctx, "satnogs gap-fill disabled (config: satnogs.enabled=false)")
 		return
 	}
 
@@ -398,12 +429,7 @@ func (a *app) startSatNOGS(ctx context.Context) {
 		WithDiskCache(satnogsCachePath)
 	go a.satnogs.Run(ctx)
 	a.satnogsAdapter = newSatnogsTransmitterAdapter(a.satnogs)
-	a.wireFreqPlanProvider()
-	slog.InfoContext(ctx, "satnogs integration enabled", "cache_ttl", a.cfg.SatNOGS.CacheTTL.Duration())
-
-	// Имитация приёма в таблице передатчиков (пакеты, уровень, SNR, lock) пока выключена.
-	// txCycleMock := services.NewTxCycleMock(a.sseHub, a.tracking, a.satnogsAdapter, services.DefaultTxCycleInterval)
-	// go txCycleMock.Run(ctx)
+	slog.InfoContext(ctx, "satnogs gap-fill enabled", "cache_ttl", a.cfg.SatNOGS.CacheTTL.Duration())
 }
 
 // watchTLERefresh подписывается на фоновые загрузки TLE. Вызывать до tleStore.Start.
@@ -500,22 +526,24 @@ func sweepRanges(sc *config.SweepConfig) []sweep.Range {
 // routeDeps собирает зависимости для setupRoutes.
 func (a *app) routeDeps() *routeDeps {
 	return &routeDeps{
-		Cfg:         a.cfg,
-		ConfigStore: a.configStore,
-		Templates:   a.templates,
-		Static:      a.static,
-		SSE:         a.sseHub,
-		Access:      a.access,
-		Tracking:    a.tracking,
-		SatNOGS:     a.satnogs,
-		SDR:         a.sdrService,
-		ReceiverHub: a.receiverHub,
-		Products:    a.products,
-		Audio:       a.audio,
-		Sweep:       a.sweep,
-		Exclude:     a.exclude,
-		PassCache:   a.pass,
-		Group:       a.tracking,
+		Cfg:                   a.cfg,
+		ConfigStore:           a.configStore,
+		Templates:             a.templates,
+		Static:                a.static,
+		SSE:                   a.sseHub,
+		Access:                a.access,
+		Tracking:              a.tracking,
+		Registry:              a.registry,
+		SDR:                   a.sdrService,
+		ReceiverHub:           a.receiverHub,
+		Products:              a.products,
+		Audio:                 a.audio,
+		Sweep:                 a.sweep,
+		Exclude:               a.exclude,
+		PassCache:             a.pass,
+		Group:                 a.tracking,
+		OnChannelOffsetChange: a.lockHoldAim,
+		KeepAimedOffset:       a.keepHoldAimOffset,
 	}
 }
 

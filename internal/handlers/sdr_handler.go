@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"slices"
 
+	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
@@ -15,6 +16,10 @@ type SDRHandler struct {
 	svc   *sdr.Service
 	hub   *sdr.ReceiverHub
 	sweep SweepStopper
+	// onChannelOffsetChange — HTTP сменил OffsetHz на ненулевой (ручной сдвиг).
+	onChannelOffsetChange func(pathID string)
+	// keepAimedOffset — true: POST с offset=0 не затирает уже наведённый hold.
+	keepAimedOffset func(pathID string) bool
 }
 
 // SweepStopper останавливает обход тракта: ручная перестройка и обход иначе перебивают друг друга.
@@ -31,6 +36,18 @@ func NewSDRHandler(svc *sdr.Service, hub *sdr.ReceiverHub) *SDRHandler {
 // WithSweep подключает обход: ручная перестройка тракта будет его останавливать.
 func (h *SDRHandler) WithSweep(sw SweepStopper) *SDRHandler {
 	h.sweep = sw
+	return h
+}
+
+// WithChannelOffsetChange — колбэк, если POST /channel меняет OffsetHz руками.
+func (h *SDRHandler) WithChannelOffsetChange(fn func(pathID string)) *SDRHandler {
+	h.onChannelOffsetChange = fn
+	return h
+}
+
+// WithKeepAimedOffset — не затирать OffsetHz=0, пока hold уже наведён на вспышку.
+func (h *SDRHandler) WithKeepAimedOffset(fn func(pathID string) bool) *SDRHandler {
+	h.keepAimedOffset = fn
 	return h
 }
 
@@ -323,9 +340,19 @@ func (h *SDRHandler) SetChannel(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
 	}
-	if err := h.hub.SetChannel(req.RadioPath, req.ChannelSettings); err != nil {
+	prev, _ := h.hub.Channel(req.RadioPath)
+	cs := req.ChannelSettings
+	// Фронт при hop шлёт offset=0: не затираем уже выставленное наведение на вспышку.
+	if cs.OffsetHz == 0 && prev.OffsetHz != 0 && h.keepAimedOffset != nil && h.keepAimedOffset(req.RadioPath) {
+		cs.OffsetHz = prev.OffsetHz
+	}
+	if err := h.hub.SetChannel(req.RadioPath, cs); err != nil {
 		writeJSON(w, http.StatusBadRequest, ErrorResponse{Error: err.Error()})
 		return
+	}
+	// Ненулевой сдвиг руками — стоп автонаведения до конца стоянки.
+	if h.onChannelOffsetChange != nil && cs.OffsetHz != prev.OffsetHz && req.OffsetHz != 0 {
+		h.onChannelOffsetChange(req.RadioPath)
 	}
 
 	slog.Info("demodulator settings applied",
@@ -421,4 +448,10 @@ func (h *SDRHandler) GetStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeStatus(w, radioPath, receiver, false)
+}
+
+// ListDemodProfiles возвращает каталог профилей демодулятора для селектора UI.
+// GET /api/sdr/demod-profiles
+func (h *SDRHandler) ListDemodProfiles(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, http.StatusOK, demod.ListProfilesAPI())
 }

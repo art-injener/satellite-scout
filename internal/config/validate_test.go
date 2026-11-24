@@ -280,7 +280,7 @@ func TestValidate_ImitatorSignalErrors(t *testing.T) {
 		{"pass without period", func(im *ImitatorConfig) { im.Signals[1].PassPeriodS = 0 }, ".signals[1].pass_period_s"},
 		{"negative pass swing", func(im *ImitatorConfig) { im.Signals[1].PassSwingDB = -5 }, ".signals[1].pass_swing_db"},
 		{"noise above full scale", func(im *ImitatorConfig) { im.NoiseDBFS = 1 }, ".noise_dbfs"},
-		{"unknown beacon modem", func(im *ImitatorConfig) { im.Signals[3].Modem = "gmsk9600" }, ".signals[3].modem"},
+		{"unknown beacon modem", func(im *ImitatorConfig) { im.Signals[3].Modem = "qpsk_ccsds" }, ".signals[3].modem"},
 		{"modem on non-beacon", func(im *ImitatorConfig) { im.Signals[1].Modem = ImitatorAFSK1200 }, ".signals[1].modem"},
 		{"sstv without period", func(im *ImitatorConfig) { im.Signals[4].PeriodS = 0 }, ".signals[4].period_s"},
 		{"unknown sstv mode", func(im *ImitatorConfig) { im.Signals[4].SSTVMode = "martin1" }, ".signals[4].sstv_mode"},

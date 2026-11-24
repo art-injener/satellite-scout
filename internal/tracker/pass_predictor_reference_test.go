@@ -173,8 +173,16 @@ func buildRefCases(t *testing.T) []refInput {
 }
 
 // startRefContainer поднимает Docker-контейнер с Python + skyfield.
+// testcontainers при недоступном Docker иногда паникует (MustExtractDockerHost),
+// а не возвращает ошибку — перехватываем и делаем Skip.
 func startRefContainer(t *testing.T, ctx context.Context, dataDir string) testcontainers.Container {
 	t.Helper()
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Skipf("Docker недоступен (panic testcontainers): %v", r)
+		}
+	}()
 
 	req := testcontainers.ContainerRequest{
 		FromDockerfile: testcontainers.FromDockerfile{

@@ -21,14 +21,17 @@ func (h *ProductsHandler) List(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, h.store.List())
 }
 
-// Image — PNG продукта; проявляющаяся картинка отдаётся как есть сейчас.
+// Image — PNG/JPEG продукта; проявляющаяся картинка отдаётся как есть сейчас.
 func (h *ProductsHandler) Image(w http.ResponseWriter, r *http.Request) {
-	b, ok := h.store.PNG(r.PathValue("id"))
+	b, ct, ok := h.store.Image(r.PathValue("id"))
 	if !ok {
 		http.NotFound(w, r)
 		return
 	}
-	w.Header().Set("Content-Type", "image/png")
+	if ct == "" {
+		ct = "image/png"
+	}
+	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "no-store")
 	_, _ = w.Write(b)
 }

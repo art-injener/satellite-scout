@@ -20,9 +20,13 @@ func NewSweepHandler(svc *sweep.Service) *SweepHandler {
 }
 
 // SweepRequest — тело POST /api/sdr/sweep: запустить или остановить обход.
+// policy: "tx" — обход по частотам TX плана (Авто приём); иначе survey.
+// include_air: к TX добавить цели из эфира (band_signals); только с policy=tx.
 type SweepRequest struct {
-	RadioPath string `json:"radio_path"`
-	Running   bool   `json:"running"`
+	RadioPath  string `json:"radio_path"`
+	Running    bool   `json:"running"`
+	Policy     string `json:"policy"`
+	IncludeAir bool   `json:"include_air,omitempty"`
 }
 
 // Get возвращает состояние обхода тракта; без обхода — окна при текущей полосе.
@@ -63,8 +67,15 @@ func (h *SweepHandler) Set(w http.ResponseWriter, r *http.Request) {
 		h.writeState(w, req.RadioPath)
 		return
 	}
-	if err := h.svc.Start(req.RadioPath); err != nil {
-		slog.Error("sweep: start failed", slog.String("radio_path", req.RadioPath), slog.Any("error", err))
+	policy := sweep.PolicySurvey
+	if req.Policy == string(sweep.PolicyTX) {
+		policy = sweep.PolicyTX
+	}
+	opt := sweep.StartOptions{Policy: policy, IncludeAir: req.IncludeAir && policy == sweep.PolicyTX}
+	if err := h.svc.StartWith(req.RadioPath, opt); err != nil {
+		slog.Error("sweep: start failed", slog.String("radio_path", req.RadioPath),
+			slog.String("policy", string(policy)), slog.Bool("include_air", opt.IncludeAir),
+			slog.Any("error", err))
 		writeSweepError(w, err)
 		return
 	}
@@ -84,6 +95,9 @@ func writeSweepError(w http.ResponseWriter, err error) {
 	code := http.StatusBadRequest
 	if errors.Is(err, sweep.ErrNotConfigured) {
 		code = http.StatusNotFound
+	}
+	if errors.Is(err, sweep.ErrNoTargets) {
+		code = http.StatusConflict
 	}
 	writeJSON(w, code, ErrorResponse{Error: err.Error()})
 }

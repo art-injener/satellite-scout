@@ -9,7 +9,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/services"
 )
 
-// planAugment — TransmitterProvider: SatNOGS (или иной base) плюс частоты из плана.
+// planAugment — TransmitterProvider: реестр (или иной base) плюс частоты из плана.
 // Лента панорамы и маркеры/bandscan берут GetTransmitters — план попадает туда же.
 type planAugment struct {
 	base services.TransmitterProvider

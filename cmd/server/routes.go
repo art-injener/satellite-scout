@@ -10,7 +10,7 @@ import (
 	"github.com/art-injener/satellite-scout/internal/demod"
 	"github.com/art-injener/satellite-scout/internal/handlers"
 	"github.com/art-injener/satellite-scout/internal/products"
-	"github.com/art-injener/satellite-scout/internal/satnogs"
+	"github.com/art-injener/satellite-scout/internal/registry"
 	"github.com/art-injener/satellite-scout/internal/sdr"
 	"github.com/art-injener/satellite-scout/internal/sweep"
 )
@@ -24,7 +24,7 @@ type routeDeps struct {
 	SSE         *handlers.SSEHub
 	Access      *access.Manager
 	Tracking    handlers.TrackingServiceInterface
-	SatNOGS     *satnogs.Service
+	Registry    *registry.Registry
 	SDR         *sdr.Service
 	ReceiverHub *sdr.ReceiverHub
 	Products    *products.Store
@@ -34,6 +34,11 @@ type routeDeps struct {
 	Exclude   handlers.ExclusionAdder
 	PassCache handlers.PassCacheInvalidator
 	Group     handlers.GroupRefresher
+
+	// OnChannelOffsetChange — HTTP сменил OffsetHz на ненулевой; автонаведение молчит.
+	OnChannelOffsetChange func(pathID string)
+	// KeepAimedOffset — POST offset=0 не затирает уже наведённый hold.
+	KeepAimedOffset func(pathID string) bool
 }
 
 // setupRoutes регистрирует все HTTP-маршруты приложения.
@@ -55,6 +60,12 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	sdrHandler := handlers.NewSDRHandler(deps.SDR, deps.ReceiverHub)
 	if deps.Sweep != nil {
 		sdrHandler.WithSweep(deps.Sweep)
+	}
+	if deps.OnChannelOffsetChange != nil {
+		sdrHandler.WithChannelOffsetChange(deps.OnChannelOffsetChange)
+	}
+	if deps.KeepAimedOffset != nil {
+		sdrHandler.WithKeepAimedOffset(deps.KeepAimedOffset)
 	}
 	sweepHandler := handlers.NewSweepHandler(deps.Sweep)
 	exclusionsHandler := handlers.NewExclusionsHandler(deps.Exclude, deps.PassCache, deps.Group)
@@ -84,6 +95,7 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	mux.HandleFunc("POST /api/access/revoke", master(accessHandler.Revoke))
 	mux.HandleFunc("POST /api/access/release", accessHandler.Release)
 	mux.HandleFunc("GET /api/sdr/devices", sdrHandler.ListDevices)
+	mux.HandleFunc("GET /api/sdr/demod-profiles", sdrHandler.ListDemodProfiles)
 	mux.HandleFunc("POST /api/sdr/test", sdrHandler.Test)
 	mux.HandleFunc("POST /api/sdr/tune", deps.Access.RequireControl(sdrHandler.Tune))
 	mux.HandleFunc("POST /api/sdr/receiver", deps.Access.RequireControl(sdrHandler.SetReceiver))
@@ -98,9 +110,13 @@ func setupRoutes(mux *http.ServeMux, deps *routeDeps) {
 	mux.HandleFunc("GET /api/exclusions", exclusionsHandler.List)
 	mux.HandleFunc("DELETE /api/exclusions/{norad}", exclusionsHandler.Delete)
 
-	if deps.SatNOGS != nil {
-		satnogsHandler := handlers.NewSatNOGSHandler(deps.SatNOGS)
+	// Имя пути историческое: ответ из реестра, без live-запроса во внешний API.
+	if src := newRegistryTXSource(deps.Registry); src != nil {
+		satnogsHandler := handlers.NewSatNOGSHandler(src.asREST())
 		mux.HandleFunc("GET /api/satnogs/transmitters/{norad}", satnogsHandler.GetTransmitters)
+	}
+	if deps.Registry != nil {
+		mux.HandleFunc("GET /api/sat-radio", handlers.NewSatRadioHandler(deps.Registry).Get)
 	}
 
 	if deps.Products != nil {

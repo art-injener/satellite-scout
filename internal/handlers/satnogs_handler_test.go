@@ -13,7 +13,6 @@ import (
 type mockSatNOGSProvider struct {
 	allByID     map[int][]satnogs.Transmitter
 	primaryByID map[int]*satnogs.TransmitterSummary
-	fetched     []int
 }
 
 func (m *mockSatNOGSProvider) GetAllTransmitters(noradID int) []satnogs.Transmitter {
@@ -22,10 +21,6 @@ func (m *mockSatNOGSProvider) GetAllTransmitters(noradID int) []satnogs.Transmit
 
 func (m *mockSatNOGSProvider) GetPrimaryTransmitter(noradID int) *satnogs.TransmitterSummary {
 	return m.primaryByID[noradID]
-}
-
-func (m *mockSatNOGSProvider) RequestFetch(noradIDs []int) {
-	m.fetched = append(m.fetched, noradIDs...)
 }
 
 func TestSatNOGSHandler_GetTransmitters_Success(t *testing.T) {
@@ -118,11 +113,7 @@ func TestSatNOGSHandler_GetTransmitters_EmptyResult(t *testing.T) {
 	if resp.Primary != nil {
 		t.Errorf("Primary = %+v, want nil", resp.Primary)
 	}
-	// Поле Transmitters должно быть пустым массивом, а не null — для консистентности UI.
 	if resp.Transmitters == nil {
 		t.Error("Transmitters = nil, want empty slice")
-	}
-	if len(mock.fetched) != 1 || mock.fetched[0] != 99999 {
-		t.Errorf("RequestFetch = %v, want [99999]", mock.fetched)
 	}
 }

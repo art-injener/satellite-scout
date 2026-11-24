@@ -5,7 +5,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/art-injener/satellite-scout/internal/bandscan"
 	"github.com/art-injener/satellite-scout/internal/freqplan"
+	"github.com/art-injener/satellite-scout/internal/signalclass"
 )
 
 func haTestPage(t *testing.T, rows ...string) *freqplan.HeavensAbove {
@@ -56,5 +58,26 @@ func TestHARefPasses_NoPageOffline(t *testing.T) {
 
 	if got := haRefPasses(nil, 47.2357, 39.7015, from, from.Add(time.Hour)); len(got) != 0 {
 		t.Fatalf("got %+v, want none without page", got)
+	}
+}
+
+func TestAirHopWorthy_SkipsCarrierAndKeepsPulse(t *testing.T) {
+	pulse := bandscan.Signal{
+		CenterHz: 435_844_000, SNRDB: 12, Emission: bandscan.EmissionPulsed, Origin: "unknown",
+	}
+	if !airHopWorthy(pulse) {
+		t.Fatal("pulsed unknown must be worthy")
+	}
+	carrier := bandscan.Signal{
+		CenterHz: 436_224_000, SNRDB: 14, Emission: bandscan.EmissionContinuous,
+		Origin:    bandscan.OriginTerrestrial,
+		Structure: &signalclass.Result{Modulation: signalclass.ModCarrier},
+	}
+	if airHopWorthy(carrier) {
+		t.Fatal("continuous terrestrial carrier must not hop")
+	}
+	weak := bandscan.Signal{CenterHz: 435_000_000, SNRDB: 5, Emission: bandscan.EmissionPulsed}
+	if airHopWorthy(weak) {
+		t.Fatal("SNR below MinSNRDB must not hop")
 	}
 }
