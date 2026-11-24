@@ -4,7 +4,8 @@ import (
 	"slices"
 )
 
-// DemodAuto — профиль «Авто»: параллельный подбор кадрового демодулятора по CRC.
+// DemodAuto — профиль «Авто»: параллельный подбор кадрового демодулятора по CRC,
+// а по подсказке также SSTV, CW и голоса.
 const DemodAuto = "auto"
 
 // TXHint — режим и символьная скорость одного передатчика из реестра.
@@ -29,7 +30,7 @@ type CandidateHints struct {
 
 // BuildCandidates собирает id по приоритету: принято, обнаружено, карточка,
 // заявлено по всем передатчикам на частоте, затем остальные кадровые профили.
-// Некадровые профили (sstv, cw) добавляются только при наличии явной подсказки.
+// Некадровые профили (sstv, cw, голос) добавляются только при наличии явной подсказки.
 func BuildCandidates(h CandidateHints) []string {
 	limit := h.Max
 	var out []string
@@ -65,7 +66,18 @@ func BuildCandidates(h CandidateHints) []string {
 
 // isAutoNonFrameProfile — некадровые профили, которые режим «Авто» может подобрать по подсказке.
 func isAutoNonFrameProfile(id string) bool {
-	return id == DemodSSTV || id == DemodCW
+	return id == DemodSSTV || id == DemodCW || isAutoVoiceProfile(id)
+}
+
+// isAutoVoiceProfile — голоса, которые «Авто» слушает в общем канале 64 кГц.
+// Вещательная ЧМ шире канала и в подбор не входит.
+func isAutoVoiceProfile(id string) bool {
+	switch id {
+	case "fm", "am", "usb", "lsb":
+		return true
+	default:
+		return false
+	}
 }
 
 func allowedAutoCandidate(id string, allowNonFrame bool) bool {

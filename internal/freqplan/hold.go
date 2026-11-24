@@ -19,6 +19,11 @@ const (
 	VoiceHoldMs      int64   = 15_000
 	MaxHoldMs        int64   = 180_000
 	GoneMs           int64   = 10_000 // как bandscan.HoldMs: сигнал пропал — уход
+	// RxGraceMs — сколько держим окно после последнего принятого кадра с CRC,
+	// чтобы не обрывать пачку данных (снимок GEOSCAN, серию маяков) на полуслове.
+	RxGraceMs int64 = 15_000
+	// RxPictureMaxHoldMs — потолок стоянки во время приёма картинки (SSTV PD120 ~126 с).
+	RxPictureMaxHoldMs int64 = 240_000
 	// Земная или непрерывная энергия рядом с номиналом TX: не держим полный пол маяка.
 	TerrestrialHoldMs int64 = 8_000
 	MinSNRDB                = 10
@@ -71,31 +76,57 @@ func DecideHold(w Window, startMs, nowMs, configDwellMs int64, plan []Entry, sig
 				holdMs = periodHold
 			}
 		}
-		return holdUntil(startMs, nowMs, holdMs, maxEnd, sight.LastSeenMs)
+		return holdUntil(startMs, nowMs, holdMs, maxEnd)
 	}
 
 	// Энергия в полосе без матча с номиналом: стоим пол телеметрии — точности
 	// классификации важнее скорость обхода молчащих TX.
-	if s, ok := strongestFresh(sights, nowMs); ok {
-		return holdUntil(startMs, nowMs, TelemetryFloorMs, maxEnd, s.LastSeenMs)
+	if _, found := strongestFresh(sights, nowMs); found {
+		return holdUntil(startMs, nowMs, TelemetryFloorMs, maxEnd)
 	}
 	return nowMs
 }
 
-// holdUntil — цель start+holdMs, не выше maxEnd; ранний wake по LastSeen+GoneMs.
-func holdUntil(startMs, nowMs, holdMs, maxEnd, lastSeenMs int64) int64 {
+// ExtendHoldForRx не даёт обходу перескочить посреди активного приёма данных:
+// пока идут валидные кадры текущей стоянки (lastFrameMs >= startMs) или рисуется
+// картинка SSTV, стоянка продлевается вплоть до потолка (MaxHoldMs / RxPictureMaxHoldMs).
+func ExtendHoldForRx(baseUntilMs, startMs, nowMs, lastFrameMs int64, pictureActive bool) int64 {
+	if nowMs < startMs {
+		nowMs = startMs
+	}
+	until := baseUntilMs
+	if pictureActive {
+		picCap := startMs + RxPictureMaxHoldMs
+		if nowMs < picCap {
+			want := min(nowMs+RxGraceMs, picCap)
+			if want > until {
+				until = want
+			}
+		}
+		return until
+	}
+	if lastFrameMs >= startMs && nowMs-lastFrameMs < RxGraceMs {
+		capEnd := startMs + MaxHoldMs
+		if nowMs < capEnd {
+			want := min(lastFrameMs+RxGraceMs, capEnd)
+			if want > until {
+				until = want
+			}
+		}
+	}
+	return until
+}
+
+// holdUntil — честная цель стоянки start+holdMs (не выше maxEnd).
+// Промежуточный wake по LastSeen+GoneMs не ставим: ранний уход при пропаже сигнала
+// проверяет цикл обхода на тике, поэтому таймер в UI не скачет с 10 с до 0 по кругу.
+func holdUntil(startMs, nowMs, holdMs, maxEnd int64) int64 {
 	targetEnd := startMs + holdMs
 	if targetEnd > maxEnd {
 		targetEnd = maxEnd
 	}
 	if nowMs >= targetEnd {
 		return nowMs
-	}
-	if lastSeenMs > 0 {
-		wake := lastSeenMs + GoneMs
-		if wake > nowMs && wake < targetEnd {
-			return wake
-		}
 	}
 	return targetEnd
 }
@@ -255,7 +286,7 @@ func DecideHoldAir(w Window, startMs, nowMs int64, sights []Sighting) int64 {
 			holdMs = TelemetryFloorMs
 		}
 	}
-	return holdUntil(startMs, nowMs, holdMs, maxEnd, sight.LastSeenMs)
+	return holdUntil(startMs, nowMs, holdMs, maxEnd)
 }
 
 func sightAtCenter(centerHz uint64, sights []Sighting, nowMs int64) (Sighting, bool) {

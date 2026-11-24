@@ -6,6 +6,7 @@ import (
 	"image"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/art-injener/satellite-scout/internal/ax25"
@@ -71,6 +72,62 @@ type Service struct {
 	airHints     AirHintSource
 	airHear      AirHear
 	drops        DropCounter
+
+	rxMu     sync.Mutex
+	rxByPath map[string]RxActivity
+}
+
+// RxActivity — живая активность приёма на тракте для удержания стоянки обхода.
+type RxActivity struct {
+	LastFrameMs int64 // время последнего кадра с CRC (Unix мс); 0 — ещё не было
+	Picture     bool  // прямо сейчас принимается картинка (SSTV)
+}
+
+// RxActivity возвращает текущую активность приёма на тракте.
+func (s *Service) RxActivity(pathID string) RxActivity {
+	if s == nil {
+		return RxActivity{}
+	}
+	s.rxMu.Lock()
+	defer s.rxMu.Unlock()
+	if s.rxByPath == nil {
+		return RxActivity{}
+	}
+	return s.rxByPath[pathID]
+}
+
+func (s *Service) recordRxFrame(pathID string, nowMs int64) {
+	if s == nil || nowMs <= 0 {
+		return
+	}
+	s.rxMu.Lock()
+	if s.rxByPath == nil {
+		s.rxByPath = make(map[string]RxActivity)
+	}
+	cur := s.rxByPath[pathID]
+	if nowMs > cur.LastFrameMs {
+		cur.LastFrameMs = nowMs
+	}
+	s.rxByPath[pathID] = cur
+	s.rxMu.Unlock()
+}
+
+func (s *Service) setPictureActive(pathID string, active bool) {
+	if s == nil {
+		return
+	}
+	s.rxMu.Lock()
+	if s.rxByPath == nil {
+		if !active {
+			s.rxMu.Unlock()
+			return
+		}
+		s.rxByPath = make(map[string]RxActivity)
+	}
+	cur := s.rxByPath[pathID]
+	cur.Picture = active
+	s.rxByPath[pathID] = cur
+	s.rxMu.Unlock()
 }
 
 // AirNote — принятый кадр/голос для строки «Эфир» (тело кадра для модалки).
@@ -401,6 +458,7 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 					s.finishPicture(picture.id, nil)
 					picture = pictureState{}
 				}
+				s.setPictureActive(pathID, false)
 				chain = NewChain()
 				// После выключения не хватать ту же передачу mid-join: только новый VIS.
 				chain.sstvVISOnly = true
@@ -436,12 +494,14 @@ func (s *Service) Run(pathID string, frames <-chan sdr.IQFrame) {
 			st.DopplerHz = doppler
 		}
 		st.DroppedFrames = droppedTotal
+		s.setPictureActive(pathID, st.Picture != nil)
 		if now := s.now(); lastStatus.IsZero() || now.Sub(lastStatus) >= statusInterval {
 			s.sendStatus(pathID, true, freq, cs, st, s.bandMarkers(f.CenterHz, f.SampleRate))
 			lastStatus = now
 		}
 	}
 	st.DroppedFrames = droppedTotal
+	s.setPictureActive(pathID, false)
 	s.sendStatus(pathID, false, freq, cs, st, nil)
 	if picture.id != "" {
 		// Поток закрылся посреди картинки: сохраняется то, что успело проявиться.
@@ -597,6 +657,10 @@ func (s *Service) emitTelemetry(pathID string, cs sdr.ChannelSettings, p Packet)
 	ev := s.telemetryEvent(pathID, cs, p)
 	s.publishGeoscanChunk(pathID, &ev, p)
 	s.send(EventTelemetry, ev)
+	// Сырая «линия» без CRC не удерживает стоянку обхода, кадры с проверкой целостности — да.
+	if ev.Kind != payload.KindLine {
+		s.recordRxFrame(pathID, s.now().UnixMilli())
+	}
 	kind := ev.Kind
 	if kind == "" {
 		kind = payload.KindUnknown

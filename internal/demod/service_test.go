@@ -740,4 +740,32 @@ func TestService_RunAutoPublishesSSTVProduct(t *testing.T) {
 	if last["done"] != true || last["mode"] != "robot36" {
 		t.Fatalf("last product=%v, want done robot36", last)
 	}
+	if act := svc.RxActivity("radio_path_0"); act.Picture {
+		t.Fatalf("picture activity must clear after stream/picture ends: %+v", act)
+	}
+}
+
+func TestService_RxActivity_TracksValidFramesAndIgnoresRawLine(t *testing.T) {
+	sink := &sinkStub{}
+	svc := NewService(&channelsStub{}, sink.emit)
+	t1 := time.UnixMilli(1_700_000_010_000)
+	svc.now = func() time.Time { return t1 }
+
+	// Raw line burst without CRC must not mark active frame reception.
+	svc.emitTelemetry("radio_path_1", sdr.ChannelSettings{Demod: "ook"}, Packet{
+		Raw: []byte{0xaa, 0x55}, FrequencyHz: 433_920_000, TimestampMs: uint64(t1.UnixMilli()),
+	})
+	if act := svc.RxActivity("radio_path_1"); act.LastFrameMs != 0 {
+		t.Fatalf("raw line updated LastFrameMs=%d, want 0", act.LastFrameMs)
+	}
+
+	// Valid framed packet updates LastFrameMs for its radio path.
+	t2 := time.UnixMilli(1_700_000_020_000)
+	svc.now = func() time.Time { return t2 }
+	svc.emitTelemetry("radio_path_1", sdr.ChannelSettings{Demod: "afsk1200"}, Packet{
+		Raw: []byte{0x01, 0x02}, FrequencyHz: 145_825_000, TimestampMs: uint64(t2.UnixMilli()),
+	})
+	if act := svc.RxActivity("radio_path_1"); act.LastFrameMs != t2.UnixMilli() {
+		t.Fatalf("valid frame LastFrameMs=%d, want %d", act.LastFrameMs, t2.UnixMilli())
+	}
 }

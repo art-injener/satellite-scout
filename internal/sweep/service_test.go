@@ -583,13 +583,85 @@ func TestService_PolicyTX_RebuildsEachHop(t *testing.T) {
 	}
 }
 
-func TestNextAfterHz(t *testing.T) {
-	ws := []Window{{CenterHz: 10}, {CenterHz: 20}, {CenterHz: 30}}
-	if i, w := nextAfterHz(ws, 10); i != 1 || w {
+func TestNextUnvisited(t *testing.T) {
+	ws := []Window{{CenterHz: 437}, {CenterHz: 145}, {CenterHz: 435}}
+	if i, w := nextUnvisited(ws, map[uint64]bool{437: true}); i != 1 || w {
 		t.Fatalf("got %d wrapped=%v, want 1 false", i, w)
 	}
-	if i, w := nextAfterHz(ws, 30); i != 0 || !w {
+	if i, w := nextUnvisited(ws, map[uint64]bool{437: true, 145: true, 435: true}); i != 0 || !w {
 		t.Fatalf("got %d wrapped=%v, want 0 true", i, w)
+	}
+}
+
+func TestService_PolicyTX_PrioritizedHighFreqFirstDoesNotStick(t *testing.T) {
+	// PrioritizeTargets puts the highest-frequency heard TX at index 0, followed by lower TXs
+	// and an air target. PolicyTX must visit every target in the cycle, never looping on index 0.
+	h := newHarness(t, Range{LoHz: 145_000_000, HiHz: 438_000_000})
+	h.svc.WithPlanTargets(func(string, time.Time, time.Time) []Target {
+		return []Target{
+			{FreqHz: 437_800_000, Label: "ISS-UHF", NoradID: 25544},
+			{FreqHz: 145_800_000, Label: "ISS-VHF", NoradID: 25544},
+			{FreqHz: 435_400_000, Label: "AO-123", NoradID: 55104},
+		}
+	})
+	h.svc.WithAirTargets(func(string) []Target {
+		return []Target{{FreqHz: 434_419_000, Label: "OOK", Air: true}}
+	})
+	if err := h.svc.StartWith(testPath, StartOptions{Policy: PolicyTX, IncludeAir: true}); err != nil {
+		t.Fatalf("StartWith: %v", err)
+	}
+	wantSeq := []uint64{437_800_000, 145_800_000, 435_400_000, 434_419_000, 437_800_000}
+	st := h.nextState(t)
+	if st.Windows[st.Index].CenterHz != wantSeq[0] {
+		t.Fatalf("step 0 hz=%d, want %d", st.Windows[st.Index].CenterHz, wantSeq[0])
+	}
+	for step := 1; step < len(wantSeq); step++ {
+		h.clock.fireDwell(t)
+		st = h.nextState(t)
+		if st.Windows[st.Index].CenterHz != wantSeq[step] {
+			t.Fatalf("step %d hz=%d (idx=%d), want %d", step, st.Windows[st.Index].CenterHz, st.Index, wantSeq[step])
+		}
+	}
+	if st.Cycle != 2 {
+		t.Fatalf("cycle=%d after full round, want 2", st.Cycle)
+	}
+}
+
+func TestService_PolicyTX_ReorderedLiveTargetsDoNotPingPong(t *testing.T) {
+	// Two live targets swap at the front on each hop; the third target must still be visited.
+	h := newHarness(t, Range{LoHz: 435_000_000, HiHz: 438_000_000})
+	var mu sync.Mutex
+	targets := []Target{
+		{FreqHz: 437_800_000, Label: "A", NoradID: 1},
+		{FreqHz: 436_200_000, Label: "B", NoradID: 2},
+		{FreqHz: 435_400_000, Label: "C", NoradID: 3},
+	}
+	h.svc.WithPlanTargets(func(string, time.Time, time.Time) []Target {
+		mu.Lock()
+		defer mu.Unlock()
+		return slices.Clone(targets)
+	})
+	if err := h.svc.StartPolicy(testPath, PolicyTX); err != nil {
+		t.Fatalf("StartPolicy: %v", err)
+	}
+	h.nextState(t) // A
+	h.clock.fireDwell(t)
+	st := h.nextState(t) // B
+	if st.Windows[st.Index].CenterHz != 436_200_000 {
+		t.Fatalf("step 1 got %d, want B", st.Windows[st.Index].CenterHz)
+	}
+	// B becomes the newest heard and moves to index 0 ahead of A.
+	mu.Lock()
+	targets = []Target{
+		{FreqHz: 436_200_000, Label: "B", NoradID: 2},
+		{FreqHz: 437_800_000, Label: "A", NoradID: 1},
+		{FreqHz: 435_400_000, Label: "C", NoradID: 3},
+	}
+	mu.Unlock()
+	h.clock.fireDwell(t)
+	st = h.nextState(t) // must go to C, not back to A
+	if st.Windows[st.Index].CenterHz != 435_400_000 {
+		t.Fatalf("step 2 got %d, want C (no ping-pong)", st.Windows[st.Index].CenterHz)
 	}
 }
 

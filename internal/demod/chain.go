@@ -726,6 +726,7 @@ func (fe *channelFrontend) build(rate uint32, offsetHz int64, bandwidth uint32) 
 }
 
 type frontendResult struct {
+	coarse    []complex64 // выход грубого фильтра на midRate: вход точных фильтров голоса
 	ch64      []complex64
 	ch32      []complex64
 	open      bool
@@ -757,6 +758,7 @@ func (fe *channelFrontend) process(
 	fe.squelch.ThresholdDBFS = s.SquelchDBFS
 	open := fe.squelch.Open(ch64)
 	return frontendResult{
+		coarse:    coarseOut,
 		ch64:      ch64,
 		ch32:      ch32,
 		open:      open,
@@ -814,6 +816,21 @@ func midRate(fs float64) float64 {
 	return fs / float64(max(1, int(math.Round(fs/midRateHz))))
 }
 
+// newFineFilter строит точный фильтр профиля по центру канала на частоте mid после грубого
+// фильтра и возвращает его срез: половина полосы канала, не шире 0,15 от mid и того, что слышно.
+func newFineFilter(p profile, mid float64, bandwidth uint32) (*dsp.XlatingFIR, float64) {
+	cutoff := min(float64(bandwidth)/2, 0.15*mid)
+	if p.maxWidthHz > 0 {
+		cutoff = min(cutoff, p.maxWidthHz/2)
+	}
+	taps := fineTaps
+	if p.fineTaps > 0 {
+		taps = p.fineTaps
+	}
+	return dsp.NewXlatingFIR(0, mid, p.fineDecim,
+		dsp.DesignLowpass(cutoff, mid, taps, dsp.WindowBlackmanHarris)), cutoff
+}
+
 // build строит фильтры канала и демодулятор. Грубый фильтр прореживает до midRateHz: пропускает
 // плоско до 0,15 от новой частоты, подавляет с 0,65 — наложенное при прореживании ложится дальше
 // 0,35 от центра, за точный фильтр. Поэтому «Полоса канала» шире 0,3 от неё обрезается.
@@ -836,16 +853,8 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 	c.coarse = dsp.NewXlatingFIR(float64(offsetHz), fs, decim,
 		dsp.DesignLowpass(0.4*mid, fs, coarseTaps, dsp.WindowBlackmanHarris))
 
-	cutoff := min(float64(bandwidth)/2, 0.15*mid)
-	if p.maxWidthHz > 0 {
-		cutoff = min(cutoff, p.maxWidthHz/2)
-	}
-	taps := fineTaps
-	if p.fineTaps > 0 {
-		taps = p.fineTaps
-	}
-	c.fine = dsp.NewXlatingFIR(0, mid, p.fineDecim,
-		dsp.DesignLowpass(cutoff, mid, taps, dsp.WindowBlackmanHarris))
+	var cutoff float64
+	c.fine, cutoff = newFineFilter(p, mid, bandwidth)
 	beatHz := p.toneHz + p.sideband*(ssbLowHz+cutoff)
 
 	c.outRate = mid / float64(p.fineDecim)

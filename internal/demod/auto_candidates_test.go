@@ -30,20 +30,46 @@ func TestBuildCandidates_LocalModeOnly(t *testing.T) {
 	}
 }
 
-func TestBuildCandidates_SkipsUnimplementedAndVoice(t *testing.T) {
+func TestBuildCandidates_VoiceHintAddsVoiceProfile(t *testing.T) {
 	got := BuildCandidates(CandidateHints{
 		CardProfile: "fm",
 		Mode:        "FM",
 		Baud:        0,
-		Blind:       "ook", // линия без newDeframer — в кадровые кандидаты не попадает
+		Blind:       "ook", // line without a deframer is not an Auto candidate
 		Max:         5,
 	})
-	want := ImplementedFrameProfiles()
-	if len(want) > 5 {
-		want = want[:5]
-	}
+	want := append([]string{"fm"}, ImplementedFrameProfiles()[:4]...)
 	if !slices.Equal(got, want) {
 		t.Fatalf("got %v, want %v", got, want)
+	}
+}
+
+func TestBuildCandidates_VoiceOnlyByHint(t *testing.T) {
+	got := BuildCandidates(CandidateHints{})
+	for _, id := range []string{"fm", "am", "usb", "lsb", "wfm"} {
+		if slices.Contains(got, id) {
+			t.Fatalf("got %v: %s must come only from a hint", got, id)
+		}
+	}
+}
+
+func TestBuildCandidates_VoiceModes(t *testing.T) {
+	for _, tc := range []struct {
+		mode string
+		want []string
+	}{
+		{"AM", []string{"am"}},
+		{"SSB", []string{"usb", "lsb"}},
+		{"WFM", nil}, // broadcast FM does not fit the 64 kHz Auto channel
+	} {
+		got := BuildCandidates(CandidateHints{Mode: tc.mode})
+		head := got[:len(tc.want)]
+		if !slices.Equal(head, tc.want) {
+			t.Errorf("mode %s: got head %v, want %v", tc.mode, head, tc.want)
+		}
+		if slices.Contains(got, "wfm") {
+			t.Errorf("mode %s: wfm must not be an Auto candidate", tc.mode)
+		}
 	}
 }
 

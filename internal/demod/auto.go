@@ -150,7 +150,8 @@ func newSharedLineDemod(key demodKey, id string, midRate float64) lineDemod {
 // AutoPicker — параллельный подбор кадрового профиля на одном общем канале 64 кГц.
 // Децимация IQ выполняется один раз на блок, линейные демодуляторы расшарены по скоростям
 // и питают все активные дефреймеры одновременно без жёсткого лимита кандидатов.
-// Поддерживаются некадровые кандидаты sstv (по заголовку VIS) и cw (по телеграфным посылкам).
+// Поддерживаются некадровые кандидаты sstv (по заголовку VIS), cw (по телеграфным посылкам)
+// и голоса fm/am/usb/lsb (по долго открытому порогу, без остановки поиска кадров).
 // Успешный выбор кадрового профиля помнится по ключу условий и восстанавливается при возврате.
 type AutoPicker struct {
 	window time.Duration
@@ -168,6 +169,7 @@ type AutoPicker struct {
 
 	sstvRx      pictureRx
 	cwDet       *cwDetector
+	voice       voiceState
 	pictures    []sstv.Event
 	lastPicture *PictureProgress
 	hasPicture  bool
@@ -259,6 +261,7 @@ func (a *AutoPicker) Configure(key string, candidates []string) {
 	a.demodRate = 0
 	a.sstvRx = nil
 	a.cwDet = nil
+	a.voice = voiceState{}
 	a.pictures = nil
 	a.lastPicture = nil
 	a.hasPicture = false
@@ -353,12 +356,15 @@ func (a *AutoPicker) ensureDeframer(id string, sig pipelineSig) {
 	}
 }
 
-// Locked — закреплённый профиль; пусто, пока идёт подбор.
+// Locked — закреплённый профиль или выбранный голос; пусто, пока идёт подбор.
 func (a *AutoPicker) Locked() string {
 	if a == nil {
 		return ""
 	}
-	return a.pinned
+	if a.pinned != "" {
+		return a.pinned
+	}
+	return a.activeVoice()
 }
 
 // Candidates — текущий список id.
@@ -624,6 +630,7 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 
 	if !fr.open {
 		if sstvStarted && a.sstvRx != nil {
+			a.voice.reset()
 			a.pinned = DemodSSTV
 			a.lastGood = now
 			a.applySSTVEvents(sstvEvs, a.sstvRx, fr.open, now, &st)
@@ -636,6 +643,10 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 			return nil, st
 		}
 		a.frontend.updatePrev(fr.ch64)
+		if a.voiceStep(f, fr, &st) {
+			fillAutoStatus(&st, a.activeVoice(), "locked", a.candidates)
+			return nil, st
+		}
 		st.AutoStats = a.collectAutoStats()
 		fillAutoStatus(&st, "", "search", a.candidates)
 		return nil, st
@@ -760,7 +771,12 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 	a.frontend.updatePrev(fr.ch64)
 
 	if lockedID != "" {
+		a.voice.reset()
 		fillAutoStatus(&st, lockedID, "locked", a.candidates)
+		return out, st
+	}
+	if a.voiceStep(f, fr, &st) {
+		fillAutoStatus(&st, a.activeVoice(), "locked", a.candidates)
 		return out, st
 	}
 	st.AutoStats = a.collectAutoStats()
@@ -912,6 +928,7 @@ func (a *AutoPicker) unpin() {
 	a.demodRate = 0
 	a.sstvRx = nil
 	a.cwDet = nil
+	a.voice = voiceState{}
 	a.lastPicture = nil
 	a.hasPicture = false
 	a.pictures = nil

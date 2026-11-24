@@ -90,22 +90,50 @@ func TestDecideHold_SSTVExtendsTo120s(t *testing.T) {
 	const start int64 = 1_000_000
 	plan := []Entry{{Name: "ISS", FreqHz: 437_550_000, Mode: "SSTV", AOS: start - 1, LOS: start + 600_000}}
 	sights := []Sighting{{CenterHz: 437_550_000, SNRDB: 15, LastSeenMs: start + ProbeMs}}
-	// Сразу после пробы будим через GoneMs, чтобы ловить пропажу сигнала.
+	// После пробы сразу честная цель SSTV, без промежуточных wake на +10 с.
 	got := DecideHold(w, start, start+ProbeMs, 60_000, plan, sights)
-	if got != start+ProbeMs+GoneMs {
-		t.Errorf("after probe got %d, want wake %d", got, start+ProbeMs+GoneMs)
-	}
-	// Пока LastSeen+GoneMs раньше цели — только короткий wake.
-	sights[0].LastSeenMs = start + 100_000
-	got = DecideHold(w, start, start+100_000, 60_000, plan, sights)
-	if got != start+100_000+GoneMs {
-		t.Errorf("mid-hold got %d, want wake %d", got, start+100_000+GoneMs)
-	}
-	// LastSeen у самого края вида — дотягиваем до 120 с.
-	sights[0].LastSeenMs = start + SSTVHoldMs - 1_000
-	got = DecideHold(w, start, start+SSTVHoldMs-1_000, 60_000, plan, sights)
 	if got != start+SSTVHoldMs {
-		t.Errorf("near end got %d, want SSTV %d", got, start+SSTVHoldMs)
+		t.Errorf("after probe got %d, want SSTV %d", got, start+SSTVHoldMs)
+	}
+	// Пока тишина короче GoneMs, цель не дёргается.
+	now := start + 100_000
+	sights[0].LastSeenMs = now - GoneMs + 1_000
+	got = DecideHold(w, start, now, 60_000, plan, sights)
+	if got != start+SSTVHoldMs {
+		t.Errorf("mid-hold within GoneMs got %d, want SSTV %d", got, start+SSTVHoldMs)
+	}
+	// После GoneMs без сигнала — уход немедленно.
+	sights[0].LastSeenMs = now - GoneMs - 1
+	got = DecideHold(w, start, now, 60_000, plan, sights)
+	if got != now {
+		t.Errorf("after GoneMs got %d, want leave now %d", got, now)
+	}
+}
+
+func TestDecideHold_FreshLastSeenDoesNotLoopTenSecondWake(t *testing.T) {
+	w := Window{CenterHz: 437_000_000, SpanHz: 1_600_000}
+	const start int64 = 1_000_000
+	plan := []Entry{{
+		NoradID: 25544, FreqHz: 437_000_000, Mode: "AFSK", Baud: 1200,
+		AOS: start - 1, LOS: start + 300_000,
+	}}
+	// И при непрерывной энергии, и при импульсном маяке (пауза 5 с < GoneMs) цель стабильна.
+	for _, tc := range []struct {
+		now, lastSeen int64
+	}{
+		{start + ProbeMs, start + ProbeMs},
+		{start + 10_000, start + 5_000},
+		{start + 15_000, start + 15_000},
+	} {
+		sights := []Sighting{{
+			CenterHz: 437_000_000, NoradID: 25544, SNRDB: 14,
+			Origin: "satellite", LastSeenMs: tc.lastSeen,
+		}}
+		got := DecideHold(w, start, tc.now, 60_000, plan, sights)
+		want := start + TelemetryFloorMs
+		if got != want {
+			t.Fatalf("at %d (lastSeen %d) got %d, want full floor %d", tc.now, tc.lastSeen, got, want)
+		}
 	}
 }
 
@@ -311,5 +339,47 @@ func TestDecideHoldAir_PeriodExtends(t *testing.T) {
 	got := DecideHoldAir(w, start, start+ProbeMs, sights)
 	if got != want {
 		t.Fatalf("got %d, want period hold %d", got, want)
+	}
+}
+
+func TestExtendHoldForRx_ActiveFramesAndPicturePreventCutoff(t *testing.T) {
+	const start int64 = 1_000_000
+
+	// Frame from a previous dwell must not extend the new window.
+	if got := ExtendHoldForRx(start+ProbeMs, start, start+ProbeMs, start-1_000, false); got != start+ProbeMs {
+		t.Fatalf("previous-dwell frame extended hold: got %d, want %d", got, start+ProbeMs)
+	}
+
+	// Recent valid frame near end of telemetry floor extends by RxGraceMs.
+	now := start + TelemetryFloorMs
+	lastFrame := now - 4_000
+	want := lastFrame + RxGraceMs
+	if got := ExtendHoldForRx(now, start, now, lastFrame, false); got != want {
+		t.Fatalf("active frame got %d, want %d", got, want)
+	}
+
+	// After RxGraceMs of silence without new frames, no extension.
+	silentNow := lastFrame + RxGraceMs
+	if got := ExtendHoldForRx(silentNow, start, silentNow, lastFrame, false); got != silentNow {
+		t.Fatalf("silent after grace got %d, want leave %d", got, silentNow)
+	}
+
+	// Frame burst is still capped at MaxHoldMs.
+	late := start + MaxHoldMs - 2_000
+	if got := ExtendHoldForRx(late, start, late, late, false); got != start+MaxHoldMs {
+		t.Fatalf("frame cap got %d, want MaxHoldMs %d", got, start+MaxHoldMs)
+	}
+
+	// Active SSTV picture extends past 120 s up to RxPictureMaxHoldMs, then leaves once done.
+	picNow := start + SSTVHoldMs
+	if got := ExtendHoldForRx(picNow, start, picNow, 0, true); got != picNow+RxGraceMs {
+		t.Fatalf("active picture got %d, want %d", got, picNow+RxGraceMs)
+	}
+	if got := ExtendHoldForRx(picNow, start, picNow, 0, false); got != picNow {
+		t.Fatalf("finished picture got %d, want leave %d", got, picNow)
+	}
+	picLate := start + RxPictureMaxHoldMs - 1_000
+	if got := ExtendHoldForRx(picLate, start, picLate, 0, true); got != start+RxPictureMaxHoldMs {
+		t.Fatalf("picture cap got %d, want %d", got, start+RxPictureMaxHoldMs)
 	}
 }

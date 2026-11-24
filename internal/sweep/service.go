@@ -550,6 +550,9 @@ type loopParams struct {
 	policy      Policy
 }
 
+// holdCheckIntervalMs — как часто на продлённой стоянке проверять ранний уход при пропаже сигнала.
+const holdCheckIntervalMs int64 = 1_000
+
 // loop стоит на окне до holdUntil, при продлении шлёт новый sweep_state, иначе — следующее окно.
 func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp loopParams) {
 	defer close(r.done)
@@ -559,6 +562,9 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 	dwell := s.armHold(lp.holdUntilMs)
 	acc := newAccumulator(lp.windows[0].CenterHz, lp.band)
 	idx, cycle := 0, 1
+	visited := make(map[uint64]bool)
+	holdExtended := false
+	lastHoldCheckMs := int64(0)
 
 	for {
 		select {
@@ -572,8 +578,23 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 			acc.push(f)
 		case <-tick:
 			now := s.clock.Now()
+			nowMs := now.UnixMilli()
 			s.publish(p, acc.snapshot(now))
-			s.runAim(pathID, p, r, lp.windows[idx], now.UnixMilli())
+			s.runAim(pathID, p, r, lp.windows[idx], nowMs)
+			// На продлённой стоянке раз в секунду проверяем только ранний уход
+			// при пропаже сигнала (next <= nowMs), не дёргая window_end_ms на полпути.
+			if !holdExtended || nowMs-lastHoldCheckMs < holdCheckIntervalMs {
+				continue
+			}
+			lastHoldCheckMs = nowMs
+			startMs := s.windowStartMs(p, r)
+			if startMs == 0 {
+				continue
+			}
+			if s.holdUntil(pathID, lp.windows[idx], startMs, nowMs, p.dwell) <= nowMs {
+				lp.holdUntilMs = nowMs
+				dwell = s.armHold(nowMs)
+			}
 		case <-dwell:
 			s.publish(p, acc.snapshot(s.clock.Now()))
 			// Дедлайн сработал: даже если тестовые часы не тикнули, считаем время = holdUntil.
@@ -585,6 +606,8 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 			next := s.holdUntil(pathID, lp.windows[idx], startMs, nowMs, p.dwell)
 			if next > nowMs {
 				lp.holdUntilMs = next
+				holdExtended = true
+				lastHoldCheckMs = nowMs
 				s.extendHold(p, r, next)
 				dwell = s.armHold(next)
 				continue
@@ -592,16 +615,19 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 			s.notifyDwellEnd(pathID, p, lp.windows[idx])
 			prevHz := lp.windows[idx].CenterHz
 			if lp.policy == PolicyTX {
-				// Авто приём: на каждом hop заново сверяем план с лентой видимых КА.
+				// Авто приём: на каждом hop сверяем план и идём на первую непосещённую
+				// частоту цикла (PrioritizeTargets и +эфир меняют порядок частот).
+				visited[prevHz] = true
 				ws, band, ok := s.rebuildWindows(pathID, p, r, len(lp.windows))
 				if !ok {
 					s.finish(pathID, p, r)
 					return
 				}
 				lp.windows, lp.band = ws, band
-				next, wrapped := nextAfterHz(lp.windows, prevHz)
+				next, wrapped := nextUnvisited(lp.windows, visited)
 				if wrapped {
 					cycle++
+					clear(visited)
 				}
 				idx = next
 			} else {
@@ -624,6 +650,8 @@ func (s *Service) loop(ctx context.Context, pathID string, p *path, r *run, lp l
 			acc.retune(lp.windows[idx].CenterHz)
 			now := s.clock.Now()
 			startMs = now.UnixMilli()
+			holdExtended = false
+			lastHoldCheckMs = 0
 			lp.holdUntilMs = s.holdUntil(pathID, lp.windows[idx], startMs, startMs, p.dwell)
 			dwell = s.armHold(lp.holdUntilMs)
 			s.advance(p, r, idx, cycle, startMs, lp.holdUntilMs)
@@ -697,11 +725,11 @@ func (s *Service) extendHold(p *path, r *run, untilMs int64) {
 	s.sendState(st)
 }
 
-// nextAfterHz — индекс окна с частотой строго выше afterHz; иначе 0 и wrapped.
-// Окна считаются упорядоченными по возрастанию частоты (как ActiveTargets).
-func nextAfterHz(windows []Window, afterHz uint64) (idx int, wrapped bool) {
+// nextUnvisited — индекс первого окна, чья частота ещё не посещалась в текущем цикле.
+// Если все окна списка уже пройдены, возвращает 0 и wrapped = true.
+func nextUnvisited(windows []Window, visited map[uint64]bool) (int, bool) {
 	for i, w := range windows {
-		if w.CenterHz > afterHz {
+		if !visited[w.CenterHz] {
 			return i, false
 		}
 	}

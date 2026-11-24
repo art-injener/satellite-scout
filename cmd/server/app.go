@@ -73,6 +73,7 @@ type app struct {
 	receiverHub *sdr.ReceiverHub // приёмники по радиотрактам из конфига
 	products    *products.Store  // картинки, принятые демодулятором; nil — каталог недоступен
 	audio       *demod.AudioHub  // звук демодулятора для потока /audio
+	demod       *demod.Service   // демодуляция по трактам (активность приёма для удержания стоянки)
 	sweep       *sweep.Service   // обход трактов по диапазонам из конфига, снимки окон панорамы
 	bandscan    *bandscan.Service
 
@@ -276,6 +277,7 @@ func NewApp(configStore *config.Store) *app {
 		receiverHub:  receiverHub,
 		products:     productStore,
 		audio:        audioHub,
+		demod:        demodService,
 		sweep:        sweepService,
 		bandscan:     bandService,
 		holdAim:      &holdAimByPath{byID: make(map[string]freqplan.AimState)},

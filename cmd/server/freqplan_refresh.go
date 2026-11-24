@@ -248,16 +248,23 @@ func (a *app) enrichSightingsFromProfiles(sights []freqplan.Sighting) {
 	}
 }
 
-// sweepDwell — гибкая стоянка: план × обнаружения → DecideHold.
+// sweepDwell — гибкая стоянка: план × обнаружения и живой приём демодулятора.
 // Окно «+эфир» (Air) — отдельная политика пробы без TX плана.
 func (a *app) sweepDwell(pathID string, w sweep.Window, startMs, nowMs, configDwellMs int64) int64 {
 	sights := a.bandSightings(pathID, w)
 	a.enrichSightingsFromProfiles(sights)
 	fw := freqplan.Window{CenterHz: w.CenterHz, SpanHz: w.SpanHz}
+	var until int64
 	if w.Air {
-		return freqplan.DecideHoldAir(fw, startMs, nowMs, sights)
+		until = freqplan.DecideHoldAir(fw, startMs, nowMs, sights)
+	} else {
+		until = freqplan.DecideHold(fw, startMs, nowMs, configDwellMs, a.loadFreqPlan(), sights)
 	}
-	return freqplan.DecideHold(fw, startMs, nowMs, configDwellMs, a.loadFreqPlan(), sights)
+	if a.demod != nil {
+		rx := a.demod.RxActivity(pathID)
+		until = freqplan.ExtendHoldForRx(until, startMs, nowMs, rx.LastFrameMs, rx.Picture)
+	}
+	return until
 }
 
 // sweepAim — наведение OffsetHz на пик вспышки на тике снимка обхода (~4 Гц).

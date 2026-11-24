@@ -380,3 +380,128 @@ func TestAutoPicker_FrameProfileBeatsCWHint(t *testing.T) {
 		t.Fatalf("locked = %q, want fsk9600_geoscan (frame profile must win over cw)", picker.Locked())
 	}
 }
+
+// runVoiceAuto feeds the air to a picker and returns the last status and the audio
+// given after the voice was selected.
+func runVoiceAuto(picker *AutoPicker, air []complex64, cs sdr.ChannelSettings) (Status, []float32) {
+	var st Status
+	var audio []float32
+	for _, f := range toFrames(air, testRate, sdr.DefaultBlockSize, 0) {
+		_, st = picker.Process(f, cs, 0)
+		if st.AutoPhase == "locked" {
+			audio = append(audio, picker.Audio()...)
+		}
+	}
+	return st, audio
+}
+
+func TestAutoPicker_SelectsFMVoiceByHint(t *testing.T) {
+	picker := NewAutoPicker()
+	picker.Configure("iss-fm", []string{"sstv", "fm", "afsk1200", "fsk9600_g3ruh"})
+	st, audio := runVoiceAuto(picker, fmToneAir(4), voiceSettings(DemodAuto, 15_000, -90))
+
+	if st.AutoPhase != "locked" || st.AutoLocked != "fm" {
+		t.Fatalf("phase=%s locked=%q, want locked fm", st.AutoPhase, st.AutoLocked)
+	}
+	if picker.Locked() != "fm" {
+		t.Fatalf("Locked()=%q, want fm", picker.Locked())
+	}
+	if len(audio) < AudioRate {
+		t.Fatalf("audio samples=%d after the voice was selected, want at least a second", len(audio))
+	}
+	settled := audio[AudioRate/5:]
+	if tone, other := tonePower(settled, 1000), tonePower(settled, 1700); tone < 1000*other {
+		t.Errorf("1000 Hz power %.2e vs 1700 Hz %.2e, want the voice tone", tone, other)
+	}
+}
+
+func TestAutoPicker_SelectsAMVoiceByHint(t *testing.T) {
+	picker := NewAutoPicker()
+	picker.Configure("am-tx", []string{"am", "fsk9600_g3ruh"})
+	st, audio := runVoiceAuto(picker, amToneAir(4), voiceSettings(DemodAuto, 15_000, -90))
+
+	if st.AutoLocked != "am" {
+		t.Fatalf("locked=%q, want am", st.AutoLocked)
+	}
+	settled := audio[AudioRate/5:]
+	if tone, other := tonePower(settled, 1000), tonePower(settled, 1700); tone < 100*other {
+		t.Errorf("1000 Hz power %.2e vs 1700 Hz %.2e, want the voice tone", tone, other)
+	}
+}
+
+func TestAutoPicker_SelectsSSBSidebandByHint(t *testing.T) {
+	picker := NewAutoPicker()
+	picker.Configure("ssb-tx", []string{"usb", "lsb", "fsk9600_g3ruh"})
+	cs := voiceSettings(DemodAuto, 2800, -90)
+	cs.OffsetHz += 1600 // band center: 200 Hz above the carrier plus half the width
+	st, audio := runVoiceAuto(picker, ssbAir(1200, 1700, 4), cs)
+
+	if st.AutoLocked != "usb" {
+		t.Fatalf("locked=%q, want usb", st.AutoLocked)
+	}
+	settled := audio[AudioRate/2:]
+	if want, reject := tonePower(settled, 1200), tonePower(settled, 1700); want < 1000*reject {
+		t.Errorf("1200 Hz power %.2e vs 1700 Hz %.2e, want the lower sideband 30 dB down", want, reject)
+	}
+	if st.PassbandHz != 2800 {
+		t.Errorf("passband %.0f Hz, want 2800 for the selected voice", st.PassbandHz)
+	}
+}
+
+func TestAutoPicker_NoVoiceWithoutHint(t *testing.T) {
+	picker := NewAutoPicker()
+	picker.Configure("no-hint", []string{"afsk1200", "fsk9600_g3ruh"})
+	st, _ := runVoiceAuto(picker, fmToneAir(4), voiceSettings(DemodAuto, 15_000, -90))
+	if st.AutoPhase != "search" || picker.Locked() != "" {
+		t.Fatalf("phase=%s locked=%q, want search without a voice hint", st.AutoPhase, picker.Locked())
+	}
+}
+
+func TestAutoPicker_VoiceReleasedAfterSilence(t *testing.T) {
+	picker := NewAutoPicker()
+	picker.review = time.Second
+	picker.Configure("iss-fm", []string{"fm", "fsk9600_g3ruh"})
+	cs := voiceSettings(DemodAuto, 15_000, -90)
+	air := append(fmToneAir(3), make([]complex64, int(2*testRate))...)
+	st, _ := runVoiceAuto(picker, air, cs)
+	if st.AutoPhase != "search" || picker.Locked() != "" {
+		t.Fatalf("phase=%s locked=%q, want search after the silence", st.AutoPhase, picker.Locked())
+	}
+}
+
+func TestAutoPicker_ShortSilenceKeepsVoice(t *testing.T) {
+	picker := NewAutoPicker()
+	picker.Configure("iss-fm", []string{"fm", "fsk9600_g3ruh"})
+	cs := voiceSettings(DemodAuto, 15_000, -90)
+	air := append(fmToneAir(3), make([]complex64, int(1*testRate))...)
+	var sawSilentLocked bool
+	for _, f := range toFrames(air, testRate, sdr.DefaultBlockSize, 0) {
+		_, st := picker.Process(f, cs, 0)
+		if !st.SquelchOpen && st.AutoLocked == "fm" {
+			sawSilentLocked = true
+			for _, v := range picker.Audio() {
+				if v != 0 {
+					t.Fatal("audio under the closed squelch must be silence")
+				}
+			}
+		}
+	}
+	if !sawSilentLocked || picker.Locked() != "fm" {
+		t.Fatalf("Locked()=%q sawSilentLocked=%v: a pause in speech must keep the voice", picker.Locked(), sawSilentLocked)
+	}
+}
+
+func TestAutoPicker_FrameProfileBeatsVoiceHint(t *testing.T) {
+	air := beaconAirOf(t, testRate, 1, time.Second, "fsk9600_geoscan")
+	picker := NewAutoPicker()
+	picker.Configure("mixed-tx", []string{"fm", "fsk9600_geoscan"})
+	cs := sdr.ChannelSettings{
+		OffsetHz: testOffset, BandwidthHz: sdr.MaxChannelBandwidthHz, SquelchDBFS: -90, Demod: DemodAuto,
+	}
+	for _, f := range toFrames(air, testRate, sdr.DefaultBlockSize, 0) {
+		picker.Process(f, cs, 0)
+	}
+	if picker.Locked() != "fsk9600_geoscan" {
+		t.Fatalf("locked = %q, want fsk9600_geoscan (frame profile must win over voice)", picker.Locked())
+	}
+}
