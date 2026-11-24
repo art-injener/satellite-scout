@@ -1,0 +1,20 @@
+{
+  "entries": [
+    {
+      "id": "geoscan-edelveis-2022-11-24",
+      "meta": "pe0sat-geoscan/geoscan_edelveis_2022-11-24_57600.sigmf-meta",
+      "profile": "fsk9600_geoscan",
+      "offset_hz": 0,
+      "bandwidth_hz": 20000,
+      "squelch_dbfs": -90,
+      "expect": {
+        "crc_good_min": 170,
+        "kinds": {
+          "image_min": 160,
+          "beacon_min": 1,
+          "unknown_max": 0
+        }
+      }
+    }
+  ]
+}

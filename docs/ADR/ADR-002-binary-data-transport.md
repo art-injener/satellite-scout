@@ -51,7 +51,7 @@ Satellite Scout получает с SDR-приёмника большой бин
 
 | Источник | Данные | Виджет |
 |----------|--------|--------|
-| REST `GET /api/satnogs/transmitters/{norad}` | Каталог TX | Строки таблицы |
+| SSE `satellite_group_update` (`transmitters[]` из реестра) | Каталог TX группы | Строки таблицы |
 | SSE `satellite_group_update` | Состав группы КА | Группировка строк |
 | SSE `satellite_state_update` | `range_rate` | Колонка «Доплер» |
 | SSE **`tx_cycle`** | `power`, `packets`, `snr_db`, `lock`, `history[]` | RSSI, SNR, Lock, Декод/Битые, **мини-водопад** |
@@ -751,7 +751,7 @@ class BinaryStreamReader {
 ### Сценарий 1: Режим «Авто» — таблица передатчиков
 
 1. Оператор на `/tracking`, `mainMode=overview` (`mode-overview` на `<body>`).
-2. `auto-link.js` грузит TX из SatNOGS REST + `satellite_group_update`.
+2. `auto-link.js` берёт TX из `satellite_group_update` (реестр / `scout.db`, ADR-011).
 3. Подписка на SSE `tx_cycle` (mock `TxCycleMock` → live `ScanStrategy`).
 4. На каждый цикл: обновление метрик строк + `WaterfallCell.setPower(power)`; canvas тикает локально ~18 FPS.
 5. **Chunked Stream не открывается.**
