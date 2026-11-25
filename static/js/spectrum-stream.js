@@ -105,6 +105,34 @@
         this._len = need;
     };
 
+    // Средний квадрат периодического окна Блэкмана–Харриса.
+    // Спектр считает |FFT|²/N² после окна и мощность окна не восстанавливает,
+    // поэтому след тише прямоугольного бина на эту величину.
+    const BH_WINDOW_POWER_DB = 10 * Math.log10(
+        0.35875 * 0.35875 +
+        0.5 * (0.48829 * 0.48829 + 0.14128 * 0.14128 + 0.01168 * 0.01168)
+    );
+
+    /**
+     * Порог шумоподавления на шкале спектра.
+     * Порог — мощность всего канала. Бин кадра — узкая полоска spanHz/bins
+     * после окна. Без перевода линия стоит на 10·log10(полоса/бин) и на мощность
+     * окна выше шума, который виден на графике.
+     * Нет ширины канала или кадра — возвращаем мощность канала как есть.
+     * @param {number} channelDbfs
+     * @param {number} passbandHz
+     * @param {number} spanHz
+     * @param {number} bins
+     * @returns {?number}
+     */
+    function squelchTraceDb(channelDbfs, passbandHz, spanHz, bins) {
+        if (typeof channelDbfs !== 'number' || !isFinite(channelDbfs)) { return null; }
+        if (!(passbandHz > 0) || !(spanHz > 0) || !(bins > 1)) { return channelDbfs; }
+        const binHz = spanHz / bins;
+        if (!(binHz > 0)) { return channelDbfs; }
+        return channelDbfs + 10 * Math.log10(binHz / passbandHz) + BH_WINDOW_POWER_DB;
+    }
+
     /**
      * dBFS в шкалу 0…1, которую ждут FFTSpectrumView и WaterfallView.
      * @param {Float32Array} dbfs
@@ -452,6 +480,7 @@
     SpectrumStream.FrameReader = FrameReader;
     SpectrumStream.parseHeader = parseHeader;
     SpectrumStream.dbfsToUnit = dbfsToUnit;
+    SpectrumStream.squelchTraceDb = squelchTraceDb;
     SpectrumStream.AutoRange = AutoRange;
     SpectrumStream.DisplaySmooth = DisplaySmooth;
     SpectrumStream.markerReadout = markerReadout;
@@ -473,6 +502,7 @@
             FrameReader: FrameReader,
             parseHeader: parseHeader,
             dbfsToUnit: dbfsToUnit,
+            squelchTraceDb: squelchTraceDb,
             AutoRange: AutoRange,
             DisplaySmooth: DisplaySmooth,
             markerReadout: markerReadout,

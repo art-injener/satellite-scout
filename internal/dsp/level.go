@@ -11,8 +11,8 @@ import (
 const peakWindow = 48
 
 // Параметры адаптивного порога шумоподавления.
+// Запас над шумом задаёт оператор, ChannelSettings.SquelchAddDB, по умолчанию 6 дБ.
 const (
-	AdaptiveSquelchMarginDB     = 6.0    // запас адаптивного порога над шумом канала, дБ
 	AdaptiveSquelchHysteresisDB = 2.0    // гистерезис удержания открытого порога, дБ
 	AdaptiveNoiseFloorDBFS      = -126.0 // нижний предел оценки шума (тишина в тестах)
 )
@@ -160,10 +160,11 @@ func SquelchPeakWindow(rate, passbandHz float64) int {
 	return w
 }
 
-// AdaptiveNoise оценивает мощность шума в полосе узкого канала по спектру широкого
-// выхода грубого фильтра (обычно 64 кГц). Нижний перцентиль (30%) по плоской полосе
-// грубого фильтра устойчив к непрерывным сигналам внутри канала и быстро отслеживает
-// скачки усиления (АРУ). Не потокобезопасен: работает в горутине потока.
+// AdaptiveNoise оценивает мощность шума в полосе демодулятора по спектру выхода
+// грубого фильтра. В расчёт входят только бины этой полосы: непрерывный сигнал
+// в остальном окне приёмника порог не поднимает. 30-й перцентиль не сдвигается
+// от отдельных тонов внутри полосы и быстро отслеживает скачки усиления (АРУ).
+// Не потокобезопасен: работает в горутине потока.
 type AdaptiveNoise struct {
 	spec     *Spectrum
 	window   []float64
@@ -208,8 +209,9 @@ func (a *AdaptiveNoise) ensure(n int) bool {
 	return true
 }
 
-// EstimateChannelNoiseDBFS возвращает сглаженную оценку шума (dBFS) в полосе passbandHz
-// на основе широкого блока coarse (с частотой отсчётов midRate).
+// EstimateChannelNoiseDBFS возвращает сглаженную оценку шума (dBFS) в полосе passbandHz.
+// coarse — выход грубого фильтра с частотой отсчётов midRate; из его спектра берутся
+// только бины passbandHz.
 func (a *AdaptiveNoise) EstimateChannelNoiseDBFS(coarse []complex64, midRate, passbandHz float64) float64 {
 	if midRate <= 0 || passbandHz <= 0 || !a.ensure(len(coarse)) {
 		if a.hasEst {
@@ -233,12 +235,19 @@ func (a *AdaptiveNoise) EstimateChannelNoiseDBFS(coarse []complex64, midRate, pa
 		a.avg[i] *= invSegs
 	}
 
-	// Берём только плоскую полосу грубого фильтра [-0.35*midRate, +0.35*midRate],
-	// чтобы скаты грубого ФНЧ не занижали оценку шумового пола.
-	half := int(math.Floor(0.35 * float64(n)))
+	// Только полоса демодулятора. Скаты грубого фильтра и постоянка рядом с каналом
+	// в эти бины не попадают.
+	binHz := midRate / float64(n)
+	half := int(math.Round(passbandHz / 2 / binHz))
+	if half < 1 {
+		half = 1
+	}
+	if half > n/2 {
+		half = n / 2
+	}
 	center := n / 2
-	lo := max(0, center-half)
-	hi := min(n, center+half)
+	lo := center - half
+	hi := center + half
 	if hi <= lo {
 		return AdaptiveNoiseFloorDBFS
 	}
@@ -248,7 +257,7 @@ func (a *AdaptiveNoise) EstimateChannelNoiseDBFS(coarse []complex64, midRate, pa
 	}
 	slices.Sort(a.sorted)
 
-	// 30-й перцентиль остаётся в шуме, даже если канал и соседний сигнал занимают больше половины полосы.
+	// 30-й перцентиль остаётся в шуме, пока сигнал не занял большую часть полосы демодулятора.
 	p30 := a.sorted[len(a.sorted)*3/10]
 	rawDB := AdaptiveNoiseFloorDBFS
 	if p30 > 0 && a.winPower > 0 {

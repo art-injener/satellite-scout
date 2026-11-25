@@ -351,23 +351,30 @@ type TelemetryParam struct {
 
 // StatusEvent — состояние демодулятора тракта для панели приёмника.
 type StatusEvent struct {
-	RadioPath    string  `json:"radio_path"`
-	Active       bool    `json:"active"` // поток устройства идёт
-	Demod        string  `json:"demod"`
-	Supported    bool    `json:"supported"`
-	FrequencyHz  uint64  `json:"frequency_hz"`
-	LevelDBFS    float32 `json:"level_dbfs"`
-	SquelchDBFS  float64 `json:"squelch_dbfs"`
-	SquelchAuto  bool    `json:"squelch_auto"`
+	RadioPath   string  `json:"radio_path"`
+	Active      bool    `json:"active"` // поток устройства идёт
+	Demod       string  `json:"demod"`
+	Supported   bool    `json:"supported"`
+	FrequencyHz uint64  `json:"frequency_hz"`
+	LevelDBFS   float32 `json:"level_dbfs"`
+	SquelchDBFS float64 `json:"squelch_dbfs"`
+	SquelchAuto bool    `json:"squelch_auto"`
+	// SquelchAddDB — добавка оператора к шуму в режиме «Авто», дБ.
+	// squelch_dbfs при этом — уже посчитанный порог, не эта добавка.
+	SquelchAddDB float64 `json:"squelch_add_db"`
 	SquelchOpen  bool    `json:"squelch_open"`
 	FramesGood   int     `json:"frames_good"`
 	FramesBad    int     `json:"frames_bad"`
 	LastPacketMs uint64  `json:"last_packet_ms"`
 	// DemodOff — оператор выключил демодулятор: спектр идёт, кадров и снимков нет.
-	DemodOff    bool    `json:"demod_off,omitempty"`
-	BandwidthHz uint32  `json:"bandwidth_hz"`
-	OffsetHz    int64   `json:"offset_hz"`      // по сдвигу, полосе, порогу и профилю клиенты следуют за каналом
-	Baud        float64 `json:"baud,omitempty"` // символьная скорость канала; 0 — дефолт профиля
+	DemodOff    bool   `json:"demod_off,omitempty"`
+	BandwidthHz uint32 `json:"bandwidth_hz"`
+	// PassbandHz — ширина, по которой посчитан порог. Линия на спектре
+	// переводит мощность канала в уровень одного бина по этой ширине.
+	// У SSB и CW она уже «Полосы канала». 0 — берём bandwidth_hz.
+	PassbandHz float64 `json:"passband_hz,omitempty"`
+	OffsetHz   int64   `json:"offset_hz"`      // по сдвигу, полосе, порогу и профилю клиенты следуют за каналом
+	Baud       float64 `json:"baud,omitempty"` // символьная скорость канала; 0 — дефолт профиля
 	// DopplerAuto — режим «Авто». DopplerNorad — КА, за которым следует канал.
 	// DopplerManualHz — поправка оператора в режиме «Вручную».
 	// DopplerHz — действующая поправка сейчас. Нет поля: поправки нет.
@@ -880,11 +887,13 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		LevelDBFS:       st.LevelDBFS,
 		SquelchDBFS:     sqDBFS,
 		SquelchAuto:     sqAuto,
+		SquelchAddDB:    cs.SquelchAddDB,
 		SquelchOpen:     active && st.SquelchOpen,
 		FramesGood:      st.Good,
 		FramesBad:       st.Bad,
 		LastPacketMs:    st.LastPacketMs,
 		BandwidthHz:     cs.BandwidthHz,
+		PassbandHz:      st.PassbandHz,
 		OffsetHz:        cs.OffsetHz,
 		Baud:            cs.Baud,
 		DopplerAuto:     cs.DopplerAuto,

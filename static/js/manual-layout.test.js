@@ -1732,7 +1732,7 @@ console.log('\n— ManualLayout: auto receive —');
 const autoRxToggle = () => _domNodes.get('manual-rx-auto');
 
 const RX_ONLY_IDS = ['manual-rx-span', 'manual-rx-gain', 'manual-rx-agc'];
-const DEMOD_KEEP_IDS = ['manual-rx-pipeline', 'manual-rx-filter-bw', 'manual-rx-squelch',
+const DEMOD_KEEP_IDS = ['manual-rx-pipeline', 'manual-rx-filter-bw',
     'manual-rx-doppler-mode', 'manual-rx-doppler-val', 'manual-demod-apply'];
 
 /** Включает «Авто приём». Состояние running:true сразу, как после успешного POST. */
@@ -1762,7 +1762,7 @@ test('Авто приём posts policy=tx and locks receiver fields; pipeline lo
             assert.strictEqual(_domNodes.get(id).disabled, true, id + ' locked in auto');
         }
         assert.strictEqual(_domNodes.get('manual-rx-gain-inc').disabled, true);
-        // Профиль «Авто»: полоса, порог, Доплер и Apply тоже залочены.
+        // Профиль «Авто»: полоса, Доплер и Apply залочены. Добавку порога можно крутить.
         for (const id of DEMOD_KEEP_IDS) {
             assert.strictEqual(_domNodes.get(id).disabled, true, id + ' locked with auto profile');
         }
@@ -2049,7 +2049,7 @@ test('auto profile locks bandwidth, squelch and Doppler', () => {
             fire(pipelineSel, 'change');
             assert.strictEqual(pipelineSel.options[pipelineSel.selectedIndex].value, 'auto');
             assert.strictEqual(filterBwSel.disabled, true);
-            assert.strictEqual(_domNodes.get('manual-rx-squelch').disabled, true);
+            assert.strictEqual(_domNodes.get('manual-rx-squelch').disabled, false, 'auto profile keeps the squelch add knob');
             assert.strictEqual(dopplerSel.disabled, true);
             assert.strictEqual(_domNodes.get('manual-demod-apply').disabled, true);
         } finally {
@@ -3532,7 +3532,7 @@ test('demodulator «Установить» sends only the channel', () => {
     withStation({}, () => {
         const m = new ManualLayout(makeStateManager());
         m.activate();
-        fillRx({ spanIndex: 1, gain: 28, agc: false, offset: 1500, bwIndex: 3, squelch: -75, demodIndex: 3 });
+        fillRx({ spanIndex: 1, gain: 28, agc: false, offset: 1500, bwIndex: 3, squelch: 4, demodIndex: 3 });
         fire(_domNodes.get('manual-demod-apply'), 'click');
         assert.strictEqual(channelCalls().length, 1);
         assert.strictEqual(receiverCalls().length, 0);
@@ -3540,7 +3540,8 @@ test('demodulator «Установить» sends only the channel', () => {
             radio_path: 'radio_path_1',
             offset_hz: 0,
             bandwidth_hz: 18000,
-            squelch_dbfs: -75,
+            squelch_dbfs: -90,
+            squelch_add_db: 4,
             squelch_auto: true,
             demod: 'afsk1200',
             demod_off: false,
@@ -3555,38 +3556,72 @@ test('demodulator «Установить» sends only the channel', () => {
 test('squelch mode toggles stepper and sends squelch_auto flag', () => {
     withStation({}, () => withDemodEvents((emit) => {
         const m = new ManualLayout(makeStateManager());
+        const input = _domNodes.get('manual-rx-squelch');
+        const unit = _domNodes.get('manual-rx-squelch-unit');
         try {
             m.activate();
-            fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 1 });
             assert.strictEqual(squelchModeSel.selectedIndex, 1, 'squelch starts on Auto');
-            assert.strictEqual(_domNodes.get('manual-rx-squelch-step').hidden, true);
+            assert.strictEqual(_domNodes.get('manual-rx-squelch-step').hidden, false);
             assert.strictEqual(_domNodes.get('manual-rx-squelch-now').hidden, false);
+            assert.strictEqual(input.value, '6', 'auto knob starts at +6 dB');
+            assert.strictEqual(unit.textContent, 'дБ');
 
-            // Adaptive status updates live display and spectrum line without rewriting manual input.
+            // Computed threshold updates the live readout and does not replace the add.
             emit('demod_status', {
                 radio_path: 'radio_path_1', active: true, demod: 'afsk1200',
                 offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -61.4, squelch_auto: true,
+                squelch_add_db: 3,
             });
             assert.strictEqual(_domNodes.get('manual-rx-squelch-now').textContent, '−61 dBFS');
-            assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-90');
+            assert.strictEqual(input.value, '3');
 
-            // Switching to manual reveals stepper and posts squelch_auto=false.
+            emit('demod_status', {
+                radio_path: 'radio_path_1', active: true, demod: 'afsk1200',
+                offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -61.4, squelch_auto: true,
+                squelch_add_db: 8,
+            });
+            assert.strictEqual(input.value, '8');
+
+            input.value = '5';
+            fire(_domNodes.get('manual-rx-squelch-inc'), 'click');
+            assert.strictEqual(input.value, '6');
+            fire(_domNodes.get('manual-demod-apply'), 'click');
+            const added = channelCalls();
+            assert.strictEqual(added[added.length - 1].body.squelch_auto, true);
+            assert.strictEqual(added[added.length - 1].body.squelch_add_db, 6);
+            assert.strictEqual(added[added.length - 1].body.squelch_dbfs, -90, 'manual level is not the add');
+
+            // dBm calibration must not shift the add.
+            m._levelOffset = -40;
+            fire(_domNodes.get('manual-demod-apply'), 'click');
+            const calibrated = channelCalls();
+            assert.strictEqual(calibrated[calibrated.length - 1].body.squelch_add_db, 6);
+
+            // Switching to manual shows the stored level and posts squelch_auto=false.
             squelchModeSel.selectedIndex = 0;
             fire(squelchModeSel, 'change');
             assert.strictEqual(_domNodes.get('manual-rx-squelch-step').hidden, false);
             assert.strictEqual(_domNodes.get('manual-rx-squelch-now').hidden, true);
+            assert.strictEqual(input.value, '-130', 'stored -90 dBFS shown in dBm');
+            assert.strictEqual(unit.textContent, 'dBm');
             const calls = channelCalls();
             assert.strictEqual(calls[calls.length - 1].body.squelch_auto, false);
+            assert.strictEqual(calls[calls.length - 1].body.squelch_add_db, 6);
+            assert.strictEqual(calls[calls.length - 1].body.squelch_dbfs, -90);
 
-            // Auto demod profile forces squelch back to Auto and locks selector.
+            // Auto demod profile forces squelch back to Auto and keeps the add knob.
             pipelineSel.selectedIndex = 0; // auto
             fire(pipelineSel, 'change');
             assert.strictEqual(squelchModeSel.selectedIndex, 1);
             assert.strictEqual(squelchModeSel.disabled, true);
+            assert.strictEqual(input.disabled, false);
+            assert.strictEqual(input.value, '6');
+            assert.strictEqual(unit.textContent, 'дБ');
         } finally {
             squelchModeSel.selectedIndex = 1;
             squelchModeSel.disabled = false;
             pipelineSel.selectedIndex = 3;
+            input.disabled = false;
             m.destroy();
         }
     }));
@@ -4443,23 +4478,22 @@ async function openWithStatus(mm, status) {
 }
 
 testAsync('calibrated tract shows dBm at the antenna: calibration minus receiver gain', async () => {
-    _domNodes.get('manual-rx-squelch').value = '-90';
     const m = await openWithStatus(CALIBRATED, { center_hz: 436500000, gain_db: 10, running: true });
     assert.deepStrictEqual(statusCalls().map((c) => c.url), ['/api/sdr/status?radio_path=radio_path_1']);
     const frame = peakFrame(768, -49.3, 1000);
     const want = new realStream.AutoRange().update(realStream.shiftLevels(frame.values, -50));
     MockStream.last().opts.onFrame(frame);
     assert.deepStrictEqual(markerText(), ['437.012', '−99.3'], 'peak in dBm: -49.3 - 40 - 10');
-    assert.deepStrictEqual(levelUnits(), ['dBm', 'dBm']);
+    assert.deepStrictEqual(levelUnits(), ['dBm', 'дБ'], 'auto squelch add stays in dB');
     assert.strictEqual(_domNodes.get('manual-rx-marker-bar').style.width, '58.9%', 'bar keeps the ADC headroom');
     assert.deepStrictEqual([m._fft._dbMin, m._fft._dbMax], [want.min, want.max], 'spectrum scale in dBm');
-    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-140', 'squelch keeps its meaning in new units');
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '6', 'auto add is not shifted into dBm');
     m._stopStream();
     global.window._modeManager = TRACT_1;
     m._startStream();
     delete global.window._modeManager;
-    assert.deepStrictEqual(levelUnits(), ['dBFS', 'dBFS'], 'uncalibrated tract goes back to dBFS');
-    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-90');
+    assert.deepStrictEqual(levelUnits(), ['dBFS', 'дБ'], 'uncalibrated tract goes back to dBFS');
+    assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '6');
     m.destroy();
 });
 
@@ -4467,7 +4501,7 @@ testAsync('AGC on the receiver keeps dBFS: gain is unknown', async () => {
     const m = await openWithStatus(CALIBRATED, { center_hz: 436500000, gain_db: -1, running: true });
     MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
     assert.deepStrictEqual(markerText(), ['437.012', '−49.3']);
-    assert.deepStrictEqual(levelUnits(), ['dBFS', 'dBFS']);
+    assert.deepStrictEqual(levelUnits(), ['dBFS', 'дБ'], 'AGC has no dBm, the auto add stays in dB');
     m.destroy();
 });
 
@@ -4476,7 +4510,7 @@ testAsync('tract without calibration stays in dBFS with a known gain', async () 
     assert.strictEqual(statusCalls().length, 1, 'status still fills the receiver fields');
     MockStream.last().opts.onFrame(peakFrame(768, -49.3, 1000));
     assert.deepStrictEqual(markerText(), ['437.012', '−49.3']);
-    assert.deepStrictEqual(levelUnits(), ['dBFS', 'dBFS']);
+    assert.deepStrictEqual(levelUnits(), ['dBFS', 'дБ']);
     m.destroy();
 });
 

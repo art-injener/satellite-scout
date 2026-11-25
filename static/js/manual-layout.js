@@ -88,6 +88,7 @@
     /**
      * Поля со степпером. kind задаёт допустимые символы:
      * усиление — 0…49.6 с шагом 0.1, доплер — целые герцы, порог — уровень с десятыми.
+     * В «Авто» у порога другой предел: это добавка к шуму, не абсолютный уровень.
      */
     const NUMERIC_FIELDS = {
         gain: { kind: 'gain', step: 0.1, min: 0, max: 49.6, decimals: 1 },
@@ -95,6 +96,10 @@
         squelch: { kind: 'squelch', step: 1, decimals: 1 },
         baud: { kind: 'gain', step: 1, min: 50, max: 100000, decimals: 0 },
     };
+    /** Добавка к шуму в «Авто», дБ. Ручной уровень по умолчанию остаётся отдельно. */
+    const SQUELCH_ADD_DEFAULT = 6;
+    const SQUELCH_MANUAL_DEFAULT = -90;
+    const SQUELCH_ADD_SPEC = { kind: 'squelch', step: 1, min: -20, max: 30, decimals: 1 };
 
     /**
      * Заполняет select профилей демодулятора из ответа /api/sdr/demod-profiles.
@@ -410,6 +415,10 @@
         this._displaySmooth = null;
         /** Сдвиг уровней из dBFS в dBm на входе антенны; null — экран в dBFS. */
         this._levelOffset = null;
+        /** Ручной порог, dBFS, и добавка «Авто», дБ. Поле ввода показывает одно из двух. */
+        this._squelchManual = SQUELCH_MANUAL_DEFAULT;
+        this._squelchAdd = SQUELCH_ADD_DEFAULT;
+        this._squelchAddMode = false;
         /** Тракт, для которого получен _levelOffset. */
         this._levelPath = null;
         /** Запросы перестройки в пути: пока они есть, кадры не двигают регулятор. */
@@ -1398,14 +1407,14 @@
             self._flushSettings('demod');
         });
         this._on(this._rxFields.squelchMode, 'change', function() {
-            self._syncSquelchEntry();
+            if (self._squelchIsAuto()) { self._enterSquelchAdd(true); } else { self._enterSquelchManual(true); }
             self._flushSettings('demod');
         });
         this._on(this._rxFields.doppler, 'change', function() {
             self._syncDopplerEntry();
             self._flushSettings('demod');
         });
-        this._syncSquelchEntry();
+        if (this._squelchIsAuto()) { this._enterSquelchAdd(false); } else { this._syncSquelchEntry(); }
         this._syncDopplerEntry();
 
         this._syncEyeFromPipeline();
@@ -1471,14 +1480,77 @@
         }
     };
 
-    /** «Ручн.» — степпер уровня порога; «Авто» — текущий расчётный порог по шуму. */
-    ManualLayout.prototype._syncSquelchEntry = function() {
-        const auto = !!(this._rxFields && this._rxFields.squelchMode &&
+    /** Селектор порога стоит на «Авто». */
+    ManualLayout.prototype._squelchIsAuto = function() {
+        return !!(this._rxFields && this._rxFields.squelchMode &&
             selectedValue(this._rxFields.squelchMode) === 'auto');
+    };
+
+    /** Ручной уровень в единицах экрана. */
+    ManualLayout.prototype._manualSquelchText = function() {
+        return String(Number((this._squelchManual + (this._levelOffset || 0)).toFixed(1)));
+    };
+
+    /** Добавка «Авто» в децибелах, без перевода в dBm. */
+    ManualLayout.prototype._addSquelchText = function() {
+        return formatStepped(this._squelchAdd, 1);
+    };
+
+    /** Запомнить уровень из поля, пока оно показывает ручной порог. */
+    ManualLayout.prototype._captureManualSquelch = function() {
+        const sq = this._squelchInput;
+        if (!sq || sq.value === '') { return; }
+        let v = Number(sq.value);
+        if (!isFinite(v)) { return; }
+        if (this._levelOffset !== null) { v -= this._levelOffset; }
+        this._squelchManual = v;
+    };
+
+    /** Запомнить добавку из поля, пока оно показывает децибелы «Авто». */
+    ManualLayout.prototype._captureAddSquelch = function() {
+        const sq = this._squelchInput;
+        if (!sq || sq.value === '') { return; }
+        const v = Number(sq.value);
+        if (isFinite(v)) { this._squelchAdd = v; }
+    };
+
+    /**
+     * Поле показывает добавку к шуму. captureManual забирает текущий текст,
+     * если до этого там был абсолютный уровень.
+     * @param {boolean} captureManual
+     */
+    ManualLayout.prototype._enterSquelchAdd = function(captureManual) {
+        if (captureManual && !this._squelchAddMode) { this._captureManualSquelch(); }
+        this._squelchAddMode = true;
+        if (this._squelchInput) { this._squelchInput.value = this._addSquelchText(); }
+        this._syncSquelchEntry();
+    };
+
+    /**
+     * Поле показывает фиксированный уровень. captureAdd забирает текущую добавку.
+     * @param {boolean} captureAdd
+     */
+    ManualLayout.prototype._enterSquelchManual = function(captureAdd) {
+        if (captureAdd && this._squelchAddMode) { this._captureAddSquelch(); }
+        this._squelchAddMode = false;
+        if (this._squelchInput) { this._squelchInput.value = this._manualSquelchText(); }
+        this._syncSquelchEntry();
+    };
+
+    /** «Авто» — крутилка добавки к шуму и живой порог. «Ручн.» — крутилка уровня. */
+    ManualLayout.prototype._syncSquelchEntry = function() {
+        const auto = this._squelchIsAuto();
         const step = document.getElementById('manual-rx-squelch-step');
         const unit = document.getElementById('manual-rx-squelch-unit');
-        if (step) { step.hidden = auto; }
-        if (unit) { unit.hidden = auto; }
+        if (step) { step.hidden = false; }
+        if (unit) {
+            unit.hidden = false;
+            if (this._squelchAddMode) {
+                unit.textContent = 'дБ';
+            } else {
+                unit.textContent = this._levelOffset !== null ? 'dBm' : 'dBFS';
+            }
+        }
         if (this._squelchNow) { this._squelchNow.hidden = !auto; }
     };
 
@@ -1633,8 +1705,15 @@
      * Шаг поля. fromRepeat отличает автоповтор от click, который браузер
      * присылает следом за отпусканием кнопки и иначе шагнул бы ещё раз.
      */
+    /** В «Авто» у порога свой шаг и предел, ручной уровень ими не режется. */
+    ManualLayout.prototype._specForInput = function(input, spec) {
+        if (input && input.id === 'manual-rx-squelch' && this._squelchAddMode) { return SQUELCH_ADD_SPEC; }
+        return spec;
+    };
+
     ManualLayout.prototype._onStepButton = function(input, spec, dir, fromRepeat) {
         if (!fromRepeat && this._stepRepeated) { return; }
+        spec = this._specForInput(input, spec);
         if (!input || input.disabled || !spec) { return; }
         input.value = stepNumericText(input.value, spec.step * (dir < 0 ? -1 : 1), spec);
         if (typeof input.dispatchEvent === 'function' && typeof Event === 'function') {
@@ -1808,8 +1887,9 @@
 
     /**
      * «Установить» секции «Демодулятор»: профиль, полоса канала, порог и Доплер.
-     * Порог сервер держит в dBFS. На экране он в dBm, если усиление уже известно,
+     * Порог «Ручн.» сервер держит в dBFS. На экране он в dBm, если усиление уже известно,
      * и переводится по этому усилению, а не по ещё не отправленному.
+     * Добавка «Авто» уходит в децибелах, без этого перевода.
      */
     ManualLayout.prototype._applyDemodSettings = function(fromQueue) {
         const ac = (typeof window !== 'undefined') ? window._accessControl : null;
@@ -1826,12 +1906,24 @@
         if (!path || !f || typeof fetch !== 'function') { return; }
 
         const manualHz = Number(f.dopplerHz ? f.dopplerHz.value : 0);
-        let squelch = Number(f.squelch ? f.squelch.value : NaN);
-        if (![manualHz, squelch].every(isFinite)) {
+        const squelchField = Number(f.squelch ? f.squelch.value : NaN);
+        if (![manualHz, squelchField].every(isFinite)) {
             if (ac) { ac.setNotice('Настройки демодулятора не применены: доплер и порог должны быть числами.'); }
             return;
         }
-        if (this._levelOffset !== null) { squelch -= this._levelOffset; }
+        // В «Авто» поле — добавка в дБ, её не переводят в dBm. Уровень «Ручн.» хранится отдельно.
+        let squelchDbfs;
+        let squelchAdd;
+        if (this._squelchAddMode) {
+            squelchAdd = squelchField;
+            squelchDbfs = this._squelchManual;
+        } else {
+            squelchDbfs = squelchField;
+            if (this._levelOffset !== null) { squelchDbfs -= this._levelOffset; }
+            squelchAdd = this._squelchAdd;
+        }
+        if (!isFinite(squelchDbfs)) { squelchDbfs = SQUELCH_MANUAL_DEFAULT; }
+        if (!isFinite(squelchAdd)) { squelchAdd = SQUELCH_ADD_DEFAULT; }
         // Выключенный по умолчанию переключатель ещё не знает сервер. Не гасим им приём.
         const box = document.getElementById('manual-rx-channel-show');
         if (box && !this._demodHydrated && !this._demodToggleDirty) {
@@ -1847,8 +1939,9 @@
             // При «Авто приёме» сервер наводит Offset на пик вспышки — сохраняем его.
             offset_hz: this._autoRx ? Math.round(this._channelOffsetHz || 0) : 0,
             bandwidth_hz: Number(selectedValue(f.bandwidth)),
-            squelch_dbfs: Number(squelch.toFixed(1)),
-            squelch_auto: !!(f.squelchMode && selectedValue(f.squelchMode) === 'auto'),
+            squelch_dbfs: Number(squelchDbfs.toFixed(1)),
+            squelch_add_db: Number(squelchAdd.toFixed(1)),
+            squelch_auto: this._squelchIsAuto(),
             demod: demodId,
             demod_off: this._demodOffForApply(),
             doppler_norad: this._dopplerNorad(),
@@ -1940,6 +2033,7 @@
         const ch = {
             offset_hz: st.offset_hz, bandwidth_hz: st.bandwidth_hz, squelch_dbfs: st.squelch_dbfs,
             squelch_auto: typeof st.squelch_auto === 'boolean' ? st.squelch_auto : null,
+            squelch_add_db: typeof st.squelch_add_db === 'number' ? st.squelch_add_db : null,
             demod: st.demod, demod_off: !!st.demod_off, doppler_norad: st.doppler_norad || 0,
             doppler_auto: typeof st.doppler_auto === 'boolean' ? st.doppler_auto : null,
             doppler_manual_hz: typeof st.doppler_manual_hz === 'number' ? st.doppler_manual_hz : null,
@@ -1961,7 +2055,8 @@
     function channelKey(ch) {
         const sqVal = ch.squelch_auto === true ? '' : ch.squelch_dbfs;
         const sqAuto = ch.squelch_auto === true ? 1 : ch.squelch_auto === false ? 0 : '';
-        return [ch.offset_hz, ch.bandwidth_hz, sqVal, sqAuto, ch.demod, ch.demod_off ? 1 : 0,
+        const sqAdd = typeof ch.squelch_add_db === 'number' && isFinite(ch.squelch_add_db) ? ch.squelch_add_db : '';
+        return [ch.offset_hz, ch.bandwidth_hz, sqVal, sqAuto, sqAdd, ch.demod, ch.demod_off ? 1 : 0,
             ch.doppler_norad || 0, ch.doppler_auto === true ? 1 : ch.doppler_auto === false ? 0 : '',
             ch.doppler_manual_hz, ch.baud || 0].join('|');
     }
@@ -2032,13 +2127,27 @@
             f.dopplerHz.value = String(ch.doppler_manual_hz);
         }
         if (typeof ch.bandwidth_hz === 'number') { selectByValue(f.bandwidth, ch.bandwidth_hz); }
-        if (f.squelchMode && (ch.squelch_auto === true || ch.squelch_auto === false)) {
-            selectByValue(f.squelchMode, ch.squelch_auto ? 'auto' : 'off');
+        if (typeof ch.squelch_add_db === 'number' && isFinite(ch.squelch_add_db)) {
+            this._squelchAdd = ch.squelch_add_db;
         }
-        if (f.squelch && typeof ch.squelch_dbfs === 'number' && ch.squelch_auto !== true) {
-            f.squelch.value = String(Number((ch.squelch_dbfs + (this._levelOffset || 0)).toFixed(1)));
+        if (ch.squelch_auto === true) {
+            if (f.squelchMode) { selectByValue(f.squelchMode, 'auto'); }
+            this._enterSquelchAdd(false);
+        } else if (ch.squelch_auto === false) {
+            if (f.squelchMode) { selectByValue(f.squelchMode, 'off'); }
+            if (typeof ch.squelch_dbfs === 'number' && isFinite(ch.squelch_dbfs)) {
+                this._squelchManual = ch.squelch_dbfs;
+            }
+            this._enterSquelchManual(false);
+        } else if (f.squelch && typeof ch.squelch_dbfs === 'number' && isFinite(ch.squelch_dbfs)) {
+            // Статус без режима оставляет поле уровнем, как раньше.
+            this._squelchManual = ch.squelch_dbfs;
+            this._squelchAddMode = false;
+            f.squelch.value = this._manualSquelchText();
+            this._syncSquelchEntry();
+        } else {
+            this._syncSquelchEntry();
         }
-        this._syncSquelchEntry();
         if (ch.demod && selectByValue(f.demod, ch.demod)) { this._syncEyeFromPipeline(); }
         if (f.baud && typeof ch.baud === 'number' && ch.baud > 0) {
             f.baud.value = String(Math.round(ch.baud));
@@ -2240,15 +2349,15 @@
 
     /**
      * Профиль «Авто»: полоса канала под кадровые профили до 9600 (18 кГц).
-     * Поля залочены — значение ставит код, не оператор.
+     * Полосу и Доплер ставит код. Добавку порога крутит оператор.
      */
     ManualLayout.prototype._prepareAutoChannel = function() {
         const f = this._rxFields;
         if (!f || !f.demod || selectedValue(f.demod) !== 'auto') { return; }
         if (f.bandwidth) { selectByValue(f.bandwidth, '18000'); }
         if (f.squelchMode) { selectByValue(f.squelchMode, 'auto'); }
+        if (!this._squelchAddMode) { this._enterSquelchAdd(true); } else { this._syncSquelchEntry(); }
         if (f.doppler) { selectByValue(f.doppler, 'auto'); }
-        this._syncSquelchEntry();
         this._syncDopplerEntry();
     };
 
@@ -2272,11 +2381,11 @@
             selectByValue(f.demod, 'auto');
             f.demod.disabled = true;
         }
-        // Профиль «Авто»: полосу, порог и Доплер задаёт подбор/hop — руками не крутим.
+        // Профиль «Авто»: полосу и Доплер задаёт подбор. Добавку порога оператор крутит сам.
         const autoProfile = !!(f.demod && selectedValue(f.demod) === 'auto');
         if (autoProfile) {
             this._prepareAutoChannel();
-            ['bandwidth', 'squelchMode', 'squelch', 'doppler', 'dopplerHz', 'applyDemod'].forEach(function(key) {
+            ['bandwidth', 'squelchMode', 'doppler', 'dopplerHz', 'applyDemod'].forEach(function(key) {
                 if (f[key]) { f[key].disabled = true; }
             });
         }
@@ -2287,13 +2396,13 @@
             const id = btn.id || '';
             if (id.indexOf('gain') >= 0) {
                 btn.disabled = rxLocked;
-            } else if (autoProfile && (id.indexOf('squelch') >= 0 || id.indexOf('doppler') >= 0)) {
+            } else if (autoProfile && id.indexOf('doppler') >= 0) {
                 btn.disabled = true;
             } else {
                 btn.disabled = demodLocked;
             }
         }
-        if (rxLocked || autoProfile) { this._stopStepRepeat(); }
+        if (rxLocked) { this._stopStepRepeat(); }
         this._syncDopplerEntry();
         this._renderSweepBar();
         this._renderAutoRx();
@@ -2367,8 +2476,12 @@
             if (this._levelUnits[i]) { this._levelUnits[i].textContent = unit; }
         }
         const sq = this._squelchInput;
-        if (sq && sq.value !== '' && isFinite(Number(sq.value))) {
+        if (sq && !this._squelchAddMode && sq.value !== '' && isFinite(Number(sq.value))) {
             sq.value = String(Number((Number(sq.value) + delta).toFixed(1)));
+        }
+        if (this._squelchAddMode) {
+            const addUnit = document.getElementById('manual-rx-squelch-unit');
+            if (addUnit) { addUnit.textContent = 'дБ'; }
         }
         if (this._streamRange) { this._streamRange = new window.SpectrumStream.AutoRange(); }
         if (this._displaySmooth) { this._displaySmooth.reset(); }
@@ -3037,6 +3150,8 @@
 
     /**
      * Порог шумоподавления в единицах шкалы спектра (dBm при известной калибровке).
+     * Мощность канала переводится в уровень одного бина кадра, иначе линия
+     * оказывается на десятки децибел выше видимого шума.
      * null — статуса ещё нет, линию не рисуем.
      */
     ManualLayout.prototype._squelchDbForSpectrum = function() {
@@ -3044,7 +3159,11 @@
         if (!st || typeof st.squelch_dbfs !== 'number' || !isFinite(st.squelch_dbfs)) {
             return null;
         }
-        return st.squelch_dbfs + (this._levelOffset || 0);
+        const channel = st.squelch_dbfs + (this._levelOffset || 0);
+        const passband = st.passband_hz > 0 ? st.passband_hz : st.bandwidth_hz;
+        const trace = window.SpectrumStream && window.SpectrumStream.squelchTraceDb;
+        if (typeof trace !== 'function') { return channel; }
+        return trace(channel, passband, this._streamSpanHz, this._lastBins);
     };
 
     /**

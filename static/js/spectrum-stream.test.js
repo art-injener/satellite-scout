@@ -21,6 +21,7 @@ global.window = {};
 const {
     SpectrumStream, FrameReader, parseHeader, dbfsToUnit, AutoRange, DisplaySmooth,
     markerReadout, cursorSample, dbmOffset, shiftLevels, zoomView, panView, viewSlice, shiftedSlice,
+    squelchTraceDb,
 } = require('./spectrum-stream.js');
 
 const HEADER = 40;
@@ -66,6 +67,23 @@ const queue = [];
 function test(name, fn) { queue.push([name, fn]); }
 
 // ── dBm at the antenna input ──────────────────────────────────────────
+
+test('squelch line is channel power scaled to one spectrum bin', () => {
+    // 2.048 MS/s, 4096 bins: 500 Hz each. A 15 kHz channel is 14.77 dB above one bin.
+    // Blackman-Harris drops the trace another 5.88 dB (it does not restore window power).
+    const line = squelchTraceDb(-70, 15000, 2048000, 4096);
+    assert.ok(Math.abs(line - (-90.66)) < 0.05, 'line ' + line + ' want about -90.66');
+    // Wider channel pushes the line further down: same channel power is less density.
+    const wide = squelchTraceDb(-70, 48000, 2048000, 4096);
+    assert.ok(wide < line - 4, 'wider passband must sit lower on the per-bin scale');
+});
+
+test('squelch line stays at channel power when the frame geometry is unknown', () => {
+    assert.strictEqual(squelchTraceDb(-70, 0, 2048000, 4096), -70);
+    assert.strictEqual(squelchTraceDb(-70, 15000, 0, 4096), -70);
+    assert.strictEqual(squelchTraceDb(-70, 15000, 2048000, 1), -70);
+    assert.strictEqual(squelchTraceDb(NaN, 15000, 2048000, 4096), null);
+});
 
 test('dbmOffset is calibration minus gain', () => {
     assert.strictEqual(dbmOffset(-40, 0), -40);

@@ -42,6 +42,14 @@ var DemodMaxBandwidthHz = map[string]uint32{"usb": 4_000, "lsb": 4_000, "cw": 1_
 // MaxChannelBaud — верх символьной скорости в настройках канала (бод).
 const MaxChannelBaud = 100_000
 
+// Добавка к шуму полосы в режиме «Авто». Крутилка прибавляет её к оценке,
+// порог равен шуму плюс это число. 0 — порог на уровне шума.
+const (
+	DefaultSquelchAddDB = 6
+	MinSquelchAddDB     = -20
+	MaxSquelchAddDB     = 30
+)
+
 // ChannelSettings — что демодулятор вырезает из полосы приёмника и как принимает:
 // ширина «Полосы канала», порог и демодулятор. Панель держит сдвиг от центра в нуле:
 // слушают частоту приёмника, поправка только Доплером. Поле сдвига остаётся, чтобы
@@ -55,8 +63,12 @@ type ChannelSettings struct {
 	SquelchDBFS float64 `json:"squelch_dbfs"`
 	// SquelchAuto — адаптивный порог по уровню шума в полосе. Без omitempty: ложь
 	// должна доходить до панели, чтобы отличать «Ручн.» от «Авто».
-	SquelchAuto bool   `json:"squelch_auto"`
-	Demod       string `json:"demod"`
+	SquelchAuto bool `json:"squelch_auto"`
+	// SquelchAddDB — децибелы, которые в «Авто» прибавляются к шуму полосы демодулятора.
+	// В «Ручн.» не применяются. 0 — порог равен оценке шума. Без omitempty, чтобы
+	// явный ноль не путать с пропущенным полем: пропуск при разборе тоже даёт 0.
+	SquelchAddDB float64 `json:"squelch_add_db"`
+	Demod        string  `json:"demod"`
 	// Baud — символьная скорость для профилей с гибким baud (сейчас ook), бод.
 	// 0 или нет поля — дефолт профиля. У профилей с фиксированной скоростью поле не используется.
 	Baud float64 `json:"baud,omitempty"`
@@ -77,7 +89,8 @@ type ChannelSettings struct {
 func DefaultChannelSettings() ChannelSettings {
 	return ChannelSettings{
 		OffsetHz: 0, BandwidthHz: 15_000, SquelchDBFS: -90, SquelchAuto: true,
-		Demod: "afsk1200", DemodOff: true, DopplerAuto: true,
+		SquelchAddDB: DefaultSquelchAddDB,
+		Demod:        "afsk1200", DemodOff: true, DopplerAuto: true,
 	}
 }
 
@@ -111,6 +124,11 @@ func (c ChannelSettings) Validate(sampleRate uint32) error {
 	}
 	if math.IsNaN(c.SquelchDBFS) || math.IsInf(c.SquelchDBFS, 0) || c.SquelchDBFS > 0 {
 		return fmt.Errorf("%w: squelch %v dBFS must be finite and not above 0", ErrInvalidChannel, c.SquelchDBFS)
+	}
+	if math.IsNaN(c.SquelchAddDB) || math.IsInf(c.SquelchAddDB, 0) ||
+		c.SquelchAddDB < MinSquelchAddDB || c.SquelchAddDB > MaxSquelchAddDB {
+		return fmt.Errorf("%w: squelch add %v dB must be finite and inside [%g, %g]",
+			ErrInvalidChannel, c.SquelchAddDB, float64(MinSquelchAddDB), float64(MaxSquelchAddDB))
 	}
 	if !slices.Contains(Demods, c.Demod) {
 		return fmt.Errorf("%w: unknown demod %q", ErrInvalidChannel, c.Demod)

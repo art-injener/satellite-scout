@@ -24,6 +24,9 @@ func TestDefaultChannelSettings_ValidAndAFSK(t *testing.T) {
 	if !c.SquelchAuto {
 		t.Error("squelch starts in adaptive auto mode")
 	}
+	if c.SquelchAddDB != DefaultSquelchAddDB {
+		t.Errorf("squelch add=%v, want %v dB", c.SquelchAddDB, DefaultSquelchAddDB)
+	}
 	if !slices.Contains(Demods, c.Demod) {
 		t.Errorf("default demod %q not in Demods", c.Demod)
 	}
@@ -50,6 +53,13 @@ func TestChannelSettings_Validate(t *testing.T) {
 		{"squelch above full scale", func(c *ChannelSettings) { c.SquelchDBFS = 0.5 }, true},
 		{"squelch NaN", func(c *ChannelSettings) { c.SquelchDBFS = math.NaN() }, true},
 		{"squelch -Inf", func(c *ChannelSettings) { c.SquelchDBFS = math.Inf(-1) }, true},
+		{"squelch add zero", func(c *ChannelSettings) { c.SquelchAddDB = 0 }, false},
+		{"squelch add default", func(c *ChannelSettings) { c.SquelchAddDB = DefaultSquelchAddDB }, false},
+		{"squelch add at upper", func(c *ChannelSettings) { c.SquelchAddDB = MaxSquelchAddDB }, false},
+		{"squelch add above upper", func(c *ChannelSettings) { c.SquelchAddDB = MaxSquelchAddDB + 1 }, true},
+		{"squelch add at lower", func(c *ChannelSettings) { c.SquelchAddDB = MinSquelchAddDB }, false},
+		{"squelch add below lower", func(c *ChannelSettings) { c.SquelchAddDB = MinSquelchAddDB - 1 }, true},
+		{"squelch add NaN", func(c *ChannelSettings) { c.SquelchAddDB = math.NaN() }, true},
 		{"empty demod", func(c *ChannelSettings) { c.Demod = "" }, true},
 		{"unknown demod", func(c *ChannelSettings) { c.Demod = "lora" }, true},
 		{"voice FM", func(c *ChannelSettings) { c.Demod = "fm" }, false},

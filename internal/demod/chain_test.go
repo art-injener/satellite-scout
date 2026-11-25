@@ -1014,11 +1014,12 @@ func TestChain_AdaptiveSquelchStaysClosedOnNoiseAndOpensOnSignal(t *testing.T) {
 
 	c := NewChain()
 	s := sdr.ChannelSettings{
-		OffsetHz:    testOffset,
-		BandwidthHz: 15_000,
-		SquelchDBFS: -90,
-		SquelchAuto: true,
-		Demod:       "afsk1200",
+		OffsetHz:     testOffset,
+		BandwidthHz:  15_000,
+		SquelchDBFS:  -90,
+		SquelchAuto:  true,
+		SquelchAddDB: 3,
+		Demod:        "afsk1200",
 	}
 	noiseFrames := toFrames(makeNoise(int(testRate/2)), testRate, sdr.DefaultBlockSize, 0)
 	for _, f := range noiseFrames {
@@ -1058,5 +1059,33 @@ func TestChain_AdaptiveSquelchStaysClosedOnNoiseAndOpensOnSignal(t *testing.T) {
 	}
 	if len(pkts) == 0 {
 		t.Fatal("expected decoded AFSK packet under adaptive squelch")
+	}
+}
+
+func TestChain_SquelchAddRaisesAdaptiveThreshold(t *testing.T) {
+	rng := rand.New(rand.NewPCG(11, 22))
+	sigma := math.Sqrt(math.Pow(10, -55.0/10.0) / 2)
+	noise := make([]complex64, int(testRate/2))
+	for i := range noise {
+		noise[i] = complex(float32(rng.NormFloat64()*sigma), float32(rng.NormFloat64()*sigma))
+	}
+	frames := toFrames(noise, testRate, sdr.DefaultBlockSize, 0)
+	threshold := func(add float64) float64 {
+		c := NewChain()
+		s := sdr.ChannelSettings{
+			OffsetHz: testOffset, BandwidthHz: 15_000, SquelchDBFS: -90,
+			SquelchAuto: true, SquelchAddDB: add, Demod: "afsk1200",
+		}
+		for _, f := range frames {
+			samples := make([]complex64, len(f.Samples))
+			copy(samples, f.Samples)
+			f.Samples = samples
+			c.Process(f, s)
+		}
+		return c.Status().SquelchDBFS
+	}
+	base, raised := threshold(0), threshold(12)
+	if math.Abs((raised-base)-12) > 0.05 {
+		t.Fatalf("add 0 threshold %.2f, add 12 threshold %.2f, want +12 dB", base, raised)
 	}
 }

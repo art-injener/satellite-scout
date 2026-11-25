@@ -674,20 +674,20 @@
                 </label>
                 <div class="ml-rx-panel__field">
                     <label class="ml-rx-panel__label" for="manual-rx-squelch-mode"
-                           title="Уровень, ниже которого звук и демодуляция закрыты. Авто — адаптивно по шуму в полосе">Порог</label>
+                           title="Уровень, ниже которого звук и демодуляция закрыты. Авто — шум полосы плюс добавка">Порог</label>
                     <div class="ml-rx-panel__controls">
                         <select class="ml-rx-panel__sel" id="manual-rx-squelch-mode"
-                                title="Авто — адаптивно по шуму. Ручн. — фиксированный уровень">
+                                title="Авто — к шуму полосы прибавляется это число. Ручн. — фиксированный уровень">
                             <option value="off">Ручн.</option>
                             <option value="auto" selected>Авто</option>
                         </select>
-                        <span class="ml-rx-stepper" id="manual-rx-squelch-step" hidden>
+                        <span class="ml-rx-stepper" id="manual-rx-squelch-step">
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-squelch-dec" aria-label="Меньше">−</button>
                             <input class="ml-rx-panel__input" id="manual-rx-squelch" type="text" inputmode="decimal"
-                                   autocomplete="off" spellcheck="false" value="-90">
+                                   autocomplete="off" spellcheck="false" value="6">
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-squelch-inc" aria-label="Больше">+</button>
                         </span>
-                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit" hidden>dBFS</span>
+                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit">дБ</span>
                         <span class="ml-rx-panel__unit" id="manual-rx-squelch-now" title="Текущий адаптивный порог"></span>
                     </div>
                 </div>

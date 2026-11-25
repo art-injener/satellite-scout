@@ -432,11 +432,12 @@ func TestAutoPicker_AlwaysUsesAdaptiveSquelch(t *testing.T) {
 	picker := NewAutoPicker()
 	picker.Configure("auto-noise", []string{"afsk1200", "fsk9600_g3ruh"})
 	cs := sdr.ChannelSettings{
-		OffsetHz:    testOffset,
-		BandwidthHz: 15_000,
-		SquelchDBFS: -90,
-		SquelchAuto: false,
-		Demod:       DemodAuto,
+		OffsetHz:     testOffset,
+		BandwidthHz:  15_000,
+		SquelchDBFS:  -90,
+		SquelchAuto:  false,
+		SquelchAddDB: 3,
+		Demod:        DemodAuto,
 	}
 	var st Status
 	for _, f := range toFrames(noise, testRate, sdr.DefaultBlockSize, 0) {

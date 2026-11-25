@@ -550,7 +550,7 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	ch := c.fine.Process(coarseOut)
 	if s.SquelchAuto {
 		noiseDB := c.adaptiveNoise.EstimateChannelNoiseDBFS(coarseOut, c.midRate, c.status.PassbandHz)
-		c.squelch.ThresholdDBFS = noiseDB + dsp.AdaptiveSquelchMarginDB
+		c.squelch.ThresholdDBFS = noiseDB + s.SquelchAddDB
 		c.squelch.HysteresisDB = dsp.AdaptiveSquelchHysteresisDB
 	} else {
 		c.squelch.ThresholdDBFS = s.SquelchDBFS
@@ -785,7 +785,7 @@ func (fe *channelFrontend) process(
 		ch32 = fe.fine32.Process(coarseOut)
 	}
 	noiseDB := fe.adaptiveNoise.EstimateChannelNoiseDBFS(coarseOut, fe.midRate, fe.passbandHz)
-	fe.squelch.ThresholdDBFS = noiseDB + dsp.AdaptiveSquelchMarginDB
+	fe.squelch.ThresholdDBFS = noiseDB + s.SquelchAddDB
 	open := fe.squelch.Open(ch64)
 	return frontendResult{
 		coarse:        coarseOut,

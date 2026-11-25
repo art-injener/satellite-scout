@@ -333,7 +333,7 @@ func TestService_StatusWhileStreamingAndOnStop(t *testing.T) {
 // Other clients follow the channel by the status: it carries all channel settings.
 func TestStatusEvent_CarriesChannelSettings(t *testing.T) {
 	cs := sdr.ChannelSettings{OffsetHz: -40_000, BandwidthHz: 18_000, SquelchDBFS: -85, Demod: DemodSSTV}
-	data, err := json.Marshal(statusEvent("radio_path_0", true, 436_460_000, cs, Status{Demod: DemodSSTV}))
+	data, err := json.Marshal(statusEvent("radio_path_0", true, 436_460_000, cs, Status{Demod: DemodSSTV, PassbandHz: 2800}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -341,7 +341,10 @@ func TestStatusEvent_CarriesChannelSettings(t *testing.T) {
 	if err := json.Unmarshal(data, &got); err != nil {
 		t.Fatal(err)
 	}
-	for k, want := range map[string]any{"offset_hz": -40_000.0, "bandwidth_hz": 18_000.0, "squelch_dbfs": -85.0, "demod": "sstv"} {
+	for k, want := range map[string]any{
+		"offset_hz": -40_000.0, "bandwidth_hz": 18_000.0, "passband_hz": 2800.0,
+		"squelch_dbfs": -85.0, "demod": "sstv",
+	} {
 		if got[k] != want {
 			t.Errorf("%s=%v, want %v", k, got[k], want)
 		}

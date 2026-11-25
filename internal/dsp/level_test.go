@@ -241,16 +241,51 @@ func TestAdaptiveNoise_WhiteNoiseChannelEstimate(t *testing.T) {
 	}
 }
 
-func TestAdaptiveNoise_RobustToContinuousSignalInChannel(t *testing.T) {
+func TestAdaptiveNoise_IgnoresContinuousSignalOutsidePassband(t *testing.T) {
+	var est AdaptiveNoise
+	const midRate = 64_000.0
+	const passband = 12_000.0
+	// -60 dBFS over 64 kHz is -67.3 dBFS inside the 12 kHz demodulator.
+	want := -60 + 10*math.Log10(passband/midRate)
+	coarse := makeWhiteNoiseC64(-60, 4)
+	// Strong continuous energy fills the coarse band outside the demodulator.
+	// The quiet gap is only the 12 kHz channel, less than 30% of the coarse
+	// flat region, so a percentile of that whole region sits on the interferer.
+	const toneDB = -15.0
+	var tones int
+	for f := -30_000.0; f <= 30_000.0; f += 500 {
+		if math.Abs(f) <= passband/2 {
+			continue
+		}
+		tones++
+	}
+	sigAmp := math.Pow(10, toneDB/20) / math.Sqrt(float64(tones))
+	for f := -30_000.0; f <= 30_000.0; f += 500 {
+		if math.Abs(f) <= passband/2 {
+			continue
+		}
+		for i := range coarse {
+			ph := 2 * math.Pi * f * float64(i) / midRate
+			coarse[i] += complex(float32(sigAmp*math.Cos(ph)), float32(sigAmp*math.Sin(ph)))
+		}
+	}
+	got := est.EstimateChannelNoiseDBFS(coarse, midRate, passband)
+	if math.Abs(got-want) > 3 {
+		t.Fatalf("noise with continuous signal outside the passband = %.2f dBFS, want %.2f ± 3 dBFS", got, want)
+	}
+}
+
+func TestAdaptiveNoise_RobustToTonesInsidePassband(t *testing.T) {
 	var est AdaptiveNoise
 	const midRate = 64_000.0
 	const passband = 15_000.0
 	// -60 dBFS white noise over 64 kHz -> -66.3 dBFS in 15 kHz channel.
 	wantNoise := -60 + 10*math.Log10(passband/midRate)
 	coarse := makeWhiteNoiseC64(-60, 2)
-	// Add a strong -20 dBFS continuous multi-tone signal filling the 15 kHz channel (-7..+7 kHz).
-	sigAmp := math.Pow(10, -20.0/20.0) / math.Sqrt(15)
-	for f := -7000.0; f <= 7000.0; f += 1000.0 {
+	// Two strong tones inside the demodulator. They must not set the noise floor:
+	// most bins of the passband stay at the noise.
+	sigAmp := math.Pow(10, -20.0/20.0) / math.Sqrt(2)
+	for _, f := range []float64{-2000, 2500} {
 		for i := range coarse {
 			ph := 2 * math.Pi * f * float64(i) / midRate
 			coarse[i] += complex(float32(sigAmp*math.Cos(ph)), float32(sigAmp*math.Sin(ph)))
@@ -258,7 +293,7 @@ func TestAdaptiveNoise_RobustToContinuousSignalInChannel(t *testing.T) {
 	}
 	got := est.EstimateChannelNoiseDBFS(coarse, midRate, passband)
 	if math.Abs(got-wantNoise) > 2.5 {
-		t.Fatalf("noise with strong continuous signal = %.2f dBFS, want %.2f ± 2.5 dBFS", got, wantNoise)
+		t.Fatalf("noise with tones inside the passband = %.2f dBFS, want %.2f ± 2.5 dBFS", got, wantNoise)
 	}
 }
 

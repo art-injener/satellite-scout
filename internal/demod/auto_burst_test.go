@@ -55,10 +55,11 @@ func TestAutoPicker_BurstBufferDecodesOffCenterFSK9600Geoscan(t *testing.T) {
 		Initial: []string{"fsk9600_geoscan", "fsk9600_g3ruh"},
 	})
 	cs := sdr.ChannelSettings{
-		OffsetHz:    testOffset - 8_500,
-		BandwidthHz: sdr.MaxChannelBandwidthHz,
-		SquelchDBFS: -90,
-		Demod:       DemodAuto,
+		OffsetHz:     testOffset - 8_500,
+		BandwidthHz:  sdr.MaxChannelBandwidthHz,
+		SquelchDBFS:  -90,
+		SquelchAddDB: sdr.DefaultSquelchAddDB,
+		Demod:        DemodAuto,
 	}
 	var got []taggedPacket
 	var carrierHz float64
@@ -94,10 +95,11 @@ func TestAutoPicker_BurstBufferDecodesOffCenterBPSK1200(t *testing.T) {
 		Initial: []string{"bpsk1200"},
 	})
 	cs := sdr.ChannelSettings{
-		OffsetHz:    testOffset + 3_000,
-		BandwidthHz: 15_000,
-		SquelchDBFS: -90,
-		Demod:       DemodAuto,
+		OffsetHz:     testOffset + 3_000,
+		BandwidthHz:  15_000,
+		SquelchDBFS:  -90,
+		SquelchAddDB: sdr.DefaultSquelchAddDB,
+		Demod:        DemodAuto,
 	}
 	var got []taggedPacket
 	for _, f := range toFrames(full, testRate, sdr.DefaultBlockSize, 0) {
