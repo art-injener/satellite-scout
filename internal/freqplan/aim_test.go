@@ -53,6 +53,9 @@ func TestDecideHoldAim_EntryFromRememberedThenLiveCorrection(t *testing.T) {
 	if !dec.Apply || dec.OffsetHz != 8_000 {
 		t.Fatalf("entry %+v, want apply offset 8000", dec)
 	}
+	if dec.Reason != AimReasonApplyEntry || dec.Source != AimSourceRemembered {
+		t.Fatalf("entry reason/source = %q/%q", dec.Reason, dec.Source)
+	}
 	if st.Phase != AimEntry || st.AimedAtHz != 437_008_000 {
 		t.Fatalf("state after entry %+v", st)
 	}
@@ -62,12 +65,18 @@ func TestDecideHoldAim_EntryFromRememberedThenLiveCorrection(t *testing.T) {
 	if dec.Apply {
 		t.Fatalf("second call must not re-aim every tick: %+v", dec)
 	}
+	if dec.Reason != AimReasonWaitLive {
+		t.Fatalf("reason = %q, want wait_live", dec.Reason)
+	}
 
 	// Live ушёл сразу в пробе — правим без ожидания конца пробы (короткий импульс).
 	live := []Sighting{{CenterHz: 437_012_000, SNRDB: 15, LastSeenMs: now + 1_000}}
 	dec, st = DecideHoldAim(st, lo, remembered, live, now+1_000, 0)
 	if !dec.Apply || dec.OffsetHz != 12_000 {
 		t.Fatalf("live %+v, want apply offset 12000", dec)
+	}
+	if dec.Reason != AimReasonApplyLive || dec.Source != AimSourceLive {
+		t.Fatalf("live reason/source = %q/%q", dec.Reason, dec.Source)
 	}
 	if st.Phase != AimLive {
 		t.Fatalf("phase %v, want AimLive", st.Phase)
@@ -77,6 +86,9 @@ func TestDecideHoldAim_EntryFromRememberedThenLiveCorrection(t *testing.T) {
 	dec, st = DecideHoldAim(st, lo, nil, live, now+2_000, 0)
 	if dec.Apply || st.Phase != AimLive {
 		t.Fatalf("after live must stay quiet: dec=%+v st=%+v", dec, st)
+	}
+	if dec.Reason != AimReasonPhaseDone {
+		t.Fatalf("reason = %q, want phase_done", dec.Reason)
 	}
 }
 
@@ -102,6 +114,9 @@ func TestDecideHoldAim_OperatorLockStopsAim(t *testing.T) {
 	if dec.Apply {
 		t.Fatalf("locked must not aim: %+v", dec)
 	}
+	if dec.Reason != AimReasonOperatorLocked {
+		t.Fatalf("reason = %q, want operator_locked", dec.Reason)
+	}
 	if !st.OperatorLocked {
 		t.Fatal("lock must stick")
 	}
@@ -115,6 +130,9 @@ func TestDecideHoldAim_SkipsTinyDelta(t *testing.T) {
 	dec, st := DecideHoldAim(st, lo, sights, nil, now, 0)
 	if dec.Apply {
 		t.Fatalf("tiny delta must not apply: %+v", dec)
+	}
+	if dec.Reason != AimReasonDeltaSmall {
+		t.Fatalf("reason = %q, want delta_small", dec.Reason)
 	}
 	if st.Phase != AimEntry {
 		t.Fatalf("phase %v, want AimEntry after tiny entry", st.Phase)
@@ -132,7 +150,20 @@ func TestDecideHoldAim_LiveWithinDeltaClosesWithoutApply(t *testing.T) {
 	if dec.Apply {
 		t.Fatalf("stable live must not apply: %+v", dec)
 	}
+	if dec.Reason != AimReasonStableLive {
+		t.Fatalf("reason = %q, want stable_live", dec.Reason)
+	}
 	if st.Phase != AimLive {
 		t.Fatalf("phase %v, want AimLive", st.Phase)
+	}
+}
+
+func TestDecideHoldAim_NoSightReason(t *testing.T) {
+	const lo uint64 = 434_000_000
+	const now int64 = 1_000_000
+	st := ResetAimState(now, lo)
+	dec, _ := DecideHoldAim(st, lo, nil, nil, now, 0)
+	if dec.Apply || dec.Reason != AimReasonNoSight {
+		t.Fatalf("got %+v, want no_sight", dec)
 	}
 }

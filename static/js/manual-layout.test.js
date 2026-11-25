@@ -444,9 +444,11 @@ _domNodes.set('manual-rx-marker-level', makeDomElement('manual-rx-marker-level')
 _domNodes.set('manual-rx-marker-bar', makeDomElement('manual-rx-marker-bar'));
 _domNodes.set('manual-rx-marker-unit', makeDomElement('manual-rx-marker-unit', { textContent: 'dBFS' }));
 _domNodes.set('manual-rx-squelch', makeDomElement('manual-rx-squelch', { value: '-90' }));
+_domNodes.set('manual-rx-squelch-step', makeDomElement('manual-rx-squelch-step'));
 _domNodes.set('manual-rx-squelch-dec', makeDomElement('manual-rx-squelch-dec'));
 _domNodes.set('manual-rx-squelch-inc', makeDomElement('manual-rx-squelch-inc'));
 _domNodes.set('manual-rx-squelch-unit', makeDomElement('manual-rx-squelch-unit', { textContent: 'dBFS' }));
+_domNodes.set('manual-rx-squelch-now', makeDomElement('manual-rx-squelch-now'));
 _domNodes.set('manual-rx-gain', makeDomElement('manual-rx-gain', { value: '32' }));
 _domNodes.set('manual-rx-gain-dec', makeDomElement('manual-rx-gain-dec'));
 _domNodes.set('manual-rx-gain-inc', makeDomElement('manual-rx-gain-inc'));
@@ -621,6 +623,12 @@ dopplerSel.addEventListener = pipelineSel.addEventListener;
 dopplerSel.removeEventListener = pipelineSel.removeEventListener;
 _domNodes.set('manual-rx-doppler-mode', dopplerSel);
 _domNodes.set('manual-rx-doppler-now', makeDomElement('manual-rx-doppler-now'));
+const squelchModeSel = makeSelect('manual-rx-squelch-mode', ['Ручн.', 'Авто'], 1);
+['off', 'auto'].forEach((v, i) => { squelchModeSel.options[i].value = v; });
+squelchModeSel._listeners = {};
+squelchModeSel.addEventListener = pipelineSel.addEventListener;
+squelchModeSel.removeEventListener = pipelineSel.removeEventListener;
+_domNodes.set('manual-rx-squelch-mode', squelchModeSel);
 _domNodes.set('manual-rx-audio', makeDomElement('manual-rx-audio', { _attrs: { 'aria-pressed': 'false' } }));
 _domNodes.set('manual-rx-volume', makeDomElement('manual-rx-volume', { value: '80' }));
 // AudioPlayer mock: what the layout asks the player to do
@@ -3533,6 +3541,7 @@ test('demodulator «Установить» sends only the channel', () => {
             offset_hz: 0,
             bandwidth_hz: 18000,
             squelch_dbfs: -75,
+            squelch_auto: true,
             demod: 'afsk1200',
             demod_off: false,
             doppler_norad: 0,
@@ -3541,6 +3550,46 @@ test('demodulator «Установить» sends only the channel', () => {
         });
         m.destroy();
     });
+});
+
+test('squelch mode toggles stepper and sends squelch_auto flag', () => {
+    withStation({}, () => withDemodEvents((emit) => {
+        const m = new ManualLayout(makeStateManager());
+        try {
+            m.activate();
+            fillRx({ gain: 28, agc: false, offset: 0, bwIndex: 2, squelch: -90, demodIndex: 1 });
+            assert.strictEqual(squelchModeSel.selectedIndex, 1, 'squelch starts on Auto');
+            assert.strictEqual(_domNodes.get('manual-rx-squelch-step').hidden, true);
+            assert.strictEqual(_domNodes.get('manual-rx-squelch-now').hidden, false);
+
+            // Adaptive status updates live display and spectrum line without rewriting manual input.
+            emit('demod_status', {
+                radio_path: 'radio_path_1', active: true, demod: 'afsk1200',
+                offset_hz: 0, bandwidth_hz: 15000, squelch_dbfs: -61.4, squelch_auto: true,
+            });
+            assert.strictEqual(_domNodes.get('manual-rx-squelch-now').textContent, '−61 dBFS');
+            assert.strictEqual(_domNodes.get('manual-rx-squelch').value, '-90');
+
+            // Switching to manual reveals stepper and posts squelch_auto=false.
+            squelchModeSel.selectedIndex = 0;
+            fire(squelchModeSel, 'change');
+            assert.strictEqual(_domNodes.get('manual-rx-squelch-step').hidden, false);
+            assert.strictEqual(_domNodes.get('manual-rx-squelch-now').hidden, true);
+            const calls = channelCalls();
+            assert.strictEqual(calls[calls.length - 1].body.squelch_auto, false);
+
+            // Auto demod profile forces squelch back to Auto and locks selector.
+            pipelineSel.selectedIndex = 0; // auto
+            fire(pipelineSel, 'change');
+            assert.strictEqual(squelchModeSel.selectedIndex, 1);
+            assert.strictEqual(squelchModeSel.disabled, true);
+        } finally {
+            squelchModeSel.selectedIndex = 1;
+            squelchModeSel.disabled = false;
+            pipelineSel.selectedIndex = 3;
+            m.destroy();
+        }
+    }));
 });
 
 const TUNE_TX = { freqMHz: 436.55, label: 'CAS-5A FM', modulation: 'FM', noradId: 54684, active: true };

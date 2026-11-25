@@ -794,3 +794,19 @@ func TestClassify_AMVoiceAndDemod(t *testing.T) {
 		}
 	}
 }
+
+func TestClassify_ConstantEnvelopeUnknownNotFM(t *testing.T) {
+	// Smooth 4 Hz triangle frequency sweep (±3.5 kHz): constant envelope, reversing slope
+	// (not LFM), uniform per-frame variance (not speech), no clock in [50..fmax] — hits constant() default.
+	n := int(testRate / 2)
+	audio := make([]float32, n)
+	for i := range audio {
+		ph := math.Mod(float64(i)*4/testRate, 1)
+		audio[i] = float32(2*math.Abs(2*ph-1) - 1)
+	}
+	res := Classify(noisy(fmAudio(audio, 3500), 25, 12_000, 99), testRate)
+	if res.Modulation != ModUnknown {
+		t.Fatalf("unidentified constant-envelope signal: got %q, want %q (why: %s)",
+			res.Modulation, ModUnknown, res.Why)
+	}
+}

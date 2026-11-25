@@ -726,7 +726,10 @@ func (a *analysis) constant(k float64) Result {
 			Why: "огибающая постоянна, такты " + num(clocked, 0) + ", но поток не держится",
 		}
 	}
-	return a.result(ModFM, 0.5, p, "огибающая постоянна, частота меняется плавно")
+	return Result{
+		Modulation: ModUnknown, Confidence: 0.3, Params: p,
+		Why: "огибающая постоянна, но модуляция не подтверждена",
+	}
 }
 
 // sstvToneShare — доля энергии спектра мгновенной частоты в 1200…2300 Гц (яркость SSTV).

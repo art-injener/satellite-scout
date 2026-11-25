@@ -334,6 +334,8 @@ type Status struct {
 	Demod        string
 	Supported    bool    // демодулятор реализован
 	LevelDBFS    float32 // уровень в полосе канала за последний блок
+	SquelchDBFS  float64 // действующий порог шумоподавления, dBFS
+	SquelchAuto  bool    // порог рассчитан адаптивно по шуму
 	SquelchOpen  bool
 	Good, Bad    int    // кадры с верной FCS и отрезки, не прошедшие её
 	LastPacketMs uint64 // время последнего кадра; 0 — кадров не было
@@ -468,16 +470,18 @@ func (n *channelNoise) snrDB(ch []complex64, rate, passbandHz float64) float32 {
 // Не потокобезопасна: работает в горутине потока.
 type Chain struct {
 	rate      uint32
+	midRate   float64 // частота отсчётов после грубого фильтра
 	outRate   float64 // частота отсчётов канала на входе демодулятора
 	offsetHz  int64
 	bandwidth uint32
 	demodName string
 	baud      float64 // ChannelSettings.Baud; учитывается профилями с newDemodBaud
 
-	coarse, fine *dsp.XlatingFIR
-	demod        lineDemod
-	squelch      dsp.Squelch
-	deframer     deframer
+	coarse, fine  *dsp.XlatingFIR
+	demod         lineDemod
+	squelch       dsp.Squelch
+	adaptiveNoise dsp.AdaptiveNoise
+	deframer      deframer
 
 	status Status
 	levels []byte
@@ -516,9 +520,11 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 		return nil
 	}
 	if f.CenterHz != c.centerHz {
-		// Другая частота приёмника — другой передатчик: картинка в приёме бросается.
+		// Другая частота приёмника — другой передатчик: картинка в приёме бросается,
+		// сглаженный шум сбрасывается для мгновенной подстройки на новом участке.
 		// Mid-join выключен: тот же IQ в тесте/срыве LO не должен сразу стать новым кадром.
 		c.centerHz = f.CenterHz
+		c.adaptiveNoise.Reset()
 		if c.picRx != nil && p.newPictures != nil && s.Demod == c.demodName {
 			c.picRx = newSSTVRxVISOnly(c.outRate)
 			c.status.Picture = nil
@@ -530,6 +536,7 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	} else if s.OffsetHz != c.offsetHz {
 		// Смена сдвига канала выполняется плавно через NCO без пересборки фильтров и модема.
 		c.offsetHz = s.OffsetHz
+		c.adaptiveNoise.Reset()
 		if c.picRx != nil && p.newPictures != nil {
 			// Перестройка канала посреди SSTV означает другой передатчик: картинка сбрасывается.
 			c.picRx = newSSTVRxVISOnly(c.outRate)
@@ -539,8 +546,18 @@ func (c *Chain) Process(f sdr.IQFrame, s sdr.ChannelSettings) []Packet {
 	// Сдвиг канала плюс Доплер без пересборки фильтров: фаза не рвётся.
 	c.coarse.SetShift(float64(s.OffsetHz) + c.dopplerHz)
 
-	c.squelch.ThresholdDBFS = s.SquelchDBFS
-	ch := c.fine.Process(c.coarse.Process(f.Samples))
+	coarseOut := c.coarse.Process(f.Samples)
+	ch := c.fine.Process(coarseOut)
+	if s.SquelchAuto {
+		noiseDB := c.adaptiveNoise.EstimateChannelNoiseDBFS(coarseOut, c.midRate, c.status.PassbandHz)
+		c.squelch.ThresholdDBFS = noiseDB + dsp.AdaptiveSquelchMarginDB
+		c.squelch.HysteresisDB = dsp.AdaptiveSquelchHysteresisDB
+	} else {
+		c.squelch.ThresholdDBFS = s.SquelchDBFS
+		c.squelch.HysteresisDB = 0
+	}
+	c.status.SquelchAuto = s.SquelchAuto
+	c.status.SquelchDBFS = c.squelch.ThresholdDBFS
 	c.status.SquelchOpen = c.squelch.Open(ch)
 	c.status.LevelDBFS = c.squelch.LevelDBFS()
 	c.pictures = c.pictures[:0]
@@ -693,19 +710,22 @@ type channelFrontend struct {
 	bandwidth  uint32
 	midRate    float64
 	passbandHz float64
+	centerHz   uint64
+	offsetHz   int64
 
 	coarse *dsp.XlatingFIR
 	fine64 *dsp.XlatingFIR
 	fine32 *dsp.XlatingFIR
 
-	squelch dsp.Squelch
-	noise   channelNoise
-	prevCh  complex64
+	squelch       dsp.Squelch
+	adaptiveNoise dsp.AdaptiveNoise
+	noise         channelNoise
+	prevCh        complex64
 }
 
 // build пересобирает фильтры фронтенда при первом блоке или смене частоты дискретизации и полосы.
 func (fe *channelFrontend) build(rate uint32, offsetHz int64, bandwidth uint32) {
-	fe.rate, fe.bandwidth = rate, bandwidth
+	fe.rate, fe.bandwidth, fe.offsetHz = rate, bandwidth, offsetHz
 	fs := float64(rate)
 	mid := fs / float64(max(1, int(math.Round(fs/midRateHz))))
 	decim := int(math.Round(fs / mid))
@@ -722,19 +742,24 @@ func (fe *channelFrontend) build(rate uint32, offsetHz int64, bandwidth uint32) 
 	fe.midRate = mid
 	fe.passbandHz = 2 * cutoff
 	fe.squelch.HoldSamples = int(squelchHold.Seconds() * mid)
+	fe.squelch.HysteresisDB = dsp.AdaptiveSquelchHysteresisDB
+	fe.squelch.PeakWindow = dsp.SquelchPeakWindow(mid, fe.passbandHz)
+	fe.adaptiveNoise.Reset()
 	fe.prevCh = 0
 }
 
 type frontendResult struct {
-	coarse    []complex64 // выход грубого фильтра на midRate: вход точных фильтров голоса
-	ch64      []complex64
-	ch32      []complex64
-	open      bool
-	above     bool
-	levelDBFS float32
+	coarse        []complex64 // выход грубого фильтра на midRate (64 кГц)
+	ch64          []complex64
+	ch32          []complex64
+	open          bool
+	above         bool
+	levelDBFS     float32
+	thresholdDBFS float64
 }
 
 // process прогоняет блок IQ через общий фронтенд ровно один раз.
+// В режиме «Авто» порог всегда адаптивный по спектру грубого выхода (64 кГц).
 func (fe *channelFrontend) process(
 	f sdr.IQFrame,
 	s sdr.ChannelSettings,
@@ -746,6 +771,10 @@ func (fe *channelFrontend) process(
 	}
 	if fe.coarse == nil || f.SampleRate != fe.rate || s.BandwidthHz != fe.bandwidth {
 		fe.build(f.SampleRate, s.OffsetHz, s.BandwidthHz)
+		fe.centerHz = f.CenterHz
+	} else if f.CenterHz != fe.centerHz || s.OffsetHz != fe.offsetHz {
+		fe.centerHz, fe.offsetHz = f.CenterHz, s.OffsetHz
+		fe.adaptiveNoise.Reset()
 	}
 	fe.coarse.SetShift(float64(s.OffsetHz) + dopplerHz)
 
@@ -755,15 +784,17 @@ func (fe *channelFrontend) process(
 	if need32 {
 		ch32 = fe.fine32.Process(coarseOut)
 	}
-	fe.squelch.ThresholdDBFS = s.SquelchDBFS
+	noiseDB := fe.adaptiveNoise.EstimateChannelNoiseDBFS(coarseOut, fe.midRate, fe.passbandHz)
+	fe.squelch.ThresholdDBFS = noiseDB + dsp.AdaptiveSquelchMarginDB
 	open := fe.squelch.Open(ch64)
 	return frontendResult{
-		coarse:    coarseOut,
-		ch64:      ch64,
-		ch32:      ch32,
-		open:      open,
-		above:     fe.squelch.AboveThreshold(),
-		levelDBFS: fe.squelch.LevelDBFS(),
+		coarse:        coarseOut,
+		ch64:          ch64,
+		ch32:          ch32,
+		open:          open,
+		above:         fe.squelch.AboveThreshold(),
+		levelDBFS:     fe.squelch.LevelDBFS(),
+		thresholdDBFS: fe.squelch.ThresholdDBFS,
 	}
 }
 
@@ -857,7 +888,9 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 	c.fine, cutoff = newFineFilter(p, mid, bandwidth)
 	beatHz := p.toneHz + p.sideband*(ssbLowHz+cutoff)
 
+	c.midRate = mid
 	c.outRate = mid / float64(p.fineDecim)
+	c.adaptiveNoise.Reset()
 	c.audioRx = nil
 	switch {
 	case p.newAudio != nil:
@@ -895,6 +928,7 @@ func (c *Chain) build(rate uint32, offsetHz int64, bandwidth uint32, demod strin
 		}
 	}
 	c.squelch.HoldSamples = int(squelchHold.Seconds() * c.outRate)
+	c.squelch.PeakWindow = dsp.SquelchPeakWindow(c.outRate, 2*cutoff)
 	c.prevCh = 0
 	m := &c.status
 	m.PassbandHz = 2 * cutoff

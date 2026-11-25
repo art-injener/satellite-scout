@@ -2,6 +2,7 @@ package dsp
 
 import (
 	"math"
+	"math/rand/v2"
 	"testing"
 )
 
@@ -171,5 +172,115 @@ func TestSquelch_AboveThresholdFalseDuringHold(t *testing.T) {
 	}
 	if sq.AboveThreshold() {
 		t.Error("quiet hold block must not count as above threshold")
+	}
+}
+
+func TestSquelch_HysteresisKeepsOpenBelowThreshold(t *testing.T) {
+	makeAt := func(dbfs float64) []complex64 {
+		amp := float32(math.Pow(10, dbfs/20))
+		x := makeToneC64(256, 1000, 48000)
+		for i := range x {
+			x[i] *= complex(amp, 0)
+		}
+		return x
+	}
+	sq := Squelch{ThresholdDBFS: -30, HysteresisDB: 2, HoldSamples: 0}
+	if sq.Open(makeAt(-31)) {
+		t.Fatal("-31 dBFS must not open closed squelch at -30 dBFS")
+	}
+	if !sq.Open(makeAt(-29)) {
+		t.Fatal("-29 dBFS must open squelch at -30 dBFS")
+	}
+	if !sq.Open(makeAt(-31)) || !sq.AboveThreshold() {
+		t.Fatal("-31 dBFS must keep open squelch above threshold with 2 dB hysteresis")
+	}
+	if sq.Open(makeAt(-33)) {
+		t.Fatal("-33 dBFS must close squelch below -32 dBFS")
+	}
+	if sq.Open(makeAt(-31)) {
+		t.Fatal("after closing, -31 dBFS must not reopen squelch at -30 dBFS")
+	}
+}
+
+func TestSquelch_CustomPeakWindow(t *testing.T) {
+	iq := make([]complex64, 1024)
+	// 16-sample impulse at -10 dBFS, rest silence: averaged over 128 samples it drops by ~9 dB to -19 dBFS.
+	amp := float32(math.Pow(10, -10.0/20.0))
+	for i := 200; i < 216; i++ {
+		iq[i] = complex(amp, 0)
+	}
+	sqNarrow := Squelch{ThresholdDBFS: -15, PeakWindow: 16}
+	if !sqNarrow.Open(iq) {
+		t.Fatal("16-sample peak window must open on 16-sample -10 dBFS pulse")
+	}
+	sqWide := Squelch{ThresholdDBFS: -15, PeakWindow: 128}
+	if sqWide.Open(iq) {
+		t.Fatalf("128-sample peak window must not open at -15 dBFS (got peak %.1f dBFS)", sqWide.PeakDBFS())
+	}
+}
+
+func makeWhiteNoiseC64(powerDBFS float64, seed uint64) []complex64 {
+	const n = 2048
+	rng := rand.New(rand.NewPCG(seed, seed^0x9e3779b9))
+	// Complex Gaussian noise with E[|z|^2] = 10^(powerDBFS/10): sigma per axis = sqrt(P/2).
+	sigma := math.Sqrt(math.Pow(10, powerDBFS/10) / 2)
+	out := make([]complex64, n)
+	for i := range out {
+		out[i] = complex(float32(rng.NormFloat64()*sigma), float32(rng.NormFloat64()*sigma))
+	}
+	return out
+}
+
+func TestAdaptiveNoise_WhiteNoiseChannelEstimate(t *testing.T) {
+	var est AdaptiveNoise
+	// -60 dBFS white noise over 64 kHz: in a 16 kHz channel noise power is -66 dBFS.
+	coarse := makeWhiteNoiseC64(-60, 1)
+	got := est.EstimateChannelNoiseDBFS(coarse, 64_000, 16_000)
+	if math.Abs(got-(-66)) > 1.5 {
+		t.Fatalf("noise estimate = %.2f dBFS, want -66 ± 1.5 dBFS", got)
+	}
+}
+
+func TestAdaptiveNoise_RobustToContinuousSignalInChannel(t *testing.T) {
+	var est AdaptiveNoise
+	const midRate = 64_000.0
+	const passband = 15_000.0
+	// -60 dBFS white noise over 64 kHz -> -66.3 dBFS in 15 kHz channel.
+	wantNoise := -60 + 10*math.Log10(passband/midRate)
+	coarse := makeWhiteNoiseC64(-60, 2)
+	// Add a strong -20 dBFS continuous multi-tone signal filling the 15 kHz channel (-7..+7 kHz).
+	sigAmp := math.Pow(10, -20.0/20.0) / math.Sqrt(15)
+	for f := -7000.0; f <= 7000.0; f += 1000.0 {
+		for i := range coarse {
+			ph := 2 * math.Pi * f * float64(i) / midRate
+			coarse[i] += complex(float32(sigAmp*math.Cos(ph)), float32(sigAmp*math.Sin(ph)))
+		}
+	}
+	got := est.EstimateChannelNoiseDBFS(coarse, midRate, passband)
+	if math.Abs(got-wantNoise) > 2.5 {
+		t.Fatalf("noise with strong continuous signal = %.2f dBFS, want %.2f ± 2.5 dBFS", got, wantNoise)
+	}
+}
+
+func TestAdaptiveNoise_TracksAGCJump(t *testing.T) {
+	var est AdaptiveNoise
+	for i := range 4 {
+		est.EstimateChannelNoiseDBFS(makeWhiteNoiseC64(-70, uint64(10+i)), 64_000, 16_000)
+	}
+	var got float64
+	for i := range 8 {
+		got = est.EstimateChannelNoiseDBFS(makeWhiteNoiseC64(-45, uint64(30+i)), 64_000, 16_000)
+	}
+	// -45 dBFS in 64 kHz -> -51 dBFS in 16 kHz.
+	if math.Abs(got-(-51)) > 2.0 {
+		t.Fatalf("after AGC jump noise = %.2f dBFS, want -51 ± 2.0 dBFS", got)
+	}
+}
+
+func TestAdaptiveNoise_SilenceFloor(t *testing.T) {
+	var est AdaptiveNoise
+	got := est.EstimateChannelNoiseDBFS(make([]complex64, 2048), 64_000, 16_000)
+	if got > -120 || got < -140 {
+		t.Fatalf("silence noise floor = %.2f dBFS, want in [-140, -120]", got)
 	}
 }

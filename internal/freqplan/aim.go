@@ -14,6 +14,24 @@ const (
 	AimMinSNRDB float32 = 6
 )
 
+// Причины решения наведения (для debug-журнала эфирной приёмки).
+const (
+	AimReasonOperatorLocked = "operator_locked"
+	AimReasonNoSight        = "no_sight"
+	AimReasonDeltaSmall     = "delta_small"
+	AimReasonApplyEntry     = "apply_entry"
+	AimReasonApplyLive      = "apply_live"
+	AimReasonWaitLive       = "wait_live"
+	AimReasonStableLive     = "stable_live"
+	AimReasonPhaseDone      = "phase_done"
+)
+
+// Источник пика для наведения.
+const (
+	AimSourceRemembered = "remembered"
+	AimSourceLive       = "live"
+)
+
 // HoldAimOffsetHz — OffsetHz канала так, чтобы LO + Offset + Doppler совпал с пиком участка.
 // dopplerHz — поправка, которую цепочка уже прибавит (Авто/Вручную); 0 если её нет.
 func HoldAimOffsetHz(loHz, sightCenterHz int64, dopplerHz float64) int64 {
@@ -65,9 +83,22 @@ type AimState struct {
 
 // AimDecision — применить ли новый OffsetHz.
 type AimDecision struct {
-	Apply    bool
-	OffsetHz int64
-	SightHz  int64
+	Apply      bool
+	OffsetHz   int64
+	SightHz    int64
+	Reason     string  // константа AimReason*
+	Source     string  // AimSourceRemembered / AimSourceLive
+	SightSNRDB float32 // СШ выбранного участка
+	SightBWHz  int64   // ширина участка из bandscan, если есть
+}
+
+func aimFromSight(s Sighting, source string) AimDecision {
+	return AimDecision{
+		SightHz:    s.CenterHz,
+		Source:     source,
+		SightSNRDB: s.SNRDB,
+		SightBWHz:  s.BandwidthHz,
+	}
 }
 
 // DecideHoldAim — когда сдвинуть канал на пик (не каждый БПФ; Apply максимум дважды за стоянку).
@@ -76,50 +107,67 @@ type AimDecision struct {
 func DecideHoldAim(st AimState, loHz uint64, remembered, live []Sighting, nowMs int64, dopplerHz float64) (AimDecision, AimState) {
 	out := st
 	if out.OperatorLocked {
-		return AimDecision{}, out
+		return AimDecision{Reason: AimReasonOperatorLocked}, out
 	}
 	lo := int64(loHz) //nolint:gosec // частоты окна > 0
 
 	switch out.Phase {
 	case AimNone:
 		s, ok := HoldAimSight(loHz, remembered, nowMs)
+		source := AimSourceRemembered
 		if !ok {
 			s, ok = HoldAimSight(loHz, live, nowMs)
+			source = AimSourceLive
 		}
 		if !ok {
-			return AimDecision{}, out
+			return AimDecision{Reason: AimReasonNoSight}, out
 		}
 		out.Phase = AimEntry
 		out.AimedAtHz = s.CenterHz
 		off := HoldAimOffsetHz(lo, s.CenterHz, dopplerHz)
+		dec := aimFromSight(s, source)
+		dec.OffsetHz = off
 		if absInt64(off, 0) < AimMinDeltaHz {
-			return AimDecision{}, out
+			dec.Reason = AimReasonDeltaSmall
+			return dec, out
 		}
-		return AimDecision{Apply: true, OffsetHz: off, SightHz: s.CenterHz}, out
+		dec.Apply = true
+		dec.Reason = AimReasonApplyEntry
+		return dec, out
 
 	case AimEntry:
 		s, ok := HoldAimSight(loHz, live, nowMs)
 		if !ok {
-			return AimDecision{}, out
+			return AimDecision{Reason: AimReasonWaitLive}, out
 		}
 		if absInt64(s.CenterHz, out.AimedAtHz) < AimLiveDeltaHz {
 			// Стабильный live: закрываем фазу после пробы (не каждый тик).
 			if nowMs >= out.StartMs+ProbeMs {
 				out.Phase = AimLive
+				dec := aimFromSight(s, AimSourceLive)
+				dec.Reason = AimReasonStableLive
+				return dec, out
 			}
-			return AimDecision{}, out
+			dec := aimFromSight(s, AimSourceLive)
+			dec.Reason = AimReasonWaitLive
+			return dec, out
 		}
 		// Пик ушёл или live не совпал с памятью — правим сразу (короткие импульсы).
 		off := HoldAimOffsetHz(lo, s.CenterHz, dopplerHz)
 		out.Phase = AimLive
 		out.AimedAtHz = s.CenterHz
+		dec := aimFromSight(s, AimSourceLive)
+		dec.OffsetHz = off
 		if absInt64(off, 0) < AimMinDeltaHz {
-			return AimDecision{}, out
+			dec.Reason = AimReasonDeltaSmall
+			return dec, out
 		}
-		return AimDecision{Apply: true, OffsetHz: off, SightHz: s.CenterHz}, out
+		dec.Apply = true
+		dec.Reason = AimReasonApplyLive
+		return dec, out
 
 	default:
-		return AimDecision{}, out
+		return AimDecision{Reason: AimReasonPhaseDone}, out
 	}
 }
 

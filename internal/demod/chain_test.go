@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"math"
+	"math/rand/v2"
 	"slices"
 	"testing"
 	"time"
@@ -995,5 +996,67 @@ func TestChain_OffsetChangeDoesNotRebuildFilters(t *testing.T) {
 	}
 	if len(got) == 0 {
 		t.Fatal("expected decoded gmsk9600_usp frames after smooth OffsetHz shift")
+	}
+}
+
+func TestChain_AdaptiveSquelchStaysClosedOnNoiseAndOpensOnSignal(t *testing.T) {
+	// Pure white noise at -55 dBFS across full band (~-73 dBFS in 15 kHz channel):
+	// manual SquelchDBFS=-90 would falsely stay open, adaptive squelch must stay closed.
+	rng := rand.New(rand.NewPCG(11, 22))
+	sigma := math.Sqrt(math.Pow(10, -55.0/10.0) / 2)
+	makeNoise := func(n int) []complex64 {
+		out := make([]complex64, n)
+		for i := range out {
+			out[i] = complex(float32(rng.NormFloat64()*sigma), float32(rng.NormFloat64()*sigma))
+		}
+		return out
+	}
+
+	c := NewChain()
+	s := sdr.ChannelSettings{
+		OffsetHz:    testOffset,
+		BandwidthHz: 15_000,
+		SquelchDBFS: -90,
+		SquelchAuto: true,
+		Demod:       "afsk1200",
+	}
+	noiseFrames := toFrames(makeNoise(int(testRate/2)), testRate, sdr.DefaultBlockSize, 0)
+	for _, f := range noiseFrames {
+		c.Process(f, s)
+	}
+	st := c.Status()
+	if st.SquelchOpen {
+		t.Fatalf("adaptive squelch opened on pure noise: level=%.1f threshold=%.1f", st.LevelDBFS, st.SquelchDBFS)
+	}
+	if !st.SquelchAuto {
+		t.Fatal("status SquelchAuto = false, want true")
+	}
+	if st.SquelchDBFS <= -85 {
+		t.Fatalf("adaptive threshold %.1f dBFS stayed near manual -90, want above channel noise floor", st.SquelchDBFS)
+	}
+
+	// Add a strong AFSK beacon (~-55 dBFS, ~+18 dB above channel noise) on top of the same noise floor.
+	beacon := beaconAirOf(t, testRate, 1, time.Second, "afsk1200")
+	scale := float32(math.Pow(10, (-55.0-testLevel)/20.0))
+	mixed := makeNoise(len(beacon))
+	for i := range mixed {
+		mixed[i] += beacon[i] * complex(scale, 0)
+	}
+	var opened bool
+	pkts := make([]Packet, 0, 4)
+	for _, f := range toFrames(mixed, testRate, sdr.DefaultBlockSize, 1000) {
+		pkts = append(pkts, c.Process(f, s)...)
+		if c.Status().SquelchOpen {
+			opened = true
+		}
+	}
+	if !opened {
+		t.Fatalf(
+			"adaptive squelch stayed closed on +18 dB beacon (level=%.1f th=%.1f)",
+			c.Status().LevelDBFS, c.Status().SquelchDBFS,
+		)
+	}
+	if len(pkts) == 0 {
+		t.Fatal("expected decoded AFSK packet under adaptive squelch")
 	}
 }

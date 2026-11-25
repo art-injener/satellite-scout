@@ -237,10 +237,11 @@ func (s *Service) WithAirHear(h AirHear) *Service {
 	return s
 }
 
-// voiceDemod — профили без кадра: в «Данные» эфира пишем kind=voice при открытом пороге.
+// voiceDemod — голосовые профили без кадра: в «Данные» эфира пишем kind=voice при открытом пороге.
+// CW не относится к голосу и сюда не входит.
 func voiceDemod(id string) bool {
 	switch id {
-	case "fm", "wfm", "am", "usb", "lsb", "cw":
+	case "fm", "wfm", "am", "usb", "lsb":
 		return true
 	default:
 		return false
@@ -357,6 +358,7 @@ type StatusEvent struct {
 	FrequencyHz  uint64  `json:"frequency_hz"`
 	LevelDBFS    float32 `json:"level_dbfs"`
 	SquelchDBFS  float64 `json:"squelch_dbfs"`
+	SquelchAuto  bool    `json:"squelch_auto"`
 	SquelchOpen  bool    `json:"squelch_open"`
 	FramesGood   int     `json:"frames_good"`
 	FramesBad    int     `json:"frames_bad"`
@@ -521,11 +523,11 @@ func (s *Service) runAuto(
 ) Status {
 	hints := s.autoHints(pathID, cs, freq)
 	key := autoConfigKey(cs.DopplerNorad, freq, cs.BandwidthHz, hints)
-	cands := BuildCandidates(hints)
+	plan := BuildCandidatePlan(hints)
 	if hints.Accepted != "" {
 		auto.SeedMemory(key, hints.Accepted)
 	}
-	auto.Configure(key, cands)
+	auto.ConfigurePlan(key, plan)
 	doppler := s.dopplerShift(cs, freq)
 	var dopplerHz float64
 	if doppler != nil {
@@ -548,20 +550,28 @@ func (s *Service) runAuto(
 }
 
 func (s *Service) autoHints(pathID string, cs sdr.ChannelSettings, freq uint64) CandidateHints {
-	h := CandidateHints{}
+	h := CandidateHints{KnownSat: cs.DopplerNorad > 0}
+	var detectedMode string
+	var detectedBaud float64
 	if s.rfProfiles != nil && cs.DopplerNorad > 0 {
 		if p, ok := s.rfProfiles.RFProfile(cs.DopplerNorad); ok {
 			if tx, ok := rfprofile.FindTx(p, "", int64(freq)); ok { //nolint:gosec // частоты канала < MaxInt64
 				eff := rfprofile.Effective(tx)
 				switch eff.Source {
 				case rfprofile.SourceAccepted:
-					h.Accepted = eff.Demod
-				case rfprofile.SourceDetected:
-					h.Blind = eff.Demod
-					h.BlindAlt = append([]string(nil), eff.DemodAlt...)
-					if h.Mode == "" && eff.Modulation != "" {
-						h.Mode, h.Baud = eff.Modulation, eff.Baud
+					if allowedAutoCandidate(eff.Demod) {
+						h.Accepted = eff.Demod
 					}
+				case rfprofile.SourceDetected:
+					if allowedAutoCandidate(eff.Demod) {
+						h.Blind = eff.Demod
+					}
+					for _, alt := range eff.DemodAlt {
+						if allowedAutoCandidate(alt) {
+							h.BlindAlt = append(h.BlindAlt, alt)
+						}
+					}
+					detectedMode, detectedBaud = eff.Modulation, eff.Baud
 				}
 			}
 		}
@@ -574,22 +584,41 @@ func (s *Service) autoHints(pathID string, cs sdr.ChannelSettings, freq uint64) 
 	if s.transmitters != nil && cs.DopplerNorad > 0 {
 		if txHints := MatchTXModeBauds(s.transmitters.ExpectedTransmitters(), cs.DopplerNorad, freq); len(txHints) > 0 {
 			h.TXHints = txHints
-			if h.Mode == "" {
-				h.Mode, h.Baud = txHints[0].Mode, txHints[0].Baud
-			}
+			h.Mode, h.Baud = txHints[0].Mode, txHints[0].Baud
 		}
 	}
-	// Участок эфира: классификатор даёт подсказку, когда нет закреплённого или сохранённого профиля.
-	if h.Blind == "" && h.Accepted == "" && s.airHints != nil {
-		if demod, alt, mode, baud, ok := s.airHints.AirHint(pathID, freq); ok {
-			h.Blind = demod
-			h.BlindAlt = alt
-			if mode != "" {
-				h.AirMode, h.AirBaud = mode, baud
-			}
-		}
+	if h.Mode == "" && detectedMode != "" {
+		h.Mode, h.Baud = detectedMode, detectedBaud
+	}
+	// Подсказка эфирного классификатора применяется только для неизвестного Эфира
+	// (DopplerNorad == 0) или если по КА вообще нет данных в реестре/карточке/радиопрофиле.
+	hasSatData := h.Accepted != "" || h.CardProfile != "" || len(h.TXHints) > 0 ||
+		h.Blind != "" || len(h.BlindAlt) > 0
+	if !h.KnownSat || !hasSatData {
+		s.applyAirHints(pathID, freq, &h)
 	}
 	return h
+}
+
+func (s *Service) applyAirHints(pathID string, freq uint64, h *CandidateHints) {
+	if s.airHints == nil {
+		return
+	}
+	demod, alt, mode, baud, ok := s.airHints.AirHint(pathID, freq)
+	if !ok {
+		return
+	}
+	if h.Blind == "" && allowedAutoCandidate(demod) {
+		h.Blind = demod
+	}
+	for _, a := range alt {
+		if allowedAutoCandidate(a) {
+			h.BlindAlt = append(h.BlindAlt, a)
+		}
+	}
+	if mode != "" {
+		h.AirMode, h.AirBaud = mode, baud
+	}
 }
 
 // pictureState — картинка, которая сейчас проявляется в тракте.
@@ -807,16 +836,12 @@ func (s *Service) sendStatus(pathID string, active bool, freq uint64, cs sdr.Cha
 	s.noteAirVoice(pathID, ev)
 }
 
-// noteAirVoice — при открытом пороге голоса/CW пишем kind=voice в эфир (кадров нет).
+// noteAirVoice — при открытом пороге голосового профиля (в ручном режиме) пишем kind=voice в эфир.
 func (s *Service) noteAirVoice(pathID string, ev StatusEvent) {
 	if !ev.Active || !ev.SquelchOpen || ev.DemodOff {
 		return
 	}
-	effDemod := ev.Demod
-	if effDemod == DemodAuto && ev.AutoPhase == "locked" && ev.AutoLocked != "" {
-		effDemod = ev.AutoLocked
-	}
-	if !voiceDemod(effDemod) {
+	if !voiceDemod(ev.Demod) {
 		return
 	}
 	norad := ev.DopplerNorad
@@ -825,7 +850,7 @@ func (s *Service) noteAirVoice(pathID string, ev StatusEvent) {
 		ts = uint64(s.now().UnixMilli()) //nolint:gosec // UnixMilli > 0
 	}
 	s.noteAir(pathID, ev.FrequencyHz, AirNote{
-		Kind: payload.KindVoice, Summary: payload.Label(payload.KindVoice), Decoder: effDemod,
+		Kind: payload.KindVoice, Summary: payload.Label(payload.KindVoice), Decoder: ev.Demod,
 		TimestampMs: ts, NoradID: norad, CountFrame: false,
 	})
 }
@@ -839,6 +864,12 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 	if demod == "" {
 		demod = cs.Demod
 	}
+	sqAuto := cs.SquelchAuto || demod == DemodAuto
+	sqDBFS := cs.SquelchDBFS
+	if !cs.DemodOff && active && st.SquelchAuto {
+		sqAuto = true
+		sqDBFS = st.SquelchDBFS
+	}
 	ev := StatusEvent{
 		RadioPath:       pathID,
 		Active:          active,
@@ -847,7 +878,8 @@ func statusEvent(pathID string, active bool, freq uint64, cs sdr.ChannelSettings
 		Supported:       st.Supported,
 		FrequencyHz:     freq,
 		LevelDBFS:       st.LevelDBFS,
-		SquelchDBFS:     cs.SquelchDBFS,
+		SquelchDBFS:     sqDBFS,
+		SquelchAuto:     sqAuto,
 		SquelchOpen:     active && st.SquelchOpen,
 		FramesGood:      st.Good,
 		FramesBad:       st.Bad,

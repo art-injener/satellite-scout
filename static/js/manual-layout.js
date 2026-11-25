@@ -1337,6 +1337,7 @@
             agc: document.getElementById('manual-rx-agc'),
             dopplerHz: document.getElementById('manual-rx-doppler-val'),
             bandwidth: document.getElementById('manual-rx-filter-bw'),
+            squelchMode: document.getElementById('manual-rx-squelch-mode'),
             squelch: this._squelchInput,
             demod: this._rxPipelineSelect,
             baud: document.getElementById('manual-rx-baud'),
@@ -1346,6 +1347,7 @@
         };
         this._demodProfilesById = {};
         this._dopplerNow = document.getElementById('manual-rx-doppler-now');
+        this._squelchNow = document.getElementById('manual-rx-squelch-now');
         const self = this;
         const agc = this._rxFields.agc;
 
@@ -1395,10 +1397,15 @@
             self._syncChannelOverlay();
             self._flushSettings('demod');
         });
+        this._on(this._rxFields.squelchMode, 'change', function() {
+            self._syncSquelchEntry();
+            self._flushSettings('demod');
+        });
         this._on(this._rxFields.doppler, 'change', function() {
             self._syncDopplerEntry();
             self._flushSettings('demod');
         });
+        this._syncSquelchEntry();
         this._syncDopplerEntry();
 
         this._syncEyeFromPipeline();
@@ -1462,6 +1469,31 @@
         if (this._wf && before.spanHz > 0 && typeof this._wf.remap === 'function') {
             this._wf.remap((before.centerHz - before.spanHz / 2) / 1e6, (before.centerHz + before.spanHz / 2) / 1e6);
         }
+    };
+
+    /** «Ручн.» — степпер уровня порога; «Авто» — текущий расчётный порог по шуму. */
+    ManualLayout.prototype._syncSquelchEntry = function() {
+        const auto = !!(this._rxFields && this._rxFields.squelchMode &&
+            selectedValue(this._rxFields.squelchMode) === 'auto');
+        const step = document.getElementById('manual-rx-squelch-step');
+        const unit = document.getElementById('manual-rx-squelch-unit');
+        if (step) { step.hidden = auto; }
+        if (unit) { unit.hidden = auto; }
+        if (this._squelchNow) { this._squelchNow.hidden = !auto; }
+    };
+
+    /** Текущий расчётный порог из статуса в единицах шкалы (dBFS или dBm). */
+    ManualLayout.prototype._showSquelch = function(st) {
+        if (!this._squelchNow) { return; }
+        const val = st && typeof st.squelch_dbfs === 'number' && isFinite(st.squelch_dbfs)
+            ? st.squelch_dbfs : null;
+        if (val === null) {
+            this._squelchNow.textContent = '';
+            return;
+        }
+        const shown = Math.round(val + (this._levelOffset || 0));
+        const unit = this._levelOffset !== null ? 'dBm' : 'dBFS';
+        this._squelchNow.textContent = String(shown).replace('-', '−') + ' ' + unit;
     };
 
     /** «Ручн.» — степпер в герцах; «Авто» — живая поправка. Unit «Гц» не показываем: узкая колонка. */
@@ -1816,6 +1848,7 @@
             offset_hz: this._autoRx ? Math.round(this._channelOffsetHz || 0) : 0,
             bandwidth_hz: Number(selectedValue(f.bandwidth)),
             squelch_dbfs: Number(squelch.toFixed(1)),
+            squelch_auto: !!(f.squelchMode && selectedValue(f.squelchMode) === 'auto'),
             demod: demodId,
             demod_off: this._demodOffForApply(),
             doppler_norad: this._dopplerNorad(),
@@ -1906,6 +1939,7 @@
         if (typeof st.offset_hz === 'number') { this._channelOffsetHz = st.offset_hz; }
         const ch = {
             offset_hz: st.offset_hz, bandwidth_hz: st.bandwidth_hz, squelch_dbfs: st.squelch_dbfs,
+            squelch_auto: typeof st.squelch_auto === 'boolean' ? st.squelch_auto : null,
             demod: st.demod, demod_off: !!st.demod_off, doppler_norad: st.doppler_norad || 0,
             doppler_auto: typeof st.doppler_auto === 'boolean' ? st.doppler_auto : null,
             doppler_manual_hz: typeof st.doppler_manual_hz === 'number' ? st.doppler_manual_hz : null,
@@ -1925,7 +1959,9 @@
     };
 
     function channelKey(ch) {
-        return [ch.offset_hz, ch.bandwidth_hz, ch.squelch_dbfs, ch.demod, ch.demod_off ? 1 : 0,
+        const sqVal = ch.squelch_auto === true ? '' : ch.squelch_dbfs;
+        const sqAuto = ch.squelch_auto === true ? 1 : ch.squelch_auto === false ? 0 : '';
+        return [ch.offset_hz, ch.bandwidth_hz, sqVal, sqAuto, ch.demod, ch.demod_off ? 1 : 0,
             ch.doppler_norad || 0, ch.doppler_auto === true ? 1 : ch.doppler_auto === false ? 0 : '',
             ch.doppler_manual_hz, ch.baud || 0].join('|');
     }
@@ -1996,9 +2032,13 @@
             f.dopplerHz.value = String(ch.doppler_manual_hz);
         }
         if (typeof ch.bandwidth_hz === 'number') { selectByValue(f.bandwidth, ch.bandwidth_hz); }
-        if (f.squelch && typeof ch.squelch_dbfs === 'number') {
+        if (f.squelchMode && (ch.squelch_auto === true || ch.squelch_auto === false)) {
+            selectByValue(f.squelchMode, ch.squelch_auto ? 'auto' : 'off');
+        }
+        if (f.squelch && typeof ch.squelch_dbfs === 'number' && ch.squelch_auto !== true) {
             f.squelch.value = String(Number((ch.squelch_dbfs + (this._levelOffset || 0)).toFixed(1)));
         }
+        this._syncSquelchEntry();
         if (ch.demod && selectByValue(f.demod, ch.demod)) { this._syncEyeFromPipeline(); }
         if (f.baud && typeof ch.baud === 'number' && ch.baud > 0) {
             f.baud.value = String(Math.round(ch.baud));
@@ -2206,7 +2246,9 @@
         const f = this._rxFields;
         if (!f || !f.demod || selectedValue(f.demod) !== 'auto') { return; }
         if (f.bandwidth) { selectByValue(f.bandwidth, '18000'); }
+        if (f.squelchMode) { selectByValue(f.squelchMode, 'auto'); }
         if (f.doppler) { selectByValue(f.doppler, 'auto'); }
+        this._syncSquelchEntry();
         this._syncDopplerEntry();
     };
 
@@ -2234,7 +2276,7 @@
         const autoProfile = !!(f.demod && selectedValue(f.demod) === 'auto');
         if (autoProfile) {
             this._prepareAutoChannel();
-            ['bandwidth', 'squelch', 'doppler', 'dopplerHz', 'applyDemod'].forEach(function(key) {
+            ['bandwidth', 'squelchMode', 'squelch', 'doppler', 'dopplerHz', 'applyDemod'].forEach(function(key) {
                 if (f[key]) { f[key].disabled = true; }
             });
         }
@@ -4319,6 +4361,7 @@
                 self._followServerChannel(d.data);
                 if (self._demodPanel) { self._demodPanel.applyStatus(d.data, self._levelOffset); }
                 self._showChannelStatus(d.data);
+                self._showSquelch(d.data);
                 self._showDoppler(d.data);
                 self._showTxMarkers(d.data);
                 if (self._demodInfoModal && self._demodInfoModal.isOpen()) { self._pushDemodInfo(); }

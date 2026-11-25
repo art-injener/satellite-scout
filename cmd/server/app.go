@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -89,13 +90,29 @@ type app struct {
 }
 
 // setupLogger — стандартный логгер без сторонних зависимостей.
+// Уровень: SCOUT_LOG_LEVEL = debug|info|warn|error (по умолчанию info).
 func setupLogger() {
+	level := parseScoutLogLevel(os.Getenv("SCOUT_LOG_LEVEL"))
 	logger := slog.New(slog.NewTextHandler(
 		os.Stdout,
-		&slog.HandlerOptions{
-			Level: slog.LevelDebug,
-		}))
+		&slog.HandlerOptions{Level: level},
+	))
 	slog.SetDefault(logger)
+	slog.Info("logger ready", slog.String("level", level.String()))
+}
+
+// parseScoutLogLevel разбирает SCOUT_LOG_LEVEL; пустое и неизвестное значение — Info.
+func parseScoutLogLevel(raw string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "debug", "dbg", "trace":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error", "err":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
+	}
 }
 
 // loadConfig загружает конфиг: читает data/config.json (или путь из
@@ -280,7 +297,7 @@ func NewApp(configStore *config.Store) *app {
 		demod:        demodService,
 		sweep:        sweepService,
 		bandscan:     bandService,
-		holdAim:      &holdAimByPath{byID: make(map[string]freqplan.AimState)},
+		holdAim:      &holdAimByPath{byID: make(map[string]holdAimEntry)},
 	}
 	demodService.WithAirHints(a)
 	demodService.WithAirHear(airHearAdapter{band: bandService})

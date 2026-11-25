@@ -672,18 +672,25 @@
                         <option value="200000">200 кГц</option>
                     </select>
                 </label>
-                <label class="ml-rx-panel__field">
-                    <span class="ml-rx-panel__label" title="Уровень, ниже которого звук и демодуляция закрыты">Порог</span>
-                    <span class="ml-rx-panel__controls">
-                        <span class="ml-rx-stepper">
+                <div class="ml-rx-panel__field">
+                    <label class="ml-rx-panel__label" for="manual-rx-squelch-mode"
+                           title="Уровень, ниже которого звук и демодуляция закрыты. Авто — адаптивно по шуму в полосе">Порог</label>
+                    <div class="ml-rx-panel__controls">
+                        <select class="ml-rx-panel__sel" id="manual-rx-squelch-mode"
+                                title="Авто — адаптивно по шуму. Ручн. — фиксированный уровень">
+                            <option value="off">Ручн.</option>
+                            <option value="auto" selected>Авто</option>
+                        </select>
+                        <span class="ml-rx-stepper" id="manual-rx-squelch-step" hidden>
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-squelch-dec" aria-label="Меньше">−</button>
                             <input class="ml-rx-panel__input" id="manual-rx-squelch" type="text" inputmode="decimal"
                                    autocomplete="off" spellcheck="false" value="-90">
                             <button type="button" class="ml-rx-stepper__btn" id="manual-rx-squelch-inc" aria-label="Больше">+</button>
                         </span>
-                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit">dBFS</span>
-                    </span>
-                </label>
+                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-unit" hidden>dBFS</span>
+                        <span class="ml-rx-panel__unit" id="manual-rx-squelch-now" title="Текущий адаптивный порог"></span>
+                    </div>
+                </div>
                 <div class="ml-rx-panel__field">
                     <label class="ml-rx-panel__label" for="manual-rx-doppler-mode"
                            title="Авто — по орбите выбранного спутника. Вручную — поправка в герцах">Доплер</label>

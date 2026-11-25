@@ -19,6 +19,7 @@
 | Что | Как |
 |-----|-----|
 | Путь к конфигу | `SCOUT_CONFIG_PATH`, по умолчанию `data/config.json` (`config.ResolveConfigPath`) |
+| Уровень логов | `SCOUT_LOG_LEVEL` = `debug`/`info`/`warn`/`error` (по умолчанию `info`; `trace` = `debug`) |
 | Первый запуск | `config.Bootstrap` создаёт файл с дефолтами (`internal/config/defaults.go`) |
 | Правка из UI | `PUT /api/settings` → `config.Store` пишет файл атомарно (temp + rename) |
 | Hot-reload | `configStore.Subscribe`: смена наблюдателя пересобирает `Observer` в `PassService`/`TrackingService` и сбрасывает кеш пролётов; смена темы уходит в SSE `theme_changed`. Остальные секции требуют перезапуска |

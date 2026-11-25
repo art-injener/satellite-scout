@@ -2,6 +2,7 @@ package demod
 
 import (
 	"log/slog"
+	"math"
 	"slices"
 	"strconv"
 	"time"
@@ -16,8 +17,11 @@ import (
 const (
 	autoWinDefault    = 30 * time.Second // окно накопления кадров для HDLC без FEC
 	autoReviewDefault = 30 * time.Second // без кадров после закрепления запускается повторный подбор
+	autoExpandDefault = 15 * time.Second // активного сигнала без CRC до расширения на семейство
 	autoNeedGoodHDLC  = 2
 	autoNeedGoodFEC   = 1
+
+	slogAttrKey = "key" // атрибут slog для ключа условий AutoPicker
 )
 
 // demodKey — ключ общего линейного демодулятора поверх узкого канала 64 или 32 кГц.
@@ -150,26 +154,29 @@ func newSharedLineDemod(key demodKey, id string, midRate float64) lineDemod {
 // AutoPicker — параллельный подбор кадрового профиля на одном общем канале 64 кГц.
 // Децимация IQ выполняется один раз на блок, линейные демодуляторы расшарены по скоростям
 // и питают все активные дефреймеры одновременно без жёсткого лимита кандидатов.
-// Поддерживаются некадровые кандидаты sstv (по заголовку VIS), cw (по телеграфным посылкам)
-// и голоса fm/am/usb/lsb (по долго открытому порогу, без остановки поиска кадров).
+// Поддерживаются некадровые кандидаты sstv (по заголовку VIS) и cw (по телеграфным посылкам).
+// Голосовые профили подбираются только в ручном режиме.
 // Успешный выбор кадрового профиля помнится по ключу условий и восстанавливается при возврате.
 type AutoPicker struct {
-	window time.Duration
-	review time.Duration
-	now    func() time.Time
+	window      time.Duration
+	review      time.Duration
+	expandAfter time.Duration
+	now         func() time.Time
 
-	key        string
-	candidates []string
-	frontend   channelFrontend
-	demodRate  float64
-	demods     map[demodKey]lineDemod
-	g3ruh      modem.G3RUHDescrambler
-	deframers  map[pipelineSig]deframer
-	hits       map[string][]time.Time
+	key                string
+	candidates         []string
+	expandedCandidates []string
+	expanded           bool
+	activeSignalMs     uint64
+	frontend           channelFrontend
+	demodRate          float64
+	demods             map[demodKey]lineDemod
+	g3ruh              modem.G3RUHDescrambler
+	deframers          map[pipelineSig]deframer
+	hits               map[string][]time.Time
 
 	sstvRx      pictureRx
 	cwDet       *cwDetector
-	voice       voiceState
 	pictures    []sstv.Event
 	lastPicture *PictureProgress
 	hasPicture  bool
@@ -183,19 +190,28 @@ type AutoPicker struct {
 	bitsBuf  map[demodKey][]byte
 	g3ruhBuf []byte
 	frameBuf [][]byte
+	burst    burstBuffer
+
+	// Сводка для debug-журнала эфирной приёмки (не горячий путь IQ).
+	dbgHaveOpen    bool
+	dbgOpen        bool
+	dbgFrames      int
+	dbgBurstsTried int
+	dbgBurstsOK    int
 }
 
 // NewAutoPicker создаёт подборщик с окнами по умолчанию.
 func NewAutoPicker() *AutoPicker {
 	return &AutoPicker{
-		window:    autoWinDefault,
-		review:    autoReviewDefault,
-		now:       time.Now,
-		demods:    make(map[demodKey]lineDemod),
-		deframers: make(map[pipelineSig]deframer),
-		hits:      make(map[string][]time.Time),
-		memory:    make(map[string]string),
-		bitsBuf:   make(map[demodKey][]byte),
+		window:      autoWinDefault,
+		review:      autoReviewDefault,
+		expandAfter: autoExpandDefault,
+		now:         time.Now,
+		demods:      make(map[demodKey]lineDemod),
+		deframers:   make(map[pipelineSig]deframer),
+		hits:        make(map[string][]time.Time),
+		memory:      make(map[string]string),
+		bitsBuf:     make(map[demodKey][]byte),
 	}
 }
 
@@ -214,14 +230,12 @@ func (a *AutoPicker) SeedMemory(key, id string) {
 	a.memory[key] = id
 }
 
-// Configure обновляет ключ условий и список кандидатов.
-// При том же ключе обновление подсказок выполняется инкрементально: накопленные попадания
-// и работающие дефреймеры с демодуляторами сохраняются. При смене ключа прежнее закрепление
-// запоминается в memory и восстанавливается при возврате.
+// Configure обновляет ключ условий и фиксированный список кандидатов без поэтапного расширения.
 func (a *AutoPicker) Configure(key string, candidates []string) {
-	if a == nil {
-		return
-	}
+	a.ConfigurePlan(key, CandidatePlan{Initial: candidates})
+}
+
+func (a *AutoPicker) initMaps() {
 	if a.memory == nil {
 		a.memory = make(map[string]string)
 	}
@@ -237,23 +251,42 @@ func (a *AutoPicker) Configure(key string, candidates []string) {
 	if a.bitsBuf == nil {
 		a.bitsBuf = make(map[demodKey][]byte)
 	}
+}
+
+// ConfigurePlan обновляет ключ условий и двухэтапный план кандидатов.
+// При том же ключе обновление подсказок выполняется инкрементально: накопленные попадания
+// и работающие дефреймеры с демодуляторами сохраняются. При смене ключа прежнее закрепление
+// запоминается в memory и восстанавливается при возврате.
+func (a *AutoPicker) ConfigurePlan(key string, plan CandidatePlan) {
+	if a == nil {
+		return
+	}
+	a.initMaps()
 
 	sameKey := key == a.key
-	sameCand := slicesEqual(candidates, a.candidates)
-	if sameKey && sameCand {
-		return
-	}
-
 	if sameKey {
-		a.configureSameKey(key, candidates)
+		a.expandedCandidates = append([]string(nil), plan.Expanded...)
+		target := plan.Initial
+		if a.expanded && len(plan.Expanded) > 0 {
+			target = plan.Expanded
+		}
+		if slicesEqual(target, a.candidates) {
+			return
+		}
+		a.configureSameKey(key, target)
 		return
 	}
 
+	a.logDwellSummary("key_change")
+	candidates := plan.Initial
 	if a.key != "" && a.pinned != "" && !isAutoNonFrameProfile(a.pinned) {
 		a.remember(a.key, a.pinned)
 	}
 	a.key = key
 	a.candidates = append([]string(nil), candidates...)
+	a.expandedCandidates = append([]string(nil), plan.Expanded...)
+	a.expanded = false
+	a.activeSignalMs = 0
 	a.deframers = make(map[pipelineSig]deframer, len(a.candidates))
 	a.hits = make(map[string][]time.Time)
 	a.demods = make(map[demodKey]lineDemod)
@@ -261,11 +294,15 @@ func (a *AutoPicker) Configure(key string, candidates []string) {
 	a.demodRate = 0
 	a.sstvRx = nil
 	a.cwDet = nil
-	a.voice = voiceState{}
 	a.pictures = nil
 	a.lastPicture = nil
 	a.hasPicture = false
 	a.audio = nil
+	a.burst.reset()
+	a.dbgHaveOpen = false
+	a.dbgFrames = 0
+	a.dbgBurstsTried = 0
+	a.dbgBurstsOK = 0
 	for _, id := range a.candidates {
 		if isAutoNonFrameProfile(id) {
 			continue
@@ -284,11 +321,7 @@ func (a *AutoPicker) Configure(key string, candidates []string) {
 		a.pinned = mem
 		a.lastGood = a.now() // свежий заход: не считать простой с прошлого hop
 	}
-	slog.Info("demod auto: configure",
-		slog.String("key", key),
-		slog.Int("candidates", len(a.candidates)),
-		slog.String("pinned", a.pinned),
-	)
+	a.logConfigure(key)
 }
 
 func newProfileDeframer(id string) deframer {
@@ -340,11 +373,7 @@ func (a *AutoPicker) configureSameKey(key string, candidates []string) {
 			a.lastGood = a.now()
 		}
 	}
-	slog.Info("demod auto: configure",
-		slog.String("key", key),
-		slog.Int("candidates", len(a.candidates)),
-		slog.String("pinned", a.pinned),
-	)
+	a.logConfigure(key)
 }
 
 func (a *AutoPicker) ensureDeframer(id string, sig pipelineSig) {
@@ -356,15 +385,12 @@ func (a *AutoPicker) ensureDeframer(id string, sig pipelineSig) {
 	}
 }
 
-// Locked — закреплённый профиль или выбранный голос; пусто, пока идёт подбор.
+// Locked — закреплённый профиль; пусто, пока идёт подбор.
 func (a *AutoPicker) Locked() string {
 	if a == nil {
 		return ""
 	}
-	if a.pinned != "" {
-		return a.pinned
-	}
-	return a.activeVoice()
+	return a.pinned
 }
 
 // Candidates — текущий список id.
@@ -464,11 +490,16 @@ func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 	id := a.pinned
 	spec := autoSpecFor(id)
 	need32 := spec.need32 || id == DemodSSTV
-	fr := a.frontend.process(f, base, dopplerHz, need32)
+	effBase := base
+	effBase.BandwidthHz = autoBandwidthFor([]string{id}, base.BandwidthHz)
+	fr := a.frontend.process(f, effBase, dopplerHz, need32)
 	a.ensureDemodRate(a.frontend.midRate)
+	a.noteSquelch(fr)
 
 	st := Status{
 		LevelDBFS:    fr.levelDBFS,
+		SquelchDBFS:  fr.thresholdDBFS,
+		SquelchAuto:  true,
 		SquelchOpen:  fr.open,
 		PassbandHz:   a.frontend.passbandHz,
 		LastPacketMs: a.lastPacketMs,
@@ -502,6 +533,20 @@ func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		} else if df != nil {
 			st.Good, st.Bad = df.Good(), df.Bad()
 		}
+		freqHz := uint64(int64(f.CenterHz) + base.OffsetHz) //nolint:gosec // частоты канала > 0
+		ready, meta, ok := a.burst.feed(
+			fr.coarse, a.frontend.midRate, fr.open, freqHz, f.TimestampMs, len(out) > 0,
+		)
+		if ok {
+			bPkts, _, centerHz := a.replayCenteredBurst(ready, meta, []string{id}, now, false)
+			a.noteBurstResult(ready, meta, bPkts, centerHz)
+			if len(bPkts) > 0 {
+				out = append(out, bPkts...)
+				st.LastPacketMs = a.lastPacketMs
+				st.Measured = true
+				st.CarrierHz = centerHz
+			}
+		}
 	}
 	a.frontend.updatePrev(fr.ch64)
 
@@ -511,11 +556,12 @@ func (a *AutoPicker) processPinned(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		a.forget(a.key)
 		a.unpin()
 		slog.Info("demod auto: unpin",
-			slog.String("key", a.key),
+			slog.String(slogAttrKey, a.key),
 			slog.String("previous", prev),
 		)
 		fillAutoStatus(&st, "", "search", a.candidates)
 	}
+	a.noteFrameCount(len(out))
 	return out, st
 }
 
@@ -603,11 +649,16 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 			}
 		}
 	}
-	fr := a.frontend.process(f, base, dopplerHz, need32)
+	effBase := base
+	effBase.BandwidthHz = autoBandwidthFor(a.candidates, base.BandwidthHz)
+	fr := a.frontend.process(f, effBase, dopplerHz, need32)
 	a.ensureDemodRate(a.frontend.midRate)
+	a.noteSquelch(fr)
 
 	st := Status{
 		LevelDBFS:    fr.levelDBFS,
+		SquelchDBFS:  fr.thresholdDBFS,
+		SquelchAuto:  true,
 		SquelchOpen:  fr.open,
 		PassbandHz:   a.frontend.passbandHz,
 		LastPacketMs: a.lastPacketMs,
@@ -628,31 +679,46 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		}
 	}
 
+	freqHz := uint64(int64(f.CenterHz) + base.OffsetHz) //nolint:gosec // частоты канала > 0
 	if !fr.open {
 		if sstvStarted && a.sstvRx != nil {
-			a.voice.reset()
 			a.pinned = DemodSSTV
 			a.lastGood = now
 			a.applySSTVEvents(sstvEvs, a.sstvRx, fr.open, now, &st)
 			slog.Info("demod auto: locked",
-				slog.String("key", a.key),
+				slog.String(slogAttrKey, a.key),
 				slog.String("profile", DemodSSTV),
 			)
 			a.frontend.updatePrev(fr.ch64)
 			fillAutoStatus(&st, DemodSSTV, "locked", a.candidates)
 			return nil, st
 		}
-		a.frontend.updatePrev(fr.ch64)
-		if a.voiceStep(f, fr, &st) {
-			fillAutoStatus(&st, a.activeVoice(), "locked", a.candidates)
-			return nil, st
+		var bOut []taggedPacket
+		if ready, meta, ok := a.burst.feed(fr.coarse, a.frontend.midRate, false, freqHz, f.TimestampMs, false); ok {
+			var lockedID string
+			var centerHz float64
+			bOut, lockedID, centerHz = a.replayCenteredBurst(ready, meta, a.candidates, now, true)
+			a.noteBurstResult(ready, meta, bOut, centerHz)
+			if len(bOut) > 0 {
+				a.activeSignalMs = 0
+				st.LastPacketMs = a.lastPacketMs
+				st.Measured = true
+				st.CarrierHz = centerHz
+			}
+			if lockedID != "" {
+				a.frontend.updatePrev(fr.ch64)
+				fillAutoStatus(&st, lockedID, "locked", a.candidates)
+				a.noteFrameCount(len(bOut))
+				return bOut, st
+			}
 		}
+		a.frontend.updatePrev(fr.ch64)
 		st.AutoStats = a.collectAutoStats()
 		fillAutoStatus(&st, "", "search", a.candidates)
-		return nil, st
+		a.noteFrameCount(len(bOut))
+		return bOut, st
 	}
 
-	freqHz := uint64(int64(f.CenterHz) + base.OffsetHz) //nolint:gosec // частоты канала > 0
 	computed := make(map[demodKey][]byte, len(a.demods)+4)
 	seenSig := make(map[pipelineSig]bool, len(a.candidates))
 	g3ruhReady := false
@@ -731,11 +797,27 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 				a.lastGood = now
 				a.remember(a.key, id)
 				slog.Info("demod auto: locked",
-					slog.String("key", a.key),
+					slog.String(slogAttrKey, a.key),
 					slog.String("profile", id),
 					slog.Int("hits", hits),
 				)
 			}
+		}
+	}
+
+	// Копим открытую вспышку; если достигли лимита 3 с без потоковых кадров —
+	// пробуем однократный разбор с центровкой, не мешая потоку для длинных передач.
+	if ready, meta, ok := a.burst.feed(fr.coarse, a.frontend.midRate, true, freqHz, f.TimestampMs, len(out) > 0); ok {
+		bPkts, bLocked, centerHz := a.replayCenteredBurst(ready, meta, a.candidates, now, lockedID == "")
+		a.noteBurstResult(ready, meta, bPkts, centerHz)
+		if len(bPkts) > 0 {
+			out = append(out, bPkts...)
+			st.LastPacketMs = a.lastPacketMs
+			st.Measured = true
+			st.CarrierHz = centerHz
+		}
+		if lockedID == "" && bLocked != "" {
+			lockedID = bLocked
 		}
 	}
 
@@ -746,7 +828,7 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 		a.lastGood = now
 		a.applySSTVEvents(sstvEvs, a.sstvRx, fr.open, now, &st)
 		slog.Info("demod auto: locked",
-			slog.String("key", a.key),
+			slog.String(slogAttrKey, a.key),
 			slog.String("profile", DemodSSTV),
 		)
 	} else if lockedID == "" && hasCW {
@@ -755,7 +837,7 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 			a.pinned = DemodCW
 			a.lastGood = now
 			slog.Info("demod auto: locked",
-				slog.String("key", a.key),
+				slog.String(slogAttrKey, a.key),
 				slog.String("profile", DemodCW),
 			)
 		}
@@ -771,16 +853,31 @@ func (a *AutoPicker) processSearch(f sdr.IQFrame, base sdr.ChannelSettings, dopp
 	a.frontend.updatePrev(fr.ch64)
 
 	if lockedID != "" {
-		a.voice.reset()
+		a.activeSignalMs = 0
 		fillAutoStatus(&st, lockedID, "locked", a.candidates)
+		a.noteFrameCount(len(out))
 		return out, st
 	}
-	if a.voiceStep(f, fr, &st) {
-		fillAutoStatus(&st, a.activeVoice(), "locked", a.candidates)
-		return out, st
+	if len(out) > 0 {
+		a.activeSignalMs = 0
+	} else if !a.expanded && len(a.expandedCandidates) > 0 && f.SampleRate > 0 {
+		a.activeSignalMs += uint64(len(f.Samples)) * 1000 / uint64(f.SampleRate)
+		limit := a.expandAfter
+		if limit <= 0 {
+			limit = autoExpandDefault
+		}
+		if a.activeSignalMs >= uint64(limit.Milliseconds()) { //nolint:gosec // порог расширения > 0
+			a.expanded = true
+			a.configureSameKey(a.key, a.expandedCandidates)
+			slog.Info("demod auto: expand family",
+				slog.String(slogAttrKey, a.key),
+				slog.Int("candidates", len(a.candidates)),
+			)
+		}
 	}
 	st.AutoStats = a.collectAutoStats()
 	fillAutoStatus(&st, "", "search", a.candidates)
+	a.noteFrameCount(len(out))
 	return out, st
 }
 
@@ -920,15 +1017,22 @@ func (a *AutoPicker) forget(key string) {
 }
 
 func (a *AutoPicker) unpin() {
+	a.logDwellSummary("unpin")
 	a.pinned = ""
 	a.lastGood = time.Time{}
+	a.activeSignalMs = 0
+	a.expanded = false
+	a.dbgHaveOpen = false
+	a.dbgFrames = 0
+	a.dbgBurstsTried = 0
+	a.dbgBurstsOK = 0
+	a.burst.reset()
 	a.hits = make(map[string][]time.Time)
 	a.demods = make(map[demodKey]lineDemod)
 	a.g3ruh = modem.G3RUHDescrambler{}
 	a.demodRate = 0
 	a.sstvRx = nil
 	a.cwDet = nil
-	a.voice = voiceState{}
 	a.lastPicture = nil
 	a.hasPicture = false
 	a.pictures = nil
@@ -944,6 +1048,80 @@ func (a *AutoPicker) unpin() {
 				a.deframers[sig] = df
 			}
 		}
+	}
+}
+
+func (a *AutoPicker) logConfigure(key string) {
+	slog.Info("demod auto: configure",
+		slog.String(slogAttrKey, key),
+		slog.Int("candidates", len(a.candidates)),
+		slog.String("pinned", a.pinned),
+	)
+	slog.Debug("demod auto: plan",
+		slog.String(slogAttrKey, key),
+		slog.Any("initial", a.candidates),
+		slog.Any("expanded", a.expandedCandidates),
+		slog.Bool("expanded_done", a.expanded),
+		slog.String("pinned", a.pinned),
+	)
+}
+
+func (a *AutoPicker) logDwellSummary(why string) {
+	if a == nil || a.key == "" {
+		return
+	}
+	if a.dbgFrames == 0 && a.dbgBurstsTried == 0 && a.pinned == "" && !a.dbgHaveOpen {
+		return
+	}
+	slog.Debug("demod auto: dwell summary",
+		slog.String(slogAttrKey, a.key),
+		slog.String("why", why),
+		slog.String("locked", a.pinned),
+		slog.Bool("expanded", a.expanded),
+		slog.Int("frames", a.dbgFrames),
+		slog.Int("bursts_tried", a.dbgBurstsTried),
+		slog.Int("bursts_ok", a.dbgBurstsOK),
+	)
+}
+
+func (a *AutoPicker) noteSquelch(fr frontendResult) {
+	if a.dbgHaveOpen && a.dbgOpen == fr.open {
+		return
+	}
+	a.dbgHaveOpen = true
+	a.dbgOpen = fr.open
+	slog.Debug("demod auto: squelch",
+		slog.String(slogAttrKey, a.key),
+		slog.Bool("open", fr.open),
+		slog.Float64("level_dbfs", float64(fr.levelDBFS)),
+		slog.Float64("th_dbfs", fr.thresholdDBFS),
+	)
+}
+
+func (a *AutoPicker) noteBurstResult(samples []complex64, meta burstMeta, pkts []taggedPacket, centerHz float64) {
+	a.dbgBurstsTried++
+	durMs := 0
+	if meta.rate > 0 {
+		durMs = int(float64(len(samples)) / meta.rate * 1000)
+	}
+	profile := ""
+	if len(pkts) > 0 {
+		a.dbgBurstsOK++
+		profile = pkts[0].Profile
+	}
+	slog.Debug("demod auto: burst",
+		slog.String(slogAttrKey, a.key),
+		slog.Int("dur_ms", durMs),
+		slog.Float64("center_hz", math.Round(centerHz)),
+		slog.Int("packets", len(pkts)),
+		slog.String("profile", profile),
+		slog.Bool("decoded", len(pkts) > 0),
+	)
+}
+
+func (a *AutoPicker) noteFrameCount(n int) {
+	if n > 0 {
+		a.dbgFrames += n
 	}
 }
 

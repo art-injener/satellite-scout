@@ -445,7 +445,9 @@ func specMatchesProfile(sp modeSpec, m ProfileMeta) bool {
 	}
 	if m.Baud > 0 {
 		if len(sp.bauds) == 0 {
-			return false
+			// В реестре часто указана модуляция без скорости (baud == 0):
+			// отдаём все скорости совпавшей модуляции.
+			return true
 		}
 		return sp.bauds[roundBaud(m.Baud)]
 	}

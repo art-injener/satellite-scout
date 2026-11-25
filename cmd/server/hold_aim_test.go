@@ -49,7 +49,7 @@ func TestMaybeAimHoldChannel_SetsOffsetOnceTowardPeak(t *testing.T) {
 
 	a := &app{
 		receiverHub: hub,
-		holdAim:     &holdAimByPath{byID: make(map[string]freqplan.AimState)},
+		holdAim:     &holdAimByPath{byID: make(map[string]holdAimEntry)},
 	}
 	w := sweep.Window{CenterHz: lo, SpanHz: 1_600_000}
 	const start int64 = 1_000_000
@@ -101,7 +101,7 @@ func TestMaybeAimHoldChannel_AirClearsStaleDopplerNorad(t *testing.T) {
 
 	a := &app{
 		receiverHub: hub,
-		holdAim:     &holdAimByPath{byID: make(map[string]freqplan.AimState)},
+		holdAim:     &holdAimByPath{byID: make(map[string]holdAimEntry)},
 	}
 	a.maybeAimHoldChannel(pathID, sweep.Window{CenterHz: lo, SpanHz: 1_600_000, Air: true}, start, start, nil)
 	got, _ := hub.Channel(pathID)
@@ -123,7 +123,7 @@ func TestMaybeAimHoldChannel_OperatorLockBlocksAim(t *testing.T) {
 
 	a := &app{
 		receiverHub: hub,
-		holdAim:     &holdAimByPath{byID: make(map[string]freqplan.AimState)},
+		holdAim:     &holdAimByPath{byID: make(map[string]holdAimEntry)},
 	}
 	w := sweep.Window{CenterHz: lo, SpanHz: 1_600_000}
 	// Сначала открываем стоянку (иначе lock до Reset сбросится).

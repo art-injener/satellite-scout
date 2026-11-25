@@ -120,14 +120,33 @@ func TestCandidates_VoiceAndCW(t *testing.T) {
 }
 
 func TestCandidates_Empty(t *testing.T) {
-	if got := Candidates("FSK", 0); len(got) != 0 {
-		t.Errorf("FSK without baud: %v", got)
-	}
 	if got := Candidates("UNKNOWN", 1200); len(got) != 0 {
 		t.Errorf("unknown mode: %v", got)
 	}
 	if got := Candidates("", 0); len(got) != 0 {
 		t.Errorf("empty mode: %v", got)
+	}
+}
+
+func TestCandidates_ZeroBaudReturnsAllSpeedsOfMode(t *testing.T) {
+	fsk := Candidates("FSK", 0)
+	for _, want := range []string{"fsk9600_g3ruh", "fsk9600_geoscan", "fsk4800", "fsk1200"} {
+		if !slices.Contains(fsk, want) {
+			t.Errorf("Candidates(FSK, 0) missing %q in %v", want, fsk)
+		}
+	}
+	gmskUSP := Candidates("GMSK USP", 0)
+	for _, want := range []string{"gmsk9600_usp", "gmsk4800_usp", "gmsk2400_usp"} {
+		if !slices.Contains(gmskUSP, want) {
+			t.Errorf("Candidates(GMSK USP, 0) missing %q in %v", want, gmskUSP)
+		}
+	}
+	if gmskUSP[0] != "gmsk9600_usp" {
+		t.Errorf("Candidates(GMSK USP, 0) first = %q, want gmsk9600_usp", gmskUSP[0])
+	}
+	bpsk := Candidates("BPSK", 0)
+	if !slices.Equal(bpsk, []string{"bpsk1200", "bpsk9600"}) {
+		t.Errorf("Candidates(BPSK, 0) = %v, want [bpsk1200 bpsk9600]", bpsk)
 	}
 }
 

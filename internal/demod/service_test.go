@@ -557,6 +557,48 @@ func TestAutoHints_FromRFProfile(t *testing.T) {
 	}
 }
 
+type txSourceStub []ExpectedTransmitter
+
+func (t txSourceStub) ExpectedTransmitters() []ExpectedTransmitter { return t }
+
+func TestAutoHints_AirHintOnlyWhenNoSatDataAndDetectedFiltersVoice(t *testing.T) {
+	air := airHintStub{demod: "afsk1200", mode: "FM", ok: true}
+	txs := txSourceStub{{NoradID: 53385, FreqHz: 436_200_000, Mode: "FSK", Baud: 9600}}
+
+	// Known satellite with TX metadata: AirHint must NOT leak in.
+	svc := NewService(&channelsStub{}, nil).WithTransmitters(txs).WithAirHints(air)
+	h := svc.autoHints("radio_path_1", sdr.ChannelSettings{DopplerNorad: 53385}, 436_200_000)
+	if !h.KnownSat || h.Blind != "" || h.AirMode != "" {
+		t.Fatalf("known sat with TX data leaked AirHint: %+v", h)
+	}
+
+	// Known satellite without any metadata: AirHint is allowed.
+	hNoData := svc.autoHints("radio_path_1", sdr.ChannelSettings{DopplerNorad: 99999}, 436_200_000)
+	if !hNoData.KnownSat || hNoData.Blind != "afsk1200" {
+		t.Fatalf("known sat without data should use AirHint, got %+v", hNoData)
+	}
+
+	// Unknown air (DopplerNorad=0): AirHint is used.
+	hAir := svc.autoHints("radio_path_1", sdr.ChannelSettings{DopplerNorad: 0}, 436_200_000)
+	if hAir.KnownSat || hAir.Blind != "afsk1200" {
+		t.Fatalf("unknown air should use AirHint, got %+v", hAir)
+	}
+
+	// Voice profile in rf_profiles.Detected must be ignored in Auto.
+	svcVoice := NewService(&channelsStub{}, nil).WithRFProfiles(rfProfileStub{
+		53385: {NoradID: 53385, Tx: []rfprofile.Transmitter{{
+			Key: "u1", FreqHz: 436_200_000,
+			Detected: rfprofile.Detected{
+				Modulation: "FM", Demod: "fm", DemodAlt: []string{"am", "fsk9600_geoscan"}, Confirmations: 4,
+			},
+		}}},
+	})
+	hVoice := svcVoice.autoHints("radio_path_1", sdr.ChannelSettings{DopplerNorad: 53385}, 436_200_000)
+	if hVoice.Blind != "" || !slices.Equal(hVoice.BlindAlt, []string{"fsk9600_geoscan"}) {
+		t.Fatalf("rf_profiles voice must be filtered out: %+v", hVoice)
+	}
+}
+
 func AcceptedStub() rfprofile.Accepted {
 	return rfprofile.Accepted{DemodID: "fsk9600_geoscan", FramesTotal: 2}
 }
@@ -658,6 +700,16 @@ func TestNoteAirVoice_OpenSquelch(t *testing.T) {
 	})
 	if air.n != 0 {
 		t.Fatalf("digital demod must not write voice, got %+v", air)
+	}
+	svc.noteAirVoice("radio_path_0", StatusEvent{
+		Active: true, SquelchOpen: true, Demod: "cw", FrequencyHz: 437_625_000,
+	})
+	svc.noteAirVoice("radio_path_0", StatusEvent{
+		Active: true, SquelchOpen: true, Demod: DemodAuto, AutoPhase: "locked", AutoLocked: "cw",
+		FrequencyHz: 437_625_000,
+	})
+	if air.n != 0 {
+		t.Fatalf("cw must not write voice, got %+v", air)
 	}
 }
 
@@ -767,5 +819,39 @@ func TestService_RxActivity_TracksValidFramesAndIgnoresRawLine(t *testing.T) {
 	})
 	if act := svc.RxActivity("radio_path_1"); act.LastFrameMs != t2.UnixMilli() {
 		t.Fatalf("valid frame LastFrameMs=%d, want %d", act.LastFrameMs, t2.UnixMilli())
+	}
+}
+
+func TestStatusEvent_PublishesAdaptiveSquelch(t *testing.T) {
+	cs := sdr.ChannelSettings{
+		BandwidthHz: 15_000,
+		SquelchDBFS: -90,
+		SquelchAuto: true,
+		Demod:       "afsk1200",
+	}
+	st := Status{
+		Demod:       "afsk1200",
+		Supported:   true,
+		SquelchDBFS: -62.5,
+		SquelchAuto: true,
+		SquelchOpen: false,
+	}
+	ev := statusEvent("radio_path_0", true, 145_825_000, cs, st)
+	if !ev.SquelchAuto {
+		t.Fatal("StatusEvent.SquelchAuto = false, want true")
+	}
+	if ev.SquelchDBFS != -62.5 {
+		t.Fatalf("StatusEvent.SquelchDBFS = %.1f, want computed adaptive -62.5", ev.SquelchDBFS)
+	}
+
+	cs.SquelchAuto = false
+	st.SquelchAuto = false
+	st.SquelchDBFS = -90
+	evManual := statusEvent("radio_path_0", true, 145_825_000, cs, st)
+	if evManual.SquelchAuto {
+		t.Fatal("manual StatusEvent.SquelchAuto = true, want false")
+	}
+	if evManual.SquelchDBFS != -90 {
+		t.Fatalf("manual StatusEvent.SquelchDBFS = %.1f, want -90", evManual.SquelchDBFS)
 	}
 }

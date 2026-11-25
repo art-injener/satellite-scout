@@ -217,6 +217,7 @@ make docker-up
 |------------|-------------|----------|
 | `SCOUT_CONFIG_PATH` | `data/config.json` (локально) / `/app/data/config.json` (Docker) | Путь к файлу конфигурации |
 | `SCOUT_DEV_MODE` | `true` локально, `false` в Docker | `true` — шаблоны/статика с диска; `false` — embed (production) |
+| `SCOUT_LOG_LEVEL` | `info` | `debug` / `info` / `warn` / `error` (`trace` = `debug`). Для эфирной приёмки: `SCOUT_LOG_LEVEL=debug` |
 
 Порт, координаты, тема и TLE — **только в `config.json`**, не в `.env`.
 

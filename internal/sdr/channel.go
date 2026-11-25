@@ -53,7 +53,10 @@ type ChannelSettings struct {
 	// SquelchDBFS — уровень в полосе канала, ниже которого демодулятор не работает.
 	// Держится в dBFS: при смене усиления его значение в dBm сдвигается.
 	SquelchDBFS float64 `json:"squelch_dbfs"`
-	Demod       string  `json:"demod"`
+	// SquelchAuto — адаптивный порог по уровню шума в полосе. Без omitempty: ложь
+	// должна доходить до панели, чтобы отличать «Ручн.» от «Авто».
+	SquelchAuto bool   `json:"squelch_auto"`
+	Demod       string `json:"demod"`
 	// Baud — символьная скорость для профилей с гибким baud (сейчас ook), бод.
 	// 0 или нет поля — дефолт профиля. У профилей с фиксированной скоростью поле не используется.
 	Baud float64 `json:"baud,omitempty"`
@@ -73,8 +76,8 @@ type ChannelSettings struct {
 // Демодулятор выключен: спектр идёт, приём начинается только по переключателю.
 func DefaultChannelSettings() ChannelSettings {
 	return ChannelSettings{
-		OffsetHz: 0, BandwidthHz: 15_000, SquelchDBFS: -90, Demod: "afsk1200", DemodOff: true,
-		DopplerAuto: true,
+		OffsetHz: 0, BandwidthHz: 15_000, SquelchDBFS: -90, SquelchAuto: true,
+		Demod: "afsk1200", DemodOff: true, DopplerAuto: true,
 	}
 }
 

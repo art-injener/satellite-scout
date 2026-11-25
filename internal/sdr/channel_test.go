@@ -21,6 +21,9 @@ func TestDefaultChannelSettings_ValidAndAFSK(t *testing.T) {
 	if !c.DopplerAuto {
 		t.Error("Doppler starts in auto")
 	}
+	if !c.SquelchAuto {
+		t.Error("squelch starts in adaptive auto mode")
+	}
 	if !slices.Contains(Demods, c.Demod) {
 		t.Errorf("default demod %q not in Demods", c.Demod)
 	}

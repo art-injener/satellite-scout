@@ -2,10 +2,12 @@ package demod
 
 import (
 	"slices"
+
+	"github.com/art-injener/satellite-scout/internal/sdr"
 )
 
 // DemodAuto — профиль «Авто»: параллельный подбор кадрового демодулятора по CRC,
-// а по подсказке также SSTV, CW и голоса.
+// а по подсказке также SSTV и CW. Голосовые профили доступны только в ручном режиме.
 const DemodAuto = "auto"
 
 // TXHint — режим и символьная скорость одного передатчика из реестра.
@@ -16,6 +18,7 @@ type TXHint struct {
 
 // CandidateHints — подсказки для списка кандидатов (радиопрофиль, карточка, реестр).
 type CandidateHints struct {
+	KnownSat    bool   // true — приём известного КА (DopplerNorad > 0)
 	Accepted    string // принято по CRC (радиопрофиль)
 	CardProfile string
 	Mode        string
@@ -28,13 +31,43 @@ type CandidateHints struct {
 	Max         int // 0 — все реализованные кадровые профили без ограничения
 }
 
-// BuildCandidates собирает id по приоритету: принято, обнаружено, карточка,
-// заявлено по всем передатчикам на частоте, затем остальные кадровые профили.
-// Некадровые профили (sstv, cw, голос) добавляются только при наличии явной подсказки.
+// CandidatePlan — двухэтапный план подбора: сначала целевые кандидаты, затем (при отсутствии
+// CRC на активном сигнале) расширение на семейство той же модуляции.
+type CandidatePlan struct {
+	Initial  []string
+	Expanded []string
+}
+
+// BuildCandidates собирает полный список кандидатов по приоритету:
+// принято, карточка, заявлено по всем передатчикам на частоте, обнаружено,
+// затем остальные кадровые профили.
+// Некадровые профили (sstv, cw) добавляются только при наличии явной подсказки.
+// Голосовые профили (fm, am, usb, lsb, wfm) в режим «Авто» не входят.
 func BuildCandidates(h CandidateHints) []string {
+	out := collectHintedCandidates(h)
+	return appendFrameProfiles(out, ImplementedFrameProfiles(), h.Max)
+}
+
+// BuildCandidatePlan строит поэтапный план подбора.
+// Для известного КА с данными сначала проверяются только его кандидаты; при длительном
+// активном сигнале без CRC список расширяется на семейство той же модуляции.
+// Для неизвестного Эфира или КА без данных сразу идёт полный перебор кадровых профилей.
+func BuildCandidatePlan(h CandidateHints) CandidatePlan {
+	hinted := collectHintedCandidates(h)
+	if !h.KnownSat || len(hinted) == 0 {
+		return CandidatePlan{Initial: appendFrameProfiles(hinted, ImplementedFrameProfiles(), h.Max)}
+	}
+	expanded := expandSameFamily(hinted, h.Max)
+	if len(expanded) <= len(hinted) {
+		return CandidatePlan{Initial: hinted}
+	}
+	return CandidatePlan{Initial: hinted, Expanded: expanded}
+}
+
+func collectHintedCandidates(h CandidateHints) []string {
 	limit := h.Max
 	var out []string
-	add := func(allowNonFrame bool, ids ...string) {
+	add := func(ids ...string) {
 		for _, id := range ids {
 			if limit > 0 && len(out) >= limit {
 				return
@@ -42,7 +75,7 @@ func BuildCandidates(h CandidateHints) []string {
 			if id == "" || id == DemodAuto {
 				continue
 			}
-			if !allowedAutoCandidate(id, allowNonFrame) {
+			if !allowedAutoCandidate(id) {
 				continue
 			}
 			if slices.Contains(out, id) {
@@ -51,37 +84,110 @@ func BuildCandidates(h CandidateHints) []string {
 			out = append(out, id)
 		}
 	}
-	add(true, h.Accepted)
-	add(true, h.Blind)
-	add(true, h.BlindAlt...)
-	add(true, h.CardProfile)
-	add(true, Candidates(h.Mode, h.Baud)...)
+	add(h.Accepted)
+	add(h.CardProfile)
+	add(Candidates(h.Mode, h.Baud)...)
 	for _, tx := range h.TXHints {
-		add(true, Candidates(tx.Mode, tx.Baud)...)
+		add(Candidates(tx.Mode, tx.Baud)...)
 	}
-	add(true, Candidates(h.AirMode, h.AirBaud)...)
-	add(false, ImplementedFrameProfiles()...)
+	add(h.Blind)
+	add(h.BlindAlt...)
+	add(Candidates(h.AirMode, h.AirBaud)...)
 	return out
+}
+
+func appendFrameProfiles(base, extra []string, limit int) []string {
+	out := append([]string(nil), base...)
+	for _, id := range extra {
+		if limit > 0 && len(out) >= limit {
+			return out
+		}
+		if !isFrameProfile(id) || slices.Contains(out, id) {
+			continue
+		}
+		out = append(out, id)
+	}
+	return out
+}
+
+// expandSameFamily дополняет целевых кандидатов КА всеми кадровыми профилями
+// тех же физических семейств модуляции (например FSK/GFSK/GMSK или BPSK).
+func expandSameFamily(base []string, limit int) []string {
+	families := make(map[string]bool, len(base))
+	for _, id := range base {
+		if !isFrameProfile(id) {
+			continue
+		}
+		if fam := modulationFamilyGroup(id); fam != "" {
+			families[fam] = true
+		}
+	}
+	if len(families) == 0 {
+		return nil
+	}
+	var extra []string
+	for _, id := range ImplementedFrameProfiles() {
+		if families[modulationFamilyGroup(id)] {
+			extra = append(extra, id)
+		}
+	}
+	return appendFrameProfiles(base, extra, limit)
+}
+
+const (
+	familyGroupFSK = "FSK"
+	familyGFSK     = "GFSK"
+	familyGMSK     = "GMSK"
+	familyMSK      = "MSK"
+)
+
+func modulationFamilyGroup(id string) string {
+	m, ok := Meta(id)
+	if !ok {
+		return ""
+	}
+	switch m.Family {
+	case familyGroupFSK, familyGFSK, familyGMSK, familyMSK:
+		return familyGroupFSK
+	default:
+		return m.Family
+	}
+}
+
+// autoBandwidthFor подбирает оптимальную ширину канала под активных кандидатов «Авто».
+// Для узких кандидатов (до 4800 бод) сужает полосу до 15 кГц вместо 18 кГц;
+// для одиночного CW держит запас 3 кГц на остаток Доплера.
+func autoBandwidthFor(candidates []string, fallback uint32) uint32 {
+	var maxBW uint32
+	for _, id := range candidates {
+		m, ok := Meta(id)
+		if !ok || m.DefaultBandwidthHz == 0 {
+			continue
+		}
+		bw := m.DefaultBandwidthHz
+		if id == DemodCW && bw < 3_000 {
+			bw = 3_000
+		}
+		if bw > maxBW {
+			maxBW = bw
+		}
+	}
+	if maxBW == 0 {
+		return fallback
+	}
+	if maxBW > sdr.MaxChannelBandwidthHz {
+		maxBW = sdr.MaxChannelBandwidthHz
+	}
+	return maxBW
 }
 
 // isAutoNonFrameProfile — некадровые профили, которые режим «Авто» может подобрать по подсказке.
 func isAutoNonFrameProfile(id string) bool {
-	return id == DemodSSTV || id == DemodCW || isAutoVoiceProfile(id)
+	return id == DemodSSTV || id == DemodCW
 }
 
-// isAutoVoiceProfile — голоса, которые «Авто» слушает в общем канале 64 кГц.
-// Вещательная ЧМ шире канала и в подбор не входит.
-func isAutoVoiceProfile(id string) bool {
-	switch id {
-	case "fm", "am", "usb", "lsb":
-		return true
-	default:
-		return false
-	}
-}
-
-func allowedAutoCandidate(id string, allowNonFrame bool) bool {
-	return isFrameProfile(id) || (allowNonFrame && isAutoNonFrameProfile(id))
+func allowedAutoCandidate(id string) bool {
+	return isFrameProfile(id) || isAutoNonFrameProfile(id)
 }
 
 // ImplementedFrameProfiles — профили с выделителем кадров в цепочке (порядок метаданных).
